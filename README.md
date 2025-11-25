@@ -1,6 +1,16 @@
 # ABS-KoSync Bridge
 
+<div align="center">
 <a href="https://buymeacoffee.com/jlich" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+
+[![GitHub tag](https://img.shields.io/github/tag/j-lich/abs-kosync-bridge?include_prereleases=&sort=semver&color=blue)](https://github.com/j-lich/abs-kosync-bridge/releases/)
+[![License](https://img.shields.io/badge/License-MIT-blue)](#license)
+[![issues - abs-kosync-bridge](https://img.shields.io/github/issues/j-lich/abs-kosync-bridge)](https://github.com/j-lich/abs-kosync-bridge/issues)
+![Docker Pulls](https://img.shields.io/docker/pulls/00jlich/abs-kosync-bridge)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/j-lich/abs-kosync-bridge/total)
+![Docker Stars](https://img.shields.io/docker/stars/00jlich/abs-kosync-bridge)
+
+</div>
 
 **The missing link between your ears and your eyes.**
 
@@ -267,4 +277,4 @@ docker-compose logs -f abs-kosync
 
 ## 📄 License
 
-Distributed under the MIT License.
+Released under [MIT](/LICENSE) by [@j-lich](https://github.com/j-lich).
