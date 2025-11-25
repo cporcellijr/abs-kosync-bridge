@@ -30,7 +30,111 @@ This is not a simple "percentage matcher." Audiobooks and Ebooks have different 
 
 ## 🚀 Deployment
 
-**Docker Compose** 
+The following options for deployment have been provided
+1. Docker compose (Dockerhub)
+2. Docker build (Local)
+3. Full Stack example (ABS / KoSync)
+
+### 1. Docker Compose (Dockerhub)
+
+```yml
+services:
+  # ---------------------------------------------------------------------------
+  # 1. The Bridge Service
+  # ---------------------------------------------------------------------------
+  abs-kosync:
+    image: 00jlich/abs-kosync-bridge:latest
+    container_name: abs_kosync
+    restart: unless-stopped
+    # depends_on:
+    #  - audiobookshelf
+    #  - kosync
+    
+    # CRITICAL: Machine Learning libraries need shared memory
+    shm_size: '2gb'
+
+    environment:
+      - TZ=America/New_York
+      # --- Server Connections ---
+      - ABS_SERVER=http://audiobookshelf:80
+      - ABS_KEY=your_abs_api_key_here
+      - KOSYNC_SERVER=http://kosync:3000
+      - KOSYNC_USER=admin
+      - KOSYNC_KEY=your_kosync_password
+      
+      # --- Sync Logic ---
+      - SYNC_PERIOD_MINS=5
+      # Loop Prevention: Ignore small changes caused by rounding errors
+      - SYNC_DELTA_ABS_SECONDS=60
+      - SYNC_DELTA_KOSYNC_PERCENT=1
+      
+      # --- Matching Logic ---
+      - FUZZY_MATCH_THRESHOLD=80
+      - KOSYNC_HASH_METHOD=content  # Use 'content' for KOReader native hashing
+      
+    volumes:
+      # Map the EXACT same folder structure used by your KOReader device if possible,
+      # or just the root folder containing your EPUBs.
+      - ./library:/books
+      - ./bridge_data:/data
+```
+
+<details>
+<summary> 2. Docker Build </summary>
+
+#### Download the project
+   `git clone [https://github.com/j-lich/abs-kosync-bridge.git](https://github.com/j-lich/abs-kosync-bridge.git)`
+   
+   `cd abs-kosync-bridge`
+
+#### Configure docker-compose.yml
+```yml
+services:
+  # ---------------------------------------------------------------------------
+  # 1. The Bridge Service
+  # ---------------------------------------------------------------------------
+  abs-kosync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: abs_kosync
+    restart: unless-stopped
+    # depends_on:
+    #  - audiobookshelf
+    #  - kosync
+    
+    # CRITICAL: Machine Learning libraries need shared memory
+    shm_size: '2gb'
+
+    environment:
+      - TZ=America/New_York
+      # --- Server Connections ---
+      - ABS_SERVER=http://audiobookshelf:80
+      - ABS_KEY=your_abs_api_key_here
+      - KOSYNC_SERVER=http://kosync:3000
+      - KOSYNC_USER=admin
+      - KOSYNC_KEY=your_kosync_password
+      
+      # --- Sync Logic ---
+      - SYNC_PERIOD_MINS=5
+      # Loop Prevention: Ignore small changes caused by rounding errors
+      - SYNC_DELTA_ABS_SECONDS=60
+      - SYNC_DELTA_KOSYNC_PERCENT=1
+      
+      # --- Matching Logic ---
+      - FUZZY_MATCH_THRESHOLD=80
+      - KOSYNC_HASH_METHOD=content  # Use 'content' for KOReader native hashing
+      
+    volumes:
+      # Map the EXACT same folder structure used by your KOReader device if possible,
+      # or just the root folder containing your EPUBs.
+      - ./library:/books
+      - ./bridge_data:/data
+```
+</details>
+
+<details>
+<summary> 3. Docker Compose (Full Stack Example) </summary>
 
 The included docker-compose.yml provides a full example stack.
 
@@ -40,7 +144,7 @@ services:
   # 1. The Bridge Service
   # ---------------------------------------------------------------------------
   abs-kosync:
-    image: yourusername/abs-kosync-bridge:latest
+    image: 00jlich/abs-kosync-bridge:latest
     container_name: abs_kosync
     restart: unless-stopped
     depends_on:
@@ -51,6 +155,7 @@ services:
     shm_size: '2gb'
 
     environment:
+      - TZ=America/New_York
       # --- Server Connections ---
       - ABS_SERVER=http://audiobookshelf:80
       - ABS_KEY=your_abs_api_key_here
@@ -101,13 +206,15 @@ services:
     ports:
       - 8081:3000
     environment:
+      - TZ=America/New_York
       - KOSYNC_SECRET=supersecretkey
       # ... add other KoSync specific env vars here ...
     volumes:
       - ./kosync_db:/db
 ```
+</details>
 
-Configuration Variables
+### Configuration Variables
 
 | Variable | Default | Description 
 |--- | --- | --- |
@@ -154,6 +261,7 @@ docker-compose logs -f abs-kosync
 - 404 Errors: Ensure KOSYNC_SERVER does not end with a slash /.
 - OOM / Crashes: If the container restarts during transcription, try increasing swap space on your host or ensure shm_size: '2gb' is set in docker-compose.
 - Sync Loops: If progress keeps bouncing back and forth, increase SYNC_DELTA_ABS_SECONDS.
+- Ensure TZ is set the same for all containers (bridge, kosync, abs) - This is to ensure accurate alignment of the most up to date date/time stamp.
 
 ## 📄 License
 
