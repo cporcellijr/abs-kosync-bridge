@@ -94,23 +94,49 @@ class SyncManager:
             print("❌ No ebooks found in /books.")
             return
 
+        search_term = input("\nFilter by title (Press Enter to view all): ").strip().lower()
+
+        if search_term:
+            # Filter Audiobooks based on title
+            filtered_audiobooks = [
+                ab for ab in audiobooks 
+                if search_term in self._get_abs_title(ab).lower()
+            ]
+            # Filter Ebooks based on filename
+            filtered_ebooks = [
+                eb for eb in ebooks 
+                if search_term in eb.name.lower()
+            ]
+        else:
+            # If blank, keep lists as is
+            filtered_audiobooks = audiobooks
+            filtered_ebooks = ebooks
+        
+        if not filtered_audiobooks:
+            print(f"❌ No audiobooks found matching term: '{search_term}'")
+            return
+
+        if not filtered_ebooks:
+            print(f"❌ No ebooks found matching term: '{search_term}'")
+            return
+        
         print(f"\n--- Available Audiobooks ({len(audiobooks)} found) ---")
-        for idx, ab in enumerate(audiobooks):
+        for idx, ab in enumerate(filtered_audiobooks):
             title = self._get_abs_title(ab)
             print(f"{idx + 1}. {title} (ID: {ab.get('id')})")
         
         try:
             ab_choice = int(input("\nSelect Audiobook Number: ")) - 1
-            selected_ab = audiobooks[ab_choice]
+            selected_ab = filtered_audiobooks[ab_choice]
         except (ValueError, IndexError): return
 
         print("\n--- Available Ebooks ---")
-        for idx, eb in enumerate(ebooks):
+        for idx, eb in enumerate(filtered_ebooks):
             print(f"{idx + 1}. {eb.name}")
         
         try:
             eb_choice = int(input("\nSelect Ebook Number: ")) - 1
-            selected_eb = ebooks[eb_choice]
+            selected_eb = filtered_ebooks[eb_choice]
         except (ValueError, IndexError): return
 
         kosync_doc_id = self.ebook_parser.get_kosync_id(selected_eb)
