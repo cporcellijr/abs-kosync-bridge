@@ -8,6 +8,7 @@ import re
 import glob # <--- Added import for escaping
 from pathlib import Path
 from rapidfuzz import process, fuzz
+from fuzzysearch import find_near_matches
 
 logger = logging.getLogger(__name__)
 
@@ -189,21 +190,36 @@ class EbookParser:
                     logger.info("   ✅ Normalized match successful.")
                     match_index = int((norm_index / len(norm_content)) * total_len)
 
-            # 3. Fuzzy Match
+            # # 3. Fuzzy Match
+            # if match_index == -1:
+            #     logger.info(f"   ...Normalized failed. Trying Fuzzy Match...")
+            #     cache_key = str(filename)
+            #     if cache_key not in self.sentence_cache:
+            #         self.sentence_cache[cache_key] = full_text.split('. ')
+                
+            #     sentences = self.sentence_cache[cache_key]
+            #     match = process.extractOne(search_phrase, sentences, scorer=fuzz.token_set_ratio)
+                
+            #     if match:
+            #         matched_string, score, _ = match
+            #         if score >= self.fuzzy_threshold:
+            #             logger.info(f"   ✅ Fuzzy match successful (Score: {score:.1f}).")
+            #             match_index = full_text.find(matched_string)
+           
+            # 3. Fuzzy Match (Revised)
             if match_index == -1:
-                logger.info(f"   ...Normalized failed. Trying Fuzzy Match...")
-                cache_key = str(filename)
-                if cache_key not in self.sentence_cache:
-                    self.sentence_cache[cache_key] = full_text.split('. ')
+                logger.info("   ...Normalized failed. Trying Fuzzy Match with Levenshtein distance...")
                 
-                sentences = self.sentence_cache[cache_key]
-                match = process.extractOne(search_phrase, sentences, scorer=fuzz.token_set_ratio)
+                max_errors = int(len(search_phrase) * 0.2) # Allow 20% error rate
                 
-                if match:
-                    matched_string, score, _ = match
-                    if score >= self.fuzzy_threshold:
-                        logger.info(f"   ✅ Fuzzy match successful (Score: {score:.1f}).")
-                        match_index = full_text.find(matched_string)
+                matches = find_near_matches(search_phrase, full_text, max_l_dist=max_errors)
+            
+                if matches:
+                    # Get the best match (lowest distance / errors)
+                    best_match = min(matches, key=lambda x: x.dist)
+                    
+                    logger.info(f"   ✅ Fuzzy match successful (Dist: {best_match.dist}).")
+                    match_index = best_match.start            
 
             if match_index != -1:
                 percentage = match_index / total_len
