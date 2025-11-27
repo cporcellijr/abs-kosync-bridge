@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import glob # <--- Added import for escaping
+import rapidfuzz
 from pathlib import Path
 from rapidfuzz import process, fuzz
 from fuzzysearch import find_near_matches
