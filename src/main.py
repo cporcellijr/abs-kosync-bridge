@@ -204,7 +204,7 @@ class SyncManager:
                     self._save_db()
 
     def sync_cycle(self):
-        logger.info("Starting Sync Cycle...")
+        logger.debug("Starting Sync Cycle...")
         self.db = self._load_db() 
         
         if not self.db['mappings']: return
