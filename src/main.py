@@ -12,7 +12,18 @@ from api_clients import ABSClient, KoSyncClient
 from transcriber import AudioTranscriber
 from ebook_utils import EbookParser
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+import logging
+import os
+
+
+# Read user defined debug lecel, default to INFO. Check its an acual level other wise default INFO
+env_log_level = os.getenv('DEBUG', 'INFO').upper()
+try:
+    log_level = getattr(logging, env_log_level)
+except AttributeError:
+    log_level = logging.INFO 
+
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("/data")
