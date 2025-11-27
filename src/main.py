@@ -17,7 +17,7 @@ import os
 
 
 # Read user defined debug lecel, default to INFO. Check its an acual level other wise default INFO
-env_log_level = os.getenv('DEBUG', 'INFO').upper()
+env_log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 try:
     log_level = getattr(logging, env_log_level)
 except AttributeError:
