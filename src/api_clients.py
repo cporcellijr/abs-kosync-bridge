@@ -73,7 +73,7 @@ class ABSClient:
                     
                     extension = af.get('metadata', {}).get('ext') or 'mp3'
                     if not extension.startswith('.'):
-                        extension = f"
+                        extension = f".{extension}"
                     
                     files.append({
                         "stream_url": stream_url,
