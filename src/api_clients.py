@@ -98,14 +98,14 @@ class ABSClient:
         return 0.0
 
     def update_progress(self, item_id, timestamp):
-        url = f"{self.base_url}/api/session/{item_id}/progress"
+        url = f"{self.base_url}/api/me/progress/{item_id}"
         payload = {
             "currentTime": timestamp,
             "duration": 0, 
             "isFinished": False
         }
         try:
-            requests.put(url, headers=self.headers, json=payload)
+            requests.patch(url, headers=self.headers, json=payload)
         except Exception as e:
             logger.error(f"Failed to update ABS progress: {e}")
 
