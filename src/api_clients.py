@@ -117,7 +117,7 @@ class KoSyncClient:
 
     def check_connection(self):
         url = f"{self.base_url}/healthcheck"
-        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
+        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, "accept": "application/json"}
         try:
             r = requests.get(url, timeout=5)
             if r.status_code == 200:
@@ -136,7 +136,7 @@ class KoSyncClient:
             return False
 
     def get_progress(self, doc_id):
-        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
+        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, 'accept': 'application/vnd.koreader.v1+json'}
         url = f"{self.base_url}/syncs/progress/{doc_id}"
         try:
             r = requests.get(url, headers=headers)
@@ -148,7 +148,7 @@ class KoSyncClient:
         return 0.0
 
     def update_progress(self, doc_id, percentage, xpath=None):
-        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
+        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, 'accept': 'application/vnd.koreader.v1+json', 'content-type': 'application/json'}
         url = f"{self.base_url}/syncs/progress"
         
         # Use XPath if generated, otherwise fallback to percentage string
