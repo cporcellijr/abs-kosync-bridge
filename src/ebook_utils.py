@@ -257,14 +257,14 @@ class EbookParser:
                 
                 return percentage, xpath, match_index
             
-            return None, None
+            return None, None, None
 
         except FileNotFoundError:
             logger.error(f"Book file not found: {filename}")
-            return None, None
+            return None, None, None
         except Exception as e:
             logger.error(f"Error finding location in {filename}: {e}")
-            return None, None
+            return None, None, None
 
     def get_text_at_percentage(self, filename, percentage):
         try:
