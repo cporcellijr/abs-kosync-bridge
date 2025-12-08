@@ -178,7 +178,7 @@ class EbookParser:
             
             # 2. Normalized Match
             if match_index == -1:
-                logger.info("   ...Exact match failed. Trying Normalized match...")
+                logger.info("  ...Exact match failed. Trying Normalized match...")
                 cache_key = str(filename)
                 if cache_key not in self.normalized_cache:
                     self.normalized_cache[cache_key] = self._normalize(full_text)
@@ -188,12 +188,12 @@ class EbookParser:
                 norm_index = norm_content.find(norm_search)
 
                 if norm_index != -1:
-                    logger.info("   ✅ Normalized match successful.")
+                    logger.info("  ✅ Normalized match successful.")
                     match_index = int((norm_index / len(norm_content)) * total_len)
 
             # # 3. Fuzzy Match
             # if match_index == -1:
-            #     logger.info(f"   ...Normalized failed. Trying Fuzzy Match...")
+            #     logger.info(f"  ...Normalized failed. Trying Fuzzy Match...")
             #     cache_key = str(filename)
             #     if cache_key not in self.sentence_cache:
             #         self.sentence_cache[cache_key] = full_text.split('. ')
@@ -204,12 +204,12 @@ class EbookParser:
             #     if match:
             #         matched_string, score, _ = match
             #         if score >= self.fuzzy_threshold:
-            #             logger.info(f"   ✅ Fuzzy match successful (Score: {score:.1f}).")
+            #             logger.info(f"  ✅ Fuzzy match successful (Score: {score:.1f}).")
             #             match_index = full_text.find(matched_string)
            
             # # 3. Fuzzy Match (Revised)
             # if match_index == -1:
-            #     logger.info("   ...Normalized failed. Trying Fuzzy Match with Levenshtein distance...")
+            #     logger.info("  ...Normalized failed. Trying Fuzzy Match with Levenshtein distance...")
                 
             #     max_errors = int(len(search_phrase) * 0.2) # Allow 20% error rate
                 
@@ -219,12 +219,12 @@ class EbookParser:
             #         # Get the best match (lowest distance / errors)
             #         best_match = min(matches, key=lambda x: x.dist)
                     
-            #         logger.info(f"   ✅ Fuzzy match successful (Dist: {best_match.dist}).")
+            #         logger.info(f"  ✅ Fuzzy match successful (Dist: {best_match.dist}).")
             #         match_index = best_match.start            
 
             # 3. Fuzzy Match (RapidFuzz Optimized)
             if match_index == -1:
-                logger.info("   ...Normalized failed. Trying Fuzzy Match with RapidFuzz...")
+                logger.info("  ...Normalized failed. Trying Fuzzy Match with RapidFuzz...")
 
                 # RapidFuzz uses a 0-100 score. 
                 # ~75 is roughly equivalent to allowing 20-25% errors.
@@ -240,7 +240,7 @@ class EbookParser:
                 )
 
                 if alignment:
-                    logger.info(f"   ✅ Fuzzy match successful (Score: {alignment.score:.1f}).")
+                    logger.info(f"  ✅ Fuzzy match successful (Score: {alignment.score:.1f}).")
                     # 'dest_start' is the index where the match starts in full_text
                     match_index = alignment.dest_start
             
@@ -252,7 +252,7 @@ class EbookParser:
                         local_index = match_index - item['start']
                         dom_path = self._generate_xpath(item['content'], local_index)
                         xpath = f"/body/DocFragment[{item['spine_index']}]{dom_path}"
-                        logger.info(f"   📍 Generated XPath: {xpath}")
+                        logger.info(f"  📍 Generated XPath: {xpath}")
                         break
                 
                 return percentage, xpath, match_index
@@ -260,10 +260,10 @@ class EbookParser:
             return None, None, None
 
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"  Book file not found: {filename}")
             return None, None, None
         except Exception as e:
-            logger.error(f"Error finding location in {filename}: {e}")
+            logger.error(f"  Error finding location in {filename}: {e}")
             return None, None, None
 
     def get_text_at_percentage(self, filename, percentage):
@@ -283,10 +283,10 @@ class EbookParser:
             
             return full_text[start:end]
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"  Book file not found: {filename}")
             return None
         except Exception as e:
-            logger.error(f"Error extracting text from {filename}: {e}")
+            logger.error(f"  Error extracting text from {filename}: {e}")
             return None
 
     def get_character_delta(self, filename, percentage_prev, percentage_new):
@@ -305,8 +305,8 @@ class EbookParser:
                         
             return character_delta
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"  Book file not found: {filename}")
             return None
         except Exception as e:
-            logger.error(f"Error calculating character delta for {filename}: {e}")
+            logger.error(f"  Error calculating character delta for {filename}: {e}")
             return None
