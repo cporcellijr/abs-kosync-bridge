@@ -1,287 +1,165 @@
-# ABS-KoSync Bridge
+# ABS-KOSync Bridge (Enhanced)
 
-<div align="center">
-<a href="https://buymeacoffee.com/jlich" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+Enhanced version of [abs-kosync-bridge](https://github.com/jLichti/abs-kosync-bridge) with three-way sync and Book Linker features.
 
-[![GitHub tag](https://img.shields.io/github/tag/j-lich/abs-kosync-bridge?include_prereleases=&sort=semver&color=blue)](https://github.com/j-lich/abs-kosync-bridge/releases/)
-![Docker Pulls](https://img.shields.io/docker/pulls/00jlich/abs-kosync-bridge)
-<br>
-[![issues - abs-kosync-bridge](https://img.shields.io/github/issues/j-lich/abs-kosync-bridge)](https://github.com/j-lich/abs-kosync-bridge/issues)
-[![issues-closed - abs-kosync-bridge](https://img.shields.io/github/issues-closed/j-lich/abs-kosync-bridge)](https://github.com/j-lich/abs-kosync-bridge/issues-closed)
+[![Docker](https://img.shields.io/badge/docker-build-blue.svg)](https://github.com/cporcellijr/abs-kosync-bridge)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-</div>
+## 🎯 What This Does
 
-**The missing link between your ears and your eyes.**
+Seamlessly sync your reading progress between:
+- **Audiobookshelf** (audiobooks) ↔
+- **KOReader/KOSync** (ebooks on Kobo/Kindle) ↔
+- **Storyteller** (enhanced web reader)
 
-Seamlessly sync your reading progress between **Audiobookshelf** (Audiobooks) and **KOReader/KoSync** (Ebooks). Start listening in the car, and pick up exactly where you left off on your Kindle or Kobo.
+Start listening in your car, continue reading on your Kobo, pick up on Storyteller - your progress stays in sync!
 
-## 🧠 How It Works
+## ✨ New Features in This Fork
 
-This is not a simple "percentage matcher." Audiobooks and Ebooks have different structures, speeds, and layouts. 50% of a file rarely equals 50% of a recording.
+### Three-Way Sync
+- **Storyteller Integration:** Full three-way progress sync
+- **Anti-Regression:** Prevents accidental backwards sync
+- **Conflict Resolution:** Smart handling when multiple sources change
+- **Configurable Thresholds:** Fine-tune sync sensitivity
 
-**ABS-KoSync Bridge** uses AI and semantic analysis to create a true link:
-1. Whisper AI Ingestion: The system downloads the audiobook and uses OpenAI's Faster-Whisper model to generate a precise timestamped transcript.
-2. Context-Aware Matching:
-    * **Audio -> Ebook:** It takes the spoken text at the current timestamp, expands the context to ~400 characters (to avoid matching short phrases like "He said"), and finds that exact block of text in your EPUB.
-    * **Reverse XPath Generation:** Instead of sending a generic percentage, it calculates the exact DOM path (e.g., `/body/DocFragment[4]/div/p[22])` required by KOReader to navigate to that specific paragraph.
-3. Loop Prevention: Configurable thresholds (time and percentage) ensure that rounding errors between platforms don't cause infinite sync loops.
+### Book Linker Workflow
+- **Automated Processing:** Prepare books for Storyteller with one click
+- **Smart Monitoring:** Detects completed processing and cleans up automatically
+- **Safety Checks:** Prevents interference with active processing
+- **Folder Preservation:** Maintains organized library structure
 
-## ✨ Key Features
+### Web Interface
+- **Flask UI:** Manage all mappings through web interface
+- **Real-Time Progress:** See sync status across all three systems
+- **Batch Operations:** Match multiple books at once
+- **Search-on-Demand:** Fast page loads, only fetches data when needed
 
-- Smart Matching Strategies: Tries 4 levels of matching:
-  1. Exact: 1:1 text match.
-  2. Case-Insensitive: Ignores capitalization.
-  3. Normalized: Strips punctuation and whitespace (handles "Smelting's" vs "Smeltings").
-  4. Fuzzy Token: Uses `rapidfuzz` to match sentences with a confidence score (default >80%).
-- Robust Caching: Audio files are downloaded to a local cache before processing begins. This prevents corruption if using network mounts (rclone/NFS) and saves hours of lost progress.
-- Crash Recovery: If the container runs out of RAM during a massive transcription, it detects the crash on reboot and flags the job, preventing infinite boot loops.
-- Resource Optimized: Tuned for low-memory environments (like Raspberry Pi) using greedy search (`beam_size=1`) and aggressive garbage collection.
-- Non-Blocking Wizard: The `match` CLI command queues jobs instantly. You can close your terminal immediately, and the background daemon will handle the heavy lifting.
-- KOReader Native Hashing: Supports the specific "Content Hash" (fastDigest) used by KOReader, ensuring matches even if you rename your files.
+### Enhanced Management
+- **Complete Cleanup:** Delete removes mappings, state, and transcripts
+- **Collection Auto-Add:** Automatically adds books to ABS collections
+- **Booklore Integration:** Optional shelf management
+- **Flexible Configuration:** Environment variable-based setup
 
-## 🚀 Deployment
+## 📦 Quick Start
 
-The following options for deployment have been provided
-1. Docker compose (Dockerhub)
-2. Docker build (Local)
-3. Full Stack example (ABS / KoSync)
-
-### 1. Docker Compose (Dockerhub)
-
-```yml
-services:
-  # ---------------------------------------------------------------------------
-  # 1. The Bridge Service
-  # ---------------------------------------------------------------------------
-  abs-kosync:
-    image: 00jlich/abs-kosync-bridge:latest
-    container_name: abs_kosync
-    restart: unless-stopped
-    # depends_on:
-    #  - audiobookshelf
-    #  - kosync
-    
-    # CRITICAL: Machine Learning libraries need shared memory
-    shm_size: '2gb'
-
-    environment:
-      - TZ=America/New_York
-      - LOG_LEVEL=INFO
-      # --- Server Connections ---
-      - ABS_SERVER=http://audiobookshelf:80
-      - ABS_KEY=your_abs_api_key_here
-      - KOSYNC_SERVER=http://kosync:3000
-      - KOSYNC_USER=admin
-      - KOSYNC_KEY=your_kosync_password
-      
-      # --- Sync Logic ---
-      - SYNC_PERIOD_MINS=5
-      # Loop Prevention: Ignore small changes caused by rounding errors
-      - SYNC_DELTA_ABS_SECONDS=60
-      - SYNC_DELTA_KOSYNC_PERCENT=1
-      - SYNC_DELTA_KOSYNC_WORDS=400
-      
-      # --- Matching Logic ---
-      - FUZZY_MATCH_THRESHOLD=80
-      - KOSYNC_HASH_METHOD=content  # Use 'content' for KOReader native hashing
-      
-    volumes:
-      # Map the EXACT same folder structure used by your KOReader device if possible,
-      # or just the root folder containing your EPUBs.
-      - ./library:/books
-      - ./bridge_data:/data
+### 1. Clone the Repository
+```bash
+git clone https://github.com/cporcellijr/abs-kosync-bridge.git
+cd abs-kosync-bridge
 ```
 
-### 2. Docker Build
-<details>
-<summary> The included Dockerfile provides the ability to build from source. </summary>
-
-#### Download the project
-   `git clone https://github.com/j-lich/abs-kosync-bridge.git`
-   
-   `cd abs-kosync-bridge`
-
-#### Configure docker-compose.yml
-```yml
-services:
-  # ---------------------------------------------------------------------------
-  # 1. The Bridge Service
-  # ---------------------------------------------------------------------------
-  abs-kosync:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: abs_kosync
-    restart: unless-stopped
-    # depends_on:
-    #  - audiobookshelf
-    #  - kosync
-    
-    # CRITICAL: Machine Learning libraries need shared memory
-    shm_size: '2gb'
-
-    environment:
-      - TZ=America/New_York
-      - LOG_LEVEL=INFO
-      # --- Server Connections ---
-      - ABS_SERVER=http://audiobookshelf:80
-      - ABS_KEY=your_abs_api_key_here
-      - KOSYNC_SERVER=http://kosync:3000
-      - KOSYNC_USER=admin
-      - KOSYNC_KEY=your_kosync_password
-      
-      # --- Sync Logic ---
-      - SYNC_PERIOD_MINS=5
-      # Loop Prevention: Ignore small changes caused by rounding errors
-      - SYNC_DELTA_ABS_SECONDS=60
-      - SYNC_DELTA_KOSYNC_PERCENT=1
-      - SYNC_DELTA_KOSYNC_WORDS=400
-      
-      # --- Matching Logic ---
-      - FUZZY_MATCH_THRESHOLD=80
-      - KOSYNC_HASH_METHOD=content  # Use 'content' for KOReader native hashing
-      
-    volumes:
-      # Map the EXACT same folder structure used by your KOReader device if possible,
-      # or just the root folder containing your EPUBs.
-      - ./library:/books
-      - ./bridge_data:/data
-```
-</details>
-
-### 3. Docker Compose (Full Stack Example)
-<details>
-<summary> The included docker-compose.yml provides a full example stack. </summary>
-
-```yml
-services:
-  # ---------------------------------------------------------------------------
-  # 1. The Bridge Service
-  # ---------------------------------------------------------------------------
-  abs-kosync:
-    image: 00jlich/abs-kosync-bridge:latest
-    container_name: abs_kosync
-    restart: unless-stopped
-    depends_on:
-      - audiobookshelf
-      - kosync
-    
-    # CRITICAL: Machine Learning libraries need shared memory
-    shm_size: '2gb'
-
-    environment:
-      - TZ=America/New_York
-      - LOG_LEVEL=INFO
-      # --- Server Connections ---
-      - ABS_SERVER=http://audiobookshelf:80
-      - ABS_KEY=your_abs_api_key_here
-      - KOSYNC_SERVER=http://kosync:3000
-      - KOSYNC_USER=admin
-      - KOSYNC_KEY=your_kosync_password
-      
-      # --- Sync Logic ---
-      - SYNC_PERIOD_MINS=5
-      # Loop Prevention: Ignore small changes caused by rounding errors
-      - SYNC_DELTA_ABS_SECONDS=60
-      - SYNC_DELTA_KOSYNC_PERCENT=1
-      - SYNC_DELTA_KOSYNC_WORDS=400
-      
-      # --- Matching Logic ---
-      - FUZZY_MATCH_THRESHOLD=80
-      - KOSYNC_HASH_METHOD=content  # Use 'content' for KOReader native hashing
-      
-    volumes:
-      # Map the EXACT same folder structure used by your KOReader device if possible,
-      # or just the root folder containing your EPUBs.
-      - ./library:/books
-      - ./bridge_data:/data
-
-  # ---------------------------------------------------------------------------
-  # 2. Audiobookshelf (Example)
-  # ---------------------------------------------------------------------------
-  audiobookshelf:
-    image: ghcr.io/advplyr/audiobookshelf:latest
-    container_name: audiobookshelf
-    ports:
-      - 13378:80
-    volumes:
-      - ./audiobooks:/audiobooks
-      - ./abs_config:/config
-      - ./abs_metadata:/metadata
-    environment:
-      - TZ=America/New_York
-      # ... add other ABS specific env vars here ...
-
-  # ---------------------------------------------------------------------------
-  # 3. KoSync Server (Example)
-  # ---------------------------------------------------------------------------
-  # Note: There are various KoSync server implementations. 
-  # This example uses a generic placeholder structure.
-  kosync:
-    image: dizzy57/kosync:latest # Or whichever implementation you prefer
-    container_name: kosync
-    ports:
-      - 8081:3000
-    environment:
-      - TZ=America/New_York
-      - KOSYNC_SECRET=supersecretkey
-      # ... add other KoSync specific env vars here ...
-    volumes:
-      - ./kosync_db:/db
-```
-</details>
-
-### Configuration Variables
-
-| Variable | Default | Description 
-|--- | --- | --- |
-ABS_SERVER | `None` | URL of your Audiobookshelf server (e.g., `http://abs:13378`)
-ABS_KEY | `None` | API Key generated in ABS Settings
-KOSYNC_SERVER | `None` | URL of your KoSync server (No trailing slash!)
-KOSYNC_USER | `None` | Your KoSync username
-KOSYNC_KEY | `None` | Your KoSync password
-SYNC_PERIOD_MINS | `5` | How often to check for progress updates
-SYNC_DELTA_ABS_SECONDS | `60` | Ignore audiobook changes smaller than X seconds (Loop prevention)
-SYNC_DELTA_KOSYNC_PERCENT | `1` | Ignore ebook changes smaller than X% (Loop prevention)
-SYNC_DELTA_KOSYNC_WORDS | `400` | Ignore ebook changes smaller than 400 words [converted to chars](https://charactercounter.com/characters-to-words) - Refer [#12](https://github.com/J-Lich/abs-kosync-bridge/issues/12)
-FUZZY_MATCH_THRESHOLD | `80` | Confidence score (0-100) required for fuzzy matching
-KOSYNC_HASH_METHOD | `content` | content (Recommended/KOReader default) or filename (Legacy)
-LOG_LEVEL | INFO | Log level. DEBUG if raising an issue
-
-## 📖 Usage Guide
-1. The Matching Wizard
-Before syncing, you must link an Audiobook to an Ebook.
-
-``` 
-docker-compose run --rm abs-kosync python src/main.py match
+### 2. Configure
+```bash
+cp docker-compose.example.yml docker-compose.yml
+nano docker-compose.yml  # Edit with your settings
 ```
 
-  1.1. Select the Audiobook from the list.
-  1.2. Select the Ebook from the list.
-  1.3. Done. The job is queued. You can close the terminal. The container logs will show the transcription progress.
-
-2. Monitoring
-Check the logs to see the sync in action:
-
-```
-docker-compose logs -f abs-kosync
-
+### 3. Run
+```bash
+docker compose up -d
 ```
 
-- Processing: Shows download and transcription status.
-- Syncing: Shows exactly what text is being matched and the calculated XPath.
+### 4. Access Web UI
+Open http://localhost:8080
 
-## 🌟 Star History
+## 📖 Full Documentation
 
-[![Star History Chart](https://api.star-history.com/svg?repos=j-lich/abs-kosync-bridge&type=date&legend=top-left)](https://www.star-history.com/#j-lich/abs-kosync-bridge&type=date&legend=top-left)
+- **[Quick Start Guide](QUICKSTART.md)** - Get running in 10 minutes
+- **[Configuration Reference](docker-compose.example.yml)** - All environment variables explained
+- **[Changelog](CHANGELOG.md)** - What's new in this version
 
-## 🛠️ Troubleshooting
+## 🔧 Configuration
 
-- 404 Errors: Ensure KOSYNC_SERVER does not end with a slash /.
-- OOM / Crashes: If the container restarts during transcription, try increasing swap space on your host or ensure shm_size: '2gb' is set in docker-compose.
-- Sync Loops: If progress keeps bouncing back and forth, increase SYNC_DELTA_ABS_SECONDS.
-- Ensure TZ is set the same for all containers (bridge, kosync, abs) - This is to ensure accurate alignment of the most up to date date/time stamp.
+### Required Settings
+```yaml
+environment:
+  # Audiobookshelf
+  - ABS_SERVER=https://your-abs-server.com
+  - ABS_KEY=your_api_key
+  
+  # KOSync
+  - KOSYNC_SERVER=https://your-server.com/api/koreader
+  - KOSYNC_USER=username
+  - KOSYNC_KEY=password
+```
 
-## 📄 License
-[![License](https://img.shields.io/badge/License-MIT-blue)](#license)
-Released under [MIT](/LICENSE) by [@j-lich](https://github.com/j-lich).
+### Optional Features
+```yaml
+  # Storyteller (three-way sync)
+  - STORYTELLER_DB_PATH=/storyteller_data/storyteller.db
+  - STORYTELLER_USER_ID=your_user_id
+  
+  # Book Linker (automated workflow)
+  - MONITOR_INTERVAL=3600
+  - STORYTELLER_INGEST_DIR=/path/to/library
+  
+  # Integrations
+  - ABS_COLLECTION_NAME=Synced with KOReader
+  - BOOKLORE_SHELF_NAME=Kobo
+```
+
+## 🎯 Use Cases
+
+### Original Two-Way Sync (ABS ↔ KOSync)
+Perfect if you:
+- Listen to audiobooks in Audiobookshelf
+- Read ebooks on Kobo or Kindle with KOReader
+- Want progress to sync between audio and ebook versions
+
+### Enhanced Three-Way Sync (+ Storyteller)
+Perfect if you:
+- Also use Storyteller for enhanced web reading
+- Want seamless switching between listening, e-reader, and web
+- Need progress sync across all three platforms
+
+### Book Linker Workflow
+Perfect if you:
+- Use Storyteller's readaloud feature
+- Want automated processing of ebook + audiobook pairs
+- Need organized management of processed books
+
+## 🔄 How It Works
+
+### Sync Flow
+```
+ABS Progress Changed → Transcribe audio → Find matching text in ebook → Update KOSync & Storyteller
+KOSync Changed → Find text in ebook → Find matching audio → Update ABS & Storyteller  
+Storyteller Changed → Find text in ebook → Find matching audio → Update ABS & KOSync
+```
+
+### Book Linker Flow
+```
+Select ebook + audiobook → Copy to processing folder → Storyteller processes →
+Monitor detects completion → Move to library → Clean up originals
+```
+
+## 🙏 Credits
+
+This is an enhanced fork of [abs-kosync-bridge](https://github.com/jLichti/abs-kosync-bridge) by [jLichti](https://github.com/jLichti).
+
+**Original features:**
+- Two-way sync between Audiobookshelf and KOSync
+- Audio transcription with Whisper AI
+- Fuzzy text matching
+
+**Enhancements by [cporcellijr](https://github.com/cporcellijr):**
+- Storyteller DB integration for three-way sync
+- Book Linker workflow automation
+- Flask web interface
+- Batch operations and enhanced UX
+
+## 📝 License
+
+MIT License - See [LICENSE](LICENSE) file
+
+## 🐛 Issues & Contributions
+
+Found a bug? Have a feature request?
+- Open an issue on [GitHub Issues](https://github.com/cporcellijr/abs-kosync-bridge/issues)
+- Check the original repo for upstream issues: [jLichti/abs-kosync-bridge](https://github.com/jLichti/abs-kosync-bridge)
+
+## 🔗 Related Projects
+
+- [Audiobookshelf](https://github.com/advplyr/audiobookshelf) - Self-hosted audiobook server
+- [KOReader](https://github.com/koreader/koreader) - Ebook reader for E Ink devices
+- [Storyteller](https://github.com/smoores-dev/storyteller) - Enhanced web-based ebook reader
