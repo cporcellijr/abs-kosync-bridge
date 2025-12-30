@@ -66,7 +66,7 @@ class SyncManager:
         # Kosync: Character (Default 400 Words) -> Converted to characters by multiplying by 5
         self.delta_kosync_char_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_WORDS", 400)) * 5
         
-        logger.info(f"⚙️ Sync Thresholds: ABS={self.delta_abs_thresh}s, KoSync={self.delta_kosync_thresh:.2%} ({self.delta_kosync_char_thresh} chars)")
+        logger.info(f"[CONFIG] Sync Thresholds: ABS={self.delta_abs_thresh}s, KoSync={self.delta_kosync_thresh:.2%} ({self.delta_kosync_char_thresh} chars)")
         
         self.startup_checks()
         self.cleanup_stale_jobs()
@@ -77,9 +77,9 @@ class SyncManager:
         kosync_ok = self.kosync_client.check_connection()
         storyteller_ok = self.storyteller_db.check_connection()  # NEW: Check Storyteller DB
         
-        if not abs_ok: logger.warning("⚠️ Audiobookshelf connection FAILED.")
-        if not kosync_ok: logger.warning("⚠️ KoSync connection FAILED.")
-        if not storyteller_ok: logger.warning("⚠️ Storyteller DB connection FAILED.")
+        if not abs_ok: logger.warning("[WARN] Audiobookshelf connection FAILED.")
+        if not kosync_ok: logger.warning("[WARN] KoSync connection FAILED.")
+        if not storyteller_ok: logger.warning("[WARN] Storyteller DB connection FAILED.")
 
     def _load_db(self):
         if DB_FILE.exists():
@@ -170,7 +170,7 @@ class SyncManager:
                     if elements:
                         # Extract all text from this element and its children
                         text = "".join(elements[0].itertext()).strip()
-                        logger.info(f"📍 Exact text via fragment '{fragment_id}': '{text[:80]}...'")
+                        logger.info(f"[XPATH] Exact text via fragment '{fragment_id}': '{text[:80]}...'")
                         return text
                     else:
                         logger.warning(f"Fragment ID not found in EPUB: {fragment_id}")
@@ -215,7 +215,7 @@ class SyncManager:
             if status == 'pending':
                 # OLD WORKFLOW: Download and transcribe
                 abs_title = mapping.get('abs_title', 'Unknown')
-                logger.info(f"🚀 Found pending job for: {abs_title}")
+                logger.info(f"[START] Found pending job for: {abs_title}")
                 
                 mapping['status'] = 'processing'
                 self._save_db()
@@ -223,7 +223,7 @@ class SyncManager:
                 try:
                     audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
                     if not audio_files:
-                        logger.error(f"❌ No audio files found for {abs_title}.")
+                        logger.error(f"[FAIL] No audio files found for {abs_title}.")
                         mapping['status'] = 'failed'
                         self._save_db()
                         continue
@@ -237,10 +237,10 @@ class SyncManager:
                     mapping['transcript_file'] = str(transcript_path)
                     mapping['status'] = 'active'
                     self._save_db()
-                    logger.info(f"✅ Job complete! {abs_title} is now active and syncing.")
+                    logger.info(f"[OK] Job complete! {abs_title} is now active and syncing.")
 
                 except Exception as e:
-                    logger.error(f"❌ Job failed for {abs_title}: {e}")
+                    logger.error(f"[FAIL] Job failed for {abs_title}: {e}")
                     mapping['status'] = 'failed_retry_later' 
                     self._save_db()
                     
@@ -254,13 +254,13 @@ class SyncManager:
 
                 if transcript_path.exists():
                     try:
-                        logger.info(f"📄 Transcript ready for '{abs_title}'. Activating sync...")
+                        logger.info(f"[SYNC] Transcript ready for '{abs_title}'. Activating sync...")
                         mapping['status'] = 'active'
                         self._save_db()
-                        logger.info(f"✅ {abs_title} is now active and syncing.")
+                        logger.info(f"[OK] {abs_title} is now active and syncing.")
 
                     except Exception as e:
-                        logger.error(f"❌ Job failed for {abs_title}: {e}")
+                        logger.error(f"[FAIL] Job failed for {abs_title}: {e}")
                         mapping['status'] = 'failed_retry_later' 
                         self._save_db()
 
@@ -295,9 +295,9 @@ class SyncManager:
                 if storyteller_progress is None:
                     storyteller_progress = 0.0
                     storyteller_ts = 0
-                    logger.debug(f"  📖 No Storyteller progress found for '{ebook_filename}'")
+                    logger.debug(f"  [BOOK] No Storyteller progress found for '{ebook_filename}'")
                 else:
-                    logger.debug(f"✅ Storyteller read: {abs_title} at {storyteller_progress*100:.2f}%")
+                    logger.debug(f"[OK] Storyteller read: {abs_title} at {storyteller_progress*100:.2f}%")
                     
             except Exception as e:
                 logger.error(f"Fetch failed for {abs_title}: {e}")
@@ -326,40 +326,40 @@ class SyncManager:
 
             # Handle small ABS changes (below threshold)
             if abs_delta > 0 and not abs_changed:
-                logger.info(f"  ✋ ABS delta {abs_delta:.2f}s (Below threshold {self.delta_abs_thresh}s): {abs_title}")
+                logger.info(f"  [BELOW_THRESH] ABS delta {abs_delta:.2f}s (Below threshold {self.delta_abs_thresh}s): {abs_title}")
                 prev_state['abs_ts'] = abs_progress   
                 prev_state['last_updated'] = time.time()
                 prev_state['kosync_index'] = 0
                 self.state[abs_id] = prev_state
                 self._save_state()
-                logger.info("  🤷 State matched to avoid loop.")
+                logger.info("  [SKIP] State matched to avoid loop.")
             
             # Handle small KoSync changes (check character delta too)
             if kosync_delta > 0 and not kosync_changed:
-                logger.info(f"  ✋ KoSync delta {kosync_delta:.4%} (Below threshold {self.delta_kosync_thresh:.2%}): {ebook_filename}")
+                logger.info(f"  [BELOW_THRESH] KoSync delta {kosync_delta:.4%} (Below threshold {self.delta_kosync_thresh:.2%}): {ebook_filename}")
                 
                 index_delta = self.ebook_parser.get_character_delta(ebook_filename, prev_state['kosync_pct'], kosync_progress)
 
                 if index_delta > self.delta_kosync_char_thresh:
                     kosync_changed = True
-                    logger.info(f"  🪲 KoSync character delta more than threshold {index_delta}/{self.delta_kosync_char_thresh}")
+                    logger.info(f"  [DELTA] KoSync character delta more than threshold {index_delta}/{self.delta_kosync_char_thresh}")
                 else:  
-                    logger.info(f"  🪲 KoSync character delta less than threshold {index_delta}/{self.delta_kosync_char_thresh}")
+                    logger.info(f"  [DELTA] KoSync character delta less than threshold {index_delta}/{self.delta_kosync_char_thresh}")
                     prev_state['kosync_pct'] = kosync_progress
                     prev_state['last_updated'] = time.time()
                     prev_state['kosync_index'] = 0
                     self.state[abs_id] = prev_state
                     self._save_state()
-                    logger.info("  🤷 State matched to avoid loop.")
+                    logger.info("  [SKIP] State matched to avoid loop.")
 
             # Handle small Storyteller changes (below threshold)
             if storyteller_delta > 0 and not storyteller_changed:
-                logger.info(f"  ✋ Storyteller delta {storyteller_delta:.4%} (Below threshold {self.delta_kosync_thresh:.2%}): {ebook_filename}")
+                logger.info(f"  [BELOW_THRESH] Storyteller delta {storyteller_delta:.4%} (Below threshold {self.delta_kosync_thresh:.2%}): {ebook_filename}")
                 prev_state['storyteller_pct'] = storyteller_progress
                 prev_state['last_updated'] = time.time()
                 self.state[abs_id] = prev_state
                 self._save_state()
-                logger.info("  🤷 State matched to avoid loop.")
+                logger.info("  [SKIP] State matched to avoid loop.")
 
             # If nothing changed significantly, skip
             if not abs_changed and not kosync_changed and not storyteller_changed: 
@@ -367,9 +367,9 @@ class SyncManager:
 
             # DETERMINE SOURCE OF CHANGE
             logger.info(f"Change detected for '{abs_title}'")
-            logger.info(f"  📊 ABS: {prev_state['abs_ts']:.2f}s -> {abs_progress:.2f}s (Δ={abs_delta:.2f}s)")
-            logger.info(f"  📊 KoSync: {prev_state['kosync_pct']:.4f}% -> {kosync_progress:.4f}% (Δ={kosync_delta:.4f}%)")
-            logger.info(f"  📊 Storyteller: {prev_state['storyteller_pct']:.4f}% -> {storyteller_progress:.4f}% (Δ={storyteller_delta:.4f}%)")
+            logger.info(f"  [STATS] ABS: {prev_state['abs_ts']:.2f}s -> {abs_progress:.2f}s (Delta=={abs_delta:.2f}s)")
+            logger.info(f"  [STATS] KoSync: {prev_state['kosync_pct']:.4f}% -> {kosync_progress:.4f}% (Delta=={kosync_delta:.4f}%)")
+            logger.info(f"  [STATS] Storyteller: {prev_state['storyteller_pct']:.4f}% -> {storyteller_progress:.4f}% (Delta=={storyteller_delta:.4f}%)")
             
             # ANTI-REGRESSION FAILSAFE
             # Prevent syncing backwards unless it's a small regression (chapter skip)
@@ -385,7 +385,7 @@ class SyncManager:
                 if prev_state['abs_ts'] > 0:
                     regression_pct = regression_amount_seconds / prev_state['abs_ts']
                     if regression_pct > REGRESSION_THRESHOLD:
-                        logger.warning(f"  ⚠️ ABS REGRESSION DETECTED: {prev_state['abs_ts']:.2f}s → {abs_progress:.2f}s (-{regression_amount_seconds:.2f}s, -{regression_pct:.1%})")
+                        logger.warning(f"  [WARN] ABS REGRESSION DETECTED: {prev_state['abs_ts']:.2f}s -> {abs_progress:.2f}s (-{regression_amount_seconds:.2f}s, -{regression_pct:.1%})")
                         regression_detected = True
                         regression_source = "ABS"
             
@@ -393,7 +393,7 @@ class SyncManager:
             if kosync_changed and kosync_progress < prev_state['kosync_pct']:
                 regression_amount = prev_state['kosync_pct'] - kosync_progress
                 if regression_amount > REGRESSION_THRESHOLD:
-                    logger.warning(f"  ⚠️ KOSYNC REGRESSION DETECTED: {prev_state['kosync_pct']:.2%} → {kosync_progress:.2%} (-{regression_amount:.2%})")
+                    logger.warning(f"  [WARN] KOSYNC REGRESSION DETECTED: {prev_state['kosync_pct']:.2%} -> {kosync_progress:.2%} (-{regression_amount:.2%})")
                     regression_detected = True
                     regression_source = "KOSYNC"
             
@@ -401,14 +401,14 @@ class SyncManager:
             if storyteller_changed and storyteller_progress < prev_state['storyteller_pct']:
                 regression_amount = prev_state['storyteller_pct'] - storyteller_progress
                 if regression_amount > REGRESSION_THRESHOLD:
-                    logger.warning(f"  ⚠️ STORYTELLER REGRESSION DETECTED: {prev_state['storyteller_pct']:.2%} → {storyteller_progress:.2%} (-{regression_amount:.2%})")
+                    logger.warning(f"  [WARN] STORYTELLER REGRESSION DETECTED: {prev_state['storyteller_pct']:.2%} -> {storyteller_progress:.2%} (-{regression_amount:.2%})")
                     regression_detected = True
                     regression_source = "STORYTELLER"
             
             # If regression detected, block the sync
             if regression_detected:
-                logger.warning(f"  🛡️ ANTI-REGRESSION: Blocking sync from {regression_source}")
-                logger.warning(f"  💡 If restarting book, manually reset progress in all systems")
+                logger.warning(f"  [BLOCKED] ANTI-REGRESSION: Blocking sync from {regression_source}")
+                logger.warning(f"  [TIP] If restarting book, manually reset progress in all systems")
                 # Update state to current values to prevent repeated warnings
                 prev_state['abs_ts'] = abs_progress
                 prev_state['kosync_pct'] = kosync_progress
@@ -431,7 +431,7 @@ class SyncManager:
             # Handle conflicts (when multiple sources changed)
             num_changed = sum([abs_changed, kosync_changed, storyteller_changed])
             if num_changed > 1:
-                logger.warning(f"  ⚠️ Conflict! {num_changed} sources changed. Defaulting to {source}.")
+                logger.warning(f"  [WARN] Conflict! {num_changed} sources changed. Defaulting to {source}.")
 
             # SYNC BASED ON SOURCE
             updated_ok = False
@@ -440,15 +440,15 @@ class SyncManager:
                 if source == "ABS":
                     target_text = self.transcriber.get_text_at_time(transcript_path, abs_progress)
                     if target_text:
-                        logger.info(f"  🔍 Searching Ebook for text: '{target_text[:60]}...'")
-                        logger.debug(f"  🔍 Searching Ebook for text: '{target_text}'")
+                        logger.info(f"  [SEARCH] Searching Ebook for text: '{target_text[:60]}...'")
+                        logger.debug(f"  [SEARCH] Searching Ebook for text: '{target_text}'")
                         matched_pct, xpath, matched_index = self.ebook_parser.find_text_location(ebook_filename, target_text)
                         
                         if matched_pct is not None:
-                            logger.info(f"  ✅ Match at {matched_pct:.2%}. Sending Updates...")
+                            logger.info(f"  [OK] Match at {matched_pct:.2%}. Sending Updates...")
 
                             index_delta = abs(matched_index - prev_state['kosync_index'])
-                            logger.info(f"  🪲 Index delta of {index_delta}.")
+                            logger.info(f"  [DELTA] Index delta of {index_delta}.")
                             
                             # Update both KoSync and Storyteller
                             self.kosync_client.update_progress(kosync_id, matched_pct, xpath)
@@ -466,17 +466,17 @@ class SyncManager:
                             prev_state['kosync_index'] = matched_index
                             updated_ok = True
                         else:
-                            logger.error("  ❌ Ebook text match FAILED.")
+                            logger.error("  [FAIL] Ebook text match FAILED.")
                 
                 # --- KOSYNC CHANGED: Update ABS and Storyteller ---
                 elif source == "KOSYNC":
                     target_text = self.ebook_parser.get_text_at_percentage(ebook_filename, kosync_progress)
                     if target_text:
-                        logger.info(f"  🔍 Searching Transcript for text: '{target_text[:60]}...'")
+                        logger.info(f"  [SEARCH] Searching Transcript for text: '{target_text[:60]}...'")
                         matched_time = self.transcriber.find_time_for_text(transcript_path, target_text)
                         
                         if matched_time is not None:
-                            logger.info(f"  ✅ Match at {matched_time:.2f}s. Sending Updates...")
+                            logger.info(f"  [OK] Match at {matched_time:.2f}s. Sending Updates...")
                             
                             # Update both ABS and Storyteller
                             self.abs_client.update_progress(abs_id, matched_time)
@@ -493,53 +493,89 @@ class SyncManager:
                                 prev_state['storyteller_pct'] = kosync_progress  # Only update if successful
                             updated_ok = True
                         else:
-                             logger.error("  ❌ Transcript text match FAILED.")
+                             logger.error("  [FAIL] Transcript text match FAILED.")
                 
                 # --- STORYTELLER CHANGED: Update ABS and KoSync ---
                 elif source == "STORYTELLER":
-                    # Try to get precise text using fragment ID first
-                    st_pct, st_ts, href, fragment_id = self.storyteller_db.get_progress_with_fragment(ebook_filename)
+                    # Check if Storyteller is behind the other systems
+                    # If so, pull Storyteller forward instead of pushing others back
+                    # This handles the case where you open a book in Storyteller for the first time
+                    # but have already made progress in ABS/KoSync
                     
-                    target_text = None
-                    if fragment_id:
-                        # Try precise extraction using fragment
-                        target_text = self.get_text_from_storyteller_fragment(ebook_filename, href, fragment_id)
-                        if target_text:
-                            logger.info(f"  ✅ Using precise fragment-based text extraction")
+                    CATCHUP_THRESHOLD = 0.05  # 5% - if Storyteller is more than 5% behind, pull it forward
                     
-                    # Fallback to percentage-based extraction if fragment method failed
-                    if not target_text:
-                        logger.info(f"  ⚠️ Fragment extraction failed, using percentage fallback")
-                        target_text = self.ebook_parser.get_text_at_percentage(ebook_filename, storyteller_progress)
+                    furthest_pct = max(kosync_progress, prev_state.get('kosync_pct', 0))
+                    storyteller_behind = (furthest_pct - storyteller_progress) > CATCHUP_THRESHOLD
                     
-                    if target_text:
-                        logger.info(f"  🔍 Searching Transcript for text: '{target_text[:60]}...'")
-                        matched_time = self.transcriber.find_time_for_text(transcript_path, target_text)
+                    if storyteller_behind:
+                        # Storyteller is behind - pull it forward to match the furthest system
+                        logger.info(f"  [INFO] Storyteller ({storyteller_progress:.2%}) is behind KoSync ({furthest_pct:.2%})")
+                        logger.info(f"  [SYNC] Pulling Storyteller forward instead of regressing others...")
                         
-                        if matched_time is not None:
-                            logger.info(f"  ✅ Match at {matched_time:.2f}s. Sending Updates...")
-                            
-                            # Update both ABS and KoSync
-                            self.abs_client.update_progress(abs_id, matched_time)
-                            
-                            # For KoSync, we need to generate XPath
-                            _, xpath, matched_index = self.ebook_parser.find_text_location(ebook_filename, target_text)
-                            self.kosync_client.update_progress(kosync_id, storyteller_progress, xpath)
-                            
-                            prev_state['abs_ts'] = matched_time
-                            prev_state['kosync_pct'] = storyteller_progress
-                            prev_state['storyteller_pct'] = storyteller_progress
-                            prev_state['kosync_index'] = matched_index if matched_index else 0
+                        # Update Storyteller to match the furthest progress
+                        storyteller_updated = self.storyteller_db.update_progress(
+                            ebook_filename,
+                            furthest_pct,
+                            source_timestamp=time.time()
+                        )
+                        
+                        if storyteller_updated:
+                            prev_state['storyteller_pct'] = furthest_pct
                             updated_ok = True
+                            logger.info(f"  [OK] Storyteller updated to {furthest_pct:.2%}")
                         else:
-                             logger.error("  ❌ Transcript text match FAILED.")
+                            logger.error("  [FAIL] Failed to update Storyteller progress.")
+                    else:
+                        # Storyteller is ahead or roughly equal - normal sync flow
+                        # Try to get precise text using fragment ID first
+                        st_pct, st_ts, href, fragment_id = self.storyteller_db.get_progress_with_fragment(ebook_filename)
+                        
+                        MIN_TEXT_LENGTH = 100  # Minimum chars needed for reliable transcript matching
+                        
+                        target_text = None
+                        if fragment_id:
+                            # Try precise extraction using fragment
+                            target_text = self.get_text_from_storyteller_fragment(ebook_filename, href, fragment_id)
+                            if target_text and len(target_text) >= MIN_TEXT_LENGTH:
+                                logger.info(f"  [OK] Using precise fragment-based text extraction ({len(target_text)} chars)")
+                            else:
+                                if target_text:
+                                    logger.info(f"  [WARN] Fragment text too short ({len(target_text)} chars), need {MIN_TEXT_LENGTH}+")
+                                target_text = None  # Force fallback
+                        
+                        # Fallback to percentage-based extraction if fragment method failed or text too short
+                        if not target_text:
+                            logger.info(f"  [INFO] Using percentage-based text extraction")
+                            target_text = self.ebook_parser.get_text_at_percentage(ebook_filename, storyteller_progress)
+                        
+                        if target_text:
+                            logger.info(f"  [SEARCH] Searching Transcript for text: '{target_text[:60]}...'")
+                            matched_time = self.transcriber.find_time_for_text(transcript_path, target_text)
+                            
+                            if matched_time is not None:
+                                logger.info(f"  [OK] Match at {matched_time:.2f}s. Sending Updates...")
+                                
+                                # Update both ABS and KoSync
+                                self.abs_client.update_progress(abs_id, matched_time)
+                                
+                                # For KoSync, we need to generate XPath
+                                _, xpath, matched_index = self.ebook_parser.find_text_location(ebook_filename, target_text)
+                                self.kosync_client.update_progress(kosync_id, storyteller_progress, xpath)
+                                
+                                prev_state['abs_ts'] = matched_time
+                                prev_state['kosync_pct'] = storyteller_progress
+                                prev_state['storyteller_pct'] = storyteller_progress
+                                prev_state['kosync_index'] = matched_index if matched_index else 0
+                                updated_ok = True
+                            else:
+                                 logger.error("  [FAIL] Transcript text match FAILED.")
 
                 # Save state if update was successful
                 if updated_ok:
                     prev_state['last_updated'] = time.time()
                     self.state[abs_id] = prev_state
                     self._save_state()
-                    logger.info("  💾 State saved.")
+                    logger.info("  [SAVED] State saved.")
                 else:
                     # Update state to prevent loops even if sync failed
                     prev_state['abs_ts'] = abs_progress
@@ -548,7 +584,7 @@ class SyncManager:
                     prev_state['last_updated'] = time.time()
                     self.state[abs_id] = prev_state
                     self._save_state()
-                    logger.info("  🤷 State matched to avoid loop.")
+                    logger.info("  [SKIP] State matched to avoid loop.")
                     
             except Exception as e:
                 logger.error(f"  Error syncing {abs_title}: {e}")
