@@ -149,6 +149,34 @@ Select ebook + audiobook → Copy to processing folder → Storyteller processes
 Monitor detects completion → Move to library → Clean up originals
 ```
 
+
+## ⚠️ Known Limitations
+
+### Storyteller: Book Must Be Opened First
+
+**Important:** For Storyteller sync to work, you must open each book in Storyteller at least once before syncing will function.
+
+**Why?** The sync system updates existing position entries in Storyteller's database. Storyteller only creates a position entry when you first open a book in its UI. Without this initial entry, there's nothing for the sync to update.
+
+**Workaround:**
+1. After processing a book with Book Linker (or manually adding it to Storyteller)
+2. Open the book once in Storyteller's web interface
+3. You can close it immediately - this creates the required database entry
+4. Sync will now work for that book
+
+**Affected scenarios:**
+- New books processed via Book Linker
+- Books added directly to Storyteller's library folder
+- Any book not yet opened in Storyteller's UI
+
+*Future versions may add automatic position entry creation to eliminate this requirement.*
+
+### Other Limitations
+
+- **Transcription RAM:** Long audiobooks (3+ hours per file) may require significant RAM during initial transcription. Files are automatically split into 45-minute chunks to mitigate this.
+- **Fuzzy Matching:** Text matching between audio transcripts and ebooks works best with professionally narrated audiobooks that closely follow the text.
+- **KOReader Hash Method:** Ensure your `KOSYNC_HASH_METHOD` matches your KOReader settings (usually `content`).
+
 ## 🙏 Credits
 
 This is an enhanced fork of [abs-kosync-bridge](https://github.com/jLichti/abs-kosync-bridge) by [jLichti](https://github.com/jLichti).
