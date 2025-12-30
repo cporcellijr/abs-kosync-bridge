@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Batch Match - Queue System</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container { 
+            max-width: 1600px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            margin: 0 0 10px 0;
+        }
+        .subtitle {
+            color: #666;
+            margin: 0 0 20px 0;
+        }
+        .btn { 
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .btn:hover { 
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .btn-secondary { background: #666; }
+        .btn-secondary:hover { background: #555; }
+        .btn-success { background: #4CAF50; }
+        .btn-success:hover { background: #45a049; }
+        .btn-danger { background: #f44336; }
+        .btn-danger:hover { background: #da190b; }
+        
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 30px;
+            margin-top: 30px;
+        }
+        
+        .selection-area {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .queue-area {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            position: sticky;
+            top: 20px;
+            height: fit-content;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+        
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .queue-count {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .queue-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .queue-item-cover {
+            width: 40px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        
+        .queue-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .queue-item-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            margin: 0 0 4px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .queue-item-ebook {
+            font-size: 11px;
+            color: #666;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .queue-item-remove {
+            background: #f44336;
+            color: white;
+            border: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        
+        .queue-actions {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .search-box { 
+            width: 100%; 
+            padding: 15px; 
+            margin: 10px 0 20px 0; 
+            font-size: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        
+        .matching-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .book-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: white;
+        }
+        
+        .book-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .book-card.selected {
+            border-color: #667eea;
+            background: #f0f4ff;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+        
+        .book-cover {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        
+        .book-cover-placeholder {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+        
+        .book-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #333;
+            word-wrap: break-word;
+            line-height: 1.3;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin: 20px 0 10px 0;
+        }
+        
+        select.ebook-select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        
+        .add-to-queue-btn {
+            width: 100%;
+            margin-top: 10px;
+        }
+        
+        .empty-queue {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .empty-queue-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+            opacity: 0.3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 Batch Match - Queue System</h1>
+        <p class="subtitle">Select multiple audiobooks and ebooks, then process them all at once</p>
+        
+        <div>
+            <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+            <a href="/match" class="btn btn-secondary">Single Match</a>
+        </div>
+        
+        <div class="layout">
+            <!-- Selection Area -->
+            <div class="selection-area">
+                <form method="GET" action="/batch-match">
+                    <input type="text" name="search" placeholder="🔍 Filter by title..." class="search-box" value="{{ search }}">
+                    <button type="submit" class="btn">Search</button>
+                </form>
+                
+                <form method="POST" action="/batch-match" id="addToQueueForm">
+                    <input type="hidden" name="action" value="add_to_queue">
+                    <input type="hidden" name="search" value="{{ search }}">
+                    <input type="hidden" name="audiobook_id" id="selected_audiobook_id">
+                    <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
+                    
+                    <h3 class="section-title">1. Select Audiobook</h3>
+                    <div class="matching-grid">
+                        {% for ab in audiobooks %}
+                        <div class="book-card" onclick="selectAudiobook(this, '{{ ab.id }}', '{{ get_title(ab) }}')">
+                            {% if ab.cover_url %}
+                            <img src="{{ ab.cover_url }}" alt="Cover" class="book-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="book-cover-placeholder" style="display:none;">🎧</div>
+                            {% else %}
+                            <div class="book-cover-placeholder">🎧</div>
+                            {% endif %}
+                            <div class="book-title">{{ get_title(ab) }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    
+                    <h3 class="section-title">2. Select Ebook</h3>
+                    <select class="ebook-select" id="ebook_select" onchange="selectEbook(this.value)">
+                        <option value="">-- Choose Ebook --</option>
+                        {% for eb in ebooks %}
+                        <option value="{{ eb.name }}">{{ eb.name }}</option>
+                        {% endfor %}
+                    </select>
+                    
+                    <button type="submit" class="btn btn-success add-to-queue-btn" id="addToQueueBtn" disabled>
+                        ➕ Add to Queue
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Queue Area -->
+            <div class="queue-area">
+                <div class="queue-header">
+                    <h3 style="margin: 0;">Queue</h3>
+                    <span class="queue-count">{{ queue|length }} items</span>
+                </div>
+                
+                {% if queue %}
+                    {% for item in queue %}
+                    <div class="queue-item">
+                        <img src="{{ item.cover_url }}" alt="Cover" class="queue-item-cover" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 60%22%3E%3Crect fill=%22%23667eea%22 width=%2240%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2224%22 fill=%22white%22%3E📖%3C/text%3E%3C/svg%3E';">
+                        <div class="queue-item-info">
+                            <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
+                            <p class="queue-item-ebook" title="{{ item.ebook_filename }}">{{ item.ebook_filename }}</p>
+                        </div>
+                        <form method="POST" action="/batch-match" style="display:inline;">
+                            <input type="hidden" name="action" value="remove_from_queue">
+                            <input type="hidden" name="abs_id" value="{{ item.abs_id }}">
+                            <button type="submit" class="queue-item-remove">×</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                    
+                    <div class="queue-actions">
+                        <form method="POST" action="/batch-match" style="margin-bottom: 10px;">
+                            <input type="hidden" name="action" value="process_queue">
+                            <button type="submit" class="btn btn-success" style="width: 100%;">
+                                ✅ Process All ({{ queue|length }})
+                            </button>
+                        </form>
+                        
+                        <form method="POST" action="/batch-match">
+                            <input type="hidden" name="action" value="clear_queue">
+                            <button type="submit" class="btn btn-danger" style="width: 100%;" onclick="return confirm('Clear entire queue?')">
+                                🗑️ Clear Queue
+                            </button>
+                        </form>
+                    </div>
+                {% else %}
+                    <div class="empty-queue">
+                        <div class="empty-queue-icon">📋</div>
+                        <p>Queue is empty<br>Add items to get started</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let selectedAudiobookId = null;
+        let selectedEbookFilename = null;
+        
+        function selectAudiobook(element, id, title) {
+            // Remove selected class from all audiobooks
+            document.querySelectorAll('.book-card').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked audiobook
+            element.classList.add('selected');
+            selectedAudiobookId = id;
+            
+            // Update hidden input
+            document.getElementById('selected_audiobook_id').value = id;
+            
+            // Enable button if both selected
+            updateAddButton();
+        }
+        
+        function selectEbook(filename) {
+            selectedEbookFilename = filename;
+            document.getElementById('selected_ebook_filename').value = filename;
+            updateAddButton();
+        }
+        
+        function updateAddButton() {
+            const btn = document.getElementById('addToQueueBtn');
+            if (selectedAudiobookId && selectedEbookFilename) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
+            }
+        }
+    </script>
+</body>
+</html>

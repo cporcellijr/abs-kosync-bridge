@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Book Linker</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container { 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 { color: #333; margin: 0 0 10px 0; }
+        .subtitle { color: #666; margin: 0 0 30px 0; }
+        .nav-buttons { margin-bottom: 20px; }
+        .btn { 
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .btn:hover { 
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .btn-secondary { background: #666; }
+        .btn-secondary:hover { background: #555; }
+        .btn-success { background: #4CAF50; }
+        .btn-success:hover { background: #45a049; }
+        
+        .monitor-status {
+            background: #e8f5e9;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            border-left: 4px solid #4caf50;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .message {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        
+        .search-box { 
+            width: 100%; 
+            max-width: 500px;
+            padding: 15px; 
+            margin: 10px 0 20px 0; 
+            font-size: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        
+        .stats-box {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            border-left: 5px solid #3498db;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .destination-box {
+            background: #fff3cd;
+            padding: 14px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-weight: bold;
+            font-size: 1.1em;
+            border: 1px solid #ffc107;
+        }
+        
+        .file-list-group {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+        }
+        
+        .file-list-column {
+            flex: 1;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background: #fff;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        
+        .file-list-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid;
+        }
+        
+        .ebook-list-title { color: #3498db; border-color: #3498db; }
+        .audiobook-list-title { color: #9b59b6; border-color: #9b59b6; }
+        
+        .file-item {
+            padding: 8px 5px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+        }
+        
+        input[type=checkbox] {
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+        
+        .check-links {
+            margin: 5px 0 10px 10px;
+            font-size: 0.9em;
+        }
+        
+        .check-links a {
+            cursor: pointer;
+            color: #3498db;
+            text-decoration: underline;
+            margin-right: 15px;
+        }
+        
+        .info-section {
+            background: #f8f9fa;
+            border-left: 4px solid #17a2b8;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 30px;
+        }
+        
+        .info-section h3 {
+            margin-top: 0;
+            color: #17a2b8;
+        }
+        
+        .info-section ol {
+            line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔗 Book Linker</h1>
+        <p class="subtitle">Link ebooks with audiobooks for Storyteller processing</p>
+        
+        <div class="nav-buttons">
+            <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+            <a href="/match" class="btn btn-secondary">Single Match</a>
+            <a href="/batch-match" class="btn btn-secondary">Batch Match</a>
+            <a href="/view_log" target="_blank" class="btn btn-secondary">View Log</a>
+        </div>
+        
+        {% if message %}
+        <div class="message {% if is_error %}error{% else %}success{% endif %}">
+            {{ message }}
+        </div>
+        {% endif %}
+        
+        <div class="monitor-status">
+            <span>✅ Readaloud Monitor Active - Checking every hour</span>
+            <form method="POST" action="/book-linker/trigger-monitor" style="margin: 0;">
+                <button type="submit" class="btn" style="margin: 0;">🔍 Check Now</button>
+            </form>
+        </div>
+        
+        <form method="POST">
+            <input type="text" name="book_name" placeholder="Enter title or author..." value="{{ book_name }}" class="search-box" autofocus>
+            <button type="submit" class="btn">Search</button>
+        </form>
+        
+        {% if ebook_matches or audiobook_matches %}
+        <div style="margin-top: 20px;">
+            <div class="stats-box">
+                <div><strong>{{ stats.ebook_count }}</strong> Ebooks • <strong>{{ stats.audio_count }}</strong> Audiobooks</div>
+                <div>Total: <strong>{{ stats.total_size_mb }} MB</strong></div>
+            </div>
+
+            <div class="destination-box">
+                📁 Folder will be named after the <strong>ebook title</strong> (not search query)
+            </div>
+
+            <form method="POST" action="/book-linker/process">
+                <input type="hidden" name="book_name" value="{{ book_name }}">
+
+                <div class="file-list-group">
+                    <div class="file-list-column">
+                        <div class="file-list-title ebook-list-title">📚 Ebooks (will be COPIED)</div>
+                        <div class="check-links">
+                            <a onclick="checkAllEbooks(true)">[Select All]</a>
+                            <a onclick="checkAllEbooks(false)">[Deselect All]</a>
+                        </div>
+                        {% if ebook_matches %}
+                            {% for m in ebook_matches %}
+                            <div class="file-item">
+                                <input type="checkbox" name="ebook" value="{{ m.full_path }}">
+                                <span>{{ m.file_name }} [{{ m.file_size_mb }} MB]</span>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div style="padding:20px;text-align:center;color:#999;">No ebooks found</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="file-list-column">
+                        <div class="file-list-title audiobook-list-title">🎧 Audiobooks (will be COPIED)</div>
+                        <div class="check-links">
+                            <a onclick="checkAllAudiobooks(true)">[Select All]</a>
+                            <a onclick="checkAllAudiobooks(false)">[Deselect All]</a>
+                        </div>
+                        {% if audiobook_matches %}
+                            {% for m in audiobook_matches %}
+                            <div class="file-item">
+                                <input type="checkbox" name="audiobook" value="{{ m.id }}">
+                                <span>{{ m.title }} by {{ m.author }} [{{ m.file_size_mb }} MB, {{ m.num_files }} files]</span>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div style="padding:20px;text-align:center;color:#999;">No audiobooks found</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div style="text-align:center;margin-top:30px;">
+                    <button type="submit" class="btn-success" style="font-size:1.3em;padding:16px 40px;border:none;border-radius:6px;cursor:pointer;color:white;font-weight:bold;">
+                        🚀 Process Selected
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+        
+        <div class="info-section">
+            <h3>ℹ️ How It Works</h3>
+            <ol>
+                <li>Search for books in <code>LargeEPUBs</code> folder</li>
+                <li>Select EPUB + audiobooks to create a folder in <code>/media_books</code></li>
+                <li>Storyteller processes the EPUB and creates <code>(readaloud).epub</code></li>
+                <li>Monitor automatically detects the completed file (checks hourly)</li>
+                <li>Moves <code>(readaloud).epub</code> back to <code>LargeEPUBs</code></li>
+                <li>Deletes the temporary folder from <code>/media_books</code></li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function checkAllEbooks(s){document.querySelectorAll('input[name="ebook"]').forEach(c=>c.checked=s);}
+        function checkAllAudiobooks(s){document.querySelectorAll('input[name="audiobook"]').forEach(c=>c.checked=s);}
+    </script>
+</body>
+</html>
