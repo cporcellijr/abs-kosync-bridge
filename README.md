@@ -40,6 +40,22 @@ Start listening in your car, continue reading on your Kobo, pick up on Storytell
 - **Booklore Integration:** Optional shelf management
 - **Flexible Configuration:** Environment variable-based setup
 
+## 📸 Screenshots
+   
+   ### Main Dashboard - Three-Way Progress Sync
+  <img width="1451" height="651" alt="image" src="https://github.com/user-attachments/assets/7480abb9-2800-483c-905c-33293e8a560b" />
+
+   
+   ### Book Linker Workflow
+<img width="1451" height="712" alt="image" src="https://github.com/user-attachments/assets/144386b3-3a05-4dc6-aea5-84b77176d13f" />
+
+ 
+   ### Book Match
+<img width="1270" height="675" alt="image" src="https://github.com/user-attachments/assets/7d74d7f7-be10-4ed1-86a7-716c1092ca07" />
+
+<img width="1670" height="705" alt="image" src="https://github.com/user-attachments/assets/7d81f081-afc4-4418-bcea-ec15a99d36ae" />
+
+   
 ## 📦 Quick Start
 
 ### 1. Clone the Repository
