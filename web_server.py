@@ -11,6 +11,7 @@ import threading
 from logging.handlers import RotatingFileHandler
 from urllib.parse import urljoin
 import html
+from json_db import JsonDB
 
 # ---------------- APP SETUP ----------------
 
@@ -21,6 +22,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 manager = SyncManager()
+
+db_handler = JsonDB("/data/mapping_db.json")
+state_handler = JsonDB("/data/last_state.json")
 
 # ---------------- BOOK LINKER CONFIG ----------------
 
@@ -553,37 +557,37 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
 @app.route('/')
 def index():
     """ABS-KoSync Dashboard - Show all mappings with unified three-way progress"""
-    manager.db = manager._load_db()
-    manager.state = manager._load_state()
-
-    mappings = manager.db.get('mappings', [])
-
+    # CHANGED: Use JsonDB for reads (process-safe)
+    db = db_handler.load(default={"mappings": []})
+    state = state_handler.load(default={})
+    
+    mappings = db.get('mappings', [])
+    
     for mapping in mappings:
         abs_id = mapping.get('abs_id')
         kosync_id = mapping.get('kosync_doc_id')
         ebook_filename = mapping.get('ebook_filename')
 
         try:
+            # Use manager's clients for API calls (reading progress)
             abs_progress = manager.abs_client.get_progress(abs_id)
             kosync_progress = manager.kosync_client.get_progress(kosync_id)
-            storyteller_progress, storyteller_ts = manager.storyteller_db.get_progress(ebook_filename)  # Unpack tuple
+            storyteller_progress, _ = manager.storyteller_db.get_progress(ebook_filename)
 
-            # Handle None from Storyteller
             if storyteller_progress is None:
                 storyteller_progress = 0.0
             mapping['storyteller_progress'] = storyteller_progress * 100
-            # Store raw values
             mapping['abs_progress'] = abs_progress
             mapping['kosync_progress'] = kosync_progress * 100
             
-            # Calculate unified progress (use the furthest ahead as the "main" progress)
             mapping['unified_progress'] = max(
                 mapping['kosync_progress'], 
                 mapping['storyteller_progress']
             )
 
-            state = manager.state.get(abs_id, {})
-            last_updated = state.get('last_updated', 0)
+            # CHANGED: Use local state variable
+            book_state = state.get(abs_id, {})
+            last_updated = book_state.get('last_updated', 0)
 
             if last_updated > 0:
                 diff = time.time() - last_updated
@@ -842,11 +846,13 @@ def match():
             "status": "pending",
         }
 
-        manager.db['mappings'] = [
-            m for m in manager.db['mappings'] if m['abs_id'] != abs_id
-        ]
-        manager.db['mappings'].append(mapping)
-        manager._save_db()
+        # CHANGED: Use JsonDB atomic update
+        def add_mapping(db):
+            db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
+            db['mappings'].append(mapping)
+            return db
+        
+        db_handler.update(add_mapping, default={"mappings": []})
 
         add_to_abs_collection(manager.abs_client, abs_id)
         add_to_booklore_shelf(ebook_filename)
@@ -935,7 +941,8 @@ def batch_match():
             return redirect(url_for('batch_match'))
 
         elif action == 'process_queue':
-            manager.db = manager._load_db()
+            # CHANGED: Use JsonDB
+            db = db_handler.load(default={"mappings": []})
 
             for item in session.get('queue', []):
                 ebook_path = find_ebook_file(item['ebook_filename'])
@@ -953,18 +960,19 @@ def batch_match():
                     "transcript_file": None,
                     "status": "pending",
                 }
-                manager.db['mappings'] = [
-                    m for m in manager.db['mappings']
-                    if m['abs_id'] != item['abs_id']
-                ]
-                manager.db['mappings'].append(mapping)
+                
+                # Remove existing and add new
+                db['mappings'] = [m for m in db['mappings'] if m['abs_id'] != item['abs_id']]
+                db['mappings'].append(mapping)
 
                 add_to_abs_collection(manager.abs_client, item['abs_id'])
                 add_to_booklore_shelf(item['ebook_filename'])
 
                 logger.info(f"MAPPED: ABS -> EPUB={ebook_path}")
 
-            manager._save_db()
+            # CHANGED: Save with JsonDB
+            db_handler.save(db)
+            
             session['queue'] = []
             session.modified = True
             return redirect(url_for('index'))
@@ -1009,14 +1017,14 @@ def batch_match():
 
 @app.route('/delete/<abs_id>', methods=['POST'])
 def delete_mapping(abs_id):
-    """
-    Delete a mapping and clean up all associated data:
-    - Remove from mappings.json
-    - Remove from state.json 
-    - Delete transcript file
-    """
+    """Delete a mapping and clean up all associated data."""
+    
+    # CHANGED: Load with JsonDB
+    db = db_handler.load(default={"mappings": []})
+    state = state_handler.load(default={})
+    
     # Find the mapping to get transcript path
-    mapping = next((m for m in manager.db['mappings'] if m['abs_id'] == abs_id), None)
+    mapping = next((m for m in db.get('mappings', []) if m['abs_id'] == abs_id), None)
     
     if mapping:
         # Delete transcript file if it exists
@@ -1030,24 +1038,27 @@ def delete_mapping(abs_id):
                 except Exception as e:
                     logger.error(f"Failed to delete transcript {transcript_path}: {e}")
     
-    # Remove from mappings
-    manager.db['mappings'] = [
-        m for m in manager.db['mappings'] if m['abs_id'] != abs_id
-    ]
-    manager._save_db()
+    # CHANGED: Use JsonDB atomic update for mappings
+    def remove_mapping(db):
+        db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
+        return db
     
-    # Remove from state
-    if abs_id in manager.state:
-        del manager.state[abs_id]
-        manager._save_state()
-        logger.info(f"Removed state for {abs_id}")
+    db_handler.update(remove_mapping, default={"mappings": []})
+    
+    # CHANGED: Use JsonDB atomic update for state
+    def remove_state(state):
+        if abs_id in state:
+            del state[abs_id]
+        return state
+    
+    state_handler.update(remove_state, default={})
     
     logger.info(f"Deleted mapping and cleaned up data for {abs_id}")
     return redirect(url_for('index'))
 
 @app.route('/api/status')
 def api_status():
-    return jsonify(manager.db)
+    return jsonify(db_handler.load(default={"mappings": []}))
 
 @app.route('/view_log')
 def view_log():

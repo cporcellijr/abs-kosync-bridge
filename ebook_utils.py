@@ -1,3 +1,12 @@
+"""
+Ebook Utilities for abs-kosync-bridge
+
+HARDENED VERSION with:
+- LRU Cache (capacity=3) to prevent OOM from caching all books
+- Robust path resolution for special characters
+- Multiple matching strategies (exact, normalized, fuzzy)
+"""
+
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -5,42 +14,71 @@ import hashlib
 import logging
 import os
 import re
-import glob # <--- Added import for escaping
+import glob
 import rapidfuzz
 from pathlib import Path
 from rapidfuzz import process, fuzz
-from fuzzysearch import find_near_matches
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
+
+class LRUCache:
+    """
+    Least Recently Used cache with fixed capacity.
+    Automatically evicts oldest entries when capacity is exceeded.
+    """
+    
+    def __init__(self, capacity: int = 3):
+        self.cache = OrderedDict()
+        self.capacity = capacity
+
+    def get(self, key):
+        if key not in self.cache:
+            return None
+        # Move to end (most recently used)
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = value
+        # Evict oldest if over capacity
+        while len(self.cache) > self.capacity:
+            evicted_key, _ = self.cache.popitem(last=False)
+            logger.debug(f"LRU evicted: {evicted_key}")
+    
+    def clear(self):
+        self.cache.clear()
+
+
 class EbookParser:
     def __init__(self, books_dir):
-        self.books_dir = books_dir
-        self.cache = {} 
-        self.normalized_cache = {}
-        self.sentence_cache = {}
-        # Stores metadata about where chapters begin/end in the full text
-        self.spine_maps = {} 
+        self.books_dir = Path(books_dir)
+        
+        # LRU Cache - keeps only last N books in memory to prevent OOM
+        cache_size = int(os.getenv("EBOOK_CACHE_SIZE", 3))
+        self.cache = LRUCache(capacity=cache_size)
         
         self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
-        logger.info(f"Initialized EbookParser. ID Method: {self.hash_method}")
+        
+        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method})")
 
     def _resolve_book_path(self, filename):
         """
-        Robustly finds a file in the books directory, handling special characters
-        like [ ] (brackets) which break standard glob patterns.
+        Robustly finds a file in the books directory.
+        Handles special characters like [ ] which break standard glob.
         """
-        # 1. Try Glob with escaping (Fastest)
+        # Strategy 1: Glob with escaping (fastest)
         try:
-            # Escape brackets, etc.
-            safe_name = glob.escape(filename) 
+            safe_name = glob.escape(filename)
             return next(self.books_dir.glob(f"**/{safe_name}"))
         except StopIteration:
             pass
-            
-        # 2. Fallback: Linear scan (Slower, but 100% reliable)
-        # This catches edge cases where glob.escape might behave differently on OS versions
+        
+        # Strategy 2: Linear scan (slower but reliable)
         for f in self.books_dir.rglob("*"):
             if f.name == filename:
                 return f
@@ -48,6 +86,7 @@ class EbookParser:
         raise FileNotFoundError(f"Could not locate {filename}")
 
     def get_kosync_id(self, filepath):
+        """Generate KoSync document ID using configured hash method."""
         filepath = Path(filepath)
         if self.hash_method == "filename":
             return self._compute_filename_hash(filepath)
@@ -57,34 +96,54 @@ class EbookParser:
         return hashlib.md5(filepath.name.encode('utf-8')).hexdigest()
 
     def _compute_koreader_hash(self, filepath):
+        """
+        Compute hash exactly as KOReader does.
+        Samples specific byte offsets to create a unique fingerprint.
+        """
         md5 = hashlib.md5()
         try:
             file_size = os.path.getsize(filepath)
             with open(filepath, 'rb') as f:
-                for i in range(-1, 11): 
-                    if i == -1: offset = 0
-                    else: offset = 1024 * (4 ** i)
-                    if offset >= file_size: break
+                for i in range(-1, 11):
+                    if i == -1:
+                        offset = 0
+                    else:
+                        offset = 1024 * (4 ** i)
+                    if offset >= file_size:
+                        break
                     f.seek(offset)
                     chunk = f.read(1024)
-                    if not chunk: break   
+                    if not chunk:
+                        break
                     md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing hash: {e}")
+            logger.error(f"Error computing KOReader hash: {e}")
             return None
 
     def extract_text_and_map(self, filepath):
+        """
+        Extract full text and spine map from EPUB.
+        Results are cached in LRU cache.
+        """
+        # Resolve filename to full path if needed
         filepath = Path(filepath)
-        if str(filepath) in self.cache:
-            return self.cache[str(filepath)], self.spine_maps[str(filepath)]
-
-        logger.info(f"Parsing ebook structure: {filepath.name}")
+        if not filepath.exists():
+            filepath = self._resolve_book_path(filepath.name)
+        str_path = str(filepath)
+        
+        # Check LRU cache first
+        cached = self.cache.get(str_path)
+        if cached:
+            logger.debug(f"Cache hit: {filepath.name}")
+            return cached['text'], cached['map']
+        
+        logger.info(f"Parsing EPUB: {filepath.name}")
+        
         try:
             book = epub.read_epub(str(filepath))
             full_text_parts = []
-            spine_map = [] 
-            
+            spine_map = []
             current_idx = 0
             
             for i, item_ref in enumerate(book.spine):
@@ -100,17 +159,19 @@ class EbookParser:
                     spine_map.append({
                         "start": start,
                         "end": end,
-                        "spine_index": i + 1, 
-                        "content": item.get_content() 
+                        "spine_index": i + 1,
+                        "content": item.get_content()
                     })
                     
                     full_text_parts.append(text)
-                    current_idx = end + 1 
+                    current_idx = end + 1
             
             combined_text = " ".join(full_text_parts)
-            self.cache[str(filepath)] = combined_text
-            self.spine_maps[str(filepath)] = spine_map
             
+            # Store in LRU cache
+            self.cache.put(str_path, {'text': combined_text, 'map': spine_map})
+            
+            logger.debug(f"Parsed {filepath.name}: {len(combined_text)} chars, {len(spine_map)} spine items")
             return combined_text, spine_map
             
         except Exception as e:
@@ -118,6 +179,7 @@ class EbookParser:
             return "", []
 
     def _generate_xpath(self, html_content, local_target_index):
+        """Generate XPath for a character position within HTML content."""
         soup = BeautifulSoup(html_content, 'html.parser')
         current_char_count = 0
         target_tag = None
@@ -125,7 +187,8 @@ class EbookParser:
         elements = soup.find_all(string=True)
         for string in elements:
             text_len = len(string.strip())
-            if text_len == 0: continue
+            if text_len == 0:
+                continue
             
             if current_char_count + text_len >= local_target_index:
                 target_tag = string.parent
@@ -137,7 +200,7 @@ class EbookParser:
         
         if not target_tag:
             return "/body/div/p[1]"
-
+        
         path_segments = []
         curr = target_tag
         while curr and curr.name != '[document]':
@@ -152,161 +215,148 @@ class EbookParser:
                     index += 1
                 sibling = sibling.previous_sibling
             
-            segment = f"{curr.name}[{index}]"
-            path_segments.append(segment)
+            path_segments.append(f"{curr.name}[{index}]")
             curr = curr.parent
-            
+        
         return "/" + "/".join(reversed(path_segments))
 
     def _normalize(self, text):
+        """Normalize text for fuzzy matching (lowercase, alphanumeric only)."""
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
-    def find_text_location(self, filename, search_phrase):
+    def find_text_location(self, filename, search_phrase, hint_percentage=None):
+        """
+        Find the location of search_phrase in the ebook.
+        
+        Returns: (percentage, xpath, char_index) or (None, None, None)
+        
+        Args:
+            filename: EPUB filename
+            search_phrase: Text to find
+            hint_percentage: Optional hint for where to search first (optimization)
+        """
         try:
-            # FIXED: Use the new robust path resolver
             book_path = self._resolve_book_path(filename)
-            
             full_text, spine_map = self.extract_text_and_map(book_path)
             
-            if not full_text: return None, None
-
+            if not full_text:
+                return None, None, None
+            
             total_len = len(full_text)
             match_index = -1
-
-            # 1. Exact Match
+            
+            # Strategy 1: Exact match
             match_index = full_text.find(search_phrase)
             
-            # 2. Normalized Match
+            # Strategy 2: Normalized match
             if match_index == -1:
-                logger.info("   ...Exact match failed. Trying Normalized match...")
-                cache_key = str(filename)
-                if cache_key not in self.normalized_cache:
-                    self.normalized_cache[cache_key] = self._normalize(full_text)
-                
-                norm_content = self.normalized_cache[cache_key]
+                logger.debug("Trying normalized match...")
+                norm_content = self._normalize(full_text)
                 norm_search = self._normalize(search_phrase)
                 norm_index = norm_content.find(norm_search)
-
+                
                 if norm_index != -1:
-                    logger.info("   ✅ Normalized match successful.")
+                    # Map normalized index back to original
                     match_index = int((norm_index / len(norm_content)) * total_len)
-
-            # # 3. Fuzzy Match
-            # if match_index == -1:
-            #     logger.info(f"   ...Normalized failed. Trying Fuzzy Match...")
-            #     cache_key = str(filename)
-            #     if cache_key not in self.sentence_cache:
-            #         self.sentence_cache[cache_key] = full_text.split('. ')
-                
-            #     sentences = self.sentence_cache[cache_key]
-            #     match = process.extractOne(search_phrase, sentences, scorer=fuzz.token_set_ratio)
-                
-            #     if match:
-            #         matched_string, score, _ = match
-            #         if score >= self.fuzzy_threshold:
-            #             logger.info(f"   ✅ Fuzzy match successful (Score: {score:.1f}).")
-            #             match_index = full_text.find(matched_string)
-           
-            # # 3. Fuzzy Match (Revised)
-            # if match_index == -1:
-            #     logger.info("   ...Normalized failed. Trying Fuzzy Match with Levenshtein distance...")
-                
-            #     max_errors = int(len(search_phrase) * 0.2) # Allow 20% error rate
-                
-            #     matches = find_near_matches(search_phrase, full_text, max_l_dist=max_errors)
+                    logger.debug(f"Normalized match at {match_index}")
             
-            #     if matches:
-            #         # Get the best match (lowest distance / errors)
-            #         best_match = min(matches, key=lambda x: x.dist)
-                    
-            #         logger.info(f"   ✅ Fuzzy match successful (Dist: {best_match.dist}).")
-            #         match_index = best_match.start            
-
-            # 3. Fuzzy Match (RapidFuzz Optimized)
+            # Strategy 3: Fuzzy match with RapidFuzz
             if match_index == -1:
-                logger.info("   ...Normalized failed. Trying Fuzzy Match with RapidFuzz...")
-
-                # RapidFuzz uses a 0-100 score. 
-                # ~75 is roughly equivalent to allowing 20-25% errors.
-                cutoff_score = 75 
-
-                # partial_ratio_alignment finds the best alignment of the search_phrase 
-                # within the full_text.
-                # Returns an object with: score, src_start, src_end, dest_start, dest_end
-                alignment = rapidfuzz.fuzz.partial_ratio_alignment(
-                    search_phrase, 
-                    full_text, 
-                    score_cutoff=cutoff_score
-                )
-
-                if alignment:
-                    logger.info(f"   ✅ Fuzzy match successful (Score: {alignment.score:.1f}).")
-                    # 'dest_start' is the index where the match starts in full_text
-                    match_index = alignment.dest_start
+                logger.debug("Trying fuzzy match...")
+                cutoff_score = self.fuzzy_threshold
+                
+                # If we have a hint, search nearby first (±10% window)
+                if hint_percentage is not None:
+                    window_start = int(max(0, hint_percentage - 0.10) * total_len)
+                    window_end = int(min(1.0, hint_percentage + 0.10) * total_len)
+                    windowed_text = full_text[window_start:window_end]
+                    
+                    alignment = rapidfuzz.fuzz.partial_ratio_alignment(
+                        search_phrase, windowed_text, score_cutoff=cutoff_score
+                    )
+                    if alignment:
+                        match_index = window_start + alignment.dest_start
+                        logger.debug(f"Windowed fuzzy match at {match_index}")
+                
+                # Full text fuzzy search as fallback
+                if match_index == -1:
+                    alignment = rapidfuzz.fuzz.partial_ratio_alignment(
+                        search_phrase, full_text, score_cutoff=cutoff_score
+                    )
+                    if alignment:
+                        match_index = alignment.dest_start
+                        logger.debug(f"Full fuzzy match at {match_index}")
             
             if match_index != -1:
                 percentage = match_index / total_len
                 xpath = None
+                
                 for item in spine_map:
                     if item['start'] <= match_index < item['end']:
                         local_index = match_index - item['start']
                         dom_path = self._generate_xpath(item['content'], local_index)
                         xpath = f"/body/DocFragment[{item['spine_index']}]{dom_path}"
-                        logger.info(f"   📍 Generated XPath: {xpath}")
                         break
                 
                 return percentage, xpath, match_index
             
             return None, None, None
-
+            
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"Book not found: {filename}")
             return None, None, None
         except Exception as e:
-            logger.error(f"Error finding location in {filename}: {e}")
+            logger.error(f"Error finding text in {filename}: {e}")
             return None, None, None
 
     def get_text_at_percentage(self, filename, percentage):
+        """
+        Extract ~900 characters of text centered at the given percentage.
+        """
         try:
-            # FIXED: Use the new robust path resolver
             book_path = self._resolve_book_path(filename)
-            
             full_text, _ = self.extract_text_and_map(book_path)
             
-            if not full_text: return None
+            if not full_text:
+                return None
             
             total_len = len(full_text)
             target_index = int(total_len * percentage)
             
+            # Extract window of text (450 chars before and after)
             start = max(0, target_index - 450)
             end = min(total_len, target_index + 450)
             
             return full_text[start:end]
+            
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"Book not found: {filename}")
             return None
         except Exception as e:
             logger.error(f"Error extracting text from {filename}: {e}")
             return None
 
     def get_character_delta(self, filename, percentage_prev, percentage_new):
+        """
+        Calculate character count difference between two percentages.
+        Used for threshold checking.
+        """
         try:
             book_path = self._resolve_book_path(filename)
-        
             full_text, _ = self.extract_text_and_map(book_path)
             
-            if not full_text: return None
+            if not full_text:
+                return None
             
             total_len = len(full_text)
             index_prev = int(total_len * percentage_prev)
             index_new = int(total_len * percentage_new)
-
-            character_delta = abs(index_new - index_prev)
-                        
-            return character_delta
+            
+            return abs(index_new - index_prev)
+            
         except FileNotFoundError:
-            logger.error(f"Book file not found: {filename}")
+            logger.error(f"Book not found: {filename}")
             return None
         except Exception as e:
-            logger.error(f"Error calculating character delta for {filename}: {e}")
+            logger.error(f"Error calculating delta for {filename}: {e}")
             return None

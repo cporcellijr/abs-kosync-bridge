@@ -9,6 +9,7 @@ COPY storyteller_db.py /app/src/storyteller_db.py
 COPY transcriber.py /app/src/transcriber.py
 COPY ebook_utils.py /app/src/ebook_utils.py
 COPY api_clients.py /app/src/api_clients.py
+COPY json_db.py /app/src/json_db.py
 
 # Copy web server to /app root
 COPY web_server.py /app/web_server.py

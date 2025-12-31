@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+LICENSE
+
+# Development files
+*.pyc
+__pycache__/
+*.log
+.env
+
+# User data (shouldn't be in build context anyway)
+data/
+transcripts/
+
+# Docker files
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/
+temp/
