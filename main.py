@@ -32,7 +32,7 @@ STATE_FILE = DATA_DIR / "last_state.json"
 
 class SyncManager:
     def __init__(self):
-        logger.info("=== Sync Manager Starting (Release 5.1 - Fixes) ===")
+        logger.info("=== Sync Manager Starting (Release 5.3 - Fix KeyError) ===")
         self.abs_client = ABSClient()
         self.kosync_client = KoSyncClient()
         self.hardcover_client = HardcoverClient()
@@ -70,13 +70,11 @@ class SyncManager:
                 changed = True
         if changed: self.db_handler.save(self.db)
 
-    # --- RESTORED HELPER METHOD ---
     def _get_abs_title(self, ab):
         """Extract title from audiobook item."""
         media = ab.get('media', {})
         metadata = media.get('metadata', {})
         return metadata.get('title') or ab.get('name', 'Unknown')
-    # ------------------------------
 
     def _automatch_hardcover(self, mapping):
         if not self.hardcover_client.token: return
@@ -178,7 +176,10 @@ class SyncManager:
                 if abs(vals['STORYTELLER'] - prev.get('storyteller_pct', 0)) > self.delta_kosync_thresh: changed = True
                 
                 if not changed:
-                    self.state[abs_id].update({'last_updated': prev.get('last_updated', 0)})
+                    # FIX: Initialize key if missing before updating
+                    if abs_id not in self.state:
+                        self.state[abs_id] = prev
+                    self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
 
                 leader = max(vals, key=vals.get)
