@@ -112,7 +112,8 @@ class StorytellerAPIClient:
         return None
     
     def get_position(self, book_uuid: str) -> Tuple[Optional[float], Optional[int]]:
-        response = self._make_request("GET", f"/api/books/{book_uuid}/positions")
+        # Updated to use V2 endpoint
+        response = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
         if response and response.status_code == 200:
             data = response.json()
             return float(data.get('locator', {}).get('locations', {}).get('totalProgression', 0)), int(data.get('timestamp', 0))
@@ -120,10 +121,14 @@ class StorytellerAPIClient:
     
     def update_position(self, book_uuid: str, percentage: float, rich_locator: dict = None) -> bool:
         """
-        Update reading position via Storyteller API.
-        Prioritizes 'rich_locator' (href/cssSelector) to prevent 'undefined' href crashes.
+        Update reading position via Storyteller API V2.
+        Includes +10s Leapfrog logic to prevent overwrites.
         """
+        # 1. LEAPFROG: Force timestamp 10s into the future
+        new_ts = int(time.time() * 1000) + 10000
+
         payload = {
+            "timestamp": new_ts,
             "locator": {
                 "locations": {
                     "totalProgression": float(percentage)
@@ -131,26 +136,28 @@ class StorytellerAPIClient:
             }
         }
 
-        # 1. Use authoritative Rich Locator if available
+        # 2. Use authoritative Rich Locator if available
         if rich_locator and rich_locator.get('href'):
             payload['locator']['href'] = rich_locator['href']
             payload['locator']['type'] = "application/xhtml+xml"
             if rich_locator.get('cssSelector'):
                 payload['locator']['locations']['cssSelector'] = rich_locator['cssSelector']
         
-        # 2. Fallback: Fetch existing position to preserve href
+        # 3. Fallback: Fetch existing position to preserve href (Using V2)
         else:
             try:
-                r = self._make_request("GET", f"/api/books/{book_uuid}/positions")
+                r = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
                 if r and r.status_code == 200:
                     old = r.json().get('locator', {})
                     if old.get('href'): payload['locator']['href'] = old['href']
                     if old.get('type'): payload['locator']['type'] = old['type']
             except Exception: pass
         
-        response = self._make_request("POST", f"/api/books/{book_uuid}/positions", payload)
+        # 4. Send Update to V2 Endpoint (respects timestamp)
+        response = self._make_request("POST", f"/api/v2/books/{book_uuid}/positions", payload)
+        
         if response and response.status_code == 204:
-            logger.info(f"✅ Storyteller API: {book_uuid[:8]}... → {percentage:.1%}")
+            logger.info(f"✅ Storyteller API: {book_uuid[:8]}... → {percentage:.1%} (TS: {new_ts})")
             return True
         else:
             logger.error(f"Storyteller update failed: {response.status_code if response else 'No Resp'}")
