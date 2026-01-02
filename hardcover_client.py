@@ -8,6 +8,9 @@ Key features:
 - Auto-sets started_at when creating a new read
 - Auto-sets finished_at when marking as finished (>99% progress)
 - Supports ISBN and title/author search for book matching
+
+CRITICAL: started_at and finished_at are TOP-LEVEL GraphQL variables,
+NOT part of the object! This matches hardcover_api.lua implementation.
 """
 
 import os
@@ -237,6 +240,9 @@ class HardcoverClient:
         """
         Update reading progress with proper date handling.
         
+        CRITICAL: Matches hardcover_api.lua lines 539-571 exactly!
+        started_at and finished_at are TOP-LEVEL variables, NOT in object!
+        
         Features:
         - Sets started_at to today when creating a new read (if not set)
         - Sets finished_at to today when is_finished=True
@@ -266,78 +272,91 @@ class HardcoverClient:
         today = self._get_today_date()
         
         if read_result and read_result.get('user_book_reads') and len(read_result['user_book_reads']) > 0:
-            # Update existing read
+            # Update existing read - MATCHES hardcover_api.lua line 539-571
             existing_read = read_result['user_book_reads'][0]
             read_id = existing_read['id']
             
-            # Build the update object
-            update_obj = {
-                "progress_pages": page
-            }
+            # Determine dates - these are TOP LEVEL variables, not in object!
+            started_at_val = None
+            finished_at_val = None
             
-            if edition_id:
-                update_obj["edition_id"] = edition_id
-            
-            # Set started_at if not already set
             if not existing_read.get('started_at'):
-                update_obj["started_at"] = today
+                started_at_val = today
                 logger.info(f"Hardcover: Setting started_at to {today}")
             
-            # Set finished_at if marking as finished
             if is_finished and not existing_read.get('finished_at'):
-                update_obj["finished_at"] = today
+                finished_at_val = today
                 logger.info(f"Hardcover: Setting finished_at to {today}")
             
+            # Build mutation matching Lua code exactly
             query = """
-            mutation ($id: Int!, $object: UserBookReadUpdateInput!) {
-                update_user_book_read(id: $id, object: $object) {
+            mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                update_user_book_read(id: $id, object: {
+                    progress_pages: $pages,
+                    edition_id: $editionId,
+                    started_at: $startedAt,
+                    finished_at: $finishedAt
+                }) {
                     error
                     user_book_read {
                         id
                         started_at
                         finished_at
+                        edition_id
+                        progress_pages
                     }
                 }
             }
             """
             
-            result = self.query(query, {"id": read_id, "object": update_obj})
+            result = self.query(query, {
+                "id": read_id, 
+                "pages": page, 
+                "editionId": edition_id,
+                "startedAt": started_at_val,
+                "finishedAt": finished_at_val
+            })
+            
             if result and result.get('update_user_book_read'):
                 error = result['update_user_book_read'].get('error')
                 if error:
                     logger.error(f"Hardcover update_user_book_read error: {error}")
                     return False
-                logger.debug(f"Hardcover: Updated read {read_id} → page {page}")
+                logger.debug(f"Hardcover: Updated read {read_id} -> page {page}")
                 return True
             return False
         else:
-            # Create new read with started_at
-            read_obj = {
-                "progress_pages": page,
-                "started_at": today
-            }
-            
-            if edition_id:
-                read_obj["edition_id"] = edition_id
-            
-            # If already finished, set finished_at too
-            if is_finished:
-                read_obj["finished_at"] = today
-            
+            # Create new read - MATCHES hardcover_api.lua line 504-537
             query = """
-            mutation ($userBookId: Int!, $object: UserBookReadCreateInput!) {
-                insert_user_book_read(user_book_id: $userBookId, user_book_read: $object) {
+            mutation InsertUserBookRead($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                insert_user_book_read(user_book_id: $id, user_book_read: {
+                    progress_pages: $pages,
+                    edition_id: $editionId,
+                    started_at: $startedAt,
+                    finished_at: $finishedAt
+                }) {
                     error
                     user_book_read {
                         id
                         started_at
                         finished_at
+                        edition_id
+                        progress_pages
                     }
                 }
             }
             """
             
-            result = self.query(query, {"userBookId": user_book_id, "object": read_obj})
+            finished_at_val = today if is_finished else None
+            
+            result = self.query(query, {
+                "id": user_book_id, 
+                "pages": page, 
+                "editionId": edition_id,
+                "startedAt": today,
+                "finishedAt": finished_at_val
+            })
+            
             if result and result.get('insert_user_book_read'):
                 error = result['insert_user_book_read'].get('error')
                 if error:
