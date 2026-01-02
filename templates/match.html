@@ -1,188 +1,435 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Create Mapping</title>
+    <title>Add Book - ABS-KoSync</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        * { 
+            box-sizing: border-box; 
             margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0;
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
             min-height: 100vh;
+            padding: 0;
         }
-        .container { 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        
+        /* Top Navigation Bar */
+        .top-nav {
+            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            backdrop-filter: blur(20px);
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        h1 {
-            color: #333;
-            margin: 0 0 30px 0;
+        
+        .logo-section h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
-        .section { margin: 30px 0; }
-        h3 {
-            color: #555;
-            margin: 0 0 15px 0;
+        
+        .nav-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
         }
-        select { 
-            width: 100%; 
-            padding: 12px; 
-            margin: 10px 0; 
-            font-size: 14px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            transition: border-color 0.3s;
-        }
-        select:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn { 
-            padding: 12px 24px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 6px;
+        
+        .btn {
+            padding: 10px 20px;
+            background: rgba(102, 126, 234, 0.15);
+            color: #667eea;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             transition: all 0.3s;
             text-decoration: none;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
-        .btn:hover { 
-            background: #5568d3;
+        
+        .btn:hover {
+            background: rgba(102, 126, 234, 0.25);
+            border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
-        .btn-secondary { 
-            background: #666;
-            margin-right: 10px;
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
         }
-        .btn-secondary:hover {
-            background: #555;
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
         }
-        .search-box { 
-            width: 100%; 
-            padding: 15px; 
-            margin: 10px 0 20px 0; 
+        
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            border: none;
             font-size: 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            transition: border-color 0.3s;
+            padding: 14px 32px;
         }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+            box-shadow: 0 8px 24px rgba(76, 175, 80, 0.4);
+        }
+        
+        /* Main Container */
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 40px;
+        }
+        
+        .page-header {
+            margin-bottom: 30px;
+        }
+        
+        .page-header h2 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .page-header .subtitle {
+            font-size: 16px;
+            color: rgba(255,255,255,0.6);
+        }
+        
+        /* Search Section */
+        .search-section {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 30px 0;
+        }
+        
+        .search-box {
+            width: 100%;
+            max-width: 600px;
+            padding: 16px 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
         .search-box:focus {
             outline: none;
             border-color: #667eea;
+            background: rgba(255,255,255,0.08);
         }
         
-        /* Audiobook Grid with Covers */
+        .search-box::placeholder {
+            color: rgba(255,255,255,0.4);
+        }
+        
+        /* Section Styling */
+        .section {
+            margin: 40px 0;
+        }
+        
+        .section h3 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+        
+        .section-number {
+            display: inline-block;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            text-align: center;
+            line-height: 32px;
+            margin-right: 12px;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        
+        /* Audiobook Grid */
         .audiobook-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 24px;
             margin: 20px 0;
         }
         
         .audiobook-option {
             cursor: pointer;
-            border: 3px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 15px;
-            text-align: center;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 0;
             transition: all 0.3s;
-            background: white;
+            background: rgba(255,255,255,0.03);
+            overflow: hidden;
         }
         
         .audiobook-option:hover {
-            border-color: #667eea;
+            border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-4px);
-            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
         }
         
         .audiobook-option.selected {
             border-color: #667eea;
-            background: #f0f4ff;
+            background: rgba(102, 126, 234, 0.15);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+        }
+        
+        .audiobook-cover-container {
+            width: 100%;
+            aspect-ratio: 2/3;
+            overflow: hidden;
+            position: relative;
         }
         
         .audiobook-cover {
             width: 100%;
-            height: 250px;
+            height: 100%;
             object-fit: cover;
-            border-radius: 6px;
-            margin-bottom: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
         
         .audiobook-cover-placeholder {
             width: 100%;
-            height: 250px;
+            height: 100%;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 64px;
-            margin-bottom: 10px;
+            font-size: 56px;
+        }
+        
+        .audiobook-info {
+            padding: 12px;
         }
         
         .audiobook-title {
             font-size: 14px;
             font-weight: 600;
-            color: #333;
-            word-wrap: break-word;
+            color: #ffffff;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         
         input[type="radio"] {
             display: none;
         }
+        
+        /* Ebook Dropdown */
+        select {
+            width: 100%;
+            padding: 16px 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        select option {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 12px;
+        }
+        
+        select:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+        
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            background: rgba(255,255,255,0.08);
+        }
+        
+        /* Submit Button Container */
+        .submit-container {
+            text-align: center;
+            margin: 40px 0 20px 0;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 80px 40px;
+            color: rgba(255,255,255,0.5);
+        }
+        
+        .empty-state-icon {
+            font-size: 72px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+        
+        .empty-state h3 {
+            font-size: 24px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 12px;
+        }
+        
+        .empty-state p {
+            font-size: 16px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .audiobook-grid {
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .top-nav {
+                padding: 16px 20px;
+            }
+            
+            .nav-actions {
+                flex-wrap: wrap;
+            }
+            
+            .page-header h2 {
+                font-size: 24px;
+            }
+            
+            .audiobook-grid {
+                grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+                gap: 16px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Create New Mapping</h1>
-        <a href="/" class="btn btn-secondary">← Back</a>
+    <!-- Top Navigation -->
+    <div class="top-nav">
+        <div class="logo-section">
+            <h1>➕ Add Book</h1>
+        </div>
         
-        <form method="GET" action="/match" style="margin: 30px 0;">
-            <input type="text" name="search" placeholder="🔍 Filter by title..." class="search-box" value="{{ search }}">
-            <button type="submit" class="btn">Search</button>
-        </form>
+        <div class="nav-actions">
+            <a href="/" class="btn">← Dashboard</a>
+            <a href="/batch-match" class="btn">📋 Batch Match</a>
+            <a href="/book-linker" class="btn">🔗 Book Linker</a>
+        </div>
+    </div>
+    
+    <!-- Main Container -->
+    <div class="container">
+        <div class="page-header">
+            <h2>Create New Mapping</h2>
+            <p class="subtitle">Link an audiobook with its matching ebook for synchronized reading</p>
+        </div>
+        
+        <!-- Search Section -->
+        <div class="search-section">
+            <form method="GET" action="/match">
+                <input 
+                    type="text" 
+                    name="search" 
+                    placeholder="🔍 Filter by title..." 
+                    class="search-box" 
+                    value="{{ search }}"
+                    autofocus
+                >
+                <button type="submit" class="btn btn-primary" style="margin-top: 16px;">Search</button>
+            </form>
+        </div>
         
         <form method="POST" action="/match" id="mappingForm">
+            <!-- Audiobook Selection -->
             <div class="section">
-                <h3>1. Select Audiobook</h3>
+                <h3><span class="section-number">1</span>Select Audiobook</h3>
+                {% if audiobooks %}
                 <div class="audiobook-grid">
                     {% for ab in audiobooks %}
                     <label class="audiobook-option" onclick="selectAudiobook(this, '{{ ab.id }}')">
                         <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
-                        {% if ab.cover_url %}
-                        <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <div class="audiobook-cover-placeholder" style="display:none;">🎧</div>
-                        {% else %}
-                        <div class="audiobook-cover-placeholder">🎧</div>
-                        {% endif %}
-                        <div class="audiobook-title">{{ get_title(ab) }}</div>
+                        <div class="audiobook-cover-container">
+                            {% if ab.cover_url %}
+                            <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover" 
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="audiobook-cover-placeholder" style="display:none;">🎧</div>
+                            {% else %}
+                            <div class="audiobook-cover-placeholder">🎧</div>
+                            {% endif %}
+                        </div>
+                        <div class="audiobook-info">
+                            <div class="audiobook-title">{{ get_title(ab) }}</div>
+                        </div>
                     </label>
                     {% endfor %}
                 </div>
+                {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎧</div>
+                    <h3>No audiobooks found</h3>
+                    <p>Try a different search term</p>
+                </div>
+                {% endif %}
             </div>
             
+            <!-- Ebook Selection -->
             <div class="section">
-                <h3>2. Select Ebook</h3>
+                <h3><span class="section-number">2</span>Select Ebook</h3>
+                {% if ebooks %}
                 <select name="ebook_filename" required>
                     <option value="">-- Choose Ebook --</option>
                     {% for eb in ebooks %}
                     <option value="{{ eb.name }}">{{ eb.name }}</option>
                     {% endfor %}
                 </select>
+                {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">📖</div>
+                    <h3>No ebooks found</h3>
+                    <p>Try a different search term</p>
+                </div>
+                {% endif %}
             </div>
             
-            <button type="submit" class="btn">✅ Create Mapping</button>
+            <!-- Submit Button -->
+            {% if audiobooks and ebooks %}
+            <div class="submit-container">
+                <button type="submit" class="btn btn-success">
+                    ✅ Create Mapping
+                </button>
+            </div>
+            {% endif %}
         </form>
     </div>
     

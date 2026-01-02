@@ -2,347 +2,494 @@
 <html>
 <head>
     <title>ABS-KoSync Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { box-sizing: border-box; }
+        * { 
+            box-sizing: border-box; 
+            margin: 0;
+            padding: 0;
+        }
+        
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; 
-            margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; 
+            background: #0a0a0a;
+            color: #ffffff;
             min-height: 100vh;
-        }
-        .container { 
-            max-width: 1400px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        }
-        h1 { 
-            color: #333; 
-            margin: 0 0 10px 0;
-            font-size: 32px;
-        }
-        .btn-success { background: #4CAF50; }
-        .btn-success:hover { 
-            background: #45a049;
-            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
-        }
-        .subtitle {
-            color: #666;
-            margin: 0 0 30px 0;
-            font-size: 16px;
-        }
-        .btn { 
-            padding: 12px 24px; 
-            background: #667eea; 
-            color: white; 
-            border: none; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            text-decoration: none; 
-            display: inline-block;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        .btn:hover { 
-            background: #5568d3;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        .btn-danger { background: #f44336; }
-        .btn-danger:hover { 
-            background: #da190b;
-            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+            padding: 0;
         }
         
-        .controls-container {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            margin: 20px 0;
-            flex-wrap: wrap;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .control-group label {
-            font-size: 14px;
-            font-weight: 600;
-            color: #555;
-        }
-
-        select, input[type="checkbox"] {
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 2px solid #e0e0e0;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        select:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-
-        .filter-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            border: 2px solid #e0e0e0;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .filter-toggle:hover {
-            border-color: #667eea;
-            background: #f0f4ff;
-        }
-
-        .filter-toggle.active {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
-
-        .filter-toggle input[type="checkbox"] {
-            margin: 0;
-        }
-
-        .filter-toggle label {
-            margin: 0;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        
-        .mapping-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-            margin-top: 30px;
-        }
-        
-        .mapping-card {
-            border: 1px solid #e0e0e0;
-            border-radius: 12px;
-            overflow: hidden;
-            background: white;
-            transition: all 0.3s;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        
-        .mapping-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-        }
-        
-        .card-header {
-            display: flex;
-            gap: 15px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        .cover-image {
-            width: 80px;
-            height: 120px;
-            object-fit: cover;
-            border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            flex-shrink: 0;
-        }
-        
-        .cover-placeholder {
-            width: 80px;
-            height: 120px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 36px;
-            flex-shrink: 0;
-        }
-        
-        .card-title-section {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .card-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #333;
-            margin: 0 0 8px 0;
-            word-wrap: break-word;
-        }
-        
-        .card-filename {
-            font-size: 13px;
-            color: #666;
-            margin: 0;
-            word-wrap: break-word;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-top: 8px;
-        }
-        
-        .status-active { background: #4CAF50; color: white; }
-        .status-pending { background: #FF9800; color: white; }
-        .status-processing { background: #2196F3; color: white; }
-        .status-failed, .status-crashed, .status-failed_retry_later { background: #f44336; color: white; }
-        
-        .card-body {
-            padding: 20px;
-        }
-        
-        .progress-section {
-            margin-bottom: 15px;
-        }
-        
-        .progress-header {
+        /* Top Navigation Bar */
+        .top-nav {
+            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            backdrop-filter: blur(20px);
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            position: sticky;
+            top: 0;
+            z-index: 100;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
-        }
-       .progress-stats-unified {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 20px;
-            margin-bottom: 12px;
         }
         
-        .progress-stat {
+        .logo-section h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .nav-actions {
             display: flex;
+            gap: 12px;
             align-items: center;
-            gap: 5px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            background: rgba(102, 126, 234, 0.15);
+            color: #667eea;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
             font-size: 14px;
-        }
-        
-        .progress-stat span:first-child {
-            font-size: 18px;
-        }
-        
-        .progress-value {
-            font-family: 'Courier New', monospace;
             font-weight: 600;
-            color: #333;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        .progress-stats {
+        .btn:hover {
+            background: rgba(102, 126, 234, 0.25);
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: translateY(-2px);
+        }
+        
+        .btn-primary {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            border: 1px solid rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:hover {
+            background: rgba(102, 126, 234, 0.3);
+            border-color: rgba(102, 126, 234, 0.6);
+        }
+        
+        .suggestion-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #e91e63;
+            color: white;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
+        }
+        
+        /* Main Container */
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 40px;
+        }
+        
+        /* Section Headers */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 40px 0 24px 0;
+        }
+        
+        .section-header h2 {
+            font-size: 32px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        
+        .section-link {
+            color: #667eea;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        
+        .section-link:hover {
+            color: #764ba2;
+        }
+        
+        /* Controls */
+        .controls-bar {
             display: flex;
             gap: 20px;
-            font-size: 13px;
-            color: #666;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
         }
         
-        .progress-stat {
+        .control-group {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 12px;
         }
         
-        .progress-value {
-            font-family: 'Courier New', monospace;
+        .control-group label {
+            font-size: 14px;
             font-weight: 600;
-            color: #333;
+            color: rgba(255,255,255,0.7);
         }
         
-        .progress-bar-container {
+        /* UPDATED: Clickable Arrow Styles */
+        .sort-direction {
+            font-size: 20px;
+            margin-left: 8px;
+            color: #667eea;
+            cursor: pointer;
+            user-select: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            background: rgba(255,255,255,0.05);
+        }
+
+        .sort-direction:hover {
+            background: rgba(102, 126, 234, 0.2);
+            color: #ffffff;
+            transform: scale(1.1);
+        }
+        
+        select {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        select option {
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 8px;
+        }
+        
+        select:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+        
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            background: rgba(255,255,255,0.08);
+        }
+        
+        /* Book Grid - COMPACT DYNAMIC SCALING */
+        .book-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 24px;
+            margin-bottom: 60px;
+        }
+        
+        /* Book Card */
+        .book-card {
+            position: relative;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 12px;
+        }
+        
+        .book-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            z-index: 10;
+        }
+        
+        .book-card:hover .book-cover-container {
+            box-shadow: 0 24px 48px rgba(102, 126, 234, 0.3);
+        }
+        
+        .book-card:hover .book-overlay {
+            opacity: 1;
+        }
+        
+        .book-cover-container {
+            position: relative;
             width: 100%;
-            height: 12px;
-            background: #e0e0e0;
+            aspect-ratio: 2/3;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            transition: all 0.4s;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+        }
+        
+        .book-cover {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .book-cover-placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+        }
+        
+        /* Progress Ring Overlay */
+        .progress-ring {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: #fff;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .progress-ring.reading {
+            border-color: #4CAF50;
+            box-shadow: 0 0 16px rgba(76, 175, 80, 0.6);
+        }
+        
+        /* Status Badge */
+        .status-badge-mini {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            padding: 4px 8px;
             border-radius: 6px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+        }
+        
+        .status-active { color: #4CAF50; border: 1px solid rgba(76, 175, 80, 0.3); }
+        .status-pending { color: #FF9800; border: 1px solid rgba(255, 152, 0, 0.3); }
+        .status-processing { color: #2196F3; border: 1px solid rgba(33, 150, 243, 0.3); }
+        .status-failed, .status-crashed, .status-failed_retry_later { 
+            color: #f44336; 
+            border: 1px solid rgba(244, 67, 54, 0.3); 
+        }
+        
+        /* Book Info Overlay */
+        .book-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.95) 60%);
+            padding: 40px 12px 12px 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border-radius: 0 0 12px 12px;
+        }
+        
+        .book-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 4px;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
         }
         
-        .progress-bar {
+        .book-filename {
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        /* Progress Details */
+        .progress-details {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 10px;
+        }
+        
+        .progress-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            color: rgba(255,255,255,0.8);
+        }
+        
+        .progress-item span:first-child {
+            font-size: 12px;
+        }
+        
+        .progress-bar-mini {
+            height: 3px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        
+        .progress-bar-fill {
             height: 100%;
             background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            border-radius: 6px;
             transition: width 0.5s ease;
         }
         
-        .sync-info {
-            font-size: 12px;
-            color: #999;
-            text-align: center;
-            padding: 12px 0 0 0;
-            margin-top: 12px;
-            border-top: 1px solid #e0e0e0;
+        .last-sync {
+            font-size: 9px;
+            color: rgba(255,255,255,0.5);
         }
         
-        .card-actions {
-            padding: 15px 20px;
-            background: #f8f9fa;
-            border-top: 1px solid #e0e0e0;
-            text-align: center;
+        /* Quick Actions */
+        .quick-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
         }
         
+        .action-btn {
+            flex: 1;
+            padding: 6px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .action-btn:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.4);
+        }
+        
+        .action-btn.danger {
+            background: rgba(244, 67, 54, 0.2);
+            border-color: rgba(244, 67, 54, 0.4);
+        }
+        
+        .action-btn.danger:hover {
+            background: rgba(244, 67, 54, 0.3);
+        }
+        
+        /* Empty State */
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: #666;
+            padding: 120px 40px;
+            color: rgba(255,255,255,0.5);
         }
         
         .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
+            font-size: 96px;
+            margin-bottom: 24px;
             opacity: 0.3;
+        }
+        
+        .empty-state h2 {
+            font-size: 28px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 12px;
+        }
+        
+        .empty-state p {
+            font-size: 16px;
+            margin-bottom: 32px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 1400px) {
+            .book-grid {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 20px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .top-nav {
+                padding: 16px 20px;
+            }
+            
+            .nav-actions {
+                flex-wrap: wrap;
+            }
+            
+            .section-header h2 {
+                font-size: 24px;
+            }
+            
+            .book-grid {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                gap: 12px;
+            }
+            
+            .controls-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav-buttons" style="margin-bottom: 20px;">
-            <a href="/suggestions" class="btn" style="position: relative; margin-right: 10px;">
+    <div class="top-nav">
+        <div class="logo-section">
+            <h1>📚 ABS-KoSync</h1>
+        </div>
+        
+        <div class="nav-actions">
+            <a href="/suggestions" class="btn" style="position: relative;">
                 💡 Suggestions
                 {% if suggestion_count > 0 %}
-                <span style="
-                    position: absolute; top: -8px; right: -8px;
-                    background: #d32f2f; color: white; border-radius: 50%;
-                    width: 20px; height: 20px; display: flex;
-                    align-items: center; justify-content: center;
-                    font-size: 11px; font-weight: bold;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                ">{{ suggestion_count }}</span>
+                <span class="suggestion-badge">{{ suggestion_count }}</span>
                 {% endif %}
             </a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
-            <a href="/match" class="btn">➕ Single Match</a>
-            <a href="/batch-match" class="btn">📋 Batch Match</a>
+            <a href="/match" class="btn btn-primary">➕ Add Book</a>
+            <a href="/batch-match" class="btn">📋 Batch</a>
         </div>
-        <h1>📚 ABS-KoSync Manager</h1>
-
+    </div>
+    
+    <div class="container">
         {% if mappings %}
-        <div class="controls-container">
+        <div class="controls-bar">
             <div class="control-group">
                 <label for="sort-select">Sort by:</label>
                 <select id="sort-select">
@@ -351,105 +498,205 @@
                     <option value="status">Status</option>
                     <option value="last_sync">Last Synced</option>
                 </select>
-            </div>
-
-            <div class="filter-toggle" id="filter-toggle">
-                <input type="checkbox" id="filter-current">
-                <label for="filter-current">📖 Show Only Currently Reading</label>
+                <span class="sort-direction" id="sort-direction" title="Click to Reverse Order">↓</span>
             </div>
         </div>
-
-        <div class="mapping-grid">
+        
+        <div class="section-header">
+            <h2>Currently Reading</h2>
+        </div>
+        
+        <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-            <div class="mapping-card" 
+            {% if mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+            <div class="book-card" 
                  data-progress="{{ mapping.kosync_progress }}"
-                 data-last-sync="{{ mapping.last_sync }}">
-                <div class="card-header">
+                 data-last-sync="{{ mapping.last_sync }}"
+                 data-status="{{ mapping.status }}"
+                 data-title="{{ mapping.abs_title }}">
+                <div class="book-cover-container">
                     {% if mapping.cover_url %}
-                    <img src="{{ mapping.cover_url }}" alt="Cover" class="cover-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="cover-placeholder" style="display:none;">📖</div>
+                    <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                    <div class="book-cover-placeholder" style="display:none;">📖</div>
                     {% else %}
-                    <div class="cover-placeholder">📖</div>
+                    <div class="book-cover-placeholder">📖</div>
                     {% endif %}
                     
-                    <div class="card-title-section">
-                        <h3 class="card-title">{{ mapping.abs_title }}</h3>
-                        <p class="card-filename">{{ mapping.ebook_filename }}</p>
-                        <span class="status-badge status-{{ mapping.status }}">{{ mapping.status }}</span>
+                    <div class="status-badge-mini status-{{ mapping.status }}">
+                        {{ mapping.status }}
                     </div>
-                </div>
-                
-                {% if mapping.status == 'active' %}
-                <div class="card-body">
-                    <div class="progress-section">
-                        <div class="progress-header">
-                            <div class="progress-stats-unified">
-                                <div class="progress-stat">
-                                    <span>🎧</span>
-                                    <span class="progress-value">{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
-                                </div>
-                                <div class="progress-stat">
-                                    <span>📖</span>
-                                    <span class="progress-value">{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
-                                </div>
-                                <div class="progress-stat">
-                                    <span>📚</span>
-                                    <span class="progress-value">{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
-                                </div>
+                    
+                    {% if mapping.status == 'active' and mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+                    <div class="progress-ring reading">
+                        {{ '%.0f' | format(mapping.unified_progress) }}%
+                    </div>
+                    {% endif %}
+                    
+                    <div class="book-overlay">
+                        <div class="book-title">{{ mapping.abs_title }}</div>
+                        <div class="book-filename">{{ mapping.ebook_filename }}</div>
+                        
+                        {% if mapping.status == 'active' %}
+                        <div class="progress-details">
+                            <div class="progress-item">
+                                <span>🎧</span>
+                                <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
+                            </div>
+                            <div class="progress-item">
+                                <span>📖</span>
+                                <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
+                            </div>
+                            <div class="progress-item">
+                                <span>📚</span>
+                                <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
                             </div>
                         </div>
                         
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" style="width: {{ mapping.unified_progress }}%"></div>
+                        <div class="progress-bar-mini">
+                            <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+                        </div>
+                        
+                        <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                        {% endif %}
+                        
+                        <div class="quick-actions">
+                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="width: 100%;">
+                                <button type="submit" class="action-btn danger" 
+                                        onclick="return confirm('Delete this mapping?')">
+                                    🗑️ Delete
+                                </button>
+                            </form>
                         </div>
                     </div>
-                    
-                    <div class="sync-info">
-                        Last synced: {{ mapping.last_sync }}
-                    </div>
                 </div>
-                {% endif %}
-                
-                <div class="card-actions">
-                    <form method="POST" action="/delete/{{ mapping.abs_id }}" style="display:inline;">
-                        <button type="submit" class="btn btn-danger" onclick="return confirm('Delete this mapping?')">🗑️ Delete</button>
-                    </form>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        
+        <div class="section-header" style="margin-top: 80px;">
+            <h2>All Books</h2>
+        </div>
+        
+        <div class="book-grid" id="all-books-grid">
+            {% for mapping in mappings %}
+            <div class="book-card" 
+                 data-progress="{{ mapping.kosync_progress }}"
+                 data-last-sync="{{ mapping.last_sync }}"
+                 data-status="{{ mapping.status }}"
+                 data-title="{{ mapping.abs_title }}">
+                <div class="book-cover-container">
+                    {% if mapping.cover_url %}
+                    <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                    <div class="book-cover-placeholder" style="display:none;">📖</div>
+                    {% else %}
+                    <div class="book-cover-placeholder">📖</div>
+                    {% endif %}
+                    
+                    <div class="status-badge-mini status-{{ mapping.status }}">
+                        {{ mapping.status }}
+                    </div>
+                    
+                    {% if mapping.status == 'active' and mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+                    <div class="progress-ring reading">
+                        {{ '%.0f' | format(mapping.unified_progress) }}%
+                    </div>
+                    {% endif %}
+                    
+                    <div class="book-overlay">
+                        <div class="book-title">{{ mapping.abs_title }}</div>
+                        <div class="book-filename">{{ mapping.ebook_filename }}</div>
+                        
+                        {% if mapping.status == 'active' %}
+                        <div class="progress-details">
+                            <div class="progress-item">
+                                <span>🎧</span>
+                                <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
+                            </div>
+                            <div class="progress-item">
+                                <span>📖</span>
+                                <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
+                            </div>
+                            <div class="progress-item">
+                                <span>📚</span>
+                                <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
+                            </div>
+                        </div>
+                        
+                        <div class="progress-bar-mini">
+                            <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+                        </div>
+                        
+                        <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                        {% endif %}
+                        
+                        <div class="quick-actions">
+                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="width: 100%;">
+                                <button type="submit" class="action-btn danger" 
+                                        onclick="return confirm('Delete this mapping?')">
+                                    🗑️ Delete
+                                </button>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         </div>
+        
         {% else %}
         <div class="empty-state">
             <div class="empty-state-icon">📚</div>
-            <h2>No mappings configured yet</h2>
-            <p>Click "Add New Mapping" above to get started syncing your audiobooks with KOReader!</p>
+            <h2>No books syncing yet</h2>
+            <p>Start by adding your first audiobook mapping</p>
+            <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
         </div>
         {% endif %}
     </div>
 
     <script>
-        const grid = document.querySelector('.mapping-grid');
+        const currentlyReadingGrid = document.getElementById('currently-reading-grid');
+        const allBooksGrid = document.getElementById('all-books-grid');
         const sortSelect = document.getElementById('sort-select');
-        const filterCheckbox = document.getElementById('filter-current');
-        const filterToggle = document.getElementById('filter-toggle');
+        const directionBtn = document.getElementById('sort-direction');
+
+        // Initial Sort Defaults
+        let sortState = {
+            title: 'asc',      // A-Z default
+            progress: 'desc',  // Highest progress first
+            status: 'asc',
+            last_sync: 'desc'  // Newest sync first
+        };
+
+        // Track last sort to detect toggles. 
+        // Important: Start as null to prevent auto-toggling on page load
+        let lastSort = null;
 
         // Load saved preferences
         const savedSort = localStorage.getItem('abs_kosync_sort') || 'title';
-        const savedFilter = localStorage.getItem('abs_kosync_filter_current') === 'true';
+        const savedSortState = localStorage.getItem('abs_kosync_sort_state');
         
-        if (savedSort) sortSelect.value = savedSort;
-        if (savedFilter) {
-            filterCheckbox.checked = true;
-            filterToggle.classList.add('active');
+        if (savedSort) {
+            sortSelect.value = savedSort;
+        }
+        
+        if (savedSortState) {
+            try {
+                // Merge saved state with defaults
+                sortState = { ...sortState, ...JSON.parse(savedSortState) };
+            } catch (e) {
+                console.error("Error parsing saved sort state", e);
+            }
         }
 
-        // Convert "Xs ago", "Xm ago", "Xh ago" to seconds for sorting
+        // Parse "Time Ago" for sorting
         function parseLastSync(syncText) {
-            if (syncText === 'Never') return Infinity;
-            if (syncText === 'Error') return Infinity;
+            if (!syncText || syncText === 'Never' || syncText === 'Error') return -1;
             
-            const match = syncText.match(/(\d+)([smh])/);
-            if (!match) return Infinity;
+            const match = syncText.match(/(\d+)([smhd])/);
+            if (!match) return -1;
             
             const value = parseInt(match[1]);
             const unit = match[2];
@@ -457,79 +704,97 @@
             if (unit === 's') return value;
             if (unit === 'm') return value * 60;
             if (unit === 'h') return value * 3600;
+            if (unit === 'd') return value * 86400;
             
-            return Infinity;
+            return -1;
         }
 
-        function sortCards(sortBy) {
+        function sortCards(grid, sortBy, direction) {
             if (!grid) return;
             const cards = Array.from(grid.children);
 
             const sortedCards = cards.sort((a, b) => {
+                let comparison = 0;
+                
+                // Safety checks for missing data attributes
+                const valA = a.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+                const valB = b.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+
                 if (sortBy === 'title') {
-                    return a.querySelector('.card-title').innerText.localeCompare(b.querySelector('.card-title').innerText);
+                    comparison = valA.localeCompare(valB);
                 } else if (sortBy === 'progress') {
-                    const aProg = parseFloat(a.dataset.progress) || 0;
-                    const bProg = parseFloat(b.dataset.progress) || 0;
-                    return bProg - aProg; // descending
+                    comparison = (parseFloat(valA) || 0) - (parseFloat(valB) || 0);
                 } else if (sortBy === 'status') {
-                    return a.querySelector('.status-badge').innerText.localeCompare(b.querySelector('.status-badge').innerText);
+                    comparison = valA.localeCompare(valB);
                 } else if (sortBy === 'last_sync') {
-                    const aSync = parseLastSync(a.dataset.lastSync);
-                    const bSync = parseLastSync(b.dataset.lastSync);
-                    return aSync - bSync; // ascending (most recent first)
+                    comparison = parseLastSync(valA) - parseLastSync(valB);
                 }
-                return 0;
+                
+                // Apply direction
+                return direction === 'asc' ? comparison : -comparison;
             });
 
+            // Re-append in new order
             sortedCards.forEach(card => grid.appendChild(card));
         }
 
-        function filterCards(showOnlyCurrent) {
-            if (!grid) return;
-            const cards = Array.from(grid.children);
+        function applySorting(sortBy) {
+            let direction;
+            
+            // Check if we are selecting the same sort type to toggle direction
+            if (lastSort === sortBy) {
+                const currentDirection = sortState[sortBy];
+                direction = currentDirection === 'asc' ? 'desc' : 'asc';
+                sortState[sortBy] = direction;
+            } else {
+                // Different selection (or first load) -> Use stored direction
+                direction = sortState[sortBy];
+            }
+            
+            // Update tracker
+            lastSort = sortBy;
+            
+            // Update UI Arrow
+            updateSortIndicator(direction);
+            
+            // Sort Grids
+            sortCards(currentlyReadingGrid, sortBy, direction);
+            sortCards(allBooksGrid, sortBy, direction);
+            
+            // Save preferences
+            localStorage.setItem('abs_kosync_sort', sortBy);
+            localStorage.setItem('abs_kosync_sort_state', JSON.stringify(sortState));
+        }
 
-            cards.forEach(card => {
-                if (showOnlyCurrent) {
-                    const progress = parseFloat(card.dataset.progress) || 0;
-                    // Show if progress > 0 and < 100
-                    if (progress > 0 && progress < 100) {
-                        card.style.display = '';
-                    } else {
-                        card.style.display = 'none';
-                    }
-                } else {
-                    card.style.display = '';
-                }
+        function updateSortIndicator(direction) {
+            if (directionBtn) {
+                directionBtn.textContent = direction === 'asc' ? '↑' : '↓';
+            }
+        }
+
+        // --- Event Listeners ---
+
+        if (sortSelect) {
+            sortSelect.addEventListener('change', (e) => {
+                applySorting(e.target.value);
             });
         }
 
-        // Apply initial sort and filter
-        sortCards(sortSelect.value);
-        filterCards(filterCheckbox.checked);
+        // NEW: Clickable Arrow Logic
+        if (directionBtn) {
+            directionBtn.addEventListener('click', () => {
+                // Clicking the arrow re-applies the CURRENT sort value.
+                // Since 'lastSort' will match, this triggers the toggle logic in applySorting.
+                applySorting(sortSelect.value);
+            });
+        }
 
-        // Sort dropdown change
-        sortSelect.addEventListener('change', (e) => {
-            const sortBy = e.target.value;
-            localStorage.setItem('abs_kosync_sort', sortBy);
-            sortCards(sortBy);
-        });
+        // --- Initialization ---
 
-        // Filter checkbox change
-        filterCheckbox.addEventListener('change', (e) => {
-            const isChecked = e.target.checked;
-            localStorage.setItem('abs_kosync_filter_current', isChecked);
-            filterToggle.classList.toggle('active', isChecked);
-            filterCards(isChecked);
-        });
-
-        // Make the whole toggle clickable
-        filterToggle.addEventListener('click', (e) => {
-            if (e.target !== filterCheckbox) {
-                filterCheckbox.checked = !filterCheckbox.checked;
-                filterCheckbox.dispatchEvent(new Event('change'));
-            }
-        });
+        // Apply initial sort on load (if content exists)
+        if (currentlyReadingGrid || allBooksGrid) {
+            applySorting(savedSort);
+        }
 
         // Auto-refresh every 30 seconds
         setTimeout(() => location.reload(), 30000);
