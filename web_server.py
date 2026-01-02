@@ -460,7 +460,8 @@ def book_linker():
             audiobook_matches = search_abs_audiobooks_linker(book_name)
             stats = get_stats(ebook_matches, audiobook_matches)
 
-    return render_template('book_linker.html', book_name=book_name, ebook_matches=ebook_matches, audiobook_matches=audiobook_matches, stats=stats, message=message, is_error=is_error)
+    return render_template('book_linker.html', book_name=book_name, ebook_matches=ebook_matches, audiobook_matches=audiobook_matches, stats=stats, message=message, is_error=is_error,linker_books_dir=str(LINKER_BOOKS_DIR), processing_dir=str(DEST_BASE),storyteller_ingest=str(STORYTELLER_INGEST))
+                         
 
 @app.route('/book-linker/process', methods=['POST'])
 def book_linker_process():
@@ -606,6 +607,50 @@ def delete_mapping(abs_id):
         if abs_id in state: del state[abs_id]
         return state
     state_handler.update(remove_state, default={})
+    return redirect(url_for('index'))
+
+@app.route('/clear-progress/<abs_id>', methods=['POST'])
+def clear_progress(abs_id):
+    """Clear progress for a mapping by setting all systems to 0%"""
+    db = db_handler.load(default={"mappings": []})
+    mapping = next((m for m in db.get('mappings', []) if m['abs_id'] == abs_id), None)
+    
+    if not mapping:
+        logger.warning(f"Cannot clear progress: mapping not found for {abs_id}")
+        return redirect(url_for('index'))
+    
+    try:
+        # Reset progress to 0 in all three systems
+        logger.info(f"Clearing progress for {mapping.get('abs_title', abs_id)}")
+        
+        # ABS: Set to 0 seconds
+        manager.abs_client.update_progress(abs_id, 0)
+        logger.info(f"  ✓ ABS progress cleared")
+        
+        # KOSync: Set to 0%
+        kosync_id = mapping.get('kosync_doc_id')
+        if kosync_id:
+            manager.kosync_client.update_progress(kosync_id, 0.0)
+            logger.info(f"  ✓ KOSync progress cleared")
+        
+        # Storyteller: Set to 0%
+        ebook_filename = mapping.get('ebook_filename')
+        if ebook_filename:
+            manager.storyteller_db.update_progress(ebook_filename, 0.0)
+            logger.info(f"  ✓ Storyteller progress cleared")
+        
+        # Clear the last state so next sync will properly propagate the 0%
+        state = state_handler.load(default={})
+        if abs_id in state:
+            del state[abs_id]
+            state_handler.save(state)
+            logger.info(f"  ✓ Last state cleared")
+        
+        logger.info(f"✅ Progress cleared successfully for {mapping.get('abs_title', abs_id)}")
+        
+    except Exception as e:
+        logger.error(f"Failed to clear progress for {abs_id}: {e}")
+    
     return redirect(url_for('index'))
 
 @app.route('/api/status')

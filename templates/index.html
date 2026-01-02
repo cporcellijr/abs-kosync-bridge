@@ -406,6 +406,17 @@
         .action-btn.danger:hover {
             background: rgba(244, 67, 54, 0.3);
         }
+
+        /* Added Warning Button Style from your code */
+        .action-btn.warning {
+            background: rgba(255, 152, 0, 0.2);
+            border-color: rgba(255, 152, 0, 0.4);
+            color: #FF9800;
+        }
+        
+        .action-btn.warning:hover {
+            background: rgba(255, 152, 0, 0.3);
+        }
         
         /* Empty State */
         .empty-state {
@@ -561,7 +572,13 @@
                         {% endif %}
                         
                         <div class="quick-actions">
-                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="width: 100%;">
+                             <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
+                                <button type="submit" class="action-btn warning" 
+                                        onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                                    🔄 Clear
+                                </button>
+                            </form>
+                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
                                 <button type="submit" class="action-btn danger" 
                                         onclick="return confirm('Delete this mapping?')">
                                     🗑️ Delete
@@ -633,7 +650,13 @@
                         {% endif %}
                         
                         <div class="quick-actions">
-                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="width: 100%;">
+                            <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
+                                <button type="submit" class="action-btn warning" 
+                                        onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                                    🔄 Clear
+                                </button>
+                            </form>
+                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
                                 <button type="submit" class="action-btn danger" 
                                         onclick="return confirm('Delete this mapping?')">
                                     🗑️ Delete

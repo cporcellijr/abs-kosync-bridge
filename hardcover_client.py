@@ -1,9 +1,23 @@
+# [START FILE: abs-kosync-enhanced/hardcover_client.py]
+"""
+Hardcover.app GraphQL API Client
+
+Handles book tracking, progress updates, and reading dates for Hardcover.app integration.
+
+Key features:
+- Auto-sets started_at when creating a new read
+- Auto-sets finished_at when marking as finished (>99% progress)
+- Supports ISBN and title/author search for book matching
+"""
+
 import os
 import requests
 import logging
 from typing import Optional, Dict, Any
+from datetime import date
 
 logger = logging.getLogger(__name__)
+
 
 class HardcoverClient:
     def __init__(self):
@@ -18,6 +32,7 @@ class HardcoverClient:
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}",
+            "User-Agent": "ABS-KoSync-Enhanced/5.9"
         }
     
     def query(self, query: str, variables: Dict = None) -> Optional[Dict]:
@@ -58,7 +73,6 @@ class HardcoverClient:
         """Search by ISBN-13 or ISBN-10."""
         isbn_key = 'isbn_13' if len(str(isbn)) == 13 else 'isbn_10'
         
-        # FIXED: Removed unused $userId variable
         query = f"""
         query ($isbn: String!) {{
             editions(where: {{ {isbn_key}: {{ _eq: $isbn }} }}) {{
@@ -87,7 +101,6 @@ class HardcoverClient:
         """Search by title and author."""
         search_query = f"{title} {author or ''}".strip()
         
-        # FIXED: Removed unused $userId variable
         query = """
         query ($query: String!) {
             search(query: $query, per_page: 5, page: 1, query_type: "Book") {
@@ -104,8 +117,6 @@ class HardcoverClient:
         if not book_ids:
             return None
         
-        # Hydrate first result (requires userId for permission checks on some fields, but getting basic book info usually doesn't)
-        # We'll use the generic lookup here
         book_query = """
         query ($id: Int!) {
             books(where: { id: { _eq: $id }}) {
@@ -118,8 +129,6 @@ class HardcoverClient:
         book_result = self.query(book_query, {"id": book_ids[0]})
         if book_result and book_result.get('books') and len(book_result['books']) > 0:
             book = book_result['books'][0]
-            
-            # Get default edition for pages
             edition = self.get_default_edition(book['id'])
             
             return {
@@ -158,7 +167,7 @@ class HardcoverClient:
         return None
     
     def find_user_book(self, book_id: int) -> Optional[Dict]:
-        """Find existing user_book. Needs userId."""
+        """Find existing user_book with read info."""
         query = """
         query ($bookId: Int!, $userId: Int!) {
             user_books(where: { book_id: { _eq: $bookId }, user_id: { _eq: $userId }}) {
@@ -167,6 +176,9 @@ class HardcoverClient:
                 edition_id
                 user_book_reads(order_by: {id: desc}, limit: 1) {
                     id
+                    started_at
+                    finished_at
+                    progress_pages
                 }
             }
         }
@@ -178,7 +190,15 @@ class HardcoverClient:
         return None
     
     def update_status(self, book_id: int, status_id: int, edition_id: int = None) -> Optional[Dict]:
-        """Create/update user_book status."""
+        """
+        Create/update user_book status.
+        
+        Status IDs:
+        - 1: Want to Read
+        - 2: Currently Reading  
+        - 3: Read (Finished)
+        - 4: Did Not Finish
+        """
         query = """
         mutation ($object: UserBookCreateInput!) {
             insert_user_book(object: $object) {
@@ -203,57 +223,127 @@ class HardcoverClient:
         
         result = self.query(query, {"object": update_args})
         if result and result.get('insert_user_book'):
+            error = result['insert_user_book'].get('error')
+            if error:
+                logger.error(f"Hardcover update_status error: {error}")
             return result['insert_user_book'].get('user_book')
         return None
     
-    def update_progress(self, user_book_id: int, page: int, edition_id: int = None) -> bool:
-        """Update reading progress."""
+    def _get_today_date(self) -> str:
+        """Get today's date in YYYY-MM-DD format for Hardcover API."""
+        return date.today().isoformat()
+    
+    def update_progress(self, user_book_id: int, page: int, edition_id: int = None, is_finished: bool = False) -> bool:
+        """
+        Update reading progress with proper date handling.
+        
+        Features:
+        - Sets started_at to today when creating a new read (if not set)
+        - Sets finished_at to today when is_finished=True
+        - Updates progress_pages
+        
+        Args:
+            user_book_id: The Hardcover user_book ID
+            page: Current page number
+            edition_id: Optional edition ID for the specific format
+            is_finished: If True, sets finished_at date
+        
+        Returns:
+            True if successful, False otherwise
+        """
         # First check if there's an existing read
         read_query = """
         query ($userBookId: Int!) {
             user_book_reads(where: { user_book_id: { _eq: $userBookId }}, order_by: {id: desc}, limit: 1) {
                 id
+                started_at
+                finished_at
             }
         }
         """
         
         read_result = self.query(read_query, {"userBookId": user_book_id})
+        today = self._get_today_date()
         
         if read_result and read_result.get('user_book_reads') and len(read_result['user_book_reads']) > 0:
             # Update existing read
-            read_id = read_result['user_book_reads'][0]['id']
+            existing_read = read_result['user_book_reads'][0]
+            read_id = existing_read['id']
+            
+            # Build the update object
+            update_obj = {
+                "progress_pages": page
+            }
+            
+            if edition_id:
+                update_obj["edition_id"] = edition_id
+            
+            # Set started_at if not already set
+            if not existing_read.get('started_at'):
+                update_obj["started_at"] = today
+                logger.info(f"Hardcover: Setting started_at to {today}")
+            
+            # Set finished_at if marking as finished
+            if is_finished and not existing_read.get('finished_at'):
+                update_obj["finished_at"] = today
+                logger.info(f"Hardcover: Setting finished_at to {today}")
             
             query = """
-            mutation ($id: Int!, $pages: Int, $editionId: Int) {
-                update_user_book_read(id: $id, object: {
-                    progress_pages: $pages,
-                    edition_id: $editionId
-                }) {
+            mutation ($id: Int!, $object: UserBookReadUpdateInput!) {
+                update_user_book_read(id: $id, object: $object) {
                     error
                     user_book_read {
                         id
+                        started_at
+                        finished_at
                     }
                 }
             }
             """
             
-            result = self.query(query, {"id": read_id, "pages": page, "editionId": edition_id})
-            return bool(result and result.get('update_user_book_read'))
+            result = self.query(query, {"id": read_id, "object": update_obj})
+            if result and result.get('update_user_book_read'):
+                error = result['update_user_book_read'].get('error')
+                if error:
+                    logger.error(f"Hardcover update_user_book_read error: {error}")
+                    return False
+                logger.debug(f"Hardcover: Updated read {read_id} → page {page}")
+                return True
+            return False
         else:
-            # Create new read
+            # Create new read with started_at
+            read_obj = {
+                "progress_pages": page,
+                "started_at": today
+            }
+            
+            if edition_id:
+                read_obj["edition_id"] = edition_id
+            
+            # If already finished, set finished_at too
+            if is_finished:
+                read_obj["finished_at"] = today
+            
             query = """
-            mutation ($userBookId: Int!, $pages: Int, $editionId: Int) {
-                insert_user_book_read(user_book_id: $userBookId, user_book_read: {
-                    progress_pages: $pages,
-                    edition_id: $editionId
-                }) {
+            mutation ($userBookId: Int!, $object: UserBookReadCreateInput!) {
+                insert_user_book_read(user_book_id: $userBookId, user_book_read: $object) {
                     error
                     user_book_read {
                         id
+                        started_at
+                        finished_at
                     }
                 }
             }
             """
             
-            result = self.query(query, {"userBookId": user_book_id, "pages": page, "editionId": edition_id})
-            return bool(result and result.get('insert_user_book_read'))
+            result = self.query(query, {"userBookId": user_book_id, "object": read_obj})
+            if result and result.get('insert_user_book_read'):
+                error = result['insert_user_book_read'].get('error')
+                if error:
+                    logger.error(f"Hardcover insert_user_book_read error: {error}")
+                    return False
+                logger.info(f"Hardcover: Created new read for user_book {user_book_id} (started: {today})")
+                return True
+            return False
+# [END FILE]
