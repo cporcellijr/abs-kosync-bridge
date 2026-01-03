@@ -229,7 +229,7 @@
         .book-cover-container {
             position: relative;
             width: 100%;
-            aspect-ratio: 2/3;
+            aspect-ratio: 1/1;
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 8px 32px rgba(0,0,0,0.6);
@@ -338,20 +338,24 @@
         /* Progress Details */
         .progress-details {
             display: flex;
-            gap: 8px;
+            flex-direction: column;
+            gap: 4px;
             margin-bottom: 8px;
-            font-size: 10px;
+            font-size: 11px;
         }
-        
+
         .progress-item {
             display: flex;
             align-items: center;
-            gap: 3px;
+            gap: 6px;
             color: rgba(255,255,255,0.8);
         }
-        
+
+        .progress-item img,
         .progress-item span:first-child {
             font-size: 12px;
+            width: 14px;
+            flex-shrink: 0;
         }
         
         .progress-bar-mini {
