@@ -3,7 +3,7 @@ import os
 import time
 import logging
 import requests
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Any
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class StorytellerAPIClient:
         if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
             return self._token
         if not self.username or not self.password:
-            logger.warning("Storyteller API: No credentials configured")
+            # logger.warning("Storyteller API: No credentials configured")
             return None
         try:
             response = requests.post(
@@ -53,6 +53,8 @@ class StorytellerAPIClient:
                 response = self.session.get(url, headers=headers, timeout=10)
             elif method.upper() == "POST":
                 response = self.session.post(url, headers=headers, json=json_data, timeout=10)
+            elif method.upper() == "PUT":
+                response = self.session.put(url, headers=headers, json=json_data, timeout=10)
             else: return None
             
             if response.status_code == 401:
@@ -62,8 +64,10 @@ class StorytellerAPIClient:
                 headers["Authorization"] = f"Bearer {token}"
                 if method.upper() == "GET":
                     response = self.session.get(url, headers=headers, timeout=10)
-                else:
+                elif method.upper() == "POST":
                     response = self.session.post(url, headers=headers, json=json_data, timeout=10)
+                elif method.upper() == "PUT":
+                    response = self.session.put(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
             logger.error(f"Storyteller API request failed: {e}")
@@ -111,22 +115,31 @@ class StorytellerAPIClient:
                 return book_info
         return None
     
-    def get_position(self, book_uuid: str) -> Tuple[Optional[float], Optional[int]]:
-        # Updated to use V2 endpoint
+    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+        """
+        Returns: (percentage, timestamp, href, fragment_id)
+        """
         response = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
         if response and response.status_code == 200:
             data = response.json()
-            return float(data.get('locator', {}).get('locations', {}).get('totalProgression', 0)), int(data.get('timestamp', 0))
-        return None, None
+            locator = data.get('locator', {})
+            locations = locator.get('locations', {})
+            
+            pct = float(locations.get('totalProgression', 0))
+            ts = int(data.get('timestamp', 0))
+            
+            # --- EXTRACT PRECISION DATA ---
+            href = locator.get('href') # e.g. "OEBPS/Text/part0000.html"
+            fragment = None
+            if locations.get('fragments') and len(locations['fragments']) > 0:
+                fragment = locations['fragments'][0] # e.g. "id628-sentence94"
+            
+            return pct, ts, href, fragment
+            
+        return None, None, None, None
     
     def update_position(self, book_uuid: str, percentage: float, rich_locator: dict = None) -> bool:
-        """
-        Update reading position via Storyteller API V2.
-        Includes +10s Leapfrog logic to prevent overwrites.
-        """
-        # 1. LEAPFROG: Force timestamp 10s into the future
         new_ts = int(time.time() * 1000) + 10000
-
         payload = {
             "timestamp": new_ts,
             "locator": {
@@ -135,16 +148,13 @@ class StorytellerAPIClient:
                 }
             }
         }
-
-        # 2. Use authoritative Rich Locator if available
         if rich_locator and rich_locator.get('href'):
             payload['locator']['href'] = rich_locator['href']
             payload['locator']['type'] = "application/xhtml+xml"
             if rich_locator.get('cssSelector'):
                 payload['locator']['locations']['cssSelector'] = rich_locator['cssSelector']
-        
-        # 3. Fallback: Fetch existing position to preserve href (Using V2)
         else:
+            # Fallback to preserve existing href if we are just sending a % update
             try:
                 r = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
                 if r and r.status_code == 200:
@@ -153,43 +163,31 @@ class StorytellerAPIClient:
                     if old.get('type'): payload['locator']['type'] = old['type']
             except Exception: pass
         
-        # 4. Send Update to V2 Endpoint (respects timestamp)
         response = self._make_request("POST", f"/api/v2/books/{book_uuid}/positions", payload)
-        
         if response and response.status_code == 204:
             logger.info(f"✅ Storyteller API: {book_uuid[:8]}... → {percentage:.1%} (TS: {new_ts})")
             return True
-        else:
-            logger.error(f"Storyteller update failed: {response.status_code if response else 'No Resp'}")
-            return False
+        return False
     
-    def get_progress_by_filename(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int]]:
+    def get_progress_by_filename(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
         book = self.find_book_by_title(ebook_filename)
-        if not book: return None, None
-        return self.get_position(book['uuid'])
+        if not book: return None, None, None, None
+        return self.get_position_details(book['uuid'])
     
     def update_progress_by_filename(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
         book = self.find_book_by_title(ebook_filename)
         if not book: return False
         return self.update_position(book['uuid'], percentage, rich_locator)
-
-    # --- NEW: Collection Logic Added Here ---
+    
     def add_to_collection(self, ebook_filename: str, collection_name: str = None) -> bool:
-        """Add book to a Storyteller collection (creating it if needed)."""
         if not collection_name:
             collection_name = os.environ.get("STORYTELLER_COLLECTION_NAME", "Synced with KOReader")
-        
         book = self.find_book_by_title(ebook_filename)
-        if not book: 
-            logger.warning(f"Storyteller: Book not found for collection add: {ebook_filename}")
-            return False
+        if not book: return False
         
         # 1. Get Collections
         r = self._make_request("GET", "/api/v2/collections")
-        if not r or r.status_code != 200:
-             logger.error("Storyteller: Failed to list collections")
-             return False
-
+        if not r or r.status_code != 200: return False
         collections = r.json()
         target_col = next((c for c in collections if c.get('name') == collection_name), None)
 
@@ -198,28 +196,22 @@ class StorytellerAPIClient:
             r_create = self._make_request("POST", "/api/v2/collections", {"name": collection_name})
             if r_create and r_create.status_code in [200, 201]:
                 target_col = r_create.json()
-                logger.info(f"Storyteller: Created collection '{collection_name}'")
-            else:
-                logger.error(f"Storyteller: Failed to create collection '{collection_name}'")
-                return False
+            else: return False
 
-        # 3. Add book to collection
         col_uuid = target_col.get('uuid') or target_col.get('id')
         book_uuid = book.get('uuid') or book.get('id')
         
-        if not col_uuid or not book_uuid: return False
-        
-        add_endpoint = f"/api/v2/collections/{col_uuid}/books"
-        payload = {"books": [book_uuid]} 
-        
-        r_add = self._make_request("POST", add_endpoint, payload)
+        # 3. Add book (Batch Endpoint from route(2).ts)
+        endpoint = "/api/v2/collections/books"
+        payload = {"collections": [col_uuid], "books": [book_uuid]}
+        r_add = self._make_request("POST", endpoint, payload)
         if r_add and r_add.status_code in [200, 204]:
              logger.info(f"✅ Storyteller: Added '{ebook_filename}' to '{collection_name}'")
              return True
-        else:
-             logger.error(f"Storyteller: Failed to add book to collection: {r_add.status_code if r_add else 'Err'}")
-             return False
-
+        # Backup strategy (singular)
+        fallback = f"/api/v2/collections/{col_uuid}/books"
+        r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
+        return (r_back and r_back.status_code in [200, 204])
 
 class StorytellerDBWithAPI:
     def __init__(self):
@@ -236,7 +228,6 @@ class StorytellerDBWithAPI:
                 logger.info("Using Storyteller REST API for sync")
             else:
                 self.api_client = None
-        
         if not self.api_client:
             try:
                 from storyteller_db import StorytellerDB
@@ -248,15 +239,18 @@ class StorytellerDBWithAPI:
         elif self.db_fallback: return self.db_fallback.check_connection()
         return False
     
-    def get_progress(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int]]:
-        if self.api_client: return self.api_client.get_progress_by_filename(ebook_filename)
-        elif self.db_fallback: return self.db_fallback.get_progress(ebook_filename)
-        return None, None
+    def get_progress(self, ebook_filename: str):
+        # Legacy Wrapper
+        pct, ts, _, _ = self.get_progress_with_fragment(ebook_filename)
+        return pct, ts
     
     def get_progress_with_fragment(self, ebook_filename: str):
-        if self.db_fallback: return self.db_fallback.get_progress_with_fragment(ebook_filename)
-        pct, ts = self.get_progress(ebook_filename)
-        return pct, ts, None, None
+        # --- FIXED: Return real fragment data ---
+        if self.api_client: 
+            return self.api_client.get_progress_by_filename(ebook_filename)
+        elif self.db_fallback: 
+            return self.db_fallback.get_progress_with_fragment(ebook_filename)
+        return None, None, None, None
     
     def update_progress(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
         if self.api_client: return self.api_client.update_progress_by_filename(ebook_filename, percentage, rich_locator)
@@ -268,11 +262,8 @@ class StorytellerDBWithAPI:
         return []
     
     def add_to_collection(self, ebook_filename: str):
-        # --- FIXED: Use the API client if available ---
-        if self.api_client: 
-            self.api_client.add_to_collection(ebook_filename)
-        elif self.db_fallback: 
-            self.db_fallback.add_to_collection(ebook_filename)
+        if self.api_client: self.api_client.add_to_collection(ebook_filename)
+        elif self.db_fallback: self.db_fallback.add_to_collection(ebook_filename)
 
 def create_storyteller_client():
     return StorytellerDBWithAPI()
