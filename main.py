@@ -34,7 +34,7 @@ STATE_FILE = DATA_DIR / "last_state.json"
 
 class SyncManager:
     def __init__(self):
-        logger.info("=== Sync Manager Starting (Release 5.9 - Booklore Integration) ===")
+        logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath) ===")
         self.abs_client = ABSClient()
         self.kosync_client = KoSyncClient()
         self.hardcover_client = HardcoverClient()
@@ -48,7 +48,6 @@ class SyncManager:
         self.state = self.state_handler.load(default={})
         self.suggestion_manager = SuggestionManager(DATA_DIR, self.ebook_parser, self.abs_client, self.storyteller_db)
 
-        # Background job processing
         self._job_queue = []
         self._job_lock = threading.Lock()
         self._job_thread = None
@@ -80,7 +79,6 @@ class SyncManager:
         if changed: self.db_handler.save(self.db)
 
     def _get_abs_title(self, ab):
-        """Extract title from audiobook item."""
         media = ab.get('media', {})
         metadata = media.get('metadata', {})
         return metadata.get('title') or ab.get('name', 'Unknown')
@@ -99,37 +97,15 @@ class SyncManager:
              self.hardcover_client.update_status(match['book_id'], 2, match.get('edition_id'))
 
     def _sync_to_hardcover(self, mapping, percentage):
-        """
-        Sync reading progress to Hardcover.app with proper date handling.
-        
-        - Sets started_at when first syncing progress
-        - Sets finished_at when percentage > 99%
-        - Updates status to "Read" (3) when finished
-        """
-        if not self.hardcover_client.token or not mapping.get('hardcover_book_id'): 
-            return
-        
+        if not self.hardcover_client.token or not mapping.get('hardcover_book_id'): return
         ub = self.hardcover_client.find_user_book(mapping['hardcover_book_id'])
         if ub:
             total_pages = mapping.get('hardcover_pages') or 0
             page_num = int(total_pages * percentage)
             is_finished = percentage > 0.99
-            
-            # Update progress (this now handles started_at and finished_at dates)
-            self.hardcover_client.update_progress(
-                ub['id'], 
-                page_num, 
-                edition_id=mapping.get('hardcover_edition_id'),
-                is_finished=is_finished
-            )
-            
-            # Also update status to "Read" when finished
+            self.hardcover_client.update_progress(ub['id'], page_num, edition_id=mapping.get('hardcover_edition_id'), is_finished=is_finished)
             if is_finished:
-                self.hardcover_client.update_status(
-                    mapping['hardcover_book_id'], 
-                    3,  # Status ID 3 = Read/Finished
-                    mapping.get('hardcover_edition_id')
-                )
+                self.hardcover_client.update_status(mapping['hardcover_book_id'], 3, mapping.get('hardcover_edition_id'))
                 logger.info(f"📚 Hardcover: Marked '{mapping.get('abs_title', 'Unknown')}' as finished")
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
@@ -164,61 +140,35 @@ class SyncManager:
         self.suggestion_manager.run_discovery_cycle([m['abs_id'] for m in self.db['mappings']])
 
     def get_text_from_storyteller_fragment(self, ebook_filename, href, fragment_id):
-        if not href or not fragment_id: return None
-        try:
-            epub_path = next(BOOKS_DIR.rglob(ebook_filename), None)
-            if not epub_path: return None
-            
-            with ZipFile(epub_path, 'r') as zip_ref:
-                internal_path = href
-                if internal_path not in zip_ref.namelist():
-                    matching = [f for f in zip_ref.namelist() if href in f]
-                    if matching: internal_path = matching[0]
-                    else: return None
-                
-                with zip_ref.open(internal_path) as f:
-                    content = f.read()
-                    parser = ET.HTMLParser(encoding='utf-8')
-                    tree = ET.fromstring(content, parser)
-                    elements = tree.xpath(f"//*[@id='{fragment_id}']")
-                    if elements: return "".join(elements[0].itertext()).strip()
-        except Exception: return None
+        return self.ebook_parser.resolve_locator_id(ebook_filename, href, fragment_id)
 
     def sync_cycle(self):
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={}) 
         
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
-        if active_books:
-            logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+        if active_books: logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
         
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
             abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
             
             try:
-                # 1. Fetch raw states (SNAPSHOT)
-                # We fetch EVERYTHING from Storyteller now to ensure consistency.
+                # 1. Fetch raw states
                 st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
                 bl_pct, bl_cfi = self.booklore_client.get_progress(epub)
-
                 abs_ts = self.abs_client.get_progress(abs_id)
-                ko_pct = self.kosync_client.get_progress(ko_id) if self.kosync_client.is_configured() else None
                 
-                # 2. [STRICT GUARD] If any service is offline (returns None), SKIP this book.
-                
-                if abs_ts is None:
-                    logger.warning(f"⚠️  [{mapping.get('abs_title', 'Unknown')[:30]}] Skipped - ABS offline or unreachable")
-                    continue
+                # UPDATED: KoSync now returns tuple (pct, xpath)
+                ko_pct, ko_xpath = (0.0, None)
+                if self.kosync_client.is_configured():
+                    ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
 
+                if abs_ts is None: continue # ABS offline
+                
                 abs_pct = self._abs_to_percentage(abs_ts, mapping.get('transcript_file'))
-                
-                if abs_ts > 0 and abs_pct is None:
-                    logger.warning(f"⚠️  [{mapping.get('abs_title', 'Unknown')[:30]}] Skipped - Transcript invalid (ABS: {abs_ts:.0f}s)")
-                    continue
+                if abs_ts > 0 and abs_pct is None: continue # Invalid transcript
 
-
-                # Treat optional integrations returning None as 0% (not configured or book not started)
                 if ko_pct is None: ko_pct = 0.0
                 if st_pct is None: st_pct = 0.0
                 if bl_pct is None: bl_pct = 0.0
@@ -239,68 +189,59 @@ class SyncManager:
 
                 leader = max(vals, key=vals.get)
                 
-                # [SAFETY CHECK] 0% Leader Protection
                 if vals[leader] == 0.0 and max(prev.get('abs_pct', 0), prev.get('kosync_pct', 0), prev.get('booklore_pct', 0)) > 0.05:
-                    logger.warning(f"🛡️  [{mapping.get('abs_title', 'Unknown')[:30]}] REGRESSION BLOCKED - {leader} tried to reset to 0% (was {max(prev.get('abs_pct', 0), prev.get('kosync_pct', 0), prev.get('booklore_pct', 0)):.1%})")
+                    logger.warning(f"🛡️   [{mapping.get('abs_title', 'Unknown')[:30]}] REGRESSION BLOCKED")
                     continue
 
-                logger.info(f"📖 [{mapping.get('abs_title', 'Unknown')[:30]}] {leader} leads at {vals[leader]:.1%} (ABS:{vals['ABS']:.1%} | KO:{vals['KOSYNC']:.1%} | ST:{vals['STORYTELLER']:.1%} | BL:{vals['BOOKLORE']:.1%})")
+                logger.info(f"📖 [{mapping.get('abs_title', 'Unknown')[:30]}] {leader} leads at {vals[leader]:.1%}")
                 
                 final_ts, final_pct = abs_ts, vals[leader]
                 sync_success = False
                 
+                # --- LEADER LOGIC ---
                 if leader == 'ABS':
                     txt = self.transcriber.get_text_at_time(mapping.get('transcript_file'), abs_ts)
                     if txt:
-                        logger.debug(f"   📝 Got transcript text at {abs_ts:.0f}s ({len(txt)} chars)")
                         match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=abs_pct)
                         if match_pct:
+                            # Send full rich locator back to KOReader (as xpath)
                             self.kosync_client.update_progress(ko_id, match_pct, rich_locator.get('xpath'))
                             self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                             self.booklore_client.update_progress(epub, match_pct, rich_locator)
                             final_pct = match_pct
                             sync_success = True
-                            logger.info(f"   ✅ Synced to ebooks → {match_pct:.1%}")
-                        else:
-                            logger.error(f"   âŒ Text match FAILED - couldn't locate in ebook")
-                    else:
-                        logger.error(f"   âŒ No transcript text at {abs_ts:.0f}s")
 
                 elif leader == 'KOSYNC':
-                    txt = self.ebook_parser.get_text_at_percentage(epub, ko_pct)
+                    # NEW: Try to use XPath first!
+                    txt = None
+                    if ko_xpath:
+                        txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
+                        if txt: logger.debug(f"   📝 Using XPath text from {ko_xpath}")
+                    
+                    if not txt:
+                        txt = self.ebook_parser.get_text_at_percentage(epub, ko_pct)
+                        logger.debug(f"   📝 Using ebook text at {ko_pct:.1%} (fallback)")
+                    
                     if txt:
-                        logger.debug(f"   📝 Got ebook text at {ko_pct:.1%} ({len(txt)} chars)")
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
                             self.abs_client.update_progress(abs_id, ts)
-                            # Use KOReader's percentage directly for Storyteller, with rich locator
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
                                 self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                                 self.booklore_client.update_progress(epub, match_pct, rich_locator)
                                 final_pct = match_pct
                             else:
-                                # Fallback: use KOReader's percentage directly
                                 self.storyteller_db.update_progress(epub, ko_pct, None)
                                 self.booklore_client.update_progress(epub, ko_pct, None)
                                 final_pct = ko_pct
                             final_ts = ts
                             sync_success = True
-                            logger.info(f"   ✅ Synced to ABS → {ts:.0f}s, ebooks → {final_pct:.1%}")
-                        else:
-                            logger.error(f"   âŒ Timestamp match FAILED - couldn't find in transcript")
-                    else:
-                        logger.error(f"   âŒ No ebook text at {ko_pct:.1%}")
 
                 elif leader == 'STORYTELLER':
-                    # Use the SNAPSHOT data (st_href, st_frag) fetched at start of cycle.
-                    # Do NOT query DB again, which might return stale/mismatched data.
+                    # Existing logic using st_href/st_frag
                     txt = self.get_text_from_storyteller_fragment(epub, st_href, st_frag) if st_frag else None
-                    if not txt: 
-                        txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
-                        logger.debug(f"   📝 Using ebook text at {st_pct:.1%} (no fragment data)")
-                    else:
-                        logger.debug(f"   📝 Using fragment text from {st_href}#{st_frag} ({len(txt)} chars)")
+                    if not txt: txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
                     
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
@@ -312,24 +253,16 @@ class SyncManager:
                                 self.booklore_client.update_progress(epub, match_pct, rich_locator)
                                 final_pct = match_pct
                             else:
-                                # Fallback: use Storyteller's percentage
                                 self.kosync_client.update_progress(ko_id, st_pct, None)
                                 self.booklore_client.update_progress(epub, st_pct, None)
                                 final_pct = st_pct
                             final_ts = ts
                             sync_success = True
-                            logger.info(f"   ✅ Synced to ABS → {ts:.0f}s, ebooks → {final_pct:.1%}")
-                        else:
-                            logger.error(f"   âŒ Timestamp match FAILED - couldn't find in transcript")
-                    else:
-                        logger.error(f"   âŒ No ebook text available")
                 
-
                 elif leader == 'BOOKLORE':
-                    # BOOKLORE leads - sync to ABS, KOSync, and Storyteller
+                    # Similar logic (if Booklore sends CFI, we could use that, but logs showed it receiving paths)
                     txt = self.ebook_parser.get_text_at_percentage(epub, bl_pct)
                     if txt:
-                        logger.debug(f"   📝 Got ebook text at {bl_pct:.1%} ({len(txt)} chars)")
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
                             self.abs_client.update_progress(abs_id, ts)
@@ -339,17 +272,12 @@ class SyncManager:
                                 self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                                 final_pct = match_pct
                             else:
-                                # Fallback: use Booklore's percentage
                                 self.kosync_client.update_progress(ko_id, bl_pct, None)
                                 self.storyteller_db.update_progress(epub, bl_pct, None)
                                 final_pct = bl_pct
                             final_ts = ts
                             sync_success = True
-                            logger.info(f"   ✅ Synced to ABS → {ts:.0f}s, ebooks → {final_pct:.1%}")
-                        else:
-                            logger.error(f"   ❌ Timestamp match FAILED - couldn't find in transcript")
-                    else:
-                        logger.error(f"   ❌ No ebook text at {bl_pct:.1%}")
+
                 if sync_success and final_pct > 0.01:
                     if not mapping.get('hardcover_book_id'): self._automatch_hardcover(mapping)
                     if mapping.get('hardcover_book_id'): self._sync_to_hardcover(mapping, final_pct)

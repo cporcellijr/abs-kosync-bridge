@@ -1,270 +1,366 @@
-# [START FILE: abs-kosync-enhanced/storyteller_api.py]
-import os
-import time
+# [START FILE: abs-kosync-enhanced/ebook_utils.py]
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup, Tag
+import hashlib
 import logging
-import requests
-from typing import Optional, Dict, Tuple, Any
+import os
+import re
+import glob
+import rapidfuzz
 from pathlib import Path
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
-class StorytellerAPIClient:
-    def __init__(self):
-        self.base_url = os.environ.get("STORYTELLER_API_URL", "http://localhost:8001").rstrip('/')
-        self.username = os.environ.get("STORYTELLER_USER")
-        self.password = os.environ.get("STORYTELLER_PASSWORD")
-        self._book_cache: Dict[str, Dict] = {}
-        self._cache_timestamp = 0
-        self._token = None
-        self._token_timestamp = 0
-        self._token_max_age = 30
-        self.session = requests.Session()
-        self.session.headers.update({"Content-Type": "application/json"})
-    
-    def _get_fresh_token(self) -> Optional[str]:
-        if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
-            return self._token
-        if not self.username or not self.password:
-            # logger.warning("Storyteller API: No credentials configured")
-            return None
+class LRUCache:
+    def __init__(self, capacity: int = 3):
+        self.cache = OrderedDict()
+        self.capacity = capacity
+    def get(self, key):
+        if key not in self.cache: return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+    def put(self, key, value):
+        if key in self.cache: self.cache.move_to_end(key)
+        self.cache[key] = value
+        while len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+    def clear(self): self.cache.clear()
+
+class EbookParser:
+    def __init__(self, books_dir):
+        self.books_dir = Path(books_dir)
+        cache_size = int(os.getenv("EBOOK_CACHE_SIZE", 3))
+        self.cache = LRUCache(capacity=cache_size)
+        self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
+        self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
+        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method})")
+
+    def _resolve_book_path(self, filename):
         try:
-            response = requests.post(
-                f"{self.base_url}/api/token",
-                data={"username": self.username, "password": self.password},
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                self._token = data.get("access_token")
-                self._token_timestamp = time.time()
-                return self._token
-        except Exception as e:
-            logger.error(f"Storyteller login error: {e}")
-        return None
-    
-    def _make_request(self, method: str, endpoint: str, json_data: dict = None) -> Optional[requests.Response]:
-        token = self._get_fresh_token()
-        if not token: return None
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            safe_name = glob.escape(filename)
+            return next(self.books_dir.glob(f"**/{safe_name}"))
+        except StopIteration: pass
+        for f in self.books_dir.rglob("*"):
+            if f.name == filename: return f
+        raise FileNotFoundError(f"Could not locate {filename}")
+
+    def get_kosync_id(self, filepath):
+        filepath = Path(filepath)
+        if self.hash_method == "filename": return hashlib.md5(filepath.name.encode('utf-8')).hexdigest()
         try:
-            url = f"{self.base_url}{endpoint}"
-            if method.upper() == "GET":
-                response = self.session.get(url, headers=headers, timeout=10)
-            elif method.upper() == "POST":
-                response = self.session.post(url, headers=headers, json=json_data, timeout=10)
-            elif method.upper() == "PUT":
-                response = self.session.put(url, headers=headers, json=json_data, timeout=10)
-            else: return None
-            
-            if response.status_code == 401:
-                self._token = None
-                token = self._get_fresh_token()
-                if not token: return None
-                headers["Authorization"] = f"Bearer {token}"
-                if method.upper() == "GET":
-                    response = self.session.get(url, headers=headers, timeout=10)
-                elif method.upper() == "POST":
-                    response = self.session.post(url, headers=headers, json=json_data, timeout=10)
-                elif method.upper() == "PUT":
-                    response = self.session.put(url, headers=headers, json=json_data, timeout=10)
-            return response
+            with open(filepath, 'rb') as f: return hashlib.md5(f.read(4096)).hexdigest()
         except Exception as e:
-            logger.error(f"Storyteller API request failed: {e}")
+            logger.error(f"Error computing hash for {filepath}: {e}")
             return None
-    
-    def check_connection(self) -> bool:
-        return bool(self._get_fresh_token())
-    
-    def _refresh_book_cache(self) -> bool:
-        response = self._make_request("GET", "/api/v2/books")
-        if response and response.status_code == 200:
-            books = response.json()
-            self._book_cache = {}
-            for book in books:
-                title = book.get('title', '').lower()
-                self._book_cache[title] = {
-                    'id': book.get('id'),
-                    'uuid': book.get('uuid'),
-                    'title': book.get('title')
-                }
-            self._cache_timestamp = time.time()
-            return True
-        return False
-    
-    def find_book_by_title(self, ebook_filename: str) -> Optional[Dict]:
-        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+
+    def extract_text_and_map(self, filepath):
+        filepath = Path(filepath)
+        str_path = str(filepath)
+        cached = self.cache.get(str_path)
+        if cached: return cached['text'], cached['map']
         
-        stem = Path(ebook_filename).stem.lower()
-        import re
-        clean_stem = re.sub(r'\s*\([^)]*\)\s*$', '', stem)
-        clean_stem = re.sub(r'\s*\[[^\]]*\]\s*$', '', clean_stem)
-        clean_stem = clean_stem.strip().lower()
-        
-        if clean_stem in self._book_cache: return self._book_cache[clean_stem]
-        
-        for title, book_info in self._book_cache.items():
-            if clean_stem in title or title in clean_stem: return book_info
-        
-        stem_words = set(clean_stem.split())
-        for title, book_info in self._book_cache.items():
-            title_words = set(title.split())
-            common = stem_words & title_words
-            if len(common) >= min(len(stem_words), len(title_words)) * 0.7:
-                return book_info
-        return None
-    
-    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+        logger.info(f"Parsing EPUB: {filepath.name}")
+        try:
+            book = epub.read_epub(str_path)
+            full_text_parts = []
+            spine_map = []
+            current_idx = 0
+            
+            for i, item_ref in enumerate(book.spine):
+                item = book.get_item_with_id(item_ref[0])
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Parse soup once
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+                    text = soup.get_text(separator=' ', strip=True)
+                    start = current_idx
+                    end = current_idx + len(text)
+                    
+                    spine_map.append({
+                        "start": start,
+                        "end": end,
+                        "spine_index": i + 1,
+                        "href": item.get_name(),
+                        "content": item.get_content()
+                    })
+                    full_text_parts.append(text)
+                    current_idx = end + 1
+            
+            combined_text = " ".join(full_text_parts)
+            self.cache.put(str_path, {'text': combined_text, 'map': spine_map})
+            return combined_text, spine_map
+        except Exception as e:
+            logger.error(f"Failed to parse EPUB {filepath}: {e}")
+            return "", []
+
+    # --- UPDATED: Resolve Storyteller ID (Locator) ---
+    def resolve_locator_id(self, filename, href, fragment_id):
+        try:
+            book_path = self._resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+            
+            target_item = None
+            for item in spine_map:
+                if href in item['href'] or item['href'] in href:
+                    target_item = item
+                    break
+            if not target_item: return None
+
+            soup = BeautifulSoup(target_item['content'], 'html.parser')
+            clean_id = fragment_id.lstrip('#')
+            element = soup.find(id=clean_id)
+            if not element: return None
+
+            elem_text = element.get_text(separator=' ', strip=True)
+            if not elem_text: return None
+            
+            chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            local_offset = chapter_text.find(elem_text)
+            if local_offset == -1: return None
+            
+            global_offset = target_item['start'] + local_offset
+            start = max(0, global_offset)
+            end = min(len(full_text), global_offset + 500)
+            return full_text[start:end]
+        except Exception: return None
+
+    # --- NEW: Resolve KOReader XPath ---
+    def resolve_xpath(self, filename, xpath_str):
         """
-        Returns: (percentage, timestamp, href, fragment_id)
+        Resolves a KOReader XPath (e.g., /body/DocFragment[18]/body/div/p[1]) to text.
         """
-        response = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
-        if response and response.status_code == 200:
-            data = response.json()
-            locator = data.get('locator', {})
-            locations = locator.get('locations', {})
-            
-            pct = float(locations.get('totalProgression', 0))
-            ts = int(data.get('timestamp', 0))
-            
-            # --- EXTRACT PRECISION DATA ---
-            href = locator.get('href') # e.g. "OEBPS/Text/part0000.html"
-            fragment = None
-            if locations.get('fragments') and len(locations['fragments']) > 0:
-                fragment = locations['fragments'][0] # e.g. "id628-sentence94"
-            
-            return pct, ts, href, fragment
-            
-        return None, None, None, None
-    
-    def update_position(self, book_uuid: str, percentage: float, rich_locator: dict = None) -> bool:
-        new_ts = int(time.time() * 1000) + 10000
-        payload = {
-            "timestamp": new_ts,
-            "locator": {
-                "locations": {
-                    "totalProgression": float(percentage)
-                }
-            }
-        }
-        if rich_locator and rich_locator.get('href'):
-            payload['locator']['href'] = rich_locator['href']
-            payload['locator']['type'] = "application/xhtml+xml"
-            if rich_locator.get('cssSelector'):
-                payload['locator']['locations']['cssSelector'] = rich_locator['cssSelector']
-        else:
-            # Fallback to preserve existing href if we are just sending a % update
-            try:
-                r = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
-                if r and r.status_code == 200:
-                    old = r.json().get('locator', {})
-                    if old.get('href'): payload['locator']['href'] = old['href']
-                    if old.get('type'): payload['locator']['type'] = old['type']
-            except Exception: pass
-        
-        response = self._make_request("POST", f"/api/v2/books/{book_uuid}/positions", payload)
-        if response and response.status_code == 204:
-            logger.info(f"✅ Storyteller API: {book_uuid[:8]}... → {percentage:.1%} (TS: {new_ts})")
-            return True
-        return False
-    
-    def get_progress_by_filename(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
-        book = self.find_book_by_title(ebook_filename)
-        if not book: return None, None, None, None
-        return self.get_position_details(book['uuid'])
-    
-    def update_progress_by_filename(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
-        book = self.find_book_by_title(ebook_filename)
-        if not book: return False
-        return self.update_position(book['uuid'], percentage, rich_locator)
-    
-    def add_to_collection(self, ebook_filename: str, collection_name: str = None) -> bool:
-        if not collection_name:
-            collection_name = os.environ.get("STORYTELLER_COLLECTION_NAME", "Synced with KOReader")
-        book = self.find_book_by_title(ebook_filename)
-        if not book: return False
-        
-        # 1. Get Collections
-        r = self._make_request("GET", "/api/v2/collections")
-        if not r or r.status_code != 200: return False
-        collections = r.json()
-        target_col = next((c for c in collections if c.get('name') == collection_name), None)
+        try:
+            # 1. Parse spine index from DocFragment[N]
+            match = re.search(r'DocFragment\[(\d+)\]', xpath_str)
+            if not match: return None
+            spine_index = int(match.group(1)) # 1-based index
 
-        # 2. Create if missing
-        if not target_col:
-            r_create = self._make_request("POST", "/api/v2/collections", {"name": collection_name})
-            if r_create and r_create.status_code in [200, 201]:
-                target_col = r_create.json()
-            else: return False
+            # 2. Get the specific spine item
+            book_path = self._resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+            
+            target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
+            if not target_item: return None
 
-        col_uuid = target_col.get('uuid') or target_col.get('id')
-        book_uuid = book.get('uuid') or book.get('id')
-        
-        # 3. Add book (Batch Endpoint from route(2).ts)
-        endpoint = "/api/v2/collections/books"
-        payload = {"collections": [col_uuid], "books": [book_uuid]}
-        r_add = self._make_request("POST", endpoint, payload)
-        if r_add and r_add.status_code in [200, 204]:
-             logger.info(f"✅ Storyteller: Added '{ebook_filename}' to '{collection_name}'")
-             return True
-        # Backup strategy (singular)
-        fallback = f"/api/v2/collections/{col_uuid}/books"
-        r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
-        return (r_back and r_back.status_code in [200, 204])
+            # 3. Clean up the path relative to the body
+            # Remove prefix like /body/DocFragment[18]
+            # Remaining might be /body/div/p[1] or //*[@id='...']
+            relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
+            
+            soup = BeautifulSoup(target_item['content'], 'html.parser')
+            target_element = None
 
-class StorytellerDBWithAPI:
-    def __init__(self):
-        self.api_client = None
-        self.db_fallback = None
-        
-        api_url = os.environ.get("STORYTELLER_API_URL")
-        api_user = os.environ.get("STORYTELLER_USER")
-        api_pass = os.environ.get("STORYTELLER_PASSWORD")
-        
-        if api_url and api_user and api_pass:
-            self.api_client = StorytellerAPIClient()
-            if self.api_client.check_connection():
-                logger.info("Using Storyteller REST API for sync")
-            else:
-                self.api_client = None
-        if not self.api_client:
-            try:
-                from storyteller_db import StorytellerDB
-                self.db_fallback = StorytellerDB()
-            except Exception: pass
-    
-    def check_connection(self) -> bool:
-        if self.api_client: return self.api_client.check_connection()
-        elif self.db_fallback: return self.db_fallback.check_connection()
-        return False
-    
-    def get_progress(self, ebook_filename: str):
-        # Legacy Wrapper
-        pct, ts, _, _ = self.get_progress_with_fragment(ebook_filename)
-        return pct, ts
-    
-    def get_progress_with_fragment(self, ebook_filename: str):
-        # --- FIXED: Return real fragment data ---
-        if self.api_client: 
-            return self.api_client.get_progress_by_filename(ebook_filename)
-        elif self.db_fallback: 
-            return self.db_fallback.get_progress_with_fragment(ebook_filename)
-        return None, None, None, None
-    
-    def update_progress(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
-        if self.api_client: return self.api_client.update_progress_by_filename(ebook_filename, percentage, rich_locator)
-        elif self.db_fallback: return self.db_fallback.update_progress(ebook_filename, percentage, rich_locator)
-        return False
-    
-    def get_recent_activity(self, hours: int = 24, min_progress: float = 0.01):
-        if self.db_fallback: return self.db_fallback.get_recent_activity(hours, min_progress)
-        return []
-    
-    def add_to_collection(self, ebook_filename: str):
-        if self.api_client: self.api_client.add_to_collection(ebook_filename)
-        elif self.db_fallback: self.db_fallback.add_to_collection(ebook_filename)
+            # Strategy A: ID Lookup (Fastest)
+            id_match = re.search(r"@id='([^']+)'", relative_path)
+            if id_match:
+                target_element = soup.find(id=id_match.group(1))
+            
+            # Strategy B: DOM Traversal (Standard XPath)
+            if not target_element:
+                # Basic traversal for /body/div[2]/p[1] style paths
+                # Note: This is an approximation since BS4 doesn't support native XPath
+                # We split by '/', ignore empty/body, and try to follow tags and indices
+                curr = soup.find('body') or soup
+                segments = [s for s in relative_path.split('/') if s and s != 'body']
+                
+                for seg in segments:
+                    tag_match = re.match(r"([a-z0-9]+)(\[(\d+)\])?", seg, re.IGNORECASE)
+                    if not tag_match: break
+                    
+                    tag_name = tag_match.group(1)
+                    idx = int(tag_match.group(3)) if tag_match.group(3) else 1
+                    
+                    # Find all direct children matching tag_name
+                    children = curr.find_all(tag_name, recursive=False)
+                    if len(children) >= idx:
+                        curr = children[idx-1]
+                    else:
+                        curr = None
+                        break
+                target_element = curr
 
-def create_storyteller_client():
-    return StorytellerDBWithAPI()
+            if not target_element: return None
+
+            # 4. Extract Text and Offset
+            elem_text = target_element.get_text(separator=' ', strip=True)
+            if not elem_text: return None
+            
+            chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            local_offset = chapter_text.find(elem_text)
+            if local_offset == -1: return None
+            
+            global_offset = target_item['start'] + local_offset
+            return full_text[global_offset : global_offset + 500]
+
+        except Exception as e:
+            logger.error(f"Error resolving XPath {xpath_str}: {e}")
+            return None
+
+    # ... (Keep existing _generate_xpath, _generate_css_selector, _generate_cfi, _normalize) ...
+    def _generate_css_selector(self, target_tag):
+        if not target_tag: return ""
+        segments = []
+        curr = target_tag
+        while curr and curr.name != '[document]':
+            if not isinstance(curr, Tag):
+                curr = curr.parent
+                continue
+            index = 1
+            sibling = curr.previous_sibling
+            while sibling:
+                if isinstance(sibling, Tag): index += 1
+                sibling = sibling.previous_sibling
+            segments.append(f"{curr.name}:nth-child({index})")
+            curr = curr.parent
+        return " > ".join(reversed(segments))
+
+    def _generate_cfi(self, spine_index, html_content, local_target_index):
+        soup = BeautifulSoup(html_content, 'html.parser')
+        current_char_count = 0
+        target_tag = None
+        elements = soup.find_all(string=True)
+        for string in elements:
+            text_len = len(string.strip())
+            if text_len == 0: continue
+            if current_char_count + text_len >= local_target_index:
+                target_tag = string.parent
+                break
+            current_char_count += text_len
+            if current_char_count < local_target_index: current_char_count += 1
+        
+        if not target_tag: return f"epubcfi(/6/{(spine_index + 1) * 2}!/4/2/1:0)"
+        
+        path_segments = []
+        curr = target_tag
+        while curr and curr.name != '[document]':
+            if curr.name == 'body':
+                path_segments.append("4")
+                break
+            index = 1
+            sibling = curr.previous_sibling
+            while sibling:
+                if isinstance(sibling, Tag): index += 1
+                sibling = sibling.previous_sibling
+            path_segments.append(str(index * 2))
+            curr = curr.parent
+        spine_step = (spine_index + 1) * 2
+        element_path = "/".join(reversed(path_segments))
+        return f"epubcfi(/6/{spine_step}!/{element_path}:0)"
+
+    def _generate_xpath(self, html_content, local_target_index):
+        soup = BeautifulSoup(html_content, 'html.parser')
+        current_char_count = 0
+        target_tag = None
+        elements = soup.find_all(string=True)
+        for string in elements:
+            text_len = len(string.strip())
+            if text_len == 0: continue
+            if current_char_count + text_len >= local_target_index:
+                target_tag = string.parent
+                break
+            current_char_count += text_len
+            if current_char_count < local_target_index: current_char_count += 1
+            
+        if not target_tag: return "/body/div/p[1]", None, False
+        
+        path_segments = []
+        curr = target_tag
+        found_anchor = False
+        while curr and curr.name != '[document]':
+            if curr.name == 'body':
+                path_segments.append("body")
+                break
+            if curr.has_attr('id') and curr['id']:
+                path_segments.append(f"*[@id='{curr['id']}']")
+                found_anchor = True
+                break
+            index = 1
+            sibling = curr.previous_sibling
+            while sibling:
+                if isinstance(sibling, Tag) and sibling.name == curr.name: index += 1
+                sibling = sibling.previous_sibling
+            path_segments.append(f"{curr.name}[{index}]")
+            curr = curr.parent
+            
+        if found_anchor: xpath = "//" + "/".join(reversed(path_segments))
+        else: xpath = "/" + "/".join(reversed(path_segments))
+        return xpath, target_tag, found_anchor
+
+    def _normalize(self, text): return re.sub(r'[^a-z0-9]', '', text.lower())
+
+    def find_text_location(self, filename, search_phrase, hint_percentage=None):
+        try:
+            book_path = self._resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+            if not full_text: return None, None
+            
+            total_len = len(full_text)
+            match_index = -1
+            
+            # Exact
+            match_index = full_text.find(search_phrase)
+            
+            # Normalized
+            if match_index == -1:
+                norm_content = self._normalize(full_text)
+                norm_search = self._normalize(search_phrase)
+                norm_index = norm_content.find(norm_search)
+                if norm_index != -1: match_index = int((norm_index / len(norm_content)) * total_len)
+            
+            # Fuzzy
+            if match_index == -1:
+                cutoff = self.fuzzy_threshold
+                if hint_percentage is not None:
+                    w_start = int(max(0, hint_percentage - 0.10) * total_len)
+                    w_end = int(min(1.0, hint_percentage + 0.10) * total_len)
+                    alignment = rapidfuzz.fuzz.partial_ratio_alignment(search_phrase, full_text[w_start:w_end], score_cutoff=cutoff)
+                    if alignment: match_index = w_start + alignment.dest_start
+                if match_index == -1:
+                    alignment = rapidfuzz.fuzz.partial_ratio_alignment(search_phrase, full_text, score_cutoff=cutoff)
+                    if alignment: match_index = alignment.dest_start
+
+            if match_index != -1:
+                percentage = match_index / total_len
+                for item in spine_map:
+                    if item['start'] <= match_index < item['end']:
+                        local_index = match_index - item['start']
+                        xpath_str, target_tag, is_anchored = self._generate_xpath(item['content'], local_index)
+                        css_selector = self._generate_css_selector(target_tag)
+                        cfi = self._generate_cfi(item['spine_index']-1, item['content'], local_index)
+                        
+                        doc_frag_prefix = f"/body/DocFragment[{item['spine_index']}]"
+                        final_xpath = f"{doc_frag_prefix}{xpath_str}"
+                        
+                        rich_locator = {
+                            "href": item['href'],
+                            "cssSelector": css_selector,
+                            "xpath": final_xpath,
+                            "cfi": cfi,
+                            "match_index": match_index
+                        }
+                        return percentage, rich_locator
+            return None, None
+        except Exception as e:
+            logger.error(f"Error finding text in {filename}: {e}")
+            return None, None
+
+    def get_text_at_percentage(self, filename, percentage):
+        try:
+            book_path = self._resolve_book_path(filename)
+            full_text, _ = self.extract_text_and_map(book_path)
+            if not full_text: return None
+            target_index = int(len(full_text) * percentage)
+            start = max(0, target_index - 450)
+            end = min(len(full_text), target_index + 450)
+            return full_text[start:end]
+        except Exception: return None
+
+    def get_character_delta(self, filename, percentage_prev, percentage_new):
+        try:
+            book_path = self._resolve_book_path(filename)
+            full_text, _ = self.extract_text_and_map(book_path)
+            if not full_text: return None
+            return abs(int(len(full_text) * percentage_prev) - int(len(full_text) * percentage_new))
+        except Exception: return None
 # [END FILE]
