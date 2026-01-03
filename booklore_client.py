@@ -1,0 +1,188 @@
+# [START FILE: abs-kosync-enhanced/booklore_client.py]
+import os
+import time
+import logging
+import requests
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class BookloreClient:
+    def __init__(self):
+        self.base_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
+        self.username = os.environ.get("BOOKLORE_USER")
+        self.password = os.environ.get("BOOKLORE_PASSWORD")
+        self._book_cache = {}
+        self._cache_timestamp = 0
+        self._token = None
+        self._token_timestamp = 0
+        self._token_max_age = 300
+        self.session = requests.Session()
+
+    def _get_fresh_token(self):
+        if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
+            return self._token
+        if not all([self.base_url, self.username, self.password]): return None
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/auth/login",
+                json={"username": self.username, "password": self.password},
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self._token = data.get("refreshToken") or data.get("accessToken") or data.get("token")
+                self._token_timestamp = time.time()
+                return self._token
+            else:
+                logger.error(f"Booklore login failed: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Booklore login error: {e}")
+        return None
+
+    def _make_request(self, method, endpoint, json_data=None):
+        token = self._get_fresh_token()
+        if not token: return None
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url = f"{self.base_url}{endpoint}"
+        try:
+            if method.upper() == "GET":
+                response = self.session.get(url, headers=headers, timeout=10)
+            elif method.upper() == "POST":
+                response = self.session.post(url, headers=headers, json=json_data, timeout=10)
+            else: return None
+
+            if response.status_code == 401:
+                self._token = None
+                token = self._get_fresh_token()
+                if not token: return None
+                headers["Authorization"] = f"Bearer {token}"
+                if method.upper() == "GET":
+                    response = self.session.get(url, headers=headers, timeout=10)
+                else:
+                    response = self.session.post(url, headers=headers, json=json_data, timeout=10)
+            return response
+        except Exception as e:
+            logger.error(f"Booklore API request failed: {e}")
+            return None
+
+    def check_connection(self):
+        if not all([self.base_url, self.username, self.password]): return False
+        token = self._get_fresh_token()
+        if token:
+            logger.info(f"✅ Connected to Booklore at {self.base_url}")
+            return True
+        return False
+
+    def _refresh_book_cache(self):
+        response = self._make_request("GET", "/api/v1/books")
+        if response and response.status_code == 200:
+            books = response.json()
+            self._book_cache = {}
+            for book in books:
+                filename = book.get('fileName', '')
+                if filename:
+                    self._book_cache[filename.lower()] = {
+                        'id': book.get('id'),
+                        'fileName': filename,
+                        'bookType': book.get('bookType'),
+                        'epubProgress': book.get('epubProgress'),
+                        'pdfProgress': book.get('pdfProgress'),
+                        'cbxProgress': book.get('cbxProgress'),
+                    }
+            self._cache_timestamp = time.time()
+            logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
+            return True
+        return False
+
+    def find_book_by_filename(self, ebook_filename):
+        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
+        if not self._book_cache: self._refresh_book_cache()
+
+        filename = Path(ebook_filename).name.lower()
+        if filename in self._book_cache: return self._book_cache[filename]
+
+        stem = Path(filename).stem.lower()
+        for cached_name, book_info in self._book_cache.items():
+            if Path(cached_name).stem.lower() == stem: return book_info
+
+        for cached_name, book_info in self._book_cache.items():
+            if stem in cached_name or cached_name.replace('.epub', '') in stem:
+                return book_info
+        return None
+
+    def get_progress(self, ebook_filename):
+        book = self.find_book_by_filename(ebook_filename)
+        if not book: return None, None
+
+        response = self._make_request("GET", f"/api/v1/books/{book['id']}")
+        if response and response.status_code == 200:
+            data = response.json()
+            book_type = data.get('bookType', '').upper()
+            if book_type == 'EPUB':
+                progress = data.get('epubProgress') or {}
+                pct = progress.get('percentage', 0)
+                return (pct / 100.0 if pct else 0.0), progress.get('cfi')
+            elif book_type == 'PDF':
+                progress = data.get('pdfProgress') or {}
+                pct = progress.get('percentage', 0)
+                return (pct / 100.0 if pct else 0.0), None
+            elif book_type == 'CBX':
+                progress = data.get('cbxProgress') or {}
+                pct = progress.get('percentage', 0)
+                return (pct / 100.0 if pct else 0.0), None
+        return None, None
+
+    def update_progress(self, ebook_filename, percentage, rich_locator=None):
+        book = self.find_book_by_filename(ebook_filename)
+        if not book:
+            logger.debug(f"Booklore: Book not found: {ebook_filename}")
+            return False
+
+        book_id = book['id']
+        book_type = (book.get('bookType') or '').upper()
+        pct_display = percentage * 100
+        cfi = rich_locator.get('cfi') if rich_locator and isinstance(rich_locator, dict) else None
+
+        if book_type == 'EPUB':
+            payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
+            if cfi:
+                payload["epubProgress"]["cfi"] = cfi
+                logger.debug(f"Booklore: Setting CFI: {cfi}")
+        elif book_type == 'PDF':
+            payload = {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}}
+        elif book_type == 'CBX':
+            payload = {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}}
+        else:
+            logger.warning(f"Booklore: Unknown book type {book_type} for {ebook_filename}")
+            return False
+
+        response = self._make_request("POST", "/api/v1/books/progress", payload)
+        if response and response.status_code in [200, 201, 204]:
+            logger.info(f"✅ Booklore: {ebook_filename} → {pct_display:.1f}%")
+            return True
+        else:
+            status = response.status_code if response else "No response"
+            logger.error(f"Booklore update failed: {status}")
+            return False
+
+    def get_recent_activity(self, min_progress=0.01):
+        if not self._book_cache: self._refresh_book_cache()
+        results = []
+        for filename, book in self._book_cache.items():
+            progress = 0
+            if book.get('epubProgress'):
+                progress = (book['epubProgress'].get('percentage') or 0) / 100.0
+            elif book.get('pdfProgress'):
+                progress = (book['pdfProgress'].get('percentage') or 0) / 100.0
+            elif book.get('cbxProgress'):
+                progress = (book['cbxProgress'].get('percentage') or 0) / 100.0
+            if progress >= min_progress:
+                results.append({
+                    "id": book['id'],
+                    "filename": book['fileName'],
+                    "progress": progress,
+                    "source": "BOOKLORE"
+                })
+        return results
+# [END FILE]
