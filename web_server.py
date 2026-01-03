@@ -1,3 +1,4 @@
+# [START FILE: abs-kosync-enhanced/web_server.py]
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 import logging
 from pathlib import Path
@@ -366,7 +367,13 @@ def index():
         ebook_filename = mapping.get('ebook_filename')
         try:
             abs_progress = manager.abs_client.get_progress(abs_id)
-            kosync_progress = manager.kosync_client.get_progress(kosync_id) if integrations['kosync'] else 0.0
+            
+            # --- FIX: Unpack tuple from KoSync client ---
+            if integrations['kosync']:
+                kosync_progress, _ = manager.kosync_client.get_progress(kosync_id)
+            else:
+                kosync_progress = 0.0
+
             storyteller_progress, _ = manager.storyteller_db.get_progress(ebook_filename)
             booklore_progress, _ = manager.booklore_client.get_progress(ebook_filename)
 
@@ -688,3 +695,4 @@ if __name__ == '__main__':
     monitor_thread.start()
     logger.info("+ Started readaloud file monitoring thread")
     app.run(host='0.0.0.0', port=5757, debug=False)
+# [END FILE]
