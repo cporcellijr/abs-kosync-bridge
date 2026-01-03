@@ -519,7 +519,7 @@
         
         <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-            {% if mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
             <div class="book-card" 
                  data-progress="{{ mapping.kosync_progress }}"
                  data-last-sync="{{ mapping.last_sync }}"
