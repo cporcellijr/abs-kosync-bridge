@@ -126,6 +126,10 @@ class KoSyncClient:
         self.user = os.environ.get("KOSYNC_USER")
         self.auth_token = hashlib.md5(os.environ.get("KOSYNC_KEY", "").encode('utf-8')).hexdigest()
 
+    def is_configured(self):
+        """Return True if KoSync is configured, False otherwise."""
+        return bool(self.base_url and self.user)
+
     def check_connection(self):
         url = f"{self.base_url}/healthcheck"
         try:

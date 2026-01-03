@@ -14,6 +14,7 @@ COPY api_clients.py /app/src/api_clients.py
 COPY json_db.py /app/src/json_db.py
 COPY hardcover_client.py /app/src/hardcover_client.py
 COPY suggestion_manager.py /app/src/suggestion_manager.py
+COPY booklore_client.py /app/src/booklore_client.py
 
 # Copy web server to /app root
 COPY web_server.py /app/web_server.py
@@ -23,6 +24,10 @@ ENV PYTHONPATH="${PYTHONPATH}:/app/src"
 # Create templates directory and copy HTML templates
 RUN mkdir -p /app/templates
 COPY templates/ /app/templates/
+
+# Copy static assets (icons, etc.)
+RUN mkdir -p /app/static
+COPY static/ /app/static/
 
 # Copy and set permissions for startup script
 COPY start.sh /app/start.sh

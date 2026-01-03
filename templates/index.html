@@ -550,24 +550,36 @@
                         
                         {% if mapping.status == 'active' %}
                         <div class="progress-details">
-                            <div class="progress-item">
-                                <span>🎧</span>
+                            {% if integrations.audiobookshelf %}
+                            <div class="progress-item" title="Audiobookshelf">
+                                <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
                                 <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
                             </div>
-                            <div class="progress-item">
+                            {% endif %}
+                            {% if integrations.kosync %}
+                            <div class="progress-item" title="KOReader">
                                 <span>📖</span>
                                 <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
                             </div>
-                            <div class="progress-item">
-                                <span>📚</span>
+                            {% endif %}
+                            {% if integrations.storyteller %}
+                            <div class="progress-item" title="Storyteller">
+                                <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
                                 <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
                             </div>
+                            {% endif %}
+                            {% if integrations.booklore %}
+                            <div class="progress-item" title="Booklore">
+                                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                                <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
+                            </div>
+                            {% endif %}
                         </div>
-                        
+
                         <div class="progress-bar-mini">
                             <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
                         </div>
-                        
+
                         <div class="last-sync">Synced {{ mapping.last_sync }}</div>
                         {% endif %}
                         
@@ -628,24 +640,36 @@
                         
                         {% if mapping.status == 'active' %}
                         <div class="progress-details">
-                            <div class="progress-item">
-                                <span>🎧</span>
+                            {% if integrations.audiobookshelf %}
+                            <div class="progress-item" title="Audiobookshelf">
+                                <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
                                 <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
                             </div>
-                            <div class="progress-item">
+                            {% endif %}
+                            {% if integrations.kosync %}
+                            <div class="progress-item" title="KOReader">
                                 <span>📖</span>
                                 <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
                             </div>
-                            <div class="progress-item">
-                                <span>📚</span>
+                            {% endif %}
+                            {% if integrations.storyteller %}
+                            <div class="progress-item" title="Storyteller">
+                                <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
                                 <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
                             </div>
+                            {% endif %}
+                            {% if integrations.booklore %}
+                            <div class="progress-item" title="Booklore">
+                                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                                <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
+                            </div>
+                            {% endif %}
                         </div>
-                        
+
                         <div class="progress-bar-mini">
                             <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
                         </div>
-                        
+
                         <div class="last-sync">Synced {{ mapping.last_sync }}</div>
                         {% endif %}
                         

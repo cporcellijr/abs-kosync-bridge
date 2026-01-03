@@ -15,7 +15,7 @@ from json_db import JsonDB
 
 # ---------------- APP SETUP ----------------
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='/app/static', static_url_path='/static')
 app.secret_key = "kosync-queue-secret-unified-app"
 
 logging.basicConfig(level=logging.INFO)
@@ -349,8 +349,16 @@ def index():
     """Dashboard"""
     db = db_handler.load(default={"mappings": []})
     state = state_handler.load(default={})
-    suggestions = suggestions_handler.load(default={}) # Load suggestions
-    
+    suggestions = suggestions_handler.load(default={})
+
+    # Build integrations dict for conditional display in template
+    integrations = {
+        'audiobookshelf': True,  # Always enabled (required)
+        'kosync': manager.kosync_client.is_configured(),
+        'storyteller': manager.storyteller_db.check_connection() if hasattr(manager.storyteller_db, 'check_connection') else True,
+        'booklore': manager.booklore_client.check_connection() if hasattr(manager.booklore_client, 'check_connection') else False
+    }
+
     mappings = db.get('mappings', [])
     for mapping in mappings:
         abs_id = mapping.get('abs_id')
@@ -358,14 +366,19 @@ def index():
         ebook_filename = mapping.get('ebook_filename')
         try:
             abs_progress = manager.abs_client.get_progress(abs_id)
-            kosync_progress = manager.kosync_client.get_progress(kosync_id)
+            kosync_progress = manager.kosync_client.get_progress(kosync_id) if integrations['kosync'] else 0.0
             storyteller_progress, _ = manager.storyteller_db.get_progress(ebook_filename)
+            booklore_progress, _ = manager.booklore_client.get_progress(ebook_filename)
+
             if storyteller_progress is None: storyteller_progress = 0.0
-            
+            if booklore_progress is None: booklore_progress = 0.0
+            if kosync_progress is None: kosync_progress = 0.0
+
             mapping['storyteller_progress'] = storyteller_progress * 100
+            mapping['booklore_progress'] = booklore_progress * 100
             mapping['abs_progress'] = abs_progress
             mapping['kosync_progress'] = kosync_progress * 100
-            mapping['unified_progress'] = max(mapping['kosync_progress'], mapping['storyteller_progress'])
+            mapping['unified_progress'] = max(mapping['kosync_progress'], mapping['storyteller_progress'], mapping['booklore_progress'])
 
             book_state = state.get(abs_id, {})
             last_updated = book_state.get('last_updated', 0)
@@ -375,17 +388,16 @@ def index():
                 elif diff < 3600: mapping['last_sync'] = f"{int(diff // 60)}m ago"
                 else: mapping['last_sync'] = f"{int(diff // 3600)}h ago"
             else: mapping['last_sync'] = "Never"
-            
+
             mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"
         except Exception as e:
             logger.error(f"Error fetching progress: {e}")
             mapping['last_sync'] = "Error"
             mapping['cover_url'] = None
 
-    # CRASH FIX: Calculate suggestion count and pass to template
     suggestion_count = sum(1 for s in suggestions.values() if s.get('state') == 'pending')
-    
-    return render_template('index.html', mappings=mappings, suggestion_count=suggestion_count)
+
+    return render_template('index.html', mappings=mappings, suggestion_count=suggestion_count, integrations=integrations)
 
 # RESTORED SUGGESTION ROUTES
 @app.route('/suggestions')
@@ -638,7 +650,12 @@ def clear_progress(abs_id):
         if ebook_filename:
             manager.storyteller_db.update_progress(ebook_filename, 0.0)
             logger.info(f"  ✓ Storyteller progress cleared")
-        
+
+        # Booklore: Set to 0%
+        if ebook_filename:
+            manager.booklore_client.update_progress(ebook_filename, 0.0)
+            logger.info(f"  ✓ Booklore progress cleared")
+
         # Clear the last state so next sync will properly propagate the 0%
         state = state_handler.load(default={})
         if abs_id in state:

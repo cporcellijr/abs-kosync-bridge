@@ -157,6 +157,59 @@ class EbookParser:
             curr = curr.parent
         return " > ".join(reversed(segments))
 
+    def _generate_cfi(self, spine_index, html_content, local_target_index):
+        """
+        Generate an EPUB CFI (Canonical Fragment Identifier) for Booklore.
+        CFI format: epubcfi(/6/{spine_step}!/4/{element_path})
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        current_char_count = 0
+        target_tag = None
+        char_offset = 0
+
+        elements = soup.find_all(string=True)
+        for string in elements:
+            text_len = len(string.strip())
+            if text_len == 0: continue
+            if current_char_count + text_len >= local_target_index:
+                target_tag = string.parent
+                char_offset = local_target_index - current_char_count
+                break
+            current_char_count += text_len
+            if current_char_count < local_target_index: current_char_count += 1
+
+        if not target_tag:
+            # Fallback CFI pointing to start of spine item
+            spine_step = (spine_index + 1) * 2
+            return f"epubcfi(/6/{spine_step}!/4/2/1:0)"
+
+        # Build CFI path from target element to body
+        path_segments = []
+        curr = target_tag
+        while curr and curr.name != '[document]':
+            if curr.name == 'body':
+                path_segments.append("4")  # body is always /4 in CFI
+                break
+            # Count element position among same-type siblings
+            index = 1
+            sibling = curr.previous_sibling
+            while sibling:
+                if isinstance(sibling, Tag):
+                    index += 1
+                sibling = sibling.previous_sibling
+            # CFI uses even numbers for elements (index * 2)
+            path_segments.append(str(index * 2))
+            curr = curr.parent
+
+        # Spine step in CFI (spine_index * 2 + 2 for 1-based, even numbers)
+        spine_step = (spine_index + 1) * 2
+
+        # Build the CFI string
+        element_path = "/".join(reversed(path_segments))
+        cfi = f"epubcfi(/6/{spine_step}!/{element_path}:0)"
+
+        return cfi
+
     def _generate_xpath(self, html_content, local_target_index):
         """
         Generate XPath and return the DOM Tag for CSS generation.
@@ -245,22 +298,24 @@ class EbookParser:
             
             if match_index != -1:
                 percentage = match_index / total_len
-                
+
                 for item in spine_map:
                     if item['start'] <= match_index < item['end']:
                         local_index = match_index - item['start']
-                        
-                        # Generate both XPath (for KoReader) and CSS Selector (for Storyteller)
+
+                        # Generate XPath (for KoReader), CSS Selector (for Storyteller), and CFI (for Booklore)
                         xpath_str, target_tag = self._generate_xpath(item['content'], local_index)
                         css_selector = self._generate_css_selector(target_tag)
-                        
+                        cfi = self._generate_cfi(item['spine_index'] - 1, item['content'], local_index)
+
                         rich_locator = {
                             "href": item['href'],
                             "cssSelector": css_selector,
                             "xpath": f"/body/DocFragment[{item['spine_index']}]{xpath_str}",
+                            "cfi": cfi,
                             "match_index": match_index
                         }
-                        
+
                         return percentage, rich_locator
             
             return None, None
