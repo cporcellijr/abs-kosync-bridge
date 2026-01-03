@@ -9,8 +9,7 @@ Key features:
 - Auto-sets finished_at when marking as finished (>99% progress)
 - Supports ISBN and title/author search for book matching
 
-CRITICAL: started_at and finished_at are TOP-LEVEL GraphQL variables,
-NOT part of the object! This matches hardcover_api.lua implementation.
+
 """
 
 import os
@@ -276,19 +275,19 @@ class HardcoverClient:
             existing_read = read_result['user_book_reads'][0]
             read_id = existing_read['id']
             
-            # Determine dates - these are TOP LEVEL variables, not in object!
-            started_at_val = None
-            finished_at_val = None
+            # FIX: Initialize with EXISTING values to prevent wiping dates with Null
+            started_at_val = existing_read.get('started_at')
+            finished_at_val = existing_read.get('finished_at')
             
-            if not existing_read.get('started_at'):
+            if not started_at_val:
                 started_at_val = today
                 logger.info(f"Hardcover: Setting started_at to {today}")
             
-            if is_finished and not existing_read.get('finished_at'):
+            if is_finished and not finished_at_val:
                 finished_at_val = today
                 logger.info(f"Hardcover: Setting finished_at to {today}")
             
-            # Build mutation matching Lua code exactly
+            # 
             query = """
             mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                 update_user_book_read(id: $id, object: {
@@ -326,7 +325,7 @@ class HardcoverClient:
                 return True
             return False
         else:
-            # Create new read - MATCHES hardcover_api.lua line 504-537
+         
             query = """
             mutation InsertUserBookRead($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                 insert_user_book_read(user_book_id: $id, user_book_read: {
