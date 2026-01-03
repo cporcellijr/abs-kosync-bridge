@@ -131,6 +131,9 @@ class KoSyncClient:
         return bool(self.base_url and self.user)
 
     def check_connection(self):
+        if not self.is_configured():
+            logger.info("ℹ️  KoSync not configured (skipping)")
+            return False
         url = f"{self.base_url}/healthcheck"
         try:
             r = requests.get(url, timeout=5)
