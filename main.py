@@ -41,7 +41,8 @@ class SyncManager:
         self.storyteller_db = StorytellerClient()
         self.booklore_client = BookloreClient()
         self._transcriber = None
-        self.ebook_parser = EbookParser(BOOKS_DIR)
+        self.epub_cache_dir = DATA_DIR / "epub_cache"
+        self.ebook_parser = EbookParser(BOOKS_DIR, epub_cache_dir=self.epub_cache_dir)
         self.db_handler = JsonDB(DB_FILE)
         self.state_handler = JsonDB(STATE_FILE)
         self.db = self.db_handler.load(default={"mappings": []})
@@ -134,11 +135,54 @@ class SyncManager:
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
-            with open(transcript_path, 'r') as f: 
+            with open(transcript_path, 'r') as f:
                 data = json.load(f)
                 dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
                 return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
         except: return None
+
+    def _get_local_epub(self, ebook_filename, working_dir=None):
+        """
+        Get local path to EPUB file, downloading from Booklore if necessary.
+
+        Returns the path to the EPUB file, either:
+        - Existing file on filesystem (/books)
+        - Cached file in epub_cache (from previous download)
+        - Downloaded file (from Booklore API, saved to epub_cache)
+        - None if file cannot be found or downloaded
+        """
+        # First, try to find on filesystem
+        filesystem_matches = list(BOOKS_DIR.glob(f"**/{ebook_filename}"))
+        if filesystem_matches:
+            logger.info(f"📚 Found EPUB on filesystem: {filesystem_matches[0]}")
+            return filesystem_matches[0]
+
+        # Check persistent EPUB cache
+        self.epub_cache_dir.mkdir(parents=True, exist_ok=True)
+        cached_path = self.epub_cache_dir / ebook_filename
+        if cached_path.exists():
+            logger.info(f"📚 Found EPUB in cache: {cached_path}")
+            return cached_path
+
+        # Try to download from Booklore API
+        if self.booklore_client.is_configured():
+            book = self.booklore_client.find_book_by_filename(ebook_filename)
+            if book:
+                logger.info(f"📥 Downloading EPUB from Booklore: {ebook_filename}")
+                content = self.booklore_client.download_book(book['id'])
+                if content:
+                    with open(cached_path, 'wb') as f:
+                        f.write(content)
+                    logger.info(f"✅ Downloaded EPUB to cache: {cached_path}")
+                    return cached_path
+                else:
+                    logger.error(f"Failed to download EPUB content from Booklore")
+            else:
+                logger.error(f"EPUB not found in Booklore: {ebook_filename}")
+        else:
+            logger.error(f"EPUB not found on filesystem and Booklore not configured")
+
+        return None
 
     def check_pending_jobs(self):
         self.db = self.db_handler.load(default={"mappings": []})
@@ -147,13 +191,26 @@ class SyncManager:
                 logger.info(f"[JOB] Starting: {mapping.get('abs_title')}")
                 mapping['status'] = 'processing'
                 self.db_handler.save(self.db)
+
                 try:
+                    # Step 1: Get EPUB file (filesystem, cache, or Booklore download)
+                    epub_path = self._get_local_epub(mapping['ebook_filename'])
+                    if not epub_path:
+                        raise FileNotFoundError(f"Could not locate or download: {mapping['ebook_filename']}")
+
+                    # Step 2: Download and transcribe audio
                     audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
                     transcript_path = self.transcriber.process_audio(mapping['abs_id'], audio_files)
-                    self.ebook_parser.extract_text_and_map(mapping['ebook_filename'])
+
+                    # Step 3: Parse EPUB for text mapping (validates EPUB is readable)
+                    self.ebook_parser.extract_text_and_map(epub_path)
+
+                    # Step 4: Mark as active
                     mapping.update({'transcript_file': str(transcript_path), 'status': 'active'})
                     self.db_handler.save(self.db)
                     self._automatch_hardcover(mapping)
+                    logger.info(f"[SUCCESS] {mapping.get('abs_title')} is now active")
+
                 except Exception as e:
                     logger.error(f"[FAIL] {mapping.get('abs_title')}: {e}")
                     mapping['status'] = 'failed_retry_later'
