@@ -115,13 +115,20 @@ class SyncManager:
              logger.info(f"📚 Hardcover: Matched '{meta.get('title')}' -> Want to Read")
 
     def _sync_to_hardcover(self, mapping, percentage):
-        # ... (previous code) ...
+        # 1. Basic checks
+        if not self.hardcover_client.token: return
+        if not mapping.get('hardcover_book_id'): return
+
+        # 2. DEFINE 'ub' BEFORE USING IT
+        ub = self.hardcover_client.get_user_book(mapping['hardcover_book_id'])
+
+        # 3. Now it is safe to check 'if ub:'
         if ub:
             total_pages = mapping.get('hardcover_pages') or 0
             page_num = int(total_pages * percentage)
             is_finished = percentage > 0.99
             
-            # UPDATED CALL: Pass 'current_percentage=percentage'
+            # Update progress
             self.hardcover_client.update_progress(
                 ub['id'], 
                 page_num, 
@@ -130,10 +137,7 @@ class SyncManager:
                 current_percentage=percentage
             )
             
-            # Update reading progress
-            self.hardcover_client.update_progress(ub['id'], page_num, edition_id=mapping.get('hardcover_edition_id'), is_finished=is_finished)
-            
-            # UPDATED: Handle Status Changes (Want to Read -> Reading -> Finished)
+            # Handle Status Changes
             current_status = ub.get('status_id')
 
             # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
@@ -184,6 +188,37 @@ class SyncManager:
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={}) 
         
+        # --- NEW: Bulk Fetch ABS Progress ---
+        abs_in_progress = {}
+        try:
+            for item in self.abs_client.get_in_progress():
+                abs_in_progress[item['id']] = item
+        except Exception as e:
+            logger.error(f"Failed to bulk fetch progress: {e}")
+            abs_in_progress = {}
+
+        active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
+        if active_books: logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+        
+        db_dirty = False 
+
+        for mapping in self.db.get('mappings', []):
+            if mapping.get('status') != 'active': continue
+            
+            abs_id = mapping['abs_id']
+
+            # --- NEW: Update Web Stats ---
+            abs_item = abs_in_progress.get(abs_id)
+            if abs_item:
+                new_prog = abs_item.get('progress', 0) * 100
+                new_dur = abs_item.get('duration', 0)
+                
+                if mapping.get('unified_progress') != new_prog or mapping.get('duration') != new_dur:
+                    mapping['unified_progress'] = new_prog
+                    mapping['duration'] = new_dur
+                    db_dirty = True
+            
+        
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
         if active_books: logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
         
@@ -196,7 +231,8 @@ class SyncManager:
                 st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
                 bl_pct, bl_cfi = self.booklore_client.get_progress(epub)
                 abs_ts = self.abs_client.get_progress(abs_id)
-                
+             
+
                 # UPDATED: KoSync now returns tuple (pct, xpath)
                 ko_pct, ko_xpath = (0.0, None)
                 if self.kosync_client.is_configured():
@@ -332,6 +368,7 @@ class SyncManager:
                 
             except Exception as e:
                 logger.error(f"Sync error: {e}")
+        if db_dirty: self.db_handler.save(self.db)
 
     def run_daemon(self):
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)

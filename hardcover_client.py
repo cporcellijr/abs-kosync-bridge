@@ -70,7 +70,30 @@ class HardcoverClient:
         if result and result.get('me'):
             self.user_id = result['me'][0]['id']
         return self.user_id
-    
+
+    def get_user_book(self, book_id):
+        """Fetch the user's specific entry (UserBook) for a generic book_id."""
+        query = """
+        query GetUserBook($book_id: Int!) {
+            user_books(where: {book_id: {_eq: $book_id}}) {
+                id
+                status_id
+            }
+        }
+        """
+        try:
+            response = self.query(query, {"book_id": int(book_id)})
+            
+            if response and 'user_books' in response:
+                books = response['user_books']
+                if books:
+                    return books[0]
+                    
+        except Exception as e:
+            logger.error(f"Error fetching user book: {e}")
+            
+        return None
+
     def search_by_isbn(self, isbn: str) -> Optional[Dict]:
         """Search by ISBN-13 or ISBN-10."""
         isbn_key = 'isbn_13' if len(str(isbn)) == 13 else 'isbn_10'

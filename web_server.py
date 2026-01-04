@@ -344,67 +344,93 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
     except: return False
 
 # ---------------- ROUTES ----------------
-
 @app.route('/')
 def index():
     """Dashboard"""
     db = db_handler.load(default={"mappings": []})
-    state = state_handler.load(default={})
     suggestions = suggestions_handler.load(default={})
+    all_states = state_handler.load(default={})
 
-    # Build integrations dict for conditional display in template
     integrations = {
-        'audiobookshelf': True,  # Always enabled (required)
+        'audiobookshelf': True,
         'kosync': manager.kosync_client.is_configured(),
         'storyteller': manager.storyteller_db.check_connection() if hasattr(manager.storyteller_db, 'check_connection') else True,
         'booklore': manager.booklore_client.check_connection() if hasattr(manager.booklore_client, 'check_connection') else False
     }
 
     mappings = db.get('mappings', [])
+    
+    total_duration = 0
+    total_listened = 0
+    
     for mapping in mappings:
         abs_id = mapping.get('abs_id')
-        kosync_id = mapping.get('kosync_doc_id')
-        ebook_filename = mapping.get('ebook_filename')
-        try:
-            abs_progress = manager.abs_client.get_progress(abs_id)
+        
+        # 1. Initialize defaults (Safe for Template)
+        if 'unified_progress' not in mapping: mapping['unified_progress'] = 0
+        if 'duration' not in mapping: mapping['duration'] = 0
+        
+        # We start these at 0, but will try to overwrite them below
+        mapping.setdefault('kosync_progress', 0)
+        mapping.setdefault('storyteller_progress', 0)
+        mapping.setdefault('booklore_progress', 0)
+        mapping.setdefault('abs_progress', 0)
+
+        # 2. POPULATE STATS (Try DB first, Fallback to State)
+        # Check if we have state data for this book
+        if abs_id in all_states:
+            state = all_states[abs_id]
             
-            # --- FIX: Unpack tuple from KoSync client ---
-            if integrations['kosync']:
-                kosync_progress, _ = manager.kosync_client.get_progress(kosync_id)
-            else:
-                kosync_progress = 0.0
+            # Helper to get % from state (0.75 -> 75.0)
+            def get_pct(key):
+                return round(state.get(key, 0) * 100, 1)
 
-            storyteller_progress, _ = manager.storyteller_db.get_progress(ebook_filename)
-            booklore_progress, _ = manager.booklore_client.get_progress(ebook_filename)
+            # If the DB is empty/zero, use the State file for everything
+            if mapping.get('unified_progress', 0) == 0:
+                mapping['kosync_progress'] = get_pct('kosync_pct')
+                mapping['storyteller_progress'] = get_pct('storyteller_pct')
+                mapping['booklore_progress'] = get_pct('booklore_pct')
+                mapping['abs_progress'] = get_pct('abs_pct')
+                
+                # Recalculate Unified Progress from the max of these
+                max_p = max(
+                    mapping['kosync_progress'],
+                    mapping['storyteller_progress'],
+                    mapping['booklore_progress'],
+                    mapping['abs_progress']
+                )
+                if max_p > 0: mapping['unified_progress'] = max_p
 
-            if storyteller_progress is None: storyteller_progress = 0.0
-            if booklore_progress is None: booklore_progress = 0.0
-            if kosync_progress is None: kosync_progress = 0.0
+        # 3. Calculate Totals for Top Bar
+        duration = mapping.get('duration', 0)
+        progress_pct = mapping.get('unified_progress', 0)
 
-            mapping['storyteller_progress'] = storyteller_progress * 100
-            mapping['booklore_progress'] = booklore_progress * 100
-            mapping['abs_progress'] = abs_progress
-            mapping['kosync_progress'] = kosync_progress * 100
-            mapping['unified_progress'] = max(mapping['kosync_progress'], mapping['storyteller_progress'], mapping['booklore_progress'])
+        if duration > 0:
+            total_duration += duration
+            total_listened += (progress_pct / 100.0) * duration
 
-            book_state = state.get(abs_id, {})
-            last_updated = book_state.get('last_updated', 0)
-            if last_updated > 0:
-                diff = time.time() - last_updated
-                if diff < 60: mapping['last_sync'] = f"{int(diff)}s ago"
-                elif diff < 3600: mapping['last_sync'] = f"{int(diff // 60)}m ago"
-                else: mapping['last_sync'] = f"{int(diff // 3600)}h ago"
-            else: mapping['last_sync'] = "Never"
+        # 4. Last Sync Time
+        book_state = all_states.get(abs_id, {})
+        last_updated = book_state.get('last_updated', 0)
+        if last_updated > 0:
+            diff = time.time() - last_updated
+            if diff < 60: mapping['last_sync'] = f"{int(diff)}s ago"
+            elif diff < 3600: mapping['last_sync'] = f"{int(diff // 60)}m ago"
+            else: mapping['last_sync'] = f"{int(diff // 3600)}h ago"
+        else:
+            mapping['last_sync'] = "Never"
+            
+        if abs_id:
+             mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"
 
-            mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"
-        except Exception as e:
-            logger.error(f"Error fetching progress: {e}")
-            mapping['last_sync'] = "Error"
-            mapping['cover_url'] = None
+    if total_duration > 0:
+        overall_progress = round((total_listened / total_duration) * 100, 1)
+    else:
+        overall_progress = 0
 
     suggestion_count = sum(1 for s in suggestions.values() if s.get('state') == 'pending')
 
-    return render_template('index.html', mappings=mappings, suggestion_count=suggestion_count, integrations=integrations)
+    return render_template('index.html', mappings=mappings, suggestion_count=suggestion_count, integrations=integrations, progress=overall_progress)
 
 # RESTORED SUGGESTION ROUTES
 @app.route('/suggestions')
