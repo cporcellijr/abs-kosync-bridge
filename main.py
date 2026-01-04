@@ -73,10 +73,18 @@ class SyncManager:
         self.booklore_client.check_connection()
 
     def cleanup_stale_jobs(self):
+        """Reset jobs that were interrupted mid-process on restart."""
         changed = False
         for mapping in self.db.get('mappings', []):
-            if mapping.get('status') == 'crashed':
+            status = mapping.get('status')
+            if status == 'crashed':
                 mapping['status'] = 'active'
+                changed = True
+            elif status == 'processing':
+                # Job was interrupted mid-process, retry it
+                logger.info(f"[JOB] Recovering interrupted job: {mapping.get('abs_title')}")
+                mapping['status'] = 'failed_retry_later'
+                mapping['last_error'] = 'Interrupted by restart'
                 changed = True
         if changed: self.db_handler.save(self.db)
 
@@ -186,35 +194,74 @@ class SyncManager:
 
     def check_pending_jobs(self):
         self.db = self.db_handler.load(default={"mappings": []})
+
+        max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
+        retry_delay_mins = int(os.getenv("JOB_RETRY_DELAY_MINS", 15))
+
         for mapping in self.db.get('mappings', []):
-            if mapping.get('status') == 'pending':
+            status = mapping.get('status')
+
+            # Skip if not pending or failed
+            if status not in ('pending', 'failed_retry_later'):
+                continue
+
+            # For failed jobs, check retry conditions
+            if status == 'failed_retry_later':
+                retry_count = mapping.get('retry_count', 0)
+                last_attempt = mapping.get('last_attempt', 0)
+
+                # Check max retries
+                if retry_count >= max_retries:
+                    if mapping.get('status') != 'failed_permanent':
+                        logger.warning(f"[JOB] {mapping.get('abs_title')}: Max retries ({max_retries}) exceeded, marking as permanently failed")
+                        mapping['status'] = 'failed_permanent'
+                        self.db_handler.save(self.db)
+                    continue
+
+                # Check retry delay
+                time_since_last = time.time() - last_attempt
+                if time_since_last < retry_delay_mins * 60:
+                    continue  # Not time to retry yet
+
+                logger.info(f"[JOB] Retrying ({retry_count + 1}/{max_retries}): {mapping.get('abs_title')}")
+            else:
                 logger.info(f"[JOB] Starting: {mapping.get('abs_title')}")
-                mapping['status'] = 'processing'
+
+            mapping['status'] = 'processing'
+            mapping['last_attempt'] = time.time()
+            self.db_handler.save(self.db)
+
+            try:
+                # Step 1: Get EPUB file (filesystem, cache, or Booklore download)
+                epub_path = self._get_local_epub(mapping['ebook_filename'])
+                if not epub_path:
+                    raise FileNotFoundError(f"Could not locate or download: {mapping['ebook_filename']}")
+
+                # Step 2: Download and transcribe audio
+                audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
+                transcript_path = self.transcriber.process_audio(mapping['abs_id'], audio_files)
+
+                # Step 3: Parse EPUB for text mapping (validates EPUB is readable)
+                self.ebook_parser.extract_text_and_map(epub_path)
+
+                # Step 4: Mark as active and clear retry tracking
+                mapping.update({
+                    'transcript_file': str(transcript_path),
+                    'status': 'active',
+                    'retry_count': 0,
+                    'last_attempt': 0
+                })
                 self.db_handler.save(self.db)
+                self._automatch_hardcover(mapping)
+                logger.info(f"[SUCCESS] {mapping.get('abs_title')} is now active")
 
-                try:
-                    # Step 1: Get EPUB file (filesystem, cache, or Booklore download)
-                    epub_path = self._get_local_epub(mapping['ebook_filename'])
-                    if not epub_path:
-                        raise FileNotFoundError(f"Could not locate or download: {mapping['ebook_filename']}")
-
-                    # Step 2: Download and transcribe audio
-                    audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
-                    transcript_path = self.transcriber.process_audio(mapping['abs_id'], audio_files)
-
-                    # Step 3: Parse EPUB for text mapping (validates EPUB is readable)
-                    self.ebook_parser.extract_text_and_map(epub_path)
-
-                    # Step 4: Mark as active
-                    mapping.update({'transcript_file': str(transcript_path), 'status': 'active'})
-                    self.db_handler.save(self.db)
-                    self._automatch_hardcover(mapping)
-                    logger.info(f"[SUCCESS] {mapping.get('abs_title')} is now active")
-
-                except Exception as e:
-                    logger.error(f"[FAIL] {mapping.get('abs_title')}: {e}")
-                    mapping['status'] = 'failed_retry_later'
-                    self.db_handler.save(self.db)
+            except Exception as e:
+                retry_count = mapping.get('retry_count', 0) + 1
+                logger.error(f"[FAIL] {mapping.get('abs_title')} (attempt {retry_count}/{max_retries}): {e}")
+                mapping['status'] = 'failed_retry_later'
+                mapping['retry_count'] = retry_count
+                mapping['last_error'] = str(e)
+                self.db_handler.save(self.db)
 
     def run_discovery(self):
         self.db = self.db_handler.load(default={"mappings": []})
