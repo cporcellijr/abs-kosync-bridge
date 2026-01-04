@@ -41,7 +41,8 @@ class SyncManager:
         self.storyteller_db = StorytellerClient()
         self.booklore_client = BookloreClient()
         self._transcriber = None
-        self.ebook_parser = EbookParser(BOOKS_DIR)
+        self.epub_cache_dir = DATA_DIR / "epub_cache"
+        self.ebook_parser = EbookParser(BOOKS_DIR, epub_cache_dir=self.epub_cache_dir)
         self.db_handler = JsonDB(DB_FILE)
         self.state_handler = JsonDB(STATE_FILE)
         self.db = self.db_handler.load(default={"mappings": []})
@@ -72,10 +73,18 @@ class SyncManager:
         self.booklore_client.check_connection()
 
     def cleanup_stale_jobs(self):
+        """Reset jobs that were interrupted mid-process on restart."""
         changed = False
         for mapping in self.db.get('mappings', []):
-            if mapping.get('status') == 'crashed':
+            status = mapping.get('status')
+            if status == 'crashed':
                 mapping['status'] = 'active'
+                changed = True
+            elif status == 'processing':
+                # Job was interrupted mid-process, retry it
+                logger.info(f"[JOB] Recovering interrupted job: {mapping.get('abs_title')}")
+                mapping['status'] = 'failed_retry_later'
+                mapping['last_error'] = 'Interrupted by restart'
                 changed = True
         if changed: self.db_handler.save(self.db)
 
@@ -134,30 +143,125 @@ class SyncManager:
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
-            with open(transcript_path, 'r') as f: 
+            with open(transcript_path, 'r') as f:
                 data = json.load(f)
                 dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
                 return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
         except: return None
 
+    def _get_local_epub(self, ebook_filename, working_dir=None):
+        """
+        Get local path to EPUB file, downloading from Booklore if necessary.
+
+        Returns the path to the EPUB file, either:
+        - Existing file on filesystem (/books)
+        - Cached file in epub_cache (from previous download)
+        - Downloaded file (from Booklore API, saved to epub_cache)
+        - None if file cannot be found or downloaded
+        """
+        # First, try to find on filesystem
+        filesystem_matches = list(BOOKS_DIR.glob(f"**/{ebook_filename}"))
+        if filesystem_matches:
+            logger.info(f"📚 Found EPUB on filesystem: {filesystem_matches[0]}")
+            return filesystem_matches[0]
+
+        # Check persistent EPUB cache
+        self.epub_cache_dir.mkdir(parents=True, exist_ok=True)
+        cached_path = self.epub_cache_dir / ebook_filename
+        if cached_path.exists():
+            logger.info(f"📚 Found EPUB in cache: {cached_path}")
+            return cached_path
+
+        # Try to download from Booklore API
+        if self.booklore_client.is_configured():
+            book = self.booklore_client.find_book_by_filename(ebook_filename)
+            if book:
+                logger.info(f"📥 Downloading EPUB from Booklore: {ebook_filename}")
+                content = self.booklore_client.download_book(book['id'])
+                if content:
+                    with open(cached_path, 'wb') as f:
+                        f.write(content)
+                    logger.info(f"✅ Downloaded EPUB to cache: {cached_path}")
+                    return cached_path
+                else:
+                    logger.error(f"Failed to download EPUB content from Booklore")
+            else:
+                logger.error(f"EPUB not found in Booklore: {ebook_filename}")
+        else:
+            logger.error(f"EPUB not found on filesystem and Booklore not configured")
+
+        return None
+
     def check_pending_jobs(self):
         self.db = self.db_handler.load(default={"mappings": []})
+
+        max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
+        retry_delay_mins = int(os.getenv("JOB_RETRY_DELAY_MINS", 15))
+
         for mapping in self.db.get('mappings', []):
-            if mapping.get('status') == 'pending':
+            status = mapping.get('status')
+
+            # Skip if not pending or failed
+            if status not in ('pending', 'failed_retry_later'):
+                continue
+
+            # For failed jobs, check retry conditions
+            if status == 'failed_retry_later':
+                retry_count = mapping.get('retry_count', 0)
+                last_attempt = mapping.get('last_attempt', 0)
+
+                # Check max retries
+                if retry_count >= max_retries:
+                    if mapping.get('status') != 'failed_permanent':
+                        logger.warning(f"[JOB] {mapping.get('abs_title')}: Max retries ({max_retries}) exceeded, marking as permanently failed")
+                        mapping['status'] = 'failed_permanent'
+                        self.db_handler.save(self.db)
+                    continue
+
+                # Check retry delay
+                time_since_last = time.time() - last_attempt
+                if time_since_last < retry_delay_mins * 60:
+                    continue  # Not time to retry yet
+
+                logger.info(f"[JOB] Retrying ({retry_count + 1}/{max_retries}): {mapping.get('abs_title')}")
+            else:
                 logger.info(f"[JOB] Starting: {mapping.get('abs_title')}")
-                mapping['status'] = 'processing'
+
+            mapping['status'] = 'processing'
+            mapping['last_attempt'] = time.time()
+            self.db_handler.save(self.db)
+
+            try:
+                # Step 1: Get EPUB file (filesystem, cache, or Booklore download)
+                epub_path = self._get_local_epub(mapping['ebook_filename'])
+                if not epub_path:
+                    raise FileNotFoundError(f"Could not locate or download: {mapping['ebook_filename']}")
+
+                # Step 2: Download and transcribe audio
+                audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
+                transcript_path = self.transcriber.process_audio(mapping['abs_id'], audio_files)
+
+                # Step 3: Parse EPUB for text mapping (validates EPUB is readable)
+                self.ebook_parser.extract_text_and_map(epub_path)
+
+                # Step 4: Mark as active and clear retry tracking
+                mapping.update({
+                    'transcript_file': str(transcript_path),
+                    'status': 'active',
+                    'retry_count': 0,
+                    'last_attempt': 0
+                })
                 self.db_handler.save(self.db)
-                try:
-                    audio_files = self.abs_client.get_audio_files(mapping['abs_id'])
-                    transcript_path = self.transcriber.process_audio(mapping['abs_id'], audio_files)
-                    self.ebook_parser.extract_text_and_map(mapping['ebook_filename'])
-                    mapping.update({'transcript_file': str(transcript_path), 'status': 'active'})
-                    self.db_handler.save(self.db)
-                    self._automatch_hardcover(mapping)
-                except Exception as e:
-                    logger.error(f"[FAIL] {mapping.get('abs_title')}: {e}")
-                    mapping['status'] = 'failed_retry_later'
-                    self.db_handler.save(self.db)
+                self._automatch_hardcover(mapping)
+                logger.info(f"[SUCCESS] {mapping.get('abs_title')} is now active")
+
+            except Exception as e:
+                retry_count = mapping.get('retry_count', 0) + 1
+                logger.error(f"[FAIL] {mapping.get('abs_title')} (attempt {retry_count}/{max_retries}): {e}")
+                mapping['status'] = 'failed_retry_later'
+                mapping['retry_count'] = retry_count
+                mapping['last_error'] = str(e)
+                self.db_handler.save(self.db)
 
     def run_discovery(self):
         self.db = self.db_handler.load(default={"mappings": []})
@@ -368,6 +472,18 @@ class SyncManager:
                 logger.error(f"Sync error: {e}")
 
     def run_daemon(self):
+        # Recover any jobs that were interrupted mid-processing (e.g., service restart)
+        db = self.db_handler.load(default={"mappings": []})
+        recovered = 0
+        for mapping in db.get('mappings', []):
+            if mapping.get('status') == 'processing':
+                logger.info(f"♻️ Recovering interrupted job: {mapping.get('abs_title', mapping.get('abs_id'))}")
+                mapping['status'] = 'pending'
+                recovered += 1
+        if recovered:
+            self.db_handler.save(db)
+            logger.info(f"♻️ Recovered {recovered} interrupted job(s) - will retry on next check")
+
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)
         schedule.every(1).minutes.do(self.check_pending_jobs)
         schedule.every(15).minutes.do(self.run_discovery)

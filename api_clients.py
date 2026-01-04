@@ -159,6 +159,8 @@ class KoSyncClient:
         return 0.0
 
     def update_progress(self, doc_id, percentage, xpath=None):
+        if not self.is_configured():
+            return  # Silently skip if KoSync not configured
         headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, 'accept': 'application/vnd.koreader.v1+json', 'content-type': 'application/json'}
         url = f"{self.base_url}/syncs/progress"
         progress_val = xpath if xpath else f"{percentage:.2%}"
