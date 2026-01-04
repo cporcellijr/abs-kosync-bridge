@@ -288,6 +288,18 @@ def find_ebook_file(filename):
     matches = list(base.rglob(filename))
     return matches[0] if matches else None
 
+def get_abs_author(ab):
+    """Extract author from ABS audiobook metadata."""
+    media = ab.get('media', {})
+    metadata = media.get('metadata', {})
+    return metadata.get('authorName') or (metadata.get('authors') or [{}])[0].get("name", "")
+
+def audiobook_matches_search(ab, search_term):
+    """Check if audiobook matches search term (searches title AND author)."""
+    title = manager._get_abs_title(ab).lower()
+    author = get_abs_author(ab).lower()
+    return search_term in title or search_term in author
+
 def add_to_abs_collection(abs_client, item_id, collection_name=None):
     if collection_name is None: collection_name = ABS_COLLECTION_NAME
     try:
@@ -546,7 +558,7 @@ def match():
     if search:
         audiobooks = manager.abs_client.get_all_audiobooks()
         ebooks = list(EBOOK_DIR.glob("**/*.epub"))
-        audiobooks = [ab for ab in audiobooks if search in manager._get_abs_title(ab).lower()]
+        audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         ebooks = [eb for eb in ebooks if search in eb.name.lower()]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager._get_abs_title)
@@ -597,7 +609,7 @@ def batch_match():
     if search:
         audiobooks = manager.abs_client.get_all_audiobooks()
         ebooks = list(EBOOK_DIR.glob("**/*.epub"))
-        audiobooks = [ab for ab in audiobooks if search in manager._get_abs_title(ab).lower()]
+        audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         ebooks = [eb for eb in ebooks if search in eb.name.lower()]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
         ebooks.sort(key=lambda x: x.name.lower())
