@@ -66,8 +66,12 @@ class BookloreClient:
             logger.error(f"Booklore API request failed: {e}")
             return None
 
+    def is_configured(self):
+        """Return True if Booklore is configured, False otherwise."""
+        return bool(self.base_url and self.username and self.password)
+
     def check_connection(self):
-        if not all([self.base_url, self.username, self.password]): return False
+        if not self.is_configured(): return False
         token = self._get_fresh_token()
         if token:
             logger.info(f"✅ Connected to Booklore at {self.base_url}")
@@ -82,9 +86,20 @@ class BookloreClient:
             for book in books:
                 filename = book.get('fileName', '')
                 if filename:
+                    # Extract authors, title, and subtitle from metadata
+                    metadata = book.get('metadata') or {}
+                    authors = metadata.get('authors') or []
+                    author_str = ', '.join(authors) if authors else ''
+                    subtitle = metadata.get('subtitle') or ''
+                    # Prefer metadata title over top-level title (which may be filename)
+                    title = metadata.get('title') or book.get('title') or filename
+
                     self._book_cache[filename.lower()] = {
                         'id': book.get('id'),
                         'fileName': filename,
+                        'title': title,
+                        'subtitle': subtitle,
+                        'authors': author_str,
                         'bookType': book.get('bookType'),
                         'epubProgress': book.get('epubProgress'),
                         'pdfProgress': book.get('pdfProgress'),
@@ -110,6 +125,45 @@ class BookloreClient:
             if stem in cached_name or cached_name.replace('.epub', '') in stem:
                 return book_info
         return None
+
+    def search_books(self, search_term):
+        """Search books by title, author, or filename. Returns list of matching books."""
+        if time.time() - self._cache_timestamp > 5: self._refresh_book_cache()
+        if not self._book_cache: self._refresh_book_cache()
+
+        if not search_term:
+            return list(self._book_cache.values())
+
+        search_lower = search_term.lower()
+        results = []
+        for book_info in self._book_cache.values():
+            title = (book_info.get('title') or '').lower()
+            authors = (book_info.get('authors') or '').lower()
+            filename = (book_info.get('fileName') or '').lower()
+
+            if search_lower in title or search_lower in authors or search_lower in filename:
+                results.append(book_info)
+
+        return results
+
+    def download_book(self, book_id):
+        """Download book content by ID. Returns bytes or None."""
+        token = self._get_fresh_token()
+        if not token: return None
+
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/api/v1/books/{book_id}/download"
+
+        try:
+            response = self.session.get(url, headers=headers, timeout=60)
+            if response.status_code == 200:
+                return response.content
+            else:
+                logger.error(f"Booklore download failed: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Booklore download error: {e}")
+            return None
 
     def get_progress(self, ebook_filename):
         book = self.find_book_by_filename(ebook_filename)

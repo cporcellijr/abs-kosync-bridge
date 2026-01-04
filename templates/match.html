@@ -361,7 +361,7 @@
                 <input 
                     type="text" 
                     name="search" 
-                    placeholder="🔍 Filter by title..." 
+                    placeholder="🔍 Search by title, author, or filename..." 
                     class="search-box" 
                     value="{{ search }}"
                     autofocus
@@ -410,7 +410,7 @@
                 <select name="ebook_filename" required>
                     <option value="">-- Choose Ebook --</option>
                     {% for eb in ebooks %}
-                    <option value="{{ eb.name }}">{{ eb.name }}</option>
+                    <option value="{{ eb.name }}">{{ eb.display_name }}</option>
                     {% endfor %}
                 </select>
                 {% else %}
