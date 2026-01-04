@@ -506,7 +506,7 @@
             <!-- Selection Area -->
             <div class="selection-area">
                 <form method="GET" action="/batch-match">
-                    <input type="text" name="search" placeholder="🔍 Filter by title..." class="search-box" value="{{ search }}" autofocus>
+                    <input type="text" name="search" placeholder="🔍 Search by title, author, or filename..." class="search-box" value="{{ search }}" autofocus>
                     <button type="submit" class="btn btn-primary">Search</button>
                 </form>
                 
@@ -538,7 +538,7 @@
                     <select class="ebook-select" id="ebook_select" onchange="selectEbook(this.value)">
                         <option value="">-- Choose Ebook --</option>
                         {% for eb in ebooks %}
-                        <option value="{{ eb.name }}">{{ eb.name }}</option>
+                        <option value="{{ eb.name }}">{{ eb.display_name }}</option>
                         {% endfor %}
                     </select>
                     

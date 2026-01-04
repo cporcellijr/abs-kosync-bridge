@@ -98,6 +98,28 @@ class EbookParser:
             logger.error(f"Error computing KOReader hash: {e}")
             return None
 
+    def _compute_koreader_hash_from_bytes(self, content):
+        """Compute KOReader hash from bytes (same algorithm as _compute_koreader_hash)."""
+        md5 = hashlib.md5()
+        try:
+            file_size = len(content)
+            for i in range(-1, 11):
+                offset = 0 if i == -1 else 1024 * (4 ** i)
+                if offset >= file_size: break
+                chunk = content[offset:offset + 1024]
+                if not chunk: break
+                md5.update(chunk)
+            return md5.hexdigest()
+        except Exception as e:
+            logger.error(f"Error computing KOReader hash from bytes: {e}")
+            return None
+
+    def get_kosync_id_from_bytes(self, filename, content):
+        """Compute KOSync ID from filename and file content bytes."""
+        if self.hash_method == "filename":
+            return hashlib.md5(filename.encode('utf-8')).hexdigest()
+        return self._compute_koreader_hash_from_bytes(content)
+
     def extract_text_and_map(self, filepath):
         filepath = Path(filepath)
         if not filepath.exists():
