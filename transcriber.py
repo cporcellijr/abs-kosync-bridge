@@ -101,41 +101,89 @@ class AudioTranscriber:
             return output_file
 
         book_cache_dir = self.cache_root / str(abs_id)
-        if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
-        book_cache_dir.mkdir(parents=True, exist_ok=True)
-
-        downloaded_files = []
+        progress_file = book_cache_dir / "_progress.json"
         MAX_DURATION_SECONDS = 45 * 60
 
+        # Try to resume from previous state, fall back to fresh start on any error
+        downloaded_files = []
+        full_transcript = []
+        chunks_completed = 0
+        cumulative_duration = 0.0
+        resuming = False
+
         try:
-            logger.info(f"📥 Phase 1: Downloading {len(audio_urls)} audio files...")
-            for idx, audio_data in enumerate(audio_urls):
-                stream_url = audio_data['stream_url']
-                extension = audio_data.get('ext', '.mp3')
-                local_path = book_cache_dir / f"part_{idx:03d}{extension}"
-                
-                logger.info(f"   Downloading Part {idx + 1}/{len(audio_urls)}...")
-                with requests.get(stream_url, stream=True, timeout=120) as r:
-                    r.raise_for_status()
-                    with open(local_path, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-                
-                if not local_path.exists() or local_path.stat().st_size == 0:
-                    raise ValueError(f"File {local_path} is empty or missing.")
+            if progress_file.exists():
+                try:
+                    with open(progress_file, 'r') as f:
+                        progress = json.load(f)
+                    chunks_completed = progress.get('chunks_completed', 0)
+                    cumulative_duration = progress.get('cumulative_duration', 0.0)
+                    full_transcript = progress.get('transcript', [])
+                    cached_files = sorted(book_cache_dir.glob("part_*_split_*.mp3")) or \
+                                   sorted(book_cache_dir.glob("part_*_split_*.m4b")) or \
+                                   sorted(book_cache_dir.glob("part_*.mp3")) or \
+                                   sorted(book_cache_dir.glob("part_*.m4b"))
+                    if cached_files and chunks_completed > 0:
+                        downloaded_files = list(cached_files)
+                        resuming = True
+                        logger.info(f"♻️ Resuming transcription: {chunks_completed}/{len(downloaded_files)} chunks done")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not resume (will start fresh): {e}")
+                    if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
+                    downloaded_files = []
+                    full_transcript = []
+                    chunks_completed = 0
+                    cumulative_duration = 0.0
 
-                downloaded_files.extend(self.split_audio_file(local_path, MAX_DURATION_SECONDS))
+            # Fresh start: download all files
+            if not resuming:
+                if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
+                book_cache_dir.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"✅ All parts cached. Starting transcription...")
-            logger.info(f"🧠 Phase 2: Transcribing using {self.model_size} model...")
-            
+                total_files = len(audio_urls)
+                logger.info(f"📥 Phase 1/2: Downloading {total_files} audio file(s)...")
+                for idx, audio_data in enumerate(audio_urls):
+                    stream_url = audio_data['stream_url']
+                    extension = audio_data.get('ext', '.mp3')
+                    local_path = book_cache_dir / f"part_{idx:03d}{extension}"
+
+                    pct = ((idx + 1) / total_files) * 100
+                    logger.info(f"   [{pct:.0f}%] Downloading file {idx + 1}/{total_files}...")
+                    with requests.get(stream_url, stream=True, timeout=120) as r:
+                        r.raise_for_status()
+                        with open(local_path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+
+                    if not local_path.exists() or local_path.stat().st_size == 0:
+                        raise ValueError(f"File {local_path} is empty or missing.")
+
+                    downloaded_files.extend(self.split_audio_file(local_path, MAX_DURATION_SECONDS))
+
+                logger.info(f"✅ Download complete. {len(downloaded_files)} chunk(s) to transcribe.")
+
+            logger.info(f"🧠 Phase 2/2: Transcribing with Whisper ({self.model_size} model)...")
+
+            # Calculate total audio duration for progress reporting
+            total_audio_duration = sum(self.get_audio_duration(f) for f in downloaded_files)
+            total_mins = total_audio_duration / 60
+            logger.info(f"   Total audio duration: {total_mins:.1f} minutes")
+
             model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=4)
-            full_transcript = []
-            cumulative_duration = 0.0
+            total_chunks = len(downloaded_files)
 
             for idx, local_path in enumerate(downloaded_files):
+                # Skip already-completed chunks when resuming
+                if idx < chunks_completed:
+                    continue
+
                 duration = self.get_audio_duration(local_path)
+
+                # Log progress before starting this chunk
+                pct = (cumulative_duration / total_audio_duration * 100) if total_audio_duration > 0 else 0
+                logger.info(f"   [{pct:.0f}%] Transcribing chunk {idx + 1}/{total_chunks} ({duration/60:.1f} min)...")
+
                 segments, info = model.transcribe(str(local_path), beam_size=1, best_of=1)
-                
+
                 for segment in segments:
                     full_transcript.append({
                         "start": segment.start + cumulative_duration,
@@ -143,19 +191,32 @@ class AudioTranscriber:
                         "text": segment.text.strip()
                     })
                 cumulative_duration += duration
+                chunks_completed = idx + 1
+
+                # Save progress after each chunk for resumption
+                with open(progress_file, 'w') as f:
+                    json.dump({
+                        'chunks_completed': chunks_completed,
+                        'cumulative_duration': cumulative_duration,
+                        'transcript': full_transcript
+                    }, f)
+
                 gc.collect()
 
             with open(output_file, 'w') as f: json.dump(full_transcript, f)
-            
+
             logger.info(f"✅ Transcription complete: {len(full_transcript)} segments")
+
+            # Clean up cache only on success
+            if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
+
             return output_file
 
         except Exception as e:
             logger.error(f"❌ Transcription failed: {e}")
             if output_file.exists(): os.remove(output_file)
+            # Don't delete cache dir - allows resume on retry
             raise e
-        finally:
-            if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
 
     def get_text_at_time(self, transcript_path, timestamp):
         try:

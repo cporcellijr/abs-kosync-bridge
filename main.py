@@ -368,6 +368,18 @@ class SyncManager:
                 logger.error(f"Sync error: {e}")
 
     def run_daemon(self):
+        # Recover any jobs that were interrupted mid-processing (e.g., service restart)
+        db = self.db_handler.load(default={"mappings": []})
+        recovered = 0
+        for mapping in db.get('mappings', []):
+            if mapping.get('status') == 'processing':
+                logger.info(f"♻️ Recovering interrupted job: {mapping.get('abs_title', mapping.get('abs_id'))}")
+                mapping['status'] = 'pending'
+                recovered += 1
+        if recovered:
+            self.db_handler.save(db)
+            logger.info(f"♻️ Recovered {recovered} interrupted job(s) - will retry on next check")
+
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)
         schedule.every(1).minutes.do(self.check_pending_jobs)
         schedule.every(15).minutes.do(self.run_discovery)
