@@ -289,6 +289,43 @@ def find_ebook_file(filename):
     return matches[0] if matches else None
 
 
+def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
+    """Get KOSync document ID for an ebook.
+
+    Tries Booklore API first (if configured and booklore_id provided),
+    falls back to filesystem if needed.
+    """
+    # Try Booklore API first
+    if booklore_id and manager.booklore_client.is_configured():
+        try:
+            content = manager.booklore_client.download_book(booklore_id)
+            if content:
+                kosync_id = manager.ebook_parser.get_kosync_id_from_bytes(ebook_filename, content)
+                if kosync_id:
+                    logger.debug(f"Computed KOSync ID from Booklore download: {kosync_id}")
+                    return kosync_id
+        except Exception as e:
+            logger.warning(f"Failed to get KOSync ID from Booklore, falling back to filesystem: {e}")
+
+    # Fall back to filesystem
+    ebook_path = find_ebook_file(ebook_filename)
+    if ebook_path:
+        return manager.ebook_parser.get_kosync_id(ebook_path)
+
+    # Neither source available - log helpful warning
+    if not manager.booklore_client.is_configured() and not EBOOK_DIR.exists():
+        logger.warning(
+            f"Cannot compute KOSync ID for '{ebook_filename}': "
+            "Neither Booklore integration nor /books volume is configured. "
+            "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "or mount the ebooks directory to /books."
+        )
+    elif not booklore_id and not ebook_path:
+        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore or filesystem")
+
+    return None
+
+
 class EbookResult:
     """Wrapper to provide consistent interface for ebooks from Booklore or filesystem."""
     def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None):
@@ -342,6 +379,12 @@ def get_searchable_ebooks(search_term):
 
     # Fallback to filesystem
     if not EBOOK_DIR.exists():
+        if not manager.booklore_client.is_configured():
+            logger.warning(
+                "No ebooks available: Neither Booklore integration nor /books volume is configured. "
+                "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+                "or mount the ebooks directory to /books."
+            )
         return []
 
     all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
@@ -491,10 +534,18 @@ def accept_suggestion(key):
         ebook_filename = sugg.get('source_filename')
     
     if not ebook_filename: return "Ebook filename missing", 400
-    ebook_path = find_ebook_file(ebook_filename)
-    if not ebook_path: return "Ebook file missing", 404
-    
-    kosync_doc_id = manager.ebook_parser.get_kosync_id(ebook_path)
+
+    # Get booklore_id if available for API-based hash computation
+    booklore_id = None
+    if manager.booklore_client.is_configured():
+        book = manager.booklore_client.find_book_by_filename(ebook_filename)
+        if book:
+            booklore_id = book.get('id')
+
+    # Compute KOSync ID (Booklore API first, filesystem fallback)
+    kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+    if not kosync_doc_id:
+        return "Could not compute KOSync ID for ebook", 404
     mapping = {
         "abs_id": abs_id, "abs_title": abs_title, "ebook_filename": ebook_filename,
         "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"
@@ -593,9 +644,18 @@ def match():
         audiobooks = manager.abs_client.get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
-        ebook_path = find_ebook_file(ebook_filename)
-        if not ebook_path: return "Ebook not found", 404
-        kosync_doc_id = manager.ebook_parser.get_kosync_id(ebook_path)
+
+        # Get booklore_id if available for API-based hash computation
+        booklore_id = None
+        if manager.booklore_client.is_configured():
+            book = manager.booklore_client.find_book_by_filename(ebook_filename)
+            if book:
+                booklore_id = book.get('id')
+
+        # Compute KOSync ID (Booklore API first, filesystem fallback)
+        kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+        if not kosync_doc_id:
+            return "Could not compute KOSync ID for ebook", 404
         mapping = {"abs_id": abs_id, "abs_title": manager._get_abs_title(selected_ab), "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
         def add_mapping(db):
             db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
@@ -643,10 +703,21 @@ def batch_match():
         elif action == 'process_queue':
             db = db_handler.load(default={"mappings": []})
             for item in session.get('queue', []):
-                ebook_path = find_ebook_file(item['ebook_filename'])
-                if not ebook_path: continue
-                kosync_doc_id = manager.ebook_parser.get_kosync_id(ebook_path)
-                mapping = {"abs_id": item['abs_id'], "abs_title": item['abs_title'], "ebook_filename": item['ebook_filename'], "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
+                ebook_filename = item['ebook_filename']
+
+                # Get booklore_id if available for API-based hash computation
+                booklore_id = None
+                if manager.booklore_client.is_configured():
+                    book = manager.booklore_client.find_book_by_filename(ebook_filename)
+                    if book:
+                        booklore_id = book.get('id')
+
+                # Compute KOSync ID (Booklore API first, filesystem fallback)
+                kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+                if not kosync_doc_id:
+                    logger.warning(f"Could not compute KOSync ID for {ebook_filename}, skipping")
+                    continue
+                mapping = {"abs_id": item['abs_id'], "abs_title": item['abs_title'], "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
                 db['mappings'] = [m for m in db['mappings'] if m['abs_id'] != item['abs_id']]
                 db['mappings'].append(mapping)
                 add_to_abs_collection(manager.abs_client, item['abs_id'])
@@ -747,6 +818,22 @@ def view_log():
 
 if __name__ == '__main__':
     logger.info("=== Unified ABS Manager Started ===")
+
+    # Check ebook source configuration
+    booklore_configured = manager.booklore_client.is_configured()
+    books_volume_exists = EBOOK_DIR.exists()
+
+    if booklore_configured:
+        logger.info(f"✅ Booklore integration enabled - ebooks sourced from API")
+    elif books_volume_exists:
+        logger.info(f"✅ Ebooks directory mounted at {EBOOK_DIR}")
+    else:
+        logger.warning(
+            "⚠️  NO EBOOK SOURCE CONFIGURED: Neither Booklore integration nor /books volume is available. "
+            "New book matches will fail. Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "or mount the ebooks directory to /books."
+        )
+
     logger.info(f"Book Linker monitoring interval: {MONITOR_INTERVAL} seconds")
     monitor_thread = threading.Thread(target=monitor_readaloud_files, daemon=True)
     monitor_thread.start()
