@@ -65,6 +65,8 @@ class StorytellerDB:
         except: return None, None, None, None
 
     def update_progress(self, ebook_filename, percentage, rich_locator=None):
+        if not self.db_path.exists():
+            return False  # Silently skip if Storyteller DB not available
         try:
             with sqlite3.connect(f"file:{self.db_path}", uri=True, timeout=10) as conn:
                 conn.row_factory = sqlite3.Row
