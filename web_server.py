@@ -288,6 +288,72 @@ def find_ebook_file(filename):
     matches = list(base.rglob(filename))
     return matches[0] if matches else None
 
+
+class EbookResult:
+    """Wrapper to provide consistent interface for ebooks from Booklore or filesystem."""
+    def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None):
+        self.name = name
+        self.title = title or Path(name).stem
+        self.subtitle = subtitle or ''
+        self.authors = authors or ''
+        self.booklore_id = booklore_id
+        self._path = path
+        self.has_metadata = booklore_id is not None
+
+    @property
+    def display_name(self):
+        """Format: 'Author - Title: Subtitle' for Booklore, filename for filesystem."""
+        if self.has_metadata and self.authors:
+            full_title = self.title
+            if self.subtitle:
+                full_title = f"{self.title}: {self.subtitle}"
+            return f"{self.authors} - {full_title}"
+        return self.name
+
+    @property
+    def stem(self):
+        return Path(self.name).stem
+
+    def __str__(self):
+        return self.name
+
+
+def get_searchable_ebooks(search_term):
+    """Get ebooks from Booklore API if available, otherwise filesystem.
+    Returns list of EbookResult objects for consistent interface."""
+
+    # Try Booklore first if configured
+    if manager.booklore_client.is_configured():
+        try:
+            books = manager.booklore_client.search_books(search_term)
+            if books:
+                return [
+                    EbookResult(
+                        name=b.get('fileName', ''),
+                        title=b.get('title'),
+                        subtitle=b.get('subtitle'),
+                        authors=b.get('authors'),
+                        booklore_id=b.get('id')
+                    )
+                    for b in books if b.get('fileName', '').lower().endswith('.epub')
+                ]
+        except Exception as e:
+            logger.warning(f"Booklore search failed, falling back to filesystem: {e}")
+
+    # Fallback to filesystem
+    if not EBOOK_DIR.exists():
+        return []
+
+    all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
+    if not search_term:
+        return [EbookResult(name=eb.name, path=eb) for eb in all_epubs]
+
+    return [
+        EbookResult(name=eb.name, path=eb)
+        for eb in all_epubs
+        if search_term.lower() in eb.name.lower()
+    ]
+
 def add_to_abs_collection(abs_client, item_id, collection_name=None):
     if collection_name is None: collection_name = ABS_COLLECTION_NAME
     try:
@@ -545,10 +611,9 @@ def match():
     audiobooks, ebooks = [], []
     if search:
         audiobooks = manager.abs_client.get_all_audiobooks()
-        ebooks = list(EBOOK_DIR.glob("**/*.epub"))
         audiobooks = [ab for ab in audiobooks if search in manager._get_abs_title(ab).lower()]
-        ebooks = [eb for eb in ebooks if search in eb.name.lower()]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
+        ebooks = get_searchable_ebooks(search)
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager._get_abs_title)
 
 @app.route('/batch-match', methods=['GET', 'POST'])
@@ -596,10 +661,9 @@ def batch_match():
     audiobooks, ebooks = [], []
     if search:
         audiobooks = manager.abs_client.get_all_audiobooks()
-        ebooks = list(EBOOK_DIR.glob("**/*.epub"))
         audiobooks = [ab for ab in audiobooks if search in manager._get_abs_title(ab).lower()]
-        ebooks = [eb for eb in ebooks if search in eb.name.lower()]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
+        ebooks = get_searchable_ebooks(search)
         ebooks.sort(key=lambda x: x.name.lower())
     return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search, get_title=manager._get_abs_title)
 
