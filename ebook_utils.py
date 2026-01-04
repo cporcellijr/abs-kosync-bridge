@@ -49,8 +49,12 @@ class LRUCache:
 
 
 class EbookParser:
-    def __init__(self, books_dir):
+    # Updated __init__ to accept epub_cache_dir
+    def __init__(self, books_dir, epub_cache_dir=None):
         self.books_dir = Path(books_dir)
+        # Use provided cache dir or default
+        self.epub_cache_dir = Path(epub_cache_dir) if epub_cache_dir else Path("/data/epub_cache")
+        
         cache_size = int(os.getenv("EBOOK_CACHE_SIZE", 3))
         self.cache = LRUCache(capacity=cache_size)
         self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
@@ -58,14 +62,23 @@ class EbookParser:
         logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method})")
 
     def _resolve_book_path(self, filename):
+        # 1. First, search in books_dir (filesystem mount)
         try:
             safe_name = glob.escape(filename)
             return next(self.books_dir.glob(f"**/{safe_name}"))
         except StopIteration:
             pass
+        
         for f in self.books_dir.rglob("*"):
             if f.name == filename:
                 return f
+
+        # 2. Then, check epub_cache (downloaded from Booklore)
+        if self.epub_cache_dir.exists():
+            cached_path = self.epub_cache_dir / filename
+            if cached_path.exists():
+                return cached_path
+    
         raise FileNotFoundError(f"Could not locate {filename}")
 
     def get_kosync_id(self, filepath):
