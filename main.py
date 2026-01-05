@@ -165,7 +165,22 @@ class SyncManager:
             page_num = int(total_pages * percentage)
             is_finished = percentage > 0.99
 
-            # Update progress
+            current_status = ub.get('status_id')
+
+            # Handle Status Changes
+            # If Finished, prefer marking as Read (3) first
+            if is_finished and current_status != 3:
+                self.hardcover_client.update_status(mapping['hardcover_book_id'], 3, mapping.get('hardcover_edition_id'))
+                logger.info(f"📚 Hardcover: Marked '{mapping.get('abs_title', 'Unknown')}' as finished")
+                current_status = 3
+
+            # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
+            elif percentage > 0.02 and current_status == 1:
+                self.hardcover_client.update_status(mapping['hardcover_book_id'], 2, mapping.get('hardcover_edition_id'))
+                logger.info(f"📚 Hardcover: Started '{mapping.get('abs_title', 'Unknown')}' (>2%)")
+                current_status = 2
+
+            # Now it's safe to update progress (Hardcover rejects page updates for Want to Read)
             self.hardcover_client.update_progress(
                 ub['id'], 
                 page_num, 
@@ -173,19 +188,6 @@ class SyncManager:
                 is_finished=is_finished, 
                 current_percentage=percentage
             )
-
-            # Handle Status Changes
-            current_status = ub.get('status_id')
-
-            # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
-            if percentage > 0.02 and current_status == 1:
-                self.hardcover_client.update_status(mapping['hardcover_book_id'], 2, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: Started '{mapping.get('abs_title', 'Unknown')}' (>2%)")
-
-            # If Finished, switch to "Read" (3)
-            if is_finished and current_status != 3:
-                self.hardcover_client.update_status(mapping['hardcover_book_id'], 3, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: Marked '{mapping.get('abs_title', 'Unknown')}' as finished")
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
