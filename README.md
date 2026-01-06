@@ -1,5 +1,19 @@
-Quick note: latest updates removed the requirement for storyteller user_id and updated to user username/password. 
+
 For most consistent sync with Storyteller recommend using https://github.com/kyonifer/silveran-reader Available for Apple devices.
+
+
+**Important: Current Branch Status**
+
+- The `main` branch of the project (no longer under active development).
+- Active development and user testing are happening on the **`Release-candidate`** branch.
+- This branch represents a **full rework** of the application with major changes and new features.
+- ⚠️ `Release-candidate` is currently **in testing**. 
+
+👉 **If you want the latest version for testing or development**, check out the `Release-candidate` branch.
+
+Contributions and pull requests should be based on `Release-candidate`.
+
+Once testing is complete and the rework is stabilized, `Release-candidate` will become the new `main`.
 
 # ABS-KoSync Enhanced
 
