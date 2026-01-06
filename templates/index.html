@@ -80,19 +80,6 @@
             border-color: rgba(102, 126, 234, 0.6);
         }
         
-        .suggestion-badge {
-            position: absolute;
-            top: -6px;
-            right: -6px;
-            background: #e91e63;
-            color: white;
-            border-radius: 12px;
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 700;
-            box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
-        }
-        
         /* Main Container */
         .container {
             max-width: 1800px;
@@ -490,12 +477,6 @@
         </div>
         
         <div class="nav-actions">
-            <a href="/suggestions" class="btn" style="position: relative;">
-                💡 Suggestions
-                {% if suggestion_count > 0 %}
-                <span class="suggestion-badge">{{ suggestion_count }}</span>
-                {% endif %}
-            </a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>

@@ -90,6 +90,12 @@ class ABSClient:
         return 0.0
 
     def update_progress(self, item_id, timestamp):
+        # Sanity check: if timestamp looks like milliseconds (greater than 1,000,000), convert to seconds
+        if timestamp > 1000000:
+            timestamp = timestamp / 1000.0
+            logger.warning(f"⚠️ Converted ABS timestamp from milliseconds to seconds: {timestamp}")
+        # Ensure we use a float for the payload
+        timestamp = float(timestamp)
         url = f"{self.base_url}/api/me/progress/{item_id}"
         payload = {"currentTime": timestamp, "duration": 0, "isFinished": False}
         try: requests.patch(url, headers=self.headers, json=payload)

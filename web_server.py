@@ -26,7 +26,6 @@ manager = SyncManager()
 
 db_handler = JsonDB("/data/mapping_db.json")
 state_handler = JsonDB("/data/last_state.json")
-suggestions_handler = JsonDB("/data/suggestions.json")  # RESTORED
 
 # ---------------- BOOK LINKER CONFIG ----------------
 
@@ -475,7 +474,6 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
 def index():
     """Dashboard"""
     db = db_handler.load(default={"mappings": []})
-    suggestions = suggestions_handler.load(default={})
     all_states = state_handler.load(default={})
 
     integrations = {
@@ -518,16 +516,32 @@ def index():
                 mapping['kosync_progress'] = get_pct('kosync_pct')
                 mapping['storyteller_progress'] = get_pct('storyteller_pct')
                 mapping['booklore_progress'] = get_pct('booklore_pct')
-                mapping['abs_progress'] = get_pct('abs_pct')
-                
-                # Recalculate Unified Progress from the max of these
+                mapping['abs_progress'] = state.get('abs_ts', 0)
+
+                # Sanity check: ABS timestamp may be stored in milliseconds in the state file.
+                # If it's a very large value, convert milliseconds -> seconds. Keep the value
+                # as seconds in the mapping so the UI can show time like 08:00:00.
+                if mapping['abs_progress'] > 1_000_000:
+                    mapping['abs_progress'] = mapping['abs_progress'] / 1000.0
+
+                # Compute percentage value for unified progress without overwriting abs_progress.
+                duration = mapping.get('duration', 0)
+                if duration and duration > 0:
+                    abs_pct_value = min((mapping['abs_progress'] / duration) * 100.0, 100.0)
+                else:
+                    # If duration unknown, use the percentage stored in the state (abs_pct) and scale to 0-100.
+                    abs_pct_value = min(state.get('abs_pct', 0) * 100.0, 100.0)
+
+                # Recalculate Unified Progress from the max of these (use abs_pct_value)
                 max_p = max(
                     mapping['kosync_progress'],
+
                     mapping['storyteller_progress'],
                     mapping['booklore_progress'],
-                    mapping['abs_progress']
+                    abs_pct_value
                 )
-                if max_p > 0: mapping['unified_progress'] = max_p
+                if max_p > 0:
+                    mapping['unified_progress'] = min(max_p, 100.0)
 
         # 3. Calculate Totals for Top Bar
         duration = mapping.get('duration', 0)
@@ -556,111 +570,8 @@ def index():
     else:
         overall_progress = 0
 
-    suggestion_count = sum(1 for s in suggestions.values() if s.get('state') == 'pending')
+    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
 
-    return render_template('index.html', mappings=mappings, suggestion_count=suggestion_count, integrations=integrations, progress=overall_progress)
-
-# RESTORED SUGGESTION ROUTES
-@app.route('/suggestions')
-def suggestions_page():
-    suggestions = suggestions_handler.load(default={})
-    pending = {k: v for k, v in suggestions.items() if v.get('state') == 'pending'}
-    sorted_sugg = sorted(pending.items(), key=lambda x: x[1].get('score', 0), reverse=True)
-    return render_template('suggestions.html', suggestions=sorted_sugg)
-
-@app.route('/suggestions/accept/<key>', methods=['POST'])
-def accept_suggestion(key):
-    suggestions = suggestions_handler.load(default={})
-    if key not in suggestions: return "Suggestion not found", 404
-    
-    sugg = suggestions[key]
-    abs_id, abs_title, ebook_filename = None, None, None
-    
-    if sugg.get('match_type') == 'ebook':
-        abs_id = sugg['source_id']
-        abs_title = sugg['source_title']
-        ebook_filename = sugg['match_filename']
-    elif sugg.get('match_type') == 'audiobook':
-        abs_id = sugg['match_id']
-        abs_title = sugg['match_title']
-        ebook_filename = sugg.get('source_filename')
-    
-    if not ebook_filename: return "Ebook filename missing", 400
-    
-    # Get booklore_id if available for API-based hash computation
-    booklore_id = None
-    if manager.booklore_client.is_configured():
-        book = manager.booklore_client.find_book_by_filename(ebook_filename)
-        if book:
-            booklore_id = book.get('id')
-
-    # Compute KOSync ID (Booklore API first, filesystem fallback)
-    kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
-    if not kosync_doc_id:
-        return "Could not compute KOSync ID for ebook", 404
-    
-    mapping = {
-        "abs_id": abs_id, "abs_title": abs_title, "ebook_filename": ebook_filename,
-        "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"
-    }
-    
-    def txn(db):
-        db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
-        db['mappings'].append(mapping)
-        return db
-    db_handler.update(txn, default={"mappings": []})
-    
-    sugg['state'] = 'accepted'
-    suggestions_handler.save(suggestions)
-    
-    add_to_abs_collection(manager.abs_client, abs_id)
-    add_to_booklore_shelf(ebook_filename)
-    manager.storyteller_db.add_to_collection(ebook_filename)
-    return redirect(url_for('suggestions_page'))
-    
-    sugg = suggestions[key]
-    abs_id, abs_title, ebook_filename = None, None, None
-    
-    if sugg.get('match_type') == 'ebook':
-        abs_id = sugg['source_id']
-        abs_title = sugg['source_title']
-        ebook_filename = sugg['match_filename']
-    elif sugg.get('match_type') == 'audiobook':
-        abs_id = sugg['match_id']
-        abs_title = sugg['match_title']
-        ebook_filename = sugg.get('source_filename')
-    
-    if not ebook_filename: return "Ebook filename missing", 400
-    ebook_path = find_ebook_file(ebook_filename)
-    if not ebook_path: return "Ebook file missing", 404
-    
-    kosync_doc_id = manager.ebook_parser.get_kosync_id(ebook_path)
-    mapping = {
-        "abs_id": abs_id, "abs_title": abs_title, "ebook_filename": ebook_filename,
-        "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"
-    }
-    
-    def txn(db):
-        db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
-        db['mappings'].append(mapping)
-        return db
-    db_handler.update(txn, default={"mappings": []})
-    
-    sugg['state'] = 'accepted'
-    suggestions_handler.save(suggestions)
-    
-    add_to_abs_collection(manager.abs_client, abs_id)
-    add_to_booklore_shelf(ebook_filename)
-    manager.storyteller_db.add_to_collection(ebook_filename)
-    return redirect(url_for('suggestions_page'))
-
-@app.route('/suggestions/dismiss/<key>', methods=['POST'])
-def dismiss_suggestion(key):
-    suggestions = suggestions_handler.load(default={})
-    if key in suggestions:
-        suggestions[key]['state'] = 'dismissed'
-        suggestions_handler.save(suggestions)
-    return redirect(url_for('suggestions_page'))
 
 @app.route('/book-linker', methods=['GET', 'POST'])
 def book_linker():

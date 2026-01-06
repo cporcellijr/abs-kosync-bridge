@@ -14,7 +14,6 @@ from api_clients import ABSClient, KoSyncClient
 from hardcover_client import HardcoverClient
 from booklore_client import BookloreClient
 from ebook_utils import EbookParser
-from suggestion_manager import SuggestionManager
 
 # FIX: Safer import logic that doesn't crash immediately
 StorytellerClientClass = None
@@ -69,7 +68,6 @@ class SyncManager:
         self.state_handler = JsonDB(STATE_FILE)
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={})
-        self.suggestion_manager = SuggestionManager(DATA_DIR, self.ebook_parser, self.abs_client, self.storyteller_db)
 
         self._job_queue = []
         self._job_lock = threading.Lock()
@@ -363,10 +361,6 @@ class SyncManager:
       
             self.db = self.db_handler.load()
 
-    def run_discovery(self):
-        self.db = self.db_handler.load(default={"mappings": []})
-        self.suggestion_manager.run_discovery_cycle([m['abs_id'] for m in self.db['mappings']])
-
     def get_text_from_storyteller_fragment(self, ebook_filename, href, fragment_id):
         return self.ebook_parser.resolve_locator_id(ebook_filename, href, fragment_id)
 
@@ -465,7 +459,7 @@ class SyncManager:
                         match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=abs_pct)
                         if match_pct:
                             # Send full rich locator back to KOReader (as xpath)
-                            self.kosync_client.update_progress(ko_id, match_pct, rich_locator.get('xpath'))
+                            self.kosync_client.update_progress(ko_id, match_pct, None)
                             self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                             self.booklore_client.update_progress(epub, match_pct, rich_locator)
                             final_pct = match_pct
@@ -509,7 +503,7 @@ class SyncManager:
                             self.abs_client.update_progress(abs_id, ts)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
                             if match_pct:
-                                self.kosync_client.update_progress(ko_id, match_pct, rich_locator.get('xpath'))
+                                self.kosync_client.update_progress(ko_id, match_pct, None)
                                 self.booklore_client.update_progress(epub, match_pct, rich_locator)
                                 final_pct = match_pct
                             else:
@@ -528,7 +522,7 @@ class SyncManager:
                             self.abs_client.update_progress(abs_id, ts)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
                             if match_pct:
-                                self.kosync_client.update_progress(ko_id, match_pct, rich_locator.get('xpath'))
+                                self.kosync_client.update_progress(ko_id, match_pct, None)
                                 self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                                 final_pct = match_pct
                             else:
@@ -559,7 +553,6 @@ class SyncManager:
     def run_daemon(self):
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)
         schedule.every(1).minutes.do(self.check_pending_jobs)
-        schedule.every(15).minutes.do(self.run_discovery)
         logger.info("Daemon started.")
         self.sync_cycle()
         while True:
