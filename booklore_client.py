@@ -73,14 +73,32 @@ class BookloreClient:
         return bool(self.base_url and self.username and self.password)
 
     def check_connection(self):
-        if not all([self.base_url, self.username, self.password]): return False
-        # Added check:
-        if not self.is_configured(): return False
-        
+        # Ensure Booklore is configured first
+        if not all([self.base_url, self.username, self.password]):
+            logger.warning("⚠️ Booklore not configured (skipping)")
+            return False
+
         token = self._get_fresh_token()
         if token:
-            logger.info(f"✅ Connected to Booklore at {self.base_url}")
+            # If first run, show INFO; otherwise keep at DEBUG
+            first_run_marker = '/data/.first_run_done'
+            try:
+                first_run = not os.path.exists(first_run_marker)
+            except Exception:
+                first_run = False
+
+            if first_run:
+                logger.info(f"✅ Connected to Booklore at {self.base_url}")
+                try:
+                    open(first_run_marker, 'w').close()
+                except Exception:
+                    pass
+            else:
+                logger.debug(f"✅ Connected to Booklore at {self.base_url}")
             return True
+
+        # If we were configured but couldn't get a token, warn
+        logger.warning("❌ Booklore connection failed: could not obtain auth token")
         return False
 
     def _refresh_book_cache(self):
@@ -116,6 +134,7 @@ class BookloreClient:
         return False
 
     def find_book_by_filename(self, ebook_filename):
+        # Ensure cache is reasonably fresh for lookups
         if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
         if not self._book_cache: self._refresh_book_cache()
 
@@ -129,6 +148,18 @@ class BookloreClient:
         for cached_name, book_info in self._book_cache.items():
             if stem in cached_name or cached_name.replace('.epub', '') in stem:
                 return book_info
+
+        # If not found, try refreshing cache once (in case Booklore updated externally)
+        if self._refresh_book_cache():
+            filename = Path(ebook_filename).name.lower()
+            if filename in self._book_cache: return self._book_cache[filename]
+            stem = Path(filename).stem.lower()
+            for cached_name, book_info in self._book_cache.items():
+                if Path(cached_name).stem.lower() == stem: return book_info
+            for cached_name, book_info in self._book_cache.items():
+                if stem in cached_name or cached_name.replace('.epub', '') in stem:
+                    return book_info
+
         return None
 
     def search_books(self, search_term):
@@ -219,6 +250,11 @@ class BookloreClient:
         response = self._make_request("POST", "/api/v1/books/progress", payload)
         if response and response.status_code in [200, 201, 204]:
             logger.info(f"✅ Booklore: {sanitize_log_data(ebook_filename)} → {pct_display:.1f}%")
+            # Refresh cache to reflect recent update so subsequent gets return fresh values
+            try:
+                self._refresh_book_cache()
+            except Exception:
+                logger.debug("Booklore: Cache refresh failed after update")
             return True
         else:
             status = response.status_code if response else "No response"

@@ -17,20 +17,40 @@ class ABSClient:
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
     def check_connection(self):
+        # Verify configuration first
+        if not self.base_url or not self.token:
+            logger.warning("⚠️ Audiobookshelf not configured (skipping)")
+            return False
+
         url = f"{self.base_url}/api/me"
         try:
             r = requests.get(url, headers=self.headers, timeout=5)
             if r.status_code == 200:
-                logger.info(f"✅ Connected to Audiobookshelf as user: {r.json().get('username', 'Unknown')}")
+                # If this is the first container start, show INFO for visibility; otherwise use DEBUG
+                first_run_marker = '/data/.first_run_done'
+                try:
+                    first_run = not os.path.exists(first_run_marker)
+                except Exception:
+                    first_run = False
+
+                if first_run:
+                    logger.info(f"✅ Connected to Audiobookshelf as user: {r.json().get('username', 'Unknown')}")
+                    try:
+                        open(first_run_marker, 'w').close()
+                    except Exception:
+                        pass
+                else:
+                    logger.debug(f"✅ Connected to Audiobookshelf as user: {r.json().get('username', 'Unknown')}")
                 return True
             else:
-                logger.error(f"❌ Audiobookshelf Connection Failed: {r.status_code} - {r.text}")
+                # Keep failure visible as warning
+                logger.warning(f"❌ Audiobookshelf Connection Failed: {r.status_code} - {sanitize_log_data(r.text)}")
                 return False
         except requests.exceptions.ConnectionError:
-            logger.error(f"❌ Could not connect to Audiobookshelf at {self.base_url}. Check URL and Docker Network.")
+            logger.warning(f"❌ Could not connect to Audiobookshelf at {self.base_url}. Check URL and Docker Network.")
             return False
         except Exception as e:
-            logger.error(f"❌ Audiobookshelf Error: {e}")
+            logger.warning(f"❌ Audiobookshelf Error: {e}")
             return False
 
     def get_all_audiobooks(self):
@@ -164,22 +184,52 @@ class KoSyncClient:
 
     def check_connection(self):
         if not self.is_configured():
-            logger.info("ℹ️  KoSync not configured (skipping)")
+            logger.warning("⚠️ KoSync not configured (skipping)")
             return False
         url = f"{self.base_url}/healthcheck"
         try:
             r = requests.get(url, timeout=5)
             if r.status_code == 200:
-                 logger.info(f"✅ Connected to KoSync Server at {self.base_url}")
+                 # First-run visible INFO, otherwise DEBUG
+                 first_run_marker = '/data/.first_run_done'
+                 try:
+                     first_run = not os.path.exists(first_run_marker)
+                 except Exception:
+                     first_run = False
+
+                 if first_run:
+                     logger.info(f"✅ Connected to KoSync Server at {self.base_url}")
+                     try:
+                         open(first_run_marker, 'w').close()
+                     except Exception:
+                         pass
+                 else:
+                     logger.debug(f"✅ Connected to KoSync Server at {self.base_url}")
                  return True
             # Fallback check
             url_sync = f"{self.base_url}/syncs/progress/test-connection"
             headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
             r = requests.get(url_sync, headers=headers, timeout=5)
-            logger.info(f"✅ Connected to KoSync Server (Response: {r.status_code})")
-            return True
+            if r.status_code == 200:
+                first_run_marker = '/data/.first_run_done'
+                try:
+                    first_run = not os.path.exists(first_run_marker)
+                except Exception:
+                    first_run = False
+
+                if first_run:
+                    logger.info(f"✅ Connected to KoSync Server (Response: {r.status_code})")
+                    try:
+                        open(first_run_marker, 'w').close()
+                    except Exception:
+                        pass
+                else:
+                    logger.debug(f"✅ Connected to KoSync Server (Response: {r.status_code})")
+                return True
+            logger.warning(f"❌ KoSync connection failed (Response: {r.status_code})")
+            return False
         except Exception as e:
-            logger.error(f"❌ KoSync Error: {e}")
+            logger.warning(f"❌ KoSync Error: {e}")
             return False
 
     def get_progress(self, doc_id):

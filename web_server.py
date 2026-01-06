@@ -20,7 +20,8 @@ from logging_utils import sanitize_log_data
 app = Flask(__name__, static_folder='/app/static', static_url_path='/static')
 app.secret_key = "kosync-queue-secret-unified-app"
 
-logging.basicConfig(level=logging.INFO)
+# NOTE: Logging is configured centrally in `main.py`. Avoid calling
+# `logging.basicConfig` here to prevent adding duplicate handlers.
 logger = logging.getLogger(__name__)
 
 manager = SyncManager()
@@ -64,8 +65,13 @@ LOG_PATH = LOG_DIR / "unified_app.log"
 
 def setup_file_logging():
     file_handler = RotatingFileHandler(str(LOG_PATH), maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s'))
-    logger.addHandler(file_handler)
+    # Attach to the root logger so all module loggers go to the same file
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    # Prevent Werkzeug from propagating its logs up to the root logger (avoids duplicate access lines)
+    logging.getLogger('werkzeug').propagate = False
 
 setup_file_logging()
 
