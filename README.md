@@ -3,17 +3,12 @@ For most consistent sync with Storyteller recommend using https://github.com/kyo
 
 
 **Important: Current Branch Status**
+## ⚠️ CRITICAL STATUS UPDATE: Release-candidate is BROKEN
 
-- The `main` branch of the project (no longer under active development).
-- Active development and user testing are happening on the **`Release-candidate`** branch.
-- This branch represents a **full rework** of the application with major changes and new features.
-- ⚠️ `Release-candidate` is currently **in testing**. 
 
-👉 **If you want the latest version for testing or development**, check out the `Release-candidate` branch.
-
-Contributions and pull requests should be based on `Release-candidate`.
-
-Once testing is complete and the rework is stabilized, `Release-candidate` will become the new `main`.
+**Current Status:**
+We are actively working on a "Hybrid Fix" 
+Until a stable release is merged into `main`, **please stick to the `main` branch (Release 5.9).**
 
 # ABS-KoSync Enhanced
 
