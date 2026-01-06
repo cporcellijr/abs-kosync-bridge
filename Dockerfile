@@ -38,11 +38,11 @@ COPY main.py /app/src/main.py
 COPY storyteller_db.py /app/src/storyteller_db.py
 COPY storyteller_api.py /app/src/storyteller_api.py
 COPY transcriber.py /app/src/transcriber.py
+COPY logging_utils.py /app/src/logging_utils.py
 COPY ebook_utils.py /app/src/ebook_utils.py
 COPY api_clients.py /app/src/api_clients.py
 COPY json_db.py /app/src/json_db.py
 COPY hardcover_client.py /app/src/hardcover_client.py
-COPY suggestion_manager.py /app/src/suggestion_manager.py
 COPY booklore_client.py /app/src/booklore_client.py
 
 COPY web_server.py /app/web_server.py

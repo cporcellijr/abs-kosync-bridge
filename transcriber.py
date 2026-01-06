@@ -23,6 +23,8 @@ import math
 from collections import OrderedDict
 import re
 
+from logging_utils import sanitize_log_data, time_execution
+
 logger = logging.getLogger(__name__)
 
 
@@ -171,6 +173,7 @@ class AudioTranscriber:
         
         return new_files if new_files else [file_path]
 
+    @time_execution
     def process_audio(self, abs_id, audio_urls):
         output_file = self.transcripts_dir / f"{abs_id}.json"
         if output_file.exists():
@@ -387,6 +390,7 @@ class AudioTranscriber:
             logger.error(f"Error reading transcript {transcript_path}: {e}")
         return None
 
+    @time_execution
     def find_time_for_text(self, transcript_path, search_text, hint_percentage=None):
         """
         Find timestamp for given text using windowed fuzzy matching.
@@ -441,7 +445,7 @@ class AudioTranscriber:
                         best_match = window
                 
                 if best_score >= self.match_threshold:
-                    logger.debug(f"Hint match: {best_score}% at {best_match['start']:.1f}s")
+                    logger.info(f"✅ Match found at {best_match['start']:.1f}s | Confidence: {best_score}% - '{sanitize_log_data(clean_search)}'")
                     return best_match['start']
             
             # Second: search all windows
@@ -452,7 +456,7 @@ class AudioTranscriber:
                     best_match = window
             
             if best_match and best_score >= self.match_threshold:
-                logger.info(f"✅ Text match found: {best_score}% (Threshold: {self.match_threshold})")
+                logger.info(f"✅ Match found at {best_match['start']:.1f}s | Confidence: {best_score}% - '{sanitize_log_data(clean_search)}'")
                 return best_match['start']
             else:
                 logger.warning(f"No good match found (best: {best_score}% < {self.match_threshold}%)")

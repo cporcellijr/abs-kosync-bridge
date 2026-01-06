@@ -18,6 +18,8 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import date
 
+from logging_utils import sanitize_log_data
+
 logger = logging.getLogger(__name__)
 
 

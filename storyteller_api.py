@@ -6,6 +6,8 @@ import requests
 from typing import Optional, Dict, Tuple, Any
 from pathlib import Path
 
+from logging_utils import sanitize_log_data
+
 logger = logging.getLogger(__name__)
 
 class StorytellerAPIClient:
@@ -206,7 +208,7 @@ class StorytellerAPIClient:
         payload = {"collections": [col_uuid], "books": [book_uuid]}
         r_add = self._make_request("POST", endpoint, payload)
         if r_add and r_add.status_code in [200, 204]:
-             logger.info(f"✅ Storyteller: Added '{ebook_filename}' to '{collection_name}'")
+             logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Storyteller Collection: {collection_name}")
              return True
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"

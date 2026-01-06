@@ -5,6 +5,8 @@ import logging
 import requests
 from pathlib import Path
 
+from logging_utils import sanitize_log_data
+
 logger = logging.getLogger(__name__)
 
 class BookloreClient:
@@ -211,12 +213,12 @@ class BookloreClient:
         elif book_type == 'CBX':
             payload = {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}}
         else:
-            logger.warning(f"Booklore: Unknown book type {book_type} for {ebook_filename}")
+            logger.warning(f"Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
             return False
 
         response = self._make_request("POST", "/api/v1/books/progress", payload)
         if response and response.status_code in [200, 201, 204]:
-            logger.info(f"✅ Booklore: {ebook_filename} → {pct_display:.1f}%")
+            logger.info(f"✅ Booklore: {sanitize_log_data(ebook_filename)} → {pct_display:.1f}%")
             return True
         else:
             status = response.status_code if response else "No response"

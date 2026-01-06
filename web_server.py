@@ -13,6 +13,7 @@ from logging.handlers import RotatingFileHandler
 from urllib.parse import urljoin
 import html
 from json_db import JsonDB
+from logging_utils import sanitize_log_data
 
 # ---------------- APP SETUP ----------------
 
@@ -436,8 +437,16 @@ def add_to_abs_collection(abs_client, item_id, collection_name=None):
         
         if not target_collection: return False
         add_url = f"{abs_client.base_url}/api/collections/{target_collection['id']}/book"
-        requests.post(add_url, headers=abs_client.headers, json={"id": item_id})
-        return True
+        r_add = requests.post(add_url, headers=abs_client.headers, json={"id": item_id})
+        if r_add.status_code in [200, 201, 204]:
+            try:
+                details = abs_client.get_item_details(item_id)
+                title = details.get('media', {}).get('metadata', {}).get('title') if details else None
+            except Exception:
+                title = None
+            logger.info(f"🏷️ Added '{sanitize_log_data(title or str(item_id))}' to ABS Collection: {collection_name}")
+            return True
+        return False
     except: return False
 
 def add_to_booklore_shelf(ebook_filename, shelf_name=None):
@@ -465,8 +474,11 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
             if r_create.status_code == 201: target_shelf = r_create.json()
             else: return False
             
-        requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers, json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
-        return True
+        r_assign = requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers, json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
+        if r_assign.status_code in [200, 201, 204]:
+            logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
+            return True
+        return False
     except: return False
 
 # ---------------- ROUTES ----------------
@@ -655,6 +667,7 @@ def match():
         # Compute KOSync ID (Booklore API first, filesystem fallback)
         kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
         if not kosync_doc_id:
+            logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
             
         mapping = {"abs_id": abs_id, "abs_title": manager._get_abs_title(selected_ab), "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
@@ -719,7 +732,7 @@ def batch_match():
                 # Compute KOSync ID (Booklore API first, filesystem fallback)
                 kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
                 if not kosync_doc_id:
-                    logger.warning(f"Could not compute KOSync ID for {ebook_filename}, skipping")
+                    logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
                     
                 mapping = {"abs_id": item['abs_id'], "abs_title": item['abs_title'], "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
@@ -776,7 +789,7 @@ def clear_progress(abs_id):
     
     try:
         # Reset progress to 0 in all three systems
-        logger.info(f"Clearing progress for {mapping.get('abs_title', abs_id)}")
+        logger.info(f"Clearing progress for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
         
         # ABS: Set to 0 seconds
         manager.abs_client.update_progress(abs_id, 0)
@@ -806,7 +819,7 @@ def clear_progress(abs_id):
             state_handler.save(state)
             logger.info(f"  ✓ Last state cleared")
         
-        logger.info(f"✅ Progress cleared successfully for {mapping.get('abs_title', abs_id)}")
+        logger.info(f"✅ Progress cleared successfully for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
         
     except Exception as e:
         logger.error(f"Failed to clear progress for {abs_id}: {e}")

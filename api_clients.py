@@ -5,6 +5,8 @@ import logging
 import time
 import hashlib
 
+from logging_utils import sanitize_log_data
+
 logger = logging.getLogger(__name__)
 
 class ABSClient:
@@ -98,8 +100,17 @@ class ABSClient:
         timestamp = float(timestamp)
         url = f"{self.base_url}/api/me/progress/{item_id}"
         payload = {"currentTime": timestamp, "duration": 0, "isFinished": False}
-        try: requests.patch(url, headers=self.headers, json=payload)
-        except Exception as e: logger.error(f"Failed to update ABS progress: {e}")
+        try:
+            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            if r.status_code in (200, 204):
+                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
+                return True
+            else:
+                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to update ABS progress: {e}")
+            return False
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
@@ -212,8 +223,14 @@ class KoSyncClient:
             "timestamp": int(time.time())
         }
         try:
-            requests.put(url, headers=headers, json=payload)
-            logger.info(f"   📡 KoSync Updated: {percentage:.1%}")
+            r = requests.put(url, headers=headers, json=payload, timeout=10)
+            if r.status_code in (200, 201, 204):
+                logger.debug(f"   📡 KoSync Updated: {percentage:.1%}")
+                return True
+            else:
+                logger.error(f"Failed to update KoSync: {r.status_code} - {r.text}")
+                return False
         except Exception as e:
             logger.error(f"Failed to update KoSync: {e}")
+            return False
 # [END FILE]

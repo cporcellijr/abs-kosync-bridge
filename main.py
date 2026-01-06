@@ -9,6 +9,9 @@ from pathlib import Path
 from zipfile import ZipFile
 import lxml.etree as ET
 
+# Logging utilities (placed at top to ensure availability during sync)
+from logging_utils import sanitize_log_data, time_execution
+
 from json_db import JsonDB
 from api_clients import ABSClient, KoSyncClient
 from hardcover_client import HardcoverClient
@@ -29,9 +32,13 @@ if not StorytellerClientClass:
     except ImportError:
         StorytellerClientClass = None
 
+# Silence noisy third-party loggers
+for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
 logging.basicConfig(
     level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO),
-    format='%(asctime)s %(levelname)s: %(message)s', datefmt='%H:%M:%S'
+    format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
@@ -101,7 +108,7 @@ class SyncManager:
                 changed = True
             elif status == 'processing':
                 # Job was interrupted mid-process, retry it
-                logger.info(f"[JOB] Recovering interrupted job: {mapping.get('abs_title')}")
+                logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(mapping.get('abs_title'))}")
                 mapping['status'] = 'failed_retry_later'
                 mapping['last_error'] = 'Interrupted by restart'
                 changed = True
@@ -141,7 +148,7 @@ class SyncManager:
              self.db_handler.save(self.db)
              # UPDATED: Set status to 1 (Want to Read) initially
              self.hardcover_client.update_status(match['book_id'], 1, match.get('edition_id'))
-             logger.info(f"📚 Hardcover: Matched '{meta.get('title')}' -> Want to Read")
+             logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' status promoted to Want to Read")
 
     def _sync_to_hardcover(self, mapping, percentage):
         # 1. Basic checks
@@ -157,7 +164,7 @@ class SyncManager:
 
             # SAFETY: If total_pages is zero we cannot compute a valid page number
             if total_pages == 0:
-                logger.warning(f"⚠️ Hardcover Sync Skipped: {mapping.get('abs_title')} has 0 pages.")
+                logger.warning(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(mapping.get('abs_title'))} has 0 pages.")
                 return
 
             page_num = int(total_pages * percentage)
@@ -169,13 +176,13 @@ class SyncManager:
             # If Finished, prefer marking as Read (3) first
             if is_finished and current_status != 3:
                 self.hardcover_client.update_status(mapping['hardcover_book_id'], 3, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: Marked '{mapping.get('abs_title', 'Unknown')}' as finished")
+                logger.info(f"📚 Hardcover: '{sanitize_log_data(mapping.get('abs_title'))}' status promoted to Read")
                 current_status = 3
 
             # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
             elif percentage > 0.02 and current_status == 1:
                 self.hardcover_client.update_status(mapping['hardcover_book_id'], 2, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: Started '{mapping.get('abs_title', 'Unknown')}' (>2%)")
+                logger.info(f"📚 Hardcover: '{sanitize_log_data(mapping.get('abs_title'))}' status promoted to Currently Reading")
                 current_status = 2
 
             # Now it's safe to update progress (Hardcover rejects page updates for Want to Read)
@@ -217,7 +224,7 @@ class SyncManager:
         if hasattr(self.booklore_client, 'is_configured') and self.booklore_client.is_configured():
             book = self.booklore_client.find_book_by_filename(ebook_filename)
             if book:
-                logger.info(f"📥 Downloading EPUB from Booklore: {ebook_filename}")
+                logger.info(f"📥 Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
                 if hasattr(self.booklore_client, 'download_book'):
                     content = self.booklore_client.download_book(book['id'])
                     if content:
@@ -228,8 +235,7 @@ class SyncManager:
                     else:
                         logger.error(f"Failed to download EPUB content from Booklore")
             else:
-                logger.error(f"EPUB not found in Booklore: {ebook_filename}")
-        else:
+                logger.error(f"EPUB not found in Booklore: {sanitize_log_data(ebook_filename)}")
             if not filesystem_matches:
                  logger.error(f"EPUB not found on filesystem and Booklore not configured")
 
@@ -244,40 +250,38 @@ class SyncManager:
         if self._job_thread and self._job_thread.is_alive():
             return
 
-        # 2. Find ONE pending job to start
+        # 2. Find ONE pending job to start (prioritize pending, then eligible retries)
         # Reload DB to ensure we have fresh status
         self.db = self.db_handler.load(default={"mappings": []})
         target_mapping = None
-        
-        # Check for 'pending' jobs (prioritize them)
+        eligible_jobs = []
+        max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
+        retry_delay_mins = int(os.getenv("JOB_RETRY_DELAY_MINS", 15))
+
         for mapping in self.db.get('mappings', []):
-            if mapping.get('status') == 'pending':
-                target_mapping = mapping
-                break
-        
-        # If no pending jobs, check for retries
-        if not target_mapping:
-            max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
-            retry_delay_mins = int(os.getenv("JOB_RETRY_DELAY_MINS", 15))
-            
-            for mapping in self.db.get('mappings', []):
-                if mapping.get('status') == 'failed_retry_later':
-                    last_attempt = mapping.get('last_attempt', 0)
-                    retry_count = mapping.get('retry_count', 0)
-                    
-                    if retry_count >= max_retries:
-                        continue # Skip permanent failures
-                        
-                    if time.time() - last_attempt > retry_delay_mins * 60:
+            status = mapping.get('status')
+            if status == 'pending':
+                eligible_jobs.append(mapping)
+                if not target_mapping:
+                    target_mapping = mapping
+            elif status == 'failed_retry_later':
+                last_attempt = mapping.get('last_attempt', 0)
+                retry_count = mapping.get('retry_count', 0)
+                if retry_count >= max_retries:
+                    continue
+                if time.time() - last_attempt > retry_delay_mins * 60:
+                    eligible_jobs.append(mapping)
+                    if not target_mapping:
                         target_mapping = mapping
-                        logger.info(f"[JOB] Retrying ({retry_count + 1}/{max_retries}): {mapping.get('abs_title')}")
-                        break
 
         if not target_mapping:
             return
 
+        total_jobs = len(eligible_jobs)
+        job_idx = (eligible_jobs.index(target_mapping) + 1) if total_jobs else 1
+
         # 3. Mark as 'processing' immediately so we don't pick it up again
-        logger.info(f"[JOB] Starting background transcription: {target_mapping.get('abs_title')}")
+        logger.info(f"[JOB {job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_mapping.get('abs_title'))}")
         
         # Atomic update to mark processing
         def set_processing(db):
@@ -291,12 +295,12 @@ class SyncManager:
         # 4. Launch the heavy work in a separate thread
         self._job_thread = threading.Thread(
             target=self._run_background_job, 
-            args=(target_mapping,),
+            args=(target_mapping, job_idx, total_jobs),
             daemon=True
         )
         self._job_thread.start()
 
-    def _run_background_job(self, mapping_data):
+    def _run_background_job(self, mapping_data, job_idx=1, job_total=1):
         """
         Threaded worker that handles transcription without blocking the main loop.
         """
@@ -304,6 +308,9 @@ class SyncManager:
         abs_title = mapping_data.get('abs_title', 'Unknown')
         ebook_filename = mapping_data['ebook_filename']
         max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
+
+        # Milestone log for background job
+        logger.info(f"[JOB {job_idx}/{job_total}] Processing '{sanitize_log_data(abs_title)}'...")
 
         try:
             # --- Heavy Lifting (Blocks this thread, but not the Main thread) ---
@@ -338,10 +345,10 @@ class SyncManager:
             if final_mapping:
                 self._automatch_hardcover(final_mapping)
             
-            logger.info(f"[JOB] Completed: {abs_title}")
+            logger.info(f"[JOB] Completed: {sanitize_log_data(abs_title)}")
 
         except Exception as e:
-            logger.error(f"[FAIL] {abs_title}: {e}")
+            logger.error(f"[FAIL] {sanitize_log_data(abs_title)}: {e}")
             # Atomic Failure Update
             def fail_update(db):
                 for m in db.get('mappings', []):
@@ -353,7 +360,7 @@ class SyncManager:
                         
                         if curr_retries >= max_retries:
                              m['status'] = 'failed_permanent'
-                             logger.warning(f"[JOB] {abs_title}: Max retries exceeded")
+                             logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
                         else:
                              m['status'] = 'failed_retry_later'
                 return db
@@ -378,7 +385,7 @@ class SyncManager:
             abs_in_progress = {}
 
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
-        if active_books: logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+        if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
         
         db_dirty = False 
 
@@ -400,7 +407,7 @@ class SyncManager:
             
         
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
-        if active_books: logger.info(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+        if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
         
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
@@ -428,106 +435,158 @@ class SyncManager:
                 if bl_pct is None: bl_pct = 0.0
 
                 prev = self.state.get(abs_id, {})
+                prev_abs_ts = prev.get('abs_ts', 0)
+                prev_kosync = prev.get('kosync_pct', 0)
+                prev_story = prev.get('storyteller_pct', 0)
+                prev_booklore = prev.get('booklore_pct', 0)
+
+                # Current values
                 vals = {'ABS': abs_pct or 0, 'KOSYNC': ko_pct, 'STORYTELLER': st_pct, 'BOOKLORE': bl_pct}
 
-                changed = False
-                if abs(vals['ABS'] - prev.get('abs_pct', 0)) > 0.01: changed = True
-                if abs(vals['KOSYNC'] - prev.get('kosync_pct', 0)) > self.delta_kosync_thresh: changed = True
-                if abs(vals['STORYTELLER'] - prev.get('storyteller_pct', 0)) > self.delta_kosync_thresh: changed = True
-                if abs(vals['BOOKLORE'] - prev.get('booklore_pct', 0)) > self.delta_kosync_thresh: changed = True
-                
-                if not changed:
+                # Compute deltas
+                abs_delta = abs(abs_ts - prev_abs_ts) if abs_ts and prev_abs_ts else abs(abs_ts - prev_abs_ts)
+                ko_delta = abs(ko_pct - prev_kosync)
+                st_delta = abs(st_pct - prev_story)
+                bl_delta = abs(bl_pct - prev_booklore)
+
+                # If nothing changed, remain silent
+                if abs_delta == 0 and ko_delta == 0 and st_delta == 0 and bl_delta == 0:
                     if abs_id not in self.state: self.state[abs_id] = prev
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
 
-                leader = max(vals, key=vals.get)
-                
-                if vals[leader] == 0.0 and max(prev.get('abs_pct', 0), prev.get('kosync_pct', 0), prev.get('booklore_pct', 0)) > 0.05:
-                    logger.warning(f"🛡️   [{mapping.get('abs_title', 'Unknown')[:30]}] REGRESSION BLOCKED")
+                title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
+
+                # Small changes (below thresholds) should be noisy-reduced
+                small_changes = []
+                if abs_delta > 0 and abs_delta < self.delta_abs_thresh:
+                    small_changes.append(f"✋ ABS delta {abs_delta:.1f}s (Below threshold): {title_snip}")
+                if ko_delta > 0 and ko_delta < self.delta_kosync_thresh:
+                    small_changes.append(f"✋ KoSync delta {ko_delta*100:.4f}% (Below threshold): {title_snip}")
+                if st_delta > 0 and st_delta < self.delta_kosync_thresh:
+                    small_changes.append(f"✋ Storyteller delta {st_delta*100:.4f}% (Below threshold): {title_snip}")
+                if bl_delta > 0 and bl_delta < self.delta_kosync_thresh:
+                    small_changes.append(f"✋ Booklore delta {bl_delta*100:.4f}% (Below threshold): {title_snip}")
+
+                if small_changes and not (abs_delta >= self.delta_abs_thresh or ko_delta >= self.delta_kosync_thresh or st_delta >= self.delta_kosync_thresh or bl_delta >= self.delta_kosync_thresh):
+                    for s in small_changes:
+                        logger.info(s)
+                    # No further action for only-small changes
                     continue
 
-                logger.info(f"📖 [{mapping.get('abs_title', 'Unknown')[:30]}] {leader} leads at {vals[leader]:.1%}")
-                
+                # At this point we have a significant change to act on
+                logger.info(f"🔄 Change detected for '{title_snip}'")
+
+                # Status block - show only changed lines
+                status_lines = []
+                if abs_delta > 0:
+                    status_lines.append(f"📊 ABS: {prev_abs_ts}s -> {abs_ts}s")
+                if ko_delta > 0:
+                    status_lines.append(f"📊 KoSync: {prev_kosync:.4%} -> {ko_pct:.4%}")
+                if st_delta > 0:
+                    status_lines.append(f"📊 Storyteller: {prev_story:.4%} -> {st_pct:.4%}")
+                if bl_delta > 0:
+                    status_lines.append(f"📊 BookLore: {prev_booklore:.4%} -> {bl_pct:.4%}")
+
+                for line in status_lines:
+                    logger.info(line)
+
+                leader = max(vals, key=vals.get)
+                logger.info(f"📖 [{title_snip}] {leader} leads at {vals[leader]:.1%}")
+
                 final_ts, final_pct = abs_ts, vals[leader]
                 sync_success = False
-                
-                # --- LEADER LOGIC ---
+
+                # --- LEADER LOGIC (unchanged behaviour, but with post-call success logs) ---
                 if leader == 'ABS':
                     txt = self.transcriber.get_text_at_time(mapping.get('transcript_file'), abs_ts)
                     if txt:
                         match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=abs_pct)
                         if match_pct:
-                            # Send full rich locator back to KOReader (as xpath)
-                            self.kosync_client.update_progress(ko_id, match_pct, None)
-                            self.storyteller_db.update_progress(epub, match_pct, rich_locator)
-                            self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                            kosync_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                            st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
+                            bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                            if kosync_ok: logger.info("✅ KoSync update successful")
+                            if st_ok: logger.info("✅ Storyteller update successful")
+                            if bl_ok: logger.info("✅ Booklore update successful")
                             final_pct = match_pct
                             sync_success = True
 
                 elif leader == 'KOSYNC':
-                    # NEW: Try to use XPath first!
                     txt = None
                     if ko_xpath:
                         txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
                         if txt: logger.debug(f"   📝 Using XPath text from {ko_xpath}")
-                    
+
                     if not txt:
                         txt = self.ebook_parser.get_text_at_percentage(epub, ko_pct)
                         logger.debug(f"   📝 Using ebook text at {ko_pct:.1%} (fallback)")
-                    
+
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
-                            self.abs_client.update_progress(abs_id, ts)
+                            abs_ok = self.abs_client.update_progress(abs_id, ts)
+                            if abs_ok: logger.info("✅ ABS update successful")
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
-                                self.storyteller_db.update_progress(epub, match_pct, rich_locator)
-                                self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                                st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
+                                bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                                if st_ok: logger.info("✅ Storyteller update successful")
+                                if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = match_pct
                             else:
-                                self.storyteller_db.update_progress(epub, ko_pct, None)
-                                self.booklore_client.update_progress(epub, ko_pct, None)
+                                st_ok = self.storyteller_db.update_progress(epub, ko_pct, None)
+                                bl_ok = self.booklore_client.update_progress(epub, ko_pct, None)
+                                if st_ok: logger.info("✅ Storyteller update successful")
+                                if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = ko_pct
                             final_ts = ts
                             sync_success = True
 
                 elif leader == 'STORYTELLER':
-                    # Existing logic using st_href/st_frag
                     txt = self.get_text_from_storyteller_fragment(epub, st_href, st_frag) if st_frag else None
                     if not txt: txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
-                    
+
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
                         if ts:
-                            self.abs_client.update_progress(abs_id, ts)
+                            abs_ok = self.abs_client.update_progress(abs_id, ts)
+                            if abs_ok: logger.info("✅ ABS update successful")
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
                             if match_pct:
-                                self.kosync_client.update_progress(ko_id, match_pct, None)
-                                self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                                bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
+                                if ko_ok: logger.info("✅ KoSync update successful")
+                                if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = match_pct
                             else:
-                                self.kosync_client.update_progress(ko_id, st_pct, None)
-                                self.booklore_client.update_progress(epub, st_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, st_pct, None)
+                                bl_ok = self.booklore_client.update_progress(epub, st_pct, None)
+                                if ko_ok: logger.info("✅ KoSync update successful")
+                                if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = st_pct
                             final_ts = ts
                             sync_success = True
-                
+
                 elif leader == 'BOOKLORE':
-                    # Similar logic (if Booklore sends CFI, we could use that, but logs showed it receiving paths)
                     txt = self.ebook_parser.get_text_at_percentage(epub, bl_pct)
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
-                            self.abs_client.update_progress(abs_id, ts)
+                            abs_ok = self.abs_client.update_progress(abs_id, ts)
+                            if abs_ok: logger.info("✅ ABS update successful")
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
                             if match_pct:
-                                self.kosync_client.update_progress(ko_id, match_pct, None)
-                                self.storyteller_db.update_progress(epub, match_pct, rich_locator)
+                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                                st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
+                                if ko_ok: logger.info("✅ KoSync update successful")
+                                if st_ok: logger.info("✅ Storyteller update successful")
                                 final_pct = match_pct
                             else:
-                                self.kosync_client.update_progress(ko_id, bl_pct, None)
-                                self.storyteller_db.update_progress(epub, bl_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, bl_pct, None)
+                                st_ok = self.storyteller_db.update_progress(epub, bl_pct, None)
+                                if ko_ok: logger.info("✅ KoSync update successful")
+                                if st_ok: logger.info("✅ Storyteller update successful")
                                 final_pct = bl_pct
                             final_ts = ts
                             sync_success = True
@@ -545,6 +604,7 @@ class SyncManager:
                     'last_updated': time.time()
                 }
                 self.state_handler.save(self.state)
+                logger.info("💾 State saved to last_state.json")
                 
             except Exception as e:
                 logger.error(f"Sync error: {e}")
