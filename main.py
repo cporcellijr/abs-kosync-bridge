@@ -454,13 +454,13 @@ class SyncManager:
 
                 config = {
                     'ABS': {
-                        'current': abs_ts,
-                        'previous': prev.get('abs_ts', 0),
+                        'current': abs_pct,
+                        'previous': prev.get('abs_pct', 0),
                         'delta': abs(abs_ts - prev.get('abs_ts', 0)) if abs_ts and prev.get('abs_ts', 0) else abs(abs_ts - prev.get('abs_ts', 0)),
                         'threshold': self.delta_abs_thresh,
                         'is_configured': True,
-                        'display': ("ABS", "{prev}s -> {curr}s"),
-                        'value_formatter': lambda v: f"{v:.1f}s"
+                        'display': ("ABS", "{prev:.4%} -> {curr:.4%}"),
+                        'value_formatter': lambda v: f"{v:.4%}"
                     },
                     'KOSYNC': {
                         'current': ko_pct,
