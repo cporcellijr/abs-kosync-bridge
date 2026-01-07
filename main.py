@@ -422,7 +422,8 @@ class SyncManager:
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
             abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
-            
+            title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
+
             try:
                 # 1. Fetch raw states
                 st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
@@ -434,6 +435,9 @@ class SyncManager:
                 ko_pct, ko_xpath = (0.0, None)
                 if self.kosync_client.is_configured():
                     ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
+                    logger.debug(f"📚 [{title_snip}] KoSync response: pct={ko_pct:.1%}, xpath={ko_xpath}")
+                    if ko_xpath is None:
+                        logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 
                 if abs_ts is None: continue # ABS offline
                 
@@ -464,8 +468,6 @@ class SyncManager:
                     if abs_id not in self.state: self.state[abs_id] = prev
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
-
-                title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
@@ -525,8 +527,14 @@ class SyncManager:
                 elif leader == 'KOSYNC':
                     txt = None
                     if ko_xpath:
+                        logger.debug(f"📚 [{title_snip}] Attempting XPath resolution: {ko_xpath}")
                         txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
-                        if txt: logger.debug(f"   📝 Using XPath text from {ko_xpath}")
+                        if txt: 
+                            logger.debug(f"   📝 Using XPath text from {ko_xpath}")
+                        else:
+                            logger.warning(f"⚠️ [{title_snip}] XPath resolution failed for: {ko_xpath}")
+                    else:
+                        logger.debug(f"⚠️ [{title_snip}] No XPath available from KoSync - using percentage fallback")
 
                     if not txt:
                         txt = self.ebook_parser.get_text_at_percentage(epub, ko_pct)
