@@ -12,10 +12,10 @@ class StorytellerDB:
     def __init__(self):
         self.db_path = Path(os.environ.get("STORYTELLER_DB_PATH", "/storyteller_data/storyteller.db"))
         self.conn = None
-        self.is_configured = self._init_connection()
+        self.connection_succeeded = self._init_connection()
 
     def is_configured(self):
-        return self.is_configured
+        return self.connection_succeeded
 
     def _init_connection(self):
         if not self.db_path.exists(): return False

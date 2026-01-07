@@ -237,6 +237,8 @@ class StorytellerDBWithAPI:
             try:
                 from storyteller_db import StorytellerDB
                 self.db_fallback = StorytellerDB()
+                if not self.db_fallback.is_configured():
+                    self.db_fallback = None
             except Exception: pass
 
     def is_configured(self) -> bool:

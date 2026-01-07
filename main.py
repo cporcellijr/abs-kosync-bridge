@@ -460,7 +460,7 @@ class SyncManager:
                         'threshold': self.delta_abs_thresh,
                         'is_configured': True,
                         'display': ("ABS", "{prev}s -> {curr}s"),
-                        'delta_fmt': lambda delta: f"{delta:.1f}s"
+                        'value_formatter': lambda v: f"{v:.1f}s"
                     },
                     'KOSYNC': {
                         'current': ko_pct,
@@ -469,7 +469,7 @@ class SyncManager:
                         'threshold': self.delta_kosync_thresh,
                         'is_configured': self.kosync_client.is_configured(),
                         'display': ("KoSync", "{prev:.4%} -> {curr:.4%}"),
-                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
                     },
                     'STORYTELLER': {
                         'current': st_pct,
@@ -478,7 +478,7 @@ class SyncManager:
                         'threshold': self.delta_kosync_thresh,
                         'is_configured': self.storyteller_db.is_configured(),
                         'display': ("Storyteller", "{prev:.4%} -> {curr:.4%}"),
-                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
                     },
                     'BOOKLORE': {
                         'current': bl_pct,
@@ -487,7 +487,7 @@ class SyncManager:
                         'threshold': self.delta_kosync_thresh,
                         'is_configured': self.booklore_client.is_configured(),
                         'display': ("BookLore", "{prev:.4%} -> {curr:.4%}"),
-                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
                     }
                 }
 
@@ -508,7 +508,7 @@ class SyncManager:
                     threshold = cfg['threshold']
                     if 0 < delta < threshold:
                         label, fmt = cfg['display']
-                        delta_str = cfg['delta_fmt'](delta)
+                        delta_str = cfg['value_formatter'](delta)
                         small_changes.append(f"✋ {label} delta {delta_str} (Below threshold): {title_snip}")
 
                 if small_changes and not any(cfg['delta'] >= cfg['threshold'] for cfg in filtered_config.values()):
@@ -536,7 +536,8 @@ class SyncManager:
                 vals = {k: v['current'] for k, v in filtered_config.items()}
 
                 leader = max(vals, key=vals.get)
-                logger.info(f"📖 [{title_snip}] {leader} leads at {vals[leader]:.1%}")
+                leader_formatter = filtered_config[leader]['value_formatter']
+                logger.info(f"📖 [{title_snip}] {leader} leads at {leader_formatter(vals[leader])}")
 
                 final_ts, final_pct = abs_ts, vals[leader]
                 sync_success = False
