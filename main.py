@@ -67,6 +67,7 @@ class SyncManager:
                 def check_connection(self): return False
                 def get_progress_with_fragment(self, *args): return None, None, None, None
                 def update_progress(self, *args): return False
+                def is_configured(self): return False
             self.storyteller_db = DummyST()
         self.booklore_client = BookloreClient()
         self._transcriber = None
@@ -450,38 +451,67 @@ class SyncManager:
                 if bl_pct is None: bl_pct = 0.0
 
                 prev = self.state.get(abs_id, {})
-                prev_abs_ts = prev.get('abs_ts', 0)
-                prev_kosync = prev.get('kosync_pct', 0)
-                prev_story = prev.get('storyteller_pct', 0)
-                prev_booklore = prev.get('booklore_pct', 0)
 
-                # Current values
-                vals = {'ABS': abs_pct or 0, 'KOSYNC': ko_pct, 'STORYTELLER': st_pct, 'BOOKLORE': bl_pct}
+                config = {
+                    'ABS': {
+                        'current': abs_ts,
+                        'previous': prev.get('abs_ts', 0),
+                        'delta': abs(abs_ts - prev.get('abs_ts', 0)) if abs_ts and prev.get('abs_ts', 0) else abs(abs_ts - prev.get('abs_ts', 0)),
+                        'threshold': self.delta_abs_thresh,
+                        'is_configured': True,
+                        'display': ("ABS", "{prev}s -> {curr}s"),
+                        'delta_fmt': lambda delta: f"{delta:.1f}s"
+                    },
+                    'KOSYNC': {
+                        'current': ko_pct,
+                        'previous': prev.get('kosync_pct', 0),
+                        'delta': abs(ko_pct - prev.get('kosync_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.kosync_client.is_configured(),
+                        'display': ("KoSync", "{prev:.4%} -> {curr:.4%}"),
+                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                    },
+                    'STORYTELLER': {
+                        'current': st_pct,
+                        'previous': prev.get('storyteller_pct', 0),
+                        'delta': abs(st_pct - prev.get('storyteller_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.storyteller_db.is_configured(),
+                        'display': ("Storyteller", "{prev:.4%} -> {curr:.4%}"),
+                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                    },
+                    'BOOKLORE': {
+                        'current': bl_pct,
+                        'previous': prev.get('booklore_pct', 0),
+                        'delta': abs(bl_pct - prev.get('booklore_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.booklore_client.is_configured(),
+                        'display': ("BookLore", "{prev:.4%} -> {curr:.4%}"),
+                        'delta_fmt': lambda delta: f"{delta*100:.4f}%"
+                    }
+                }
 
-                # Compute deltas
-                abs_delta = abs(abs_ts - prev_abs_ts) if abs_ts and prev_abs_ts else abs(abs_ts - prev_abs_ts)
-                ko_delta = abs(ko_pct - prev_kosync)
-                st_delta = abs(st_pct - prev_story)
-                bl_delta = abs(bl_pct - prev_booklore)
+                # Filter config to only include configured services
+                filtered_config = {k: v for k, v in config.items() if v.get('is_configured', True)}
 
-                # If nothing changed, remain silent
-                if abs_delta == 0 and ko_delta == 0 and st_delta == 0 and bl_delta == 0:
-                    if abs_id not in self.state: self.state[abs_id] = prev
+                # Check if all 'delta' fields in filtered_config are zero, if so, skip processing
+                if all(cfg['delta'] == 0 for cfg in filtered_config.values()):
+                    if abs_id not in self.state:
+                        self.state[abs_id] = prev
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
-                if abs_delta > 0 and abs_delta < self.delta_abs_thresh:
-                    small_changes.append(f"✋ ABS delta {abs_delta:.1f}s (Below threshold): {title_snip}")
-                if ko_delta > 0 and ko_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ KoSync delta {ko_delta*100:.4f}% (Below threshold): {title_snip}")
-                if st_delta > 0 and st_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ Storyteller delta {st_delta*100:.4f}% (Below threshold): {title_snip}")
-                if bl_delta > 0 and bl_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ Booklore delta {bl_delta*100:.4f}% (Below threshold): {title_snip}")
+                for key, cfg in filtered_config.items():
+                    delta = cfg['delta']
+                    threshold = cfg['threshold']
+                    if 0 < delta < threshold:
+                        label, fmt = cfg['display']
+                        delta_str = cfg['delta_fmt'](delta)
+                        small_changes.append(f"✋ {label} delta {delta_str} (Below threshold): {title_snip}")
 
-                if small_changes and not (abs_delta >= self.delta_abs_thresh or ko_delta >= self.delta_kosync_thresh or st_delta >= self.delta_kosync_thresh or bl_delta >= self.delta_kosync_thresh):
+                if small_changes and not any(cfg['delta'] >= cfg['threshold'] for cfg in filtered_config.values()):
                     for s in small_changes:
                         logger.info(s)
                     # No further action for only-small changes
@@ -492,17 +522,18 @@ class SyncManager:
 
                 # Status block - show only changed lines
                 status_lines = []
-                if abs_delta > 0:
-                    status_lines.append(f"📊 ABS: {prev_abs_ts}s -> {abs_ts}s")
-                if ko_delta > 0:
-                    status_lines.append(f"📊 KoSync: {prev_kosync:.4%} -> {ko_pct:.4%}")
-                if st_delta > 0:
-                    status_lines.append(f"📊 Storyteller: {prev_story:.4%} -> {st_pct:.4%}")
-                if bl_delta > 0:
-                    status_lines.append(f"📊 BookLore: {prev_booklore:.4%} -> {bl_pct:.4%}")
+                for key, cfg in filtered_config.items():
+                    if cfg['delta'] > 0:
+                        prev = cfg['previous']
+                        curr = cfg['current']
+                        label, fmt = cfg['display']
+                        status_lines.append(f"📊 {label}: {fmt.format(prev=prev, curr=curr)}")
 
                 for line in status_lines:
                     logger.info(line)
+
+                # Build vals from filtered_config
+                vals = {k: v['current'] for k, v in filtered_config.items()}
 
                 leader = max(vals, key=vals.get)
                 logger.info(f"📖 [{title_snip}] {leader} leads at {vals[leader]:.1%}")
