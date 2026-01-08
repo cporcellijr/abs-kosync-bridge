@@ -26,8 +26,13 @@ logger = logging.getLogger(__name__)
 
 manager = SyncManager()
 
-db_handler = JsonDB("/data/mapping_db.json")
-state_handler = JsonDB("/data/last_state.json")
+# ---------------- DATA DIR CONFIG ----------------
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+
+# Use DATA_DIR for DB and logs
+
+db_handler = JsonDB(str(DATA_DIR / "mapping_db.json"))
+state_handler = JsonDB(str(DATA_DIR / "last_state.json"))
 
 # ---------------- BOOK LINKER CONFIG ----------------
 
@@ -40,7 +45,7 @@ LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
 # Book Linker - Storyteller processing folder
 DEST_BASE = Path(os.environ.get("PROCESSING_DIR", "/processing"))
 
-# Book Linker - Storyteller final ingest folder  
+# Book Linker - Storyteller final ingest folder
 STORYTELLER_INGEST = Path(os.environ.get("STORYTELLER_INGEST_DIR", os.environ.get("LINKER_BOOKS_DIR", "/linker_books")))
 
 # Audiobook files location
@@ -59,7 +64,7 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 
-LOG_DIR = Path("/data/logs")
+LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = LOG_DIR / "unified_app.log"
 
@@ -135,20 +140,20 @@ def copy_abs_audiobook_linker(abs_id: str, dest_folder: Path):
         if not audio_files:
             logger.warning(f"No audio files found for ABS {abs_id}")
             return False
-        
+
         dest_folder.mkdir(parents=True, exist_ok=True)
         copied = 0
-        
+
         for f in audio_files:
             meta = f.get("metadata", {})
             full_path = meta.get("path", "")
             filename = meta.get("filename", "")
-            
+
             src_path = None
             # 1. Try exact path (rarely works across containers)
             if full_path and Path(full_path).exists():
                 src_path = Path(full_path)
-            
+
             # 2. Smart Suffix Matching
             # Tries to match the last 4, 3, 2, or 1 segments of the path (e.g. Author/Series/Book/file.mp3)
             if not src_path and full_path:
@@ -160,14 +165,14 @@ def copy_abs_audiobook_linker(abs_id: str, dest_folder: Path):
                     if candidate.exists():
                         src_path = candidate
                         break
-            
+
             # 3. Filename fallback (slowest but most reliable)
             if not src_path and filename:
                 # Limit search to avoid hanging on massive libraries
                 matches = list(ABS_AUDIO_ROOT.glob(f"**/{filename}"))
                 if matches:
                     src_path = matches[0]
-            
+
             if src_path and src_path.exists():
                 shutil.copy2(str(src_path), dest_folder / src_path.name)
                 copied += 1
@@ -183,7 +188,7 @@ def find_local_ebooks(query: str):
     matches = []
     query_lower = query.lower()
     if not LINKER_BOOKS_DIR.exists(): return matches
-    
+
     for epub in LINKER_BOOKS_DIR.rglob("*.epub"):
         if "(readaloud)" in epub.name.lower(): continue
         if query_lower in epub.name.lower():
@@ -203,30 +208,30 @@ def run_processing_scan(manual=False):
     """
     processed = 0
     skipped = 0
-    MIN_AGE_MINUTES = 10 
-    
+    MIN_AGE_MINUTES = 10
+
     try:
         if not DEST_BASE.exists():
             if manual: logger.warning(f"Destination base does not exist: {DEST_BASE}")
             return 0, 0
-        
+
         for folder in DEST_BASE.iterdir():
             if not folder.is_dir(): continue
-            
+
             readaloud_files = list(folder.glob("*readaloud*.epub"))
             if not readaloud_files: continue
-            
+
             for readaloud_file in readaloud_files:
                 try:
                     # 1. Age Check
                     file_mtime = readaloud_file.stat().st_mtime
                     file_age_minutes = (time.time() - file_mtime) / 60
-                    
+
                     if file_age_minutes < MIN_AGE_MINUTES:
                         logger.info(f"Skipping {readaloud_file.name} - too recent ({file_age_minutes:.1f} min)")
                         skipped += 1
                         continue
-                    
+
                     # 2. Process Lock Check
                     folder_name = folder.name
                     storyteller_active = False
@@ -241,7 +246,7 @@ def run_processing_scan(manual=False):
                                     storyteller_active = True
                                     break
                         except: pass
-                    
+
                     if storyteller_active:
                         skipped += 1
                         continue
@@ -267,21 +272,21 @@ def run_processing_scan(manual=False):
                             file.unlink()
                             deleted_count += 1
                         except: pass
-                    
+
                     ingest_dest = STORYTELLER_INGEST / folder.name
                     if ingest_dest.exists(): shutil.rmtree(str(ingest_dest))
-                    
+
                     shutil.move(str(folder), str(ingest_dest))
                     logger.info(f"Processed: {ingest_dest} (Deleted {deleted_count} sources)")
                     processed += 1
-                    
+
                 except Exception as e:
                     logger.error(f"Error processing {readaloud_file}: {e}")
                     skipped += 1
-                    
+
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
-        
+
     return processed, skipped
 
 def monitor_readaloud_files():
@@ -428,10 +433,10 @@ def add_to_abs_collection(abs_client, item_id, collection_name=None):
         collections_url = f"{abs_client.base_url}/api/collections"
         r = requests.get(collections_url, headers=abs_client.headers)
         if r.status_code != 200: return False
-        
+
         collections = r.json().get('collections', [])
         target_collection = next((c for c in collections if c.get('name') == collection_name), None)
-        
+
         if not target_collection:
             lib_url = f"{abs_client.base_url}/api/libraries"
             r_lib = requests.get(lib_url, headers=abs_client.headers)
@@ -440,7 +445,7 @@ def add_to_abs_collection(abs_client, item_id, collection_name=None):
                 if libraries:
                     r_create = requests.post(collections_url, headers=abs_client.headers, json={"libraryId": libraries[0]['id'], "name": collection_name})
                     if r_create.status_code in [200, 201]: target_collection = r_create.json()
-        
+
         if not target_collection: return False
         add_url = f"{abs_client.base_url}/api/collections/{target_collection['id']}/book"
         r_add = requests.post(add_url, headers=abs_client.headers, json={"id": item_id})
@@ -461,25 +466,25 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
     booklore_user = os.environ.get("BOOKLORE_USER")
     booklore_pass = os.environ.get("BOOKLORE_PASSWORD")
     if not all([booklore_url, booklore_user, booklore_pass]): return False
-    
+
     try:
         booklore_url = booklore_url.rstrip('/')
         r_login = requests.post(f"{booklore_url}/api/v1/auth/login", json={"username": booklore_user, "password": booklore_pass})
         if r_login.status_code != 200: return False
         headers = {"Authorization": f"Bearer {r_login.json().get('refreshToken')}"}
-        
+
         r_books = requests.get(f"{booklore_url}/api/v1/books", headers=headers)
         target_book = next((b for b in r_books.json() if b.get('fileName') == ebook_filename), None)
         if not target_book: return False
-        
+
         r_shelves = requests.get(f"{booklore_url}/api/v1/shelves", headers=headers)
         target_shelf = next((s for s in r_shelves.json() if s.get('name') == shelf_name), None)
-        
+
         if not target_shelf:
             r_create = requests.post(f"{booklore_url}/api/v1/shelves", headers=headers, json={"name": shelf_name, "icon": "📚", "iconType": "PRIME_NG"})
             if r_create.status_code == 201: target_shelf = r_create.json()
             else: return False
-            
+
         r_assign = requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers, json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
         if r_assign.status_code in [200, 201, 204]:
             logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
@@ -503,17 +508,17 @@ def index():
     }
 
     mappings = db.get('mappings', [])
-    
+
     total_duration = 0
     total_listened = 0
-    
+
     for mapping in mappings:
         abs_id = mapping.get('abs_id')
-        
+
         # 1. Initialize defaults (Safe for Template)
         if 'unified_progress' not in mapping: mapping['unified_progress'] = 0
         if 'duration' not in mapping: mapping['duration'] = 0
-        
+
         # We start these at 0, but will try to overwrite them below
         mapping.setdefault('kosync_progress', 0)
         mapping.setdefault('storyteller_progress', 0)
@@ -524,7 +529,7 @@ def index():
         # Check if we have state data for this book
         if abs_id in all_states:
             state = all_states[abs_id]
-            
+
             # Helper to get % from state (0.75 -> 75.0)
             def get_pct(key):
                 return round(state.get(key, 0) * 100, 1)
@@ -579,7 +584,7 @@ def index():
             else: mapping['last_sync'] = f"{int(diff // 3600)}h ago"
         else:
             mapping['last_sync'] = "Never"
-            
+
         if abs_id:
              mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"
 
@@ -608,7 +613,7 @@ def book_linker():
             stats = get_stats(ebook_matches, audiobook_matches)
 
     return render_template('book_linker.html', book_name=book_name, ebook_matches=ebook_matches, audiobook_matches=audiobook_matches, stats=stats, message=message, is_error=is_error,linker_books_dir=str(LINKER_BOOKS_DIR), processing_dir=str(DEST_BASE),storyteller_ingest=str(STORYTELLER_INGEST))
-                         
+
 
 @app.route('/book-linker/process', methods=['POST'])
 def book_linker_process():
@@ -662,7 +667,7 @@ def match():
         audiobooks = manager.abs_client.get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
-        
+
         # Get booklore_id if available for API-based hash computation
         booklore_id = None
         if manager.booklore_client.is_configured():
@@ -675,7 +680,7 @@ def match():
         if not kosync_doc_id:
             logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
-            
+
         mapping = {"abs_id": abs_id, "abs_title": manager._get_abs_title(selected_ab), "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
         def add_mapping(db):
             db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
@@ -693,10 +698,10 @@ def match():
         audiobooks = manager.abs_client.get_all_audiobooks()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
-        
+
         # Use new search method
         ebooks = get_searchable_ebooks(search)
-        
+
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager._get_abs_title)
 
 @app.route('/batch-match', methods=['GET', 'POST'])
@@ -727,7 +732,7 @@ def batch_match():
             db = db_handler.load(default={"mappings": []})
             for item in session.get('queue', []):
                 ebook_filename = item['ebook_filename']
-                
+
                 # Get booklore_id if available for API-based hash computation
                 booklore_id = None
                 if manager.booklore_client.is_configured():
@@ -740,7 +745,7 @@ def batch_match():
                 if not kosync_doc_id:
                     logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
-                    
+
                 mapping = {"abs_id": item['abs_id'], "abs_title": item['abs_title'], "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
                 db['mappings'] = [m for m in db['mappings'] if m['abs_id'] != item['abs_id']]
                 db['mappings'].append(mapping)
@@ -751,18 +756,18 @@ def batch_match():
             session['queue'] = []
             session.modified = True
             return redirect(url_for('index'))
-            
+
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks = [], []
     if search:
         audiobooks = manager.abs_client.get_all_audiobooks()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
-        
+
         # Use new search method
         ebooks = get_searchable_ebooks(search)
         ebooks.sort(key=lambda x: x.name.lower())
-        
+
     return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search, get_title=manager._get_abs_title)
 
 @app.route('/delete/<abs_id>', methods=['POST'])
@@ -788,25 +793,25 @@ def clear_progress(abs_id):
     """Clear progress for a mapping by setting all systems to 0%"""
     db = db_handler.load(default={"mappings": []})
     mapping = next((m for m in db.get('mappings', []) if m['abs_id'] == abs_id), None)
-    
+
     if not mapping:
         logger.warning(f"Cannot clear progress: mapping not found for {abs_id}")
         return redirect(url_for('index'))
-    
+
     try:
         # Reset progress to 0 in all three systems
         logger.info(f"Clearing progress for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
-        
+
         # ABS: Set to 0 seconds
         manager.abs_client.update_progress(abs_id, 0)
         logger.info(f"  ✓ ABS progress cleared")
-        
+
         # KOSync: Set to 0%
         kosync_id = mapping.get('kosync_doc_id')
         if kosync_id:
             manager.kosync_client.update_progress(kosync_id, 0.0)
             logger.info(f"  ✓ KOSync progress cleared")
-        
+
         # Storyteller: Set to 0%
         ebook_filename = mapping.get('ebook_filename')
         if ebook_filename:
@@ -824,12 +829,12 @@ def clear_progress(abs_id):
             del state[abs_id]
             state_handler.save(state)
             logger.info(f"  ✓ Last state cleared")
-        
+
         logger.info(f"✅ Progress cleared successfully for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
-        
+
     except Exception as e:
         logger.error(f"Failed to clear progress for {abs_id}: {e}")
-    
+
     return redirect(url_for('index'))
 
 @app.route('/link-hardcover/<abs_id>', methods=['POST'])

@@ -42,8 +42,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("/data")
-BOOKS_DIR = Path("/books")
+# Use environment variable for DATA_DIR and BOOKS_DIR, defaulting to /data and /books
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+BOOKS_DIR = Path(os.environ.get("BOOKS_DIR", "/books"))
 DB_FILE = DATA_DIR / "mapping_db.json"
 STATE_FILE = DATA_DIR / "last_state.json"
 
@@ -66,6 +67,7 @@ class SyncManager:
                 def check_connection(self): return False
                 def get_progress_with_fragment(self, *args): return None, None, None, None
                 def update_progress(self, *args): return False
+                def is_configured(self): return False
             self.storyteller_db = DummyST()
         self.booklore_client = BookloreClient()
         self._transcriber = None
@@ -82,6 +84,8 @@ class SyncManager:
 
         self.delta_abs_thresh = float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60))
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
+        self.abs_progress_offset = float(os.getenv("ABS_PROGRESS_OFFSET_SECONDS", 0))
+        self.kosync_use_percentage_from_server = os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
         self.startup_checks()
         self.cleanup_stale_jobs()
 
@@ -187,16 +191,25 @@ class SyncManager:
 
             # Now it's safe to update progress (Hardcover rejects page updates for Want to Read)
             self.hardcover_client.update_progress(
-                ub['id'], 
-                page_num, 
-                edition_id=mapping.get('hardcover_edition_id'), 
-                is_finished=is_finished, 
+                ub['id'],
+                page_num,
+                edition_id=mapping.get('hardcover_edition_id'),
+                is_finished=is_finished,
                 current_percentage=percentage
             )
 
+    def _update_abs_progress_with_offset(self, abs_id, ts):
+        """Apply offset to timestamp and update ABS progress."""
+        adjusted_ts = round(ts + self.abs_progress_offset, 2)
+        if self.abs_progress_offset != 0:
+            logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
+        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts)
+        if abs_ok: logger.info("✅ ABS update successful")
+        return abs_ok, adjusted_ts
+
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
-            with open(transcript_path, 'r') as f: 
+            with open(transcript_path, 'r') as f:
                 data = json.load(f)
                 dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
                 return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
@@ -282,7 +295,7 @@ class SyncManager:
 
         # 3. Mark as 'processing' immediately so we don't pick it up again
         logger.info(f"[JOB {job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_mapping.get('abs_title'))}")
-        
+
         # Atomic update to mark processing
         def set_processing(db):
             for m in db.get('mappings', []):
@@ -294,7 +307,7 @@ class SyncManager:
 
         # 4. Launch the heavy work in a separate thread
         self._job_thread = threading.Thread(
-            target=self._run_background_job, 
+            target=self._run_background_job,
             args=(target_mapping, job_idx, total_jobs),
             daemon=True
         )
@@ -325,7 +338,7 @@ class SyncManager:
 
             # Step 3: Parse EPUB
             self.ebook_parser.extract_text_and_map(epub_path)
-            
+
             # --- Atomic Success Update ---
             def success_update(db):
                 for m in db.get('mappings', []):
@@ -334,17 +347,17 @@ class SyncManager:
                         m['status'] = 'active'
                         m['retry_count'] = 0
                 return db
-            
+
             self.db_handler.update(success_update)
 
             self.db = self.db_handler.load()
-            
+
             # Trigger Hardcover Match (using fresh DB data)
             final_db = self.db_handler.load()
             final_mapping = next((m for m in final_db.get('mappings', []) if m['abs_id'] == abs_id), None)
             if final_mapping:
                 self._automatch_hardcover(final_mapping)
-            
+
             logger.info(f"[JOB] Completed: {sanitize_log_data(abs_title)}")
 
         except Exception as e:
@@ -357,7 +370,7 @@ class SyncManager:
                         curr_retries = m.get('retry_count', 0) + 1
                         m['retry_count'] = curr_retries
                         m['last_error'] = str(e)
-                        
+
                         if curr_retries >= max_retries:
                              m['status'] = 'failed_permanent'
                              logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
@@ -365,7 +378,7 @@ class SyncManager:
                              m['status'] = 'failed_retry_later'
                 return db
             self.db_handler.update(fail_update)
-      
+
             self.db = self.db_handler.load()
 
     def get_text_from_storyteller_fragment(self, ebook_filename, href, fragment_id):
@@ -373,8 +386,8 @@ class SyncManager:
 
     def sync_cycle(self):
         self.db = self.db_handler.load(default={"mappings": []})
-        self.state = self.state_handler.load(default={}) 
-        
+        self.state = self.state_handler.load(default={})
+
         # --- NEW: Bulk Fetch ABS Progress ---
         abs_in_progress = {}
         try:
@@ -386,12 +399,12 @@ class SyncManager:
 
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
         if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
-        
-        db_dirty = False 
+
+        db_dirty = False
 
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
-            
+
             abs_id = mapping['abs_id']
 
             # --- NEW: Update Web Stats ---
@@ -399,34 +412,38 @@ class SyncManager:
             if abs_item:
                 new_prog = abs_item.get('progress', 0) * 100
                 new_dur = abs_item.get('duration', 0)
-                
+
                 if mapping.get('unified_progress') != new_prog or mapping.get('duration') != new_dur:
                     mapping['unified_progress'] = new_prog
                     mapping['duration'] = new_dur
                     db_dirty = True
-            
-        
+
+
         active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
         if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
-        
+
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
             abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
-            
+            title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
+
             try:
                 # 1. Fetch raw states
                 st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
                 bl_pct, bl_cfi = self.booklore_client.get_progress(epub)
                 abs_ts = self.abs_client.get_progress(abs_id)
-             
+
 
                 # UPDATED: KoSync now returns tuple (pct, xpath)
                 ko_pct, ko_xpath = (0.0, None)
                 if self.kosync_client.is_configured():
                     ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
+                    logger.debug(f"📚 [{title_snip}] KoSync response: pct={ko_pct:.1%}, xpath={ko_xpath}")
+                    if ko_xpath is None:
+                        logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 
                 if abs_ts is None: continue # ABS offline
-                
+
                 abs_pct = self._abs_to_percentage(abs_ts, mapping.get('transcript_file'))
                 if abs_ts > 0 and abs_pct is None: continue # Invalid transcript
 
@@ -435,40 +452,67 @@ class SyncManager:
                 if bl_pct is None: bl_pct = 0.0
 
                 prev = self.state.get(abs_id, {})
-                prev_abs_ts = prev.get('abs_ts', 0)
-                prev_kosync = prev.get('kosync_pct', 0)
-                prev_story = prev.get('storyteller_pct', 0)
-                prev_booklore = prev.get('booklore_pct', 0)
 
-                # Current values
-                vals = {'ABS': abs_pct or 0, 'KOSYNC': ko_pct, 'STORYTELLER': st_pct, 'BOOKLORE': bl_pct}
+                config = {
+                    'ABS': {
+                        'current': abs_pct,
+                        'previous': prev.get('abs_pct', 0),
+                        'delta': abs(abs_ts - prev.get('abs_ts', 0)) if abs_ts and prev.get('abs_ts', 0) else abs(abs_ts - prev.get('abs_ts', 0)),
+                        'threshold': self.delta_abs_thresh,
+                        'is_configured': True,
+                        'display': ("ABS", "{prev:.4%} -> {curr:.4%}"),
+                        'value_formatter': lambda v: f"{v:.4%}"
+                    },
+                    'KOSYNC': {
+                        'current': ko_pct,
+                        'previous': prev.get('kosync_pct', 0),
+                        'delta': abs(ko_pct - prev.get('kosync_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.kosync_client.is_configured(),
+                        'display': ("KoSync", "{prev:.4%} -> {curr:.4%}"),
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
+                    },
+                    'STORYTELLER': {
+                        'current': st_pct,
+                        'previous': prev.get('storyteller_pct', 0),
+                        'delta': abs(st_pct - prev.get('storyteller_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.storyteller_db.is_configured(),
+                        'display': ("Storyteller", "{prev:.4%} -> {curr:.4%}"),
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
+                    },
+                    'BOOKLORE': {
+                        'current': bl_pct,
+                        'previous': prev.get('booklore_pct', 0),
+                        'delta': abs(bl_pct - prev.get('booklore_pct', 0)),
+                        'threshold': self.delta_kosync_thresh,
+                        'is_configured': self.booklore_client.is_configured(),
+                        'display': ("BookLore", "{prev:.4%} -> {curr:.4%}"),
+                        'value_formatter': lambda v: f"{v*100:.4f}%"
+                    }
+                }
 
-                # Compute deltas
-                abs_delta = abs(abs_ts - prev_abs_ts) if abs_ts and prev_abs_ts else abs(abs_ts - prev_abs_ts)
-                ko_delta = abs(ko_pct - prev_kosync)
-                st_delta = abs(st_pct - prev_story)
-                bl_delta = abs(bl_pct - prev_booklore)
+                # Filter config to only include configured services
+                filtered_config = {k: v for k, v in config.items() if v.get('is_configured', True)}
 
-                # If nothing changed, remain silent
-                if abs_delta == 0 and ko_delta == 0 and st_delta == 0 and bl_delta == 0:
-                    if abs_id not in self.state: self.state[abs_id] = prev
+                # Check if all 'delta' fields in filtered_config are zero, if so, skip processing
+                if all(cfg['delta'] == 0 for cfg in filtered_config.values()):
+                    if abs_id not in self.state:
+                        self.state[abs_id] = prev
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
 
-                title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
-
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
-                if abs_delta > 0 and abs_delta < self.delta_abs_thresh:
-                    small_changes.append(f"✋ ABS delta {abs_delta:.1f}s (Below threshold): {title_snip}")
-                if ko_delta > 0 and ko_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ KoSync delta {ko_delta*100:.4f}% (Below threshold): {title_snip}")
-                if st_delta > 0 and st_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ Storyteller delta {st_delta*100:.4f}% (Below threshold): {title_snip}")
-                if bl_delta > 0 and bl_delta < self.delta_kosync_thresh:
-                    small_changes.append(f"✋ Booklore delta {bl_delta*100:.4f}% (Below threshold): {title_snip}")
+                for key, cfg in filtered_config.items():
+                    delta = cfg['delta']
+                    threshold = cfg['threshold']
+                    if 0 < delta < threshold:
+                        label, fmt = cfg['display']
+                        delta_str = cfg['value_formatter'](delta)
+                        small_changes.append(f"✋ {label} delta {delta_str} (Below threshold): {title_snip}")
 
-                if small_changes and not (abs_delta >= self.delta_abs_thresh or ko_delta >= self.delta_kosync_thresh or st_delta >= self.delta_kosync_thresh or bl_delta >= self.delta_kosync_thresh):
+                if small_changes and not any(cfg['delta'] >= cfg['threshold'] for cfg in filtered_config.values()):
                     for s in small_changes:
                         logger.info(s)
                     # No further action for only-small changes
@@ -479,20 +523,22 @@ class SyncManager:
 
                 # Status block - show only changed lines
                 status_lines = []
-                if abs_delta > 0:
-                    status_lines.append(f"📊 ABS: {prev_abs_ts}s -> {abs_ts}s")
-                if ko_delta > 0:
-                    status_lines.append(f"📊 KoSync: {prev_kosync:.4%} -> {ko_pct:.4%}")
-                if st_delta > 0:
-                    status_lines.append(f"📊 Storyteller: {prev_story:.4%} -> {st_pct:.4%}")
-                if bl_delta > 0:
-                    status_lines.append(f"📊 BookLore: {prev_booklore:.4%} -> {bl_pct:.4%}")
+                for key, cfg in filtered_config.items():
+                    if cfg['delta'] > 0:
+                        prev = cfg['previous']
+                        curr = cfg['current']
+                        label, fmt = cfg['display']
+                        status_lines.append(f"📊 {label}: {fmt.format(prev=prev, curr=curr)}")
 
                 for line in status_lines:
                     logger.info(line)
 
+                # Build vals from filtered_config
+                vals = {k: v['current'] for k, v in filtered_config.items()}
+
                 leader = max(vals, key=vals.get)
-                logger.info(f"📖 [{title_snip}] {leader} leads at {vals[leader]:.1%}")
+                leader_formatter = filtered_config[leader]['value_formatter']
+                logger.info(f"📖 [{title_snip}] {leader} leads at {leader_formatter(vals[leader])}")
 
                 final_ts, final_pct = abs_ts, vals[leader]
                 sync_success = False
@@ -503,7 +549,8 @@ class SyncManager:
                     if txt:
                         match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=abs_pct)
                         if match_pct:
-                            kosync_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                            kosync_xpath = rich_locator["xpath"] if rich_locator and rich_locator.get("xpath") else None
+                            kosync_ok = self.kosync_client.update_progress(ko_id, match_pct, kosync_xpath)
                             st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                             bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
                             if kosync_ok: logger.info("✅ KoSync update successful")
@@ -515,8 +562,14 @@ class SyncManager:
                 elif leader == 'KOSYNC':
                     txt = None
                     if ko_xpath:
+                        logger.debug(f"📚 [{title_snip}] Attempting XPath resolution: {ko_xpath}")
                         txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
-                        if txt: logger.debug(f"   📝 Using XPath text from {ko_xpath}")
+                        if txt:
+                            logger.debug(f"   📝 Using XPath text from {ko_xpath}")
+                        else:
+                            logger.warning(f"⚠️ [{title_snip}] XPath resolution failed for: {ko_xpath}")
+                    else:
+                        logger.debug(f"⚠️ [{title_snip}] No XPath available from KoSync - using percentage fallback")
 
                     if not txt:
                         txt = self.ebook_parser.get_text_at_percentage(epub, ko_pct)
@@ -525,10 +578,10 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
-                            abs_ok = self.abs_client.update_progress(abs_id, ts)
-                            if abs_ok: logger.info("✅ ABS update successful")
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
+                                logger.debug(f"📚 [{title_snip}] Matched text at {match_pct:.1%}. Kosync is at {ko_pct:.1%}")
                                 st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                                 bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
                                 if st_ok: logger.info("✅ Storyteller update successful")
@@ -540,7 +593,6 @@ class SyncManager:
                                 if st_ok: logger.info("✅ Storyteller update successful")
                                 if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = ko_pct
-                            final_ts = ts
                             sync_success = True
 
                 elif leader == 'STORYTELLER':
@@ -550,22 +602,21 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
                         if ts:
-                            abs_ok = self.abs_client.update_progress(abs_id, ts)
-                            if abs_ok: logger.info("✅ ABS update successful")
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
+                            kosync_xpath = rich_locator["xpath"] if rich_locator and rich_locator.get("xpath") else None
                             if match_pct:
-                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, kosync_xpath)
                                 bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
                                 if ko_ok: logger.info("✅ KoSync update successful")
                                 if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = match_pct
                             else:
-                                ko_ok = self.kosync_client.update_progress(ko_id, st_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, st_pct, kosync_xpath)
                                 bl_ok = self.booklore_client.update_progress(epub, st_pct, None)
                                 if ko_ok: logger.info("✅ KoSync update successful")
                                 if bl_ok: logger.info("✅ Booklore update successful")
                                 final_pct = st_pct
-                            final_ts = ts
                             sync_success = True
 
                 elif leader == 'BOOKLORE':
@@ -573,22 +624,21 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
-                            abs_ok = self.abs_client.update_progress(abs_id, ts)
-                            if abs_ok: logger.info("✅ ABS update successful")
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
+                            kosync_xpath = rich_locator["xpath"] if rich_locator and rich_locator.get("xpath") else None
                             if match_pct:
-                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, match_pct, kosync_xpath)
                                 st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                                 if ko_ok: logger.info("✅ KoSync update successful")
                                 if st_ok: logger.info("✅ Storyteller update successful")
                                 final_pct = match_pct
                             else:
-                                ko_ok = self.kosync_client.update_progress(ko_id, bl_pct, None)
+                                ko_ok = self.kosync_client.update_progress(ko_id, bl_pct, kosync_xpath)
                                 st_ok = self.storyteller_db.update_progress(epub, bl_pct, None)
                                 if ko_ok: logger.info("✅ KoSync update successful")
                                 if st_ok: logger.info("✅ Storyteller update successful")
                                 final_pct = bl_pct
-                            final_ts = ts
                             sync_success = True
 
                 if sync_success and final_pct > 0.01:
@@ -598,14 +648,14 @@ class SyncManager:
                 self.state[abs_id] = {
                     'abs_ts': final_ts,
                     'abs_pct': self._abs_to_percentage(final_ts, mapping.get('transcript_file')) or 0,
-                    'kosync_pct': final_pct,
+                    'kosync_pct': ko_pct if self.kosync_use_percentage_from_server and leader == 'KOSYNC' else final_pct,
                     'storyteller_pct': final_pct,
                     'booklore_pct': final_pct,
                     'last_updated': time.time()
                 }
                 self.state_handler.save(self.state)
                 logger.info("💾 State saved to last_state.json")
-                
+
             except Exception as e:
                 logger.error(f"Sync error: {e}")
         if db_dirty: self.db_handler.save(self.db)

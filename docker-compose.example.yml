@@ -29,6 +29,8 @@ services:
       - ABS_LIBRARY_ID=your_library_id
       # Collection name for synced books (auto-created if missing)
       - ABS_COLLECTION_NAME=Synced with KOReader
+      # Optionally, adjust progress offset in seconds, like -60 for 1 minute back
+      # - ABS_PROGRESS_OFFSET_SECONDS=-60
 
       # ============================================
       # KOSync Configuration (REQUIRED)
@@ -39,6 +41,8 @@ services:
       - KOSYNC_KEY=your_password
       # Hash method: 'content' (recommended) or 'filename'
       - KOSYNC_HASH_METHOD=content
+      # Whether to use percentage progress from KOSync server instead of calculating from text matching when saving the previous state
+      - KOSYNC_USE_PERCENTAGE_FROM_SERVER=false
 
       # ============================================
       # Hardcover Integration (OPTIONAL)

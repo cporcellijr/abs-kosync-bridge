@@ -81,7 +81,7 @@ class ABSClient:
                 # Return list of dicts with stream_url and ext (for transcriber)
                 audio_files = data.get('media', {}).get('audioFiles', [])
                 audio_files.sort(key=lambda x: (x.get('disc', 0) or 0, x.get('track', 0) or 0))
-                
+
                 for af in audio_files:
                     stream_url = f"{self.base_url}/api/items/{item_id}/file/{af['ino']}?token={self.token}"
                     # Return dict with stream URL and extension (default to mp3)
@@ -144,21 +144,21 @@ class ABSClient:
             for item in items:
                 # Filter for audiobooks only
                 if item.get('mediaType') and item.get('mediaType') != 'audiobook': continue
-                
+
                 duration = item.get('duration', 0)
                 current_time = item.get('currentTime', 0)
                 if duration == 0 or item.get('isFinished'): continue
-                
+
                 pct = current_time / duration
                 if pct >= min_progress:
                     lib_item_id = item.get('libraryItemId') or item.get('itemId')
                     if not lib_item_id: continue
-                    
+
                     # Quick detail fetch to get Title/Author
                     details = self.get_item_details(lib_item_id)
                     if not details: continue
                     metadata = details.get('media', {}).get('metadata', {})
-                    
+
                     active_items.append({
                         "id": lib_item_id,
                         "title": metadata.get('title', details.get('name', 'Unknown')),
@@ -188,7 +188,8 @@ class KoSyncClient:
             return False
         url = f"{self.base_url}/healthcheck"
         try:
-            r = requests.get(url, timeout=5)
+            headers = {'accept': 'application/vnd.koreader.v1+json'}
+            r = requests.get(url, timeout=5, headers = headers)
             if r.status_code == 200:
                  # First-run visible INFO, otherwise DEBUG
                  first_run_marker = '/data/.first_run_done'
@@ -241,8 +242,9 @@ class KoSyncClient:
         url = f"{self.base_url}/syncs/progress/{doc_id}"
         try:
             r = requests.get(url, headers=headers)
-            if r.status_code == 200: 
+            if r.status_code == 200:
                 data = r.json()
+                logger.debug(f"KoSync get_progress data: {data}")
                 pct = float(data.get('percentage', 0))
                 # Grab the raw progress string (XPath)
                 xpath = data.get('progress')
@@ -252,30 +254,30 @@ class KoSyncClient:
 
     def update_progress(self, doc_id, percentage, xpath=None):
         if not self.is_configured(): return
-        
+
         headers = {
-            "x-auth-user": self.user, 
-            "x-auth-key": self.auth_token, 
-            'accept': 'application/vnd.koreader.v1+json', 
+            "x-auth-user": self.user,
+            "x-auth-key": self.auth_token,
+            'accept': 'application/vnd.koreader.v1+json',
             'content-type': 'application/json'
         }
         url = f"{self.base_url}/syncs/progress"
-        
+
         # Use XPath if provided, otherwise format percentage
         progress_val = xpath if xpath else f"{percentage:.2%}"
-        
+
         payload = {
-            "document": doc_id, 
-            "percentage": percentage, 
-            "progress": progress_val, 
-            "device": "abs-sync-bot", 
-            "device_id": "abs-sync-bot", 
+            "document": doc_id,
+            "percentage": percentage,
+            "progress": progress_val,
+            "device": "abs-sync-bot",
+            "device_id": "abs-sync-bot",
             "timestamp": int(time.time())
         }
         try:
             r = requests.put(url, headers=headers, json=payload, timeout=10)
             if r.status_code in (200, 201, 204):
-                logger.debug(f"   📡 KoSync Updated: {percentage:.1%}")
+                logger.debug(f"   📡 KoSync Updated: {percentage:.1%} with progress '{progress_val}' for doc {doc_id}")
                 return True
             else:
                 logger.error(f"Failed to update KoSync: {r.status_code} - {r.text}")

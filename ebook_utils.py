@@ -59,7 +59,8 @@ class EbookParser:
         self.cache = LRUCache(capacity=cache_size)
         self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
-        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method})")
+        self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
+        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
     def _resolve_book_path(self, filename):
         # 1. First, search in books_dir (filesystem mount)
@@ -464,20 +465,29 @@ class EbookParser:
         Resolves a KOReader XPath (e.g., /body/DocFragment[18]/body/div/p[1]) to text.
         """
         try:
+            logger.debug(f"🔍 Resolving XPath for {filename}: {xpath_str}")
+            
             # 1. Parse spine index from DocFragment[N]
             match = re.search(r'DocFragment\[(\d+)\]', xpath_str)
-            if not match: return None
+            if not match: 
+                logger.debug(f"❌ No DocFragment found in XPath: {xpath_str}")
+                return None
             spine_index = int(match.group(1)) # 1-based index
+            logger.debug(f"📖 Extracted spine index: {spine_index}")
 
             # 2. Get the specific spine item
             book_path = self._resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
             
             target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
-            if not target_item: return None
+            if not target_item: 
+                logger.debug(f"❌ No spine item found for index {spine_index}. Available indices: {[i['spine_index'] for i in spine_map]}")
+                return None
+            logger.debug(f"✅ Found spine item: {target_item['href']}")
 
             # 3. Clean up the path relative to the body
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
+            logger.debug(f"🛤️ Relative path after DocFragment: {relative_path}")
             
             soup = BeautifulSoup(target_item['content'], 'html.parser')
             target_element = None
@@ -485,38 +495,75 @@ class EbookParser:
             # Strategy A: ID Lookup
             id_match = re.search(r"@id='([^']+)'", relative_path)
             if id_match:
-                target_element = soup.find(id=id_match.group(1))
+                element_id = id_match.group(1)
+                logger.debug(f"🔍 Attempting ID lookup: {element_id}")
+                target_element = soup.find(id=element_id)
+                if target_element:
+                    logger.debug(f"✅ Found element by ID: {element_id}")
+                else:
+                    logger.debug(f"❌ Element not found by ID: {element_id}")
             
             # Strategy B: Simple Traversal
             if not target_element:
+                logger.debug(f"🚶 Attempting simple traversal for path: {relative_path}")
                 curr = soup.find('body') or soup
                 segments = [s for s in relative_path.split('/') if s and s != 'body']
-                for seg in segments:
+                logger.debug(f"🧩 Path segments to traverse: {segments}")
+                
+                last_valid_element = curr  # Keep track of the last successfully found element
+                
+                for i, seg in enumerate(segments):
                     tag_match = re.match(r"([a-z0-9]+)(\[(\d+)\])?", seg, re.IGNORECASE)
-                    if not tag_match: break
+                    if not tag_match: 
+                        logger.debug(f"❌ Failed to parse segment {i}: {seg}")
+                        break
                     tag_name = tag_match.group(1)
                     idx = int(tag_match.group(3)) if tag_match.group(3) else 1
+                    logger.debug(f"🔍 Looking for {tag_name}[{idx}] in current element")
+                    
                     children = curr.find_all(tag_name, recursive=False)
-                    if len(children) >= idx: curr = children[idx-1]
+                    logger.debug(f"📊 Found {len(children)} {tag_name} children")
+                    
+                    if len(children) >= idx: 
+                        curr = children[idx-1]
+                        last_valid_element = curr  # Update last valid element
+                        logger.debug(f"✅ Found {tag_name}[{idx}]")
                     else: 
-                        curr = None
-                        break
+                        logger.debug(f"❌ {tag_name}[{idx}] not found - only {len(children)} children available")
+                        # Conditional fallback: Use the last successfully found element only if enabled
+                        if self.useXpathSegmentFallback and i == len(segments) - 1:  # This is the final segment
+                            logger.debug(f"🔄 Fallback: Using previous element as final segment failed")
+                            curr = last_valid_element
+                        else:
+                            curr = None
+                            break
                 target_element = curr
 
-            if not target_element: return None
+            if not target_element: 
+                logger.debug(f"❌ No target element found after both ID and traversal strategies")
+                return None
+            logger.debug(f"✅ Found target element: {target_element.name}")
 
             elem_text = target_element.get_text(separator=' ', strip=True)
-            if not elem_text: return None
+            if not elem_text: 
+                logger.debug(f"❌ Target element has no text content")
+                return None
+            logger.debug(f"📝 Element text preview: {elem_text[:100]}...")
             
             chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
             local_offset = chapter_text.find(elem_text)
-            if local_offset == -1: return None
+            if local_offset == -1: 
+                logger.debug(f"❌ Element text not found in chapter text")
+                return None
+            logger.debug(f"📍 Local offset in chapter: {local_offset}")
             
             global_offset = target_item['start'] + local_offset
-            return full_text[global_offset : global_offset + 500]
+            result_text = full_text[global_offset : global_offset + 500]
+            logger.debug(f"✅ XPath resolved successfully - returning text snippet ({len(result_text)} chars)")
+            return result_text
 
         except Exception as e:
-            logger.error(f"Error resolving XPath {xpath_str}: {e}")
+            logger.error(f"❌ Error resolving XPath {xpath_str}: {e}")
             return None
 
 # [END FILE]

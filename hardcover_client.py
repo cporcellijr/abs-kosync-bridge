@@ -39,6 +39,9 @@ class HardcoverClient:
             "User-Agent": "ABS-KoSync-Enhanced/5.9"
         }
     
+    def is_configured(self):
+        return bool(self.token)
+    
     def query(self, query: str, variables: Dict = None) -> Optional[Dict]:
         if not self.token:
             return None

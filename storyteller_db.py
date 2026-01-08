@@ -12,7 +12,10 @@ class StorytellerDB:
     def __init__(self):
         self.db_path = Path(os.environ.get("STORYTELLER_DB_PATH", "/storyteller_data/storyteller.db"))
         self.conn = None
-        self._init_connection()
+        self.connection_succeeded = self._init_connection()
+
+    def is_configured(self):
+        return self.connection_succeeded
 
     def _init_connection(self):
         if not self.db_path.exists(): return False
@@ -76,32 +79,32 @@ class StorytellerDB:
                 row = cursor.fetchone()
                 if not row: return False
                 uuid = row['uuid']
-                
+
                 cursor.execute("SELECT locator, timestamp FROM position WHERE book_uuid = ? ORDER BY timestamp DESC LIMIT 1", (uuid,))
                 pos_row = cursor.fetchone()
-                
+
                 # 10s leapfrog logic
                 current_ts = pos_row['timestamp'] if pos_row else 0
                 new_ts = max(int(time.time() * 1000), current_ts)
-                
+
                 locator = {}
-                if pos_row and pos_row['locator']: 
+                if pos_row and pos_row['locator']:
                     try: locator = json.loads(pos_row['locator'])
                     except: pass
-                
+
                 if 'locations' not in locator: locator['locations'] = {}
                 locator['locations']['totalProgression'] = float(percentage)
-                
+
                 # Apply Rich Locator if available
                 if rich_locator:
                     if rich_locator.get('href'): locator['href'] = rich_locator['href']
                     if rich_locator.get('cssSelector'): locator['locations']['cssSelector'] = rich_locator['cssSelector']
-                
+
                 # Clear conflicting fields if we are just setting percentage
                 elif not rich_locator:
                     for k in ['cssSelector', 'fragments', 'position', 'progression']:
                         if k in locator['locations']: del locator['locations'][k]
-                
+
                 cursor.execute("UPDATE position SET locator = ?, timestamp = ? WHERE uuid = ?", (json.dumps(locator), new_ts, uuid))
                 conn.commit()
                 return True
@@ -121,7 +124,7 @@ class StorytellerDB:
                 if row['uuid'] in seen: continue
                 try:
                     pct = json.loads(row['locator']).get('locations', {}).get('totalProgression', 0)
-                    if pct > min_progress: 
+                    if pct > min_progress:
                         results.append({"id": row['uuid'], "title": row['title'], "source": "STORYTELLER"})
                         seen.add(row['uuid'])
                 except: pass
@@ -148,14 +151,14 @@ class StorytellerDB:
                 row = cursor.fetchone()
                 if not row: return False
                 uuid = row['uuid']
-                
+
                 new_ts = int(time.time() * 1000)
                 locator = {
                     "type": "application/xhtml+xml",
                     "locations": {"totalProgression": float(percentage)}
                 }
                 if target_href: locator["href"] = target_href
-                
+
                 cursor.execute("UPDATE position SET locator = ?, timestamp = ? WHERE uuid = ?", (json.dumps(locator), new_ts, uuid))
                 conn.commit()
                 return True
