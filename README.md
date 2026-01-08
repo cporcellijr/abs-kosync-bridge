@@ -48,7 +48,6 @@ ABS-KoSync Enhanced synchronizes your reading/listening progress across multiple
 - **Dashboard** with cover art and real-time progress across all platforms
 - **Single match** - manually link audiobooks to ebooks
 - **Batch matching** - queue multiple books for processing
-- **Suggestions** - auto-discovered matches from your reading activity
 - **Book Linker** - automated Storyteller readaloud workflow
 
 ### Automation
@@ -338,12 +337,6 @@ Queue multiple mappings at once:
 2. Review the queue in the sidebar
 3. Click "Process All" to create all mappings
 
-### Suggestions (`/suggestions`)
-
-Auto-discovered potential matches:
-- Based on fuzzy title matching between your active audiobooks/ebooks
-- Accept to create a mapping, or Dismiss to ignore
-- Confidence score shows match quality
 
 ### Book Linker (`/book-linker`)
 
@@ -459,9 +452,6 @@ docker compose up -d
 | `/` | GET | Dashboard |
 | `/match` | GET/POST | Single match interface |
 | `/batch-match` | GET/POST | Batch matching |
-| `/suggestions` | GET | Auto-discovered matches |
-| `/suggestions/accept/<key>` | POST | Accept a suggestion |
-| `/suggestions/dismiss/<key>` | POST | Dismiss a suggestion |
 | `/book-linker` | GET/POST | Book Linker workflow |
 | `/delete/<abs_id>` | POST | Delete a mapping |
 | `/clear-progress/<abs_id>` | POST | Reset progress to 0% |
@@ -478,7 +468,6 @@ All persistent data is stored in `/data`:
 |------|-------------|
 | `mapping_db.json` | Book mappings and configuration |
 | `last_state.json` | Last known sync state per book |
-| `suggestions.json` | Auto-discovered match suggestions |
 | `transcripts/` | Whisper transcription output (JSON) |
 | `audio_cache/` | Temporary audio file downloads |
 | `epub_cache/` | Downloaded EPUBs from Booklore |
