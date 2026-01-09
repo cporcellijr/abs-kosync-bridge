@@ -14,7 +14,6 @@ from urllib.parse import urljoin
 import html
 from json_db import JsonDB
 from logging_utils import sanitize_log_data
-import json
 from datetime import datetime
 import schedule
 from main import SyncManager
@@ -299,15 +298,15 @@ def sync_daemon():
         sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
         schedule.every(sync_period).minutes.do(manager.sync_cycle)
         schedule.every(1).minutes.do(manager.check_pending_jobs)
-        
+
         logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
-        
+
         # Run initial sync cycle
         try:
             manager.sync_cycle()
         except Exception as e:
             logger.error(f"Initial sync cycle failed: {e}")
-        
+
         # Main daemon loop
         while True:
             try:
@@ -316,7 +315,7 @@ def sync_daemon():
             except Exception as e:
                 logger.error(f"Sync daemon error: {e}")
                 time.sleep(60)  # Wait longer on error
-                
+
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
 
@@ -548,7 +547,7 @@ def index():
         mapping.setdefault('storyteller_progress', 0)
         mapping.setdefault('booklore_progress', 0)
         mapping.setdefault('abs_progress', 0)
-        mapping.setdefault('hardcover_progress', 0) 
+        mapping.setdefault('hardcover_progress', 0)
 
         # 2. POPULATE STATS (Try DB first, Fallback to State)
         # Check if we have state data for this book
@@ -564,7 +563,7 @@ def index():
                 mapping['kosync_progress'] = get_pct('kosync_pct')
                 mapping['storyteller_progress'] = get_pct('storyteller_pct')
                 mapping['booklore_progress'] = get_pct('booklore_pct')
-                mapping['hardcover_progress'] = get_pct('hardcover_pct') 
+                mapping['hardcover_progress'] = get_pct('hardcover_pct')
                 mapping['abs_progress'] = state.get('abs_ts', 0)
 
                 # Sanity check: ABS timestamp may be stored in milliseconds in the state file.
@@ -916,18 +915,18 @@ def api_logs():
         min_level = request.args.get('level', 'DEBUG')
         search_term = request.args.get('search', '').lower()
         offset = request.args.get('offset', 0, type=int)
-        
+
         # Limit lines count for performance
         lines_count = min(lines_count, 5000)
-        
+
         # Read log files (current and backups)
         all_lines = []
-        
+
         # Read current log file
         if LOG_PATH.exists():
             with open(LOG_PATH, 'r', encoding='utf-8') as f:
                 all_lines.extend(f.readlines())
-        
+
         # Read backup files if needed (for more history)
         if lines_count > len(all_lines):
             for i in range(1, 6):  # Check up to 5 backup files
@@ -938,13 +937,13 @@ def api_logs():
                         all_lines = backup_lines + all_lines
                         if len(all_lines) >= lines_count:
                             break
-        
+
         # Parse and filter logs
         log_levels = {
             'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50
         }
         min_level_num = log_levels.get(min_level.upper(), 10)
-        
+
         parsed_logs = []
         for line in all_lines:
             line = line.strip()
@@ -957,7 +956,7 @@ def api_logs():
                     timestamp_end = line.find('] ')
                     timestamp_str = line[1:timestamp_end]
                     rest = line[timestamp_end + 2:]
-                    
+
                     if ': ' in rest:
                         level_module_str, message = rest.split(': ', 1)
                         
@@ -970,7 +969,7 @@ def api_logs():
                             module_str = 'unknown'
                             
                         level_num = log_levels.get(level_str.upper(), 20)
-                        
+
                         # Apply filters
                         if level_num >= min_level_num:
                             if not search_term or search_term in message.lower() or search_term in level_str.lower() or search_term in module_str.lower():
@@ -1013,21 +1012,21 @@ def api_logs():
                         'module': 'unknown',
                         'raw': line
                     })
-        
+
         # Get recent logs first, then apply pagination
         recent_logs = parsed_logs[-lines_count:] if len(parsed_logs) > lines_count else parsed_logs
-        
+
         # Apply offset for pagination
         if offset > 0:
             recent_logs = recent_logs[:-offset] if offset < len(recent_logs) else []
-        
+
         return jsonify({
             'logs': recent_logs,
             'total_lines': len(parsed_logs),
             'displayed_lines': len(recent_logs),
             'has_more': len(parsed_logs) > lines_count + offset
         })
-        
+
     except Exception as e:
         logger.error(f"Error fetching logs: {e}")
         return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
@@ -1040,55 +1039,39 @@ def api_logs_live():
         count = request.args.get('count', 50, type=int)
         min_level = request.args.get('level', 'DEBUG')
         search_term = request.args.get('search', '').lower()
-        
+
         # Limit count for performance
         count = min(count, 500)
-        
+
         log_levels = {
             'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50
         }
         min_level_num = log_levels.get(min_level.upper(), 10)
-        
+
         # Get recent logs from memory
         recent_logs = memory_log_handler.get_recent_logs(count * 2)  # Get more to filter
-        
+
         # Filter logs
         filtered_logs = []
         for log_entry in recent_logs:
             level_num = log_levels.get(log_entry['level'], 20)
-            
+
             # Apply filters
             if level_num >= min_level_num:
                 if not search_term or search_term in log_entry['message'].lower() or search_term in log_entry['level'].lower():
                     filtered_logs.append(log_entry)
-        
+
         # Return most recent filtered logs
         result_logs = filtered_logs[-count:] if len(filtered_logs) > count else filtered_logs
-        
+
         return jsonify({
             'logs': result_logs,
             'timestamp': datetime.now().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"Error fetching live logs: {e}")
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
-
-@app.route('/api/test-log')
-def test_log():
-    """Test endpoint to generate logs from different modules for testing."""
-    logger.info("Test log from web_server module")
-    
-    # Generate log from main module via manager
-    main_logger = logging.getLogger('main')
-    main_logger.info("Test log from main module via web_server")
-    
-    # Test log from manager
-    if hasattr(manager, 'abs_client'):
-        abs_logger = logging.getLogger('api_clients')
-        abs_logger.info("Test log from api_clients module")
-    
-    return jsonify({'message': 'Test logs generated', 'memory_logs_count': len(memory_log_handler.logs)})
 
 @app.route('/view_log')
 def view_log():
