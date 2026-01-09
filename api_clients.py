@@ -39,8 +39,6 @@ class ABSClient:
                         open(first_run_marker, 'w').close()
                     except Exception:
                         pass
-                else:
-                    logger.debug(f"✅ Connected to Audiobookshelf as user: {r.json().get('username', 'Unknown')}")
                 return True
             else:
                 # Keep failure visible as warning
@@ -204,8 +202,6 @@ class KoSyncClient:
                          open(first_run_marker, 'w').close()
                      except Exception:
                          pass
-                 else:
-                     logger.debug(f"✅ Connected to KoSync Server at {self.base_url}")
                  return True
             # Fallback check
             url_sync = f"{self.base_url}/syncs/progress/test-connection"
@@ -224,8 +220,6 @@ class KoSyncClient:
                         open(first_run_marker, 'w').close()
                     except Exception:
                         pass
-                else:
-                    logger.debug(f"✅ Connected to KoSync Server (Response: {r.status_code})")
                 return True
             logger.warning(f"❌ KoSync connection failed (Response: {r.status_code})")
             return False

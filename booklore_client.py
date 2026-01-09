@@ -93,8 +93,6 @@ class BookloreClient:
                     open(first_run_marker, 'w').close()
                 except Exception:
                     pass
-            else:
-                logger.debug(f"✅ Connected to Booklore at {self.base_url}")
             return True
 
         # If we were configured but couldn't get a token, warn

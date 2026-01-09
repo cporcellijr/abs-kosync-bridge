@@ -76,7 +76,9 @@ def setup_file_logging():
     root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)
     # Prevent Werkzeug from propagating its logs up to the root logger (avoids duplicate access lines)
-    logging.getLogger('werkzeug').propagate = False
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_logger.propagate = False
+    werkzeug_logger.setLevel(logging.WARNING)
 
 setup_file_logging()
 

@@ -418,10 +418,6 @@ class SyncManager:
                     mapping['duration'] = new_dur
                     db_dirty = True
 
-
-        active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
-        if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
-
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
             abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
