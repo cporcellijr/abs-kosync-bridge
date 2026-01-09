@@ -238,7 +238,6 @@ class KoSyncClient:
             r = requests.get(url, headers=headers)
             if r.status_code == 200:
                 data = r.json()
-                logger.debug(f"KoSync get_progress data: {data}")
                 pct = float(data.get('percentage', 0))
                 # Grab the raw progress string (XPath)
                 xpath = data.get('progress')
