@@ -9,6 +9,9 @@ from pathlib import Path
 from zipfile import ZipFile
 import lxml.etree as ET
 
+# Import memory logging setup early to capture logs from this process too
+from logging_utils import memory_log_handler, LOG_PATH
+
 # Logging utilities (placed at top to ensure availability during sync)
 from logging_utils import sanitize_log_data, time_execution
 
@@ -36,10 +39,13 @@ if not StorytellerClientClass:
 for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
-logging.basicConfig(
-    level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO),
-    format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
-)
+# Only call basicConfig if logging hasn't been configured already (by memory_logger)
+root_logger = logging.getLogger()
+if not hasattr(root_logger, '_configured') or not root_logger._configured:
+    logging.basicConfig(
+        level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO),
+        format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+    )
 logger = logging.getLogger(__name__)
 
 # Use environment variable for DATA_DIR and BOOKS_DIR, defaulting to /data and /books
@@ -557,7 +563,8 @@ class SyncManager:
                             elif rich_locator and rich_locator.get("xpath"):
                                 kosync_xpath = rich_locator["xpath"]
                             else:
-                                kosync_xpath = "" 
+                                logger.warning(f"⚠️ [{title_snip}] No valid XPath could be determined from ABS text match, not updating progress.")
+                                continue
 
                             # 3. Update Clients
                             kosync_ok = self.kosync_client.update_progress(ko_id, match_pct, kosync_xpath)
@@ -698,6 +705,8 @@ class SyncManager:
         if db_dirty: self.db_handler.save(self.db)
 
     def run_daemon(self):
+        """Legacy method - daemon is now run from web_server.py"""
+        logger.warning("run_daemon() called - daemon should be started from web_server.py instead")
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)
         schedule.every(1).minutes.do(self.check_pending_jobs)
         logger.info("Daemon started.")
@@ -707,5 +716,7 @@ class SyncManager:
             time.sleep(30)
 
 if __name__ == "__main__":
+    # This is only used for standalone testing - production uses web_server.py
+    logger.info("🚀 Running sync manager in standalone mode (for testing)")
     SyncManager().run_daemon()
 # [END FILE]

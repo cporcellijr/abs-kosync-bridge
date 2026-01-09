@@ -75,7 +75,7 @@ class BookloreClient:
     def check_connection(self):
         # Ensure Booklore is configured first
         if not all([self.base_url, self.username, self.password]):
-            logger.warning("⚠️ Booklore not configured (skipping)")
+            logger.info("⚠️ Booklore not configured (skipping)")
             return False
 
         token = self._get_fresh_token()

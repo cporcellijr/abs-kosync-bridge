@@ -1,19 +1,22 @@
 # [START FILE: abs-kosync-enhanced/web_server.py]
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
+# Import memory logging setup - this must happen early to capture all logs
+from logging_utils import memory_log_handler, LOG_PATH
 import logging
 from pathlib import Path
-from main import SyncManager
 import time
 import requests
 import os
 import shutil
 import subprocess
 import threading
-from logging.handlers import RotatingFileHandler
 from urllib.parse import urljoin
 import html
 from json_db import JsonDB
 from logging_utils import sanitize_log_data
+from datetime import datetime
+import schedule
+from main import SyncManager
 
 # ---------------- APP SETUP ----------------
 
@@ -23,6 +26,7 @@ app.secret_key = "kosync-queue-secret-unified-app"
 # NOTE: Logging is configured centrally in `main.py`. Avoid calling
 # `logging.basicConfig` here to prevent adding duplicate handlers.
 logger = logging.getLogger(__name__)
+logger.info("Starting ABS-KOSync Bridge Web Server")
 
 manager = SyncManager()
 
@@ -63,24 +67,6 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
-
-LOG_DIR = DATA_DIR / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_PATH = LOG_DIR / "unified_app.log"
-
-def setup_file_logging():
-    file_handler = RotatingFileHandler(str(LOG_PATH), maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s'))
-    # Attach to the root logger so all module loggers go to the same file
-    root_logger = logging.getLogger()
-    root_logger.addHandler(file_handler)
-    # Prevent Werkzeug from propagating its logs up to the root logger (avoids duplicate access lines)
-    werkzeug_logger = logging.getLogger('werkzeug')
-    werkzeug_logger.propagate = False
-    werkzeug_logger.setLevel(logging.WARNING)
-
-setup_file_logging()
 
 # ---------------- BOOK LINKER HELPERS ----------------
 
@@ -303,6 +289,41 @@ monitor_thread = threading.Thread(target=monitor_readaloud_files, daemon=True)
 monitor_thread.start()
 logger.info("Readaloud monitor started")
 
+# ---------------- SYNC MANAGER DAEMON ----------------
+
+def sync_daemon():
+    """Background sync daemon running in a separate thread."""
+    try:
+        # Setup schedule for sync operations
+        sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
+        schedule.every(sync_period).minutes.do(manager.sync_cycle)
+        schedule.every(1).minutes.do(manager.check_pending_jobs)
+
+        logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
+
+        # Run initial sync cycle
+        try:
+            manager.sync_cycle()
+        except Exception as e:
+            logger.error(f"Initial sync cycle failed: {e}")
+
+        # Main daemon loop
+        while True:
+            try:
+                schedule.run_pending()
+                time.sleep(30)  # Check every 30 seconds
+            except Exception as e:
+                logger.error(f"Sync daemon error: {e}")
+                time.sleep(60)  # Wait longer on error
+
+    except Exception as e:
+        logger.error(f"Sync daemon crashed: {e}")
+
+# Start sync daemon in background thread
+sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
+sync_daemon_thread.start()
+logger.info("Sync daemon thread started")
+
 # ---------------- ORIGINAL ABS-KOSYNC HELPERS ----------------
 
 def find_ebook_file(filename):
@@ -505,7 +526,7 @@ def index():
         'audiobookshelf': True,
         'kosync': manager.kosync_client.is_configured(),
         'storyteller': manager.storyteller_db.check_connection() if hasattr(manager.storyteller_db, 'check_connection') else True,
-        'booklore': manager.booklore_client.check_connection() if hasattr(manager.booklore_client, 'check_connection') else False,
+        'booklore': manager.booklore_client.is_configured() if hasattr(manager.booklore_client, 'check_connection') else False,
         'hardcover': bool(manager.hardcover_client.token)
     }
 
@@ -526,7 +547,7 @@ def index():
         mapping.setdefault('storyteller_progress', 0)
         mapping.setdefault('booklore_progress', 0)
         mapping.setdefault('abs_progress', 0)
-        mapping.setdefault('hardcover_progress', 0) 
+        mapping.setdefault('hardcover_progress', 0)
 
         # 2. POPULATE STATS (Try DB first, Fallback to State)
         # Check if we have state data for this book
@@ -542,7 +563,7 @@ def index():
                 mapping['kosync_progress'] = get_pct('kosync_pct')
                 mapping['storyteller_progress'] = get_pct('storyteller_pct')
                 mapping['booklore_progress'] = get_pct('booklore_pct')
-                mapping['hardcover_progress'] = get_pct('hardcover_pct') 
+                mapping['hardcover_progress'] = get_pct('hardcover_pct')
                 mapping['abs_progress'] = state.get('abs_ts', 0)
 
                 # Sanity check: ABS timestamp may be stored in milliseconds in the state file.
@@ -880,15 +901,185 @@ def link_hardcover(abs_id):
 def api_status():
     return jsonify(db_handler.load(default={"mappings": []}))
 
+@app.route('/logs')
+def logs_view():
+    """Display logs frontend with filtering capabilities."""
+    return render_template('logs.html')
+
+@app.route('/api/logs')
+def api_logs():
+    """API endpoint for fetching logs with filtering and pagination."""
+    try:
+        # Get query parameters
+        lines_count = request.args.get('lines', 1000, type=int)
+        min_level = request.args.get('level', 'DEBUG')
+        search_term = request.args.get('search', '').lower()
+        offset = request.args.get('offset', 0, type=int)
+
+        # Limit lines count for performance
+        lines_count = min(lines_count, 5000)
+
+        # Read log files (current and backups)
+        all_lines = []
+
+        # Read current log file
+        if LOG_PATH.exists():
+            with open(LOG_PATH, 'r', encoding='utf-8') as f:
+                all_lines.extend(f.readlines())
+
+        # Read backup files if needed (for more history)
+        if lines_count > len(all_lines):
+            for i in range(1, 6):  # Check up to 5 backup files
+                backup_path = Path(str(LOG_PATH) + f'.{i}')
+                if backup_path.exists():
+                    with open(backup_path, 'r', encoding='utf-8') as f:
+                        backup_lines = f.readlines()
+                        all_lines = backup_lines + all_lines
+                        if len(all_lines) >= lines_count:
+                            break
+
+        # Parse and filter logs
+        log_levels = {
+            'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50
+        }
+        min_level_num = log_levels.get(min_level.upper(), 10)
+
+        parsed_logs = []
+        for line in all_lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Parse log line format: [2024-01-09 10:30:45] LEVEL - MODULE: MESSAGE
+            try:
+                if line.startswith('[') and '] ' in line:
+                    timestamp_end = line.find('] ')
+                    timestamp_str = line[1:timestamp_end]
+                    rest = line[timestamp_end + 2:]
+
+                    if ': ' in rest:
+                        level_module_str, message = rest.split(': ', 1)
+                        
+                        # Check if format includes module (LEVEL - MODULE)
+                        if ' - ' in level_module_str:
+                            level_str, module_str = level_module_str.split(' - ', 1)
+                        else:
+                            # Old format without module
+                            level_str = level_module_str
+                            module_str = 'unknown'
+                            
+                        level_num = log_levels.get(level_str.upper(), 20)
+
+                        # Apply filters
+                        if level_num >= min_level_num:
+                            if not search_term or search_term in message.lower() or search_term in level_str.lower() or search_term in module_str.lower():
+                                parsed_logs.append({
+                                    'timestamp': timestamp_str,
+                                    'level': level_str,
+                                    'message': message,
+                                    'module': module_str,
+                                    'raw': line
+                                })
+                    else:
+                        # Line without level, treat as INFO
+                        if min_level_num <= 20:
+                            if not search_term or search_term in rest.lower():
+                                parsed_logs.append({
+                                    'timestamp': timestamp_str,
+                                    'level': 'INFO',
+                                    'message': rest,
+                                    'module': 'unknown',
+                                    'raw': line
+                                })
+                else:
+                    # Raw line without timestamp, treat as INFO
+                    if min_level_num <= 20:
+                        if not search_term or search_term in line.lower():
+                            parsed_logs.append({
+                                'timestamp': '',
+                                'level': 'INFO',
+                                'message': line,
+                                'module': 'unknown',
+                                'raw': line
+                            })
+            except Exception:
+                # If parsing fails, include as raw line
+                if not search_term or search_term in line.lower():
+                    parsed_logs.append({
+                        'timestamp': '',
+                        'level': 'INFO',
+                        'message': line,
+                        'module': 'unknown',
+                        'raw': line
+                    })
+
+        # Get recent logs first, then apply pagination
+        recent_logs = parsed_logs[-lines_count:] if len(parsed_logs) > lines_count else parsed_logs
+
+        # Apply offset for pagination
+        if offset > 0:
+            recent_logs = recent_logs[:-offset] if offset < len(recent_logs) else []
+
+        return jsonify({
+            'logs': recent_logs,
+            'total_lines': len(parsed_logs),
+            'displayed_lines': len(recent_logs),
+            'has_more': len(parsed_logs) > lines_count + offset
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching logs: {e}")
+        return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
+
+@app.route('/api/logs/live')
+def api_logs_live():
+    """API endpoint for fetching recent live logs from memory."""
+    try:
+        # Get query parameters
+        count = request.args.get('count', 50, type=int)
+        min_level = request.args.get('level', 'DEBUG')
+        search_term = request.args.get('search', '').lower()
+
+        # Limit count for performance
+        count = min(count, 500)
+
+        log_levels = {
+            'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50
+        }
+        min_level_num = log_levels.get(min_level.upper(), 10)
+
+        # Get recent logs from memory
+        recent_logs = memory_log_handler.get_recent_logs(count * 2)  # Get more to filter
+
+        # Filter logs
+        filtered_logs = []
+        for log_entry in recent_logs:
+            level_num = log_levels.get(log_entry['level'], 20)
+
+            # Apply filters
+            if level_num >= min_level_num:
+                if not search_term or search_term in log_entry['message'].lower() or search_term in log_entry['level'].lower():
+                    filtered_logs.append(log_entry)
+
+        # Return most recent filtered logs
+        result_logs = filtered_logs[-count:] if len(filtered_logs) > count else filtered_logs
+
+        return jsonify({
+            'logs': result_logs,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching live logs: {e}")
+        return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
+
 @app.route('/view_log')
 def view_log():
-    try:
-        lines = LOG_PATH.read_text(encoding="utf-8").splitlines()[-300:]
-        return "<pre>" + "\n".join(html.escape(l) for l in lines) + "</pre>"
-    except: return "Log not available"
+    """Legacy endpoint - redirect to new logs page."""
+    return redirect(url_for('logs_view'))
 
 if __name__ == '__main__':
-    logger.info("=== Unified ABS Manager Started ===")
+    logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 
     # Check ebook source configuration
     booklore_configured = manager.booklore_client.is_configured()
@@ -905,7 +1096,10 @@ if __name__ == '__main__':
             "or mount the ebooks directory to /books."
         )
 
-    logger.info(f"Book Linker monitoring interval: {MONITOR_INTERVAL} seconds")
+    sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
+    logger.info(f"📅 Sync period: {sync_period} minutes")
+    logger.info(f"📁 Book Linker monitoring interval: {MONITOR_INTERVAL} seconds")
+    logger.info(f"🌐 Web interface starting on port 5757")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
 # [END FILE]
