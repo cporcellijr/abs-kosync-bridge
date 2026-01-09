@@ -5,18 +5,19 @@ from datetime import datetime
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from functools import wraps
+import requests
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryLogHandler(logging.Handler):
     """Log handler that keeps logs in memory for real-time streaming."""
-    
+
     def __init__(self, maxlen=1000):
         super().__init__()
         self.logs = []
         self.maxlen = maxlen
-        
+
     def emit(self, record):
         try:
             log_entry = {
@@ -31,7 +32,7 @@ class MemoryLogHandler(logging.Handler):
                 self.logs.pop(0)
         except Exception:
             pass
-    
+
     def get_recent_logs(self, count=100):
         """Get the most recent logs up to specified count."""
         return self.logs[-count:] if len(self.logs) > count else self.logs.copy()
@@ -48,11 +49,11 @@ def setup_file_logging():
     file_handler = RotatingFileHandler(str(LOG_PATH), maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
     file_handler.setLevel(log_level)
     file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s - %(name)s: %(message)s'))
-    
+
     # Attach to the root logger so all module loggers go to the same file
     root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)
-    
+
     return LOG_PATH
 
 
@@ -63,19 +64,19 @@ def setup_console_logging():
     log_level = getattr(logging, os.environ.get('LOG_LEVEL', 'INFO').upper(), logging.INFO)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    
+
     # Add to root logger
     root_logger = logging.getLogger()
     root_logger.addHandler(console_handler)
-    
+
     # Set root logger to DEBUG so all messages reach handlers, let handlers filter individually
     root_logger.setLevel(logging.DEBUG)
-    
+
     # Prevent Werkzeug from propagating its logs up to the root logger (avoids duplicate access lines)
     werkzeug_logger = logging.getLogger('werkzeug')
     werkzeug_logger.propagate = False
     werkzeug_logger.setLevel(logging.WARNING)
-    
+
     # Mark that we've already configured logging to prevent basicConfig from running
     root_logger._configured = True
 
@@ -89,8 +90,48 @@ def setup_memory_logging():
     # Add to root logger to capture all logs from all modules
     root_logger = logging.getLogger()
     root_logger.addHandler(memory_handler)
-    
+
     return memory_handler
+
+
+class TelegramHandler(logging.Handler):
+    """Log handler that sends logs to a Telegram chat via bot API."""
+    def __init__(self, bot_token, chat_id, min_level=logging.ERROR):
+        super().__init__(min_level)
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    def emit(self, record):
+        try:
+            message = self.format(record)
+            payload = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': 'HTML',
+                'disable_notification': False
+            }
+            requests.post(self.api_url, data=payload, timeout=5)
+        except Exception:
+            pass  # Never raise from logging
+
+
+def setup_telegram_logging():
+    """Setup Telegram logging handler if environment variables are set."""
+    logger.info("Setting up telegram logger")
+    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    log_level_name = os.environ.get('TELEGRAM_LOG_LEVEL', 'ERROR').upper()
+    log_level = getattr(logging, log_level_name, logging.ERROR)
+    if not bot_token or not chat_id:
+        return None
+    handler = TelegramHandler(bot_token, chat_id, min_level=log_level)
+    handler.setFormatter(logging.Formatter(
+        '<b>[%(asctime)s]</b> <code>%(levelname)s</code> - <b>%(name)s</b>: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    return handler
 
 
 def sanitize_log_data(data):
@@ -125,3 +166,4 @@ def time_execution(func):
 LOG_PATH = setup_file_logging()  # Setup file logging first
 setup_console_logging()  # Setup console logging second
 memory_log_handler = setup_memory_logging()  # Then memory logging
+telegram_log_handler = setup_telegram_logging()  # Optionally setup Telegram logging

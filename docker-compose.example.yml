@@ -1,5 +1,5 @@
 # ABS-KoSync Enhanced - Example Docker Compose Configuration
-# 
+#
 # Copy this file to docker-compose.yml and fill in your values.
 # See README.md for detailed configuration instructions.
 
@@ -10,7 +10,7 @@ services:
     # image: your-username/abs-kosync-enhanced:latest
     container_name: abs_kosync_enhanced
     restart: unless-stopped
-    
+
     environment:
       # ============================================
       # General Settings
@@ -59,7 +59,7 @@ services:
       - STORYTELLER_API_URL=http://host.docker.internal:8001
       - STORYTELLER_USER=your_storyteller_username
       - STORYTELLER_PASSWORD=your_storyteller_password
-      
+
       # Option 2: Direct SQLite (Legacy - may be overwritten by mobile app)
       # Only used as fallback if API credentials not set
       - STORYTELLER_DB_PATH=/storyteller_data/storyteller.db
@@ -97,13 +97,23 @@ services:
       - AUDIOBOOKS_DIR=/audiobooks
       - STORYTELLER_INGEST_DIR=/storyteller/library
 
+      # ============================================
+      # Telegram Logging Integration (OPTIONAL)
+      # ============================================
+      # Enable Telegram log forwarding for errors and above.
+      # Get your bot token from @BotFather and chat ID from @userinfobot or via API.
+      # Uncomment and fill in the following lines to enable:
+      # - TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
+      # - TELEGRAM_CHAT_ID=123456789
+      # - TELEGRAM_LOG_LEVEL=ERROR  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
     volumes:
       # ============================================
       # REQUIRED VOLUMES
       # ============================================
       # App data (database, transcripts, state)
       - ./data:/data
-      
+
       # Main ebook library (for sync matching)
       - /path/to/your/ebooks:/books
 
@@ -112,7 +122,7 @@ services:
       # ============================================
       # Storyteller database (for SQLite fallback)
       - /path/to/storyteller/data:/storyteller_data
-      
+
       # Book Linker volumes
       - /path/to/source/ebooks:/linker_books
       - /path/to/audiobooks:/audiobooks
