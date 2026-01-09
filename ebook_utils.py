@@ -2,10 +2,11 @@
 """
 Ebook Utilities for abs-kosync-bridge
 
-FINAL HYBRID MERGE VERSION:
+ULTIMATE HYBRID VERSION:
 - [Engine A] BeautifulSoup: For fuzzy matching, Storyteller/Readium support, and rich locators.
 - [Engine B] LXML: For "Perfect" KOReader sync (precise /text().OFFSET handling).
 - Robustness: Prefers ID anchors when available, falls back to positional indexing.
+- Complete Storyteller/Readium locator support with href + #id resolution.
 """
 
 import ebooklib
@@ -179,12 +180,29 @@ class EbookParser:
             logger.error(f"Error getting text at percentage: {e}")
             return None
 
+    def get_character_delta(self, filename, percentage_prev, percentage_new):
+        """Calculate character difference between two percentages."""
+        try:
+            book_path = self._resolve_book_path(filename)
+            full_text, _ = self.extract_text_and_map(book_path)
+            if not full_text:
+                return None
+            total_len = len(full_text)
+            return abs(int(total_len * percentage_prev) - int(total_len * percentage_new))
+        except Exception as e:
+            logger.error(f"Error calculating character delta: {e}")
+            return None
+
     # =========================================================================
     # [ENGINE A] STORYTELLER / READIUM / GENERAL UTILS
     # Uses BeautifulSoup for broad compatibility
     # =========================================================================
 
     def resolve_locator_id(self, filename, href, fragment_id):
+        """
+        Returns a text snippet starting at the element identified by href + #fragment_id.
+        Useful for syncing from Storyteller or any Readium-based reader that uses DOM IDs.
+        """
         try:
             book_path = self._resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
@@ -211,7 +229,10 @@ class EbookParser:
                 if s.parent == element or element in s.parents:
                     found_offset = current_offset
                     break
-                current_offset += len(s)
+                text_len = len(s.strip())
+                if text_len == 0:
+                    continue
+                current_offset += text_len
 
             if found_offset == -1:
                 # Fallback
@@ -231,6 +252,7 @@ class EbookParser:
             return None
 
     def _generate_css_selector(self, target_tag):
+        """Generate a Readium-compatible CSS selector."""
         if not target_tag: return ""
         segments = []
         curr = target_tag
@@ -249,6 +271,7 @@ class EbookParser:
         return " > ".join(reversed(segments))
 
     def _generate_cfi(self, spine_index, html_content, local_target_index):
+        """Generate an EPUB CFI for Booklore/Readium."""
         soup = BeautifulSoup(html_content, 'html.parser')
         current_char_count = 0
         target_tag = None
@@ -288,7 +311,10 @@ class EbookParser:
         return f"epubcfi(/6/{spine_step}!/{element_path}:0)"
 
     def _generate_xpath_bs4(self, html_content, local_target_index):
-        """Original BS4 XPath generator (kept for fuzzy matching references)."""
+        """
+        Original BS4 XPath generator (kept for fuzzy matching references).
+        Returns: (xpath_string, target_tag_object, is_anchored)
+        """
         soup = BeautifulSoup(html_content, 'html.parser')
         current_char_count = 0
         target_tag = None
@@ -333,6 +359,7 @@ class EbookParser:
     def find_text_location(self, filename, search_phrase, hint_percentage=None):
         """
         Uses BS4 Engine. Good for fuzzy matching phrases from external apps.
+        Returns: (percentage, rich_locator_dict) or (None, None)
         """
         try:
             book_path = self._resolve_book_path(filename)
@@ -342,14 +369,18 @@ class EbookParser:
             total_len = len(full_text)
             match_index = -1
 
+            # 1. Exact match
             match_index = full_text.find(search_phrase)
+            
+            # 2. Normalized match
             if match_index == -1:
                 norm_content = self._normalize(full_text)
                 norm_search = self._normalize(search_phrase)
-                match_index = norm_content.find(norm_search)
-                if match_index != -1:
-                    match_index = int((match_index / len(norm_content)) * total_len)
+                norm_index = norm_content.find(norm_search)
+                if norm_index != -1:
+                    match_index = int((norm_index / len(norm_content)) * total_len)
 
+            # 3. Fuzzy match
             if match_index == -1:
                 cutoff = self.fuzzy_threshold
                 if hint_percentage is not None:
@@ -406,12 +437,14 @@ class EbookParser:
     # =========================================================================
     # [ENGINE B] KOREADER PERFECT SYNC
     # Uses LXML and "Hybrid" Logic (ID + Text Offset)
+    # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
     # =========================================================================
 
     def get_xpath_and_percentage(self, filename, position=0):
         """
         NEW: For KOReader Sync.
-        Uses LXML for precision handling of /text().OFFSET
+        Uses LXML for precision handling of /text().OFFSET.
+        Includes WHITESPACE STRIPPING to match extract_text_and_map's counting logic.
         """
         try:
             # 1. Get Text & Map
@@ -445,29 +478,47 @@ class EbookParser:
             # 2. Use LXML to generate the hybrid XPath
             tree = html.fromstring(target_item['content'])
             
-            # Find the specific node at 'local_pos'
+            # Find the specific node at 'local_pos' (WHITESPACE AWARE)
             current_count = 0
             target_node = None
             target_offset = 0
 
             for node in tree.iter():
+                # Process Text
                 if node.text:
-                    node_len = len(node.text)
-                    if current_count + node_len >= local_pos:
-                        target_node = node
-                        target_offset = local_pos - current_count
-                        break
-                    current_count += node_len
+                    # FIX: Strip whitespace to match how we counted 'total_length'
+                    clean_text = node.text.strip()
+                    clean_len = len(clean_text)
+                    
+                    if clean_len > 0:
+                        if current_count + clean_len >= local_pos:
+                            target_node = node
+                            # Calculate remainder within the CLEAN text
+                            clean_remainder = local_pos - current_count
+                            # Find start of clean text in raw text
+                            raw_start = node.text.find(clean_text)
+                            if raw_start == -1: raw_start = 0
+                            # Final offset is raw_start + remainder
+                            target_offset = raw_start + clean_remainder
+                            break
+                        current_count += clean_len
+
+                # Process Tail
                 if node.tail:
-                    tail_len = len(node.tail)
-                    if current_count + tail_len >= local_pos:
-                        target_node = node
-                        target_offset = local_pos - current_count
-                        break
-                    current_count += tail_len
+                    clean_tail = node.tail.strip()
+                    tail_len = len(clean_tail)
+                    
+                    if tail_len > 0:
+                        if current_count + tail_len >= local_pos:
+                            target_node = node # Target the element owning the tail
+                            clean_remainder = local_pos - current_count
+                            raw_start = node.tail.find(clean_tail)
+                            if raw_start == -1: raw_start = 0
+                            target_offset = raw_start + clean_remainder
+                            break
+                        current_count += tail_len
 
             if target_node is None:
-                # Default to root
                 raw_xpath = "/body/html"
                 target_offset = 0
             else:
@@ -491,8 +542,6 @@ class EbookParser:
     def _generate_hybrid_xpath_lxml(self, node):
         """
         Internal LXML helper: STRICT POSITIONAL ONLY.
-        1. Removes ID anchoring (KOReader hates it).
-        2. Removes 'html' root tag (KOReader expects path to start at body).
         """
         path = []
         current = node
@@ -513,8 +562,6 @@ class EbookParser:
             
             current = parent
 
-        # FIX: KOReader expects paths like /body/DocFragment[X]/body/...
-        # lxml generates /html/body/..., so we must remove the leading 'html'.
         if path and path[0] == 'html':
             path.pop(0)
 
@@ -524,11 +571,11 @@ class EbookParser:
         """
         HYBRID RESOLVER:
         Uses LXML to handle KOReader's /text().123 format accurately.
+        Includes WHITESPACE STRIPPING to align with get_xpath_and_percentage.
         """
         try:
             logger.debug(f"🔍 Resolving XPath (Hybrid): {xpath_str}")
             
-            # Extract DocFragment index
             match = re.search(r'DocFragment\[(\d+)\]', xpath_str)
             if not match:
                 return None
@@ -541,52 +588,37 @@ class EbookParser:
             if not target_item:
                 return None
 
-            # Clean path and extract offset
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
             
-            # Check for offset suffix
             offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
             target_offset = int(offset_match.group(1)) if offset_match else 0
             clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
             
-            # FIX: Handle leading slash and make xpath work with lxml
             if clean_xpath.startswith('/'):
-                clean_xpath = '.' + clean_xpath  # Make relative to root
+                clean_xpath = '.' + clean_xpath
             
-            # LXML Parsing
             tree = html.fromstring(target_item['content'])
             
-            # Attempt 1: Direct Lookup
             elements = []
             try:
                 elements = tree.xpath(clean_xpath)
             except Exception as e:
                 logger.debug(f"XPath query failed: {e}")
             
-            # Attempt 2: Fallback - try without leading ./
             if not elements and clean_xpath.startswith('./'):
-                try:
-                    elements = tree.xpath(clean_xpath[2:])
-                except:
-                    pass
+                try: elements = tree.xpath(clean_xpath[2:])
+                except: pass
             
-            # Attempt 3: Fallback (ID check)
             if not elements:
-                logger.debug("⚠️ Direct XPath failed, trying fallback ID search")
                 id_match = re.search(r"@id='([^']+)'", clean_xpath)
                 if id_match:
-                    try:
-                        elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
-                    except:
-                        pass
+                    try: elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
+                    except: pass
             
-            # Attempt 4: Just find by tag path (strip indices)
             if not elements:
                 simple_path = re.sub(r'\[\d+\]', '', clean_xpath)
-                try:
-                    elements = tree.xpath(simple_path)
-                except:
-                    pass
+                try: elements = tree.xpath(simple_path)
+                except: pass
             
             if not elements:
                 logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
@@ -594,31 +626,36 @@ class EbookParser:
             
             target_node = elements[0]
             
-            # Calculate position by counting all text up to and including target node
+            # Calculate position by counting CLEAN text length
             preceding_len = 0
             found_target = False
             
             for node in tree.iter():
                 if node == target_node:
                     found_target = True
-                    # Add the offset within this node
-                    preceding_len += target_offset
+                    # The offset from KOReader is a RAW offset into node.text (or tail)
+                    # We need to convert this RAW offset into CLEAN length contribution.
+                    if node.text and target_offset > 0:
+                        # Safety check for slice range
+                        raw_segment = node.text[:min(len(node.text), target_offset)]
+                        preceding_len += len(raw_segment.strip())
+                    elif target_offset > 0:
+                        # Fallback for tail targeting or weird state
+                        preceding_len += target_offset # Best guess
                     break
+                
                 if node.text:
-                    preceding_len += len(node.text)
+                    preceding_len += len(node.text.strip())
                 if node.tail:
-                    preceding_len += len(node.tail)
+                    preceding_len += len(node.tail.strip())
             
             if not found_target:
                 logger.warning(f"❌ Target node not found in iteration")
                 return None
             
             local_pos = preceding_len
-            
-            # Global offset
             global_offset = target_item['start'] + local_pos
             
-            # Return text snippet
             start = max(0, global_offset)
             end = min(len(full_text), global_offset + 500)
             return full_text[start:end]
