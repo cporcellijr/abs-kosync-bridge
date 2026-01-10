@@ -1,8 +1,8 @@
-# [START FILE: abs-kosync-enhanced/transcriber.py]
 """
 Audio Transcriber for abs-kosync-enhanced
 
 UPDATED VERSION with:
+- SMIL media overlay extraction (for Storyteller EPUB3s)
 - WAV normalization fix for ctranslate2/faster-whisper codec compatibility
 - LRU transcript cache
 - Long file splitting
@@ -17,11 +17,13 @@ import shutil
 import subprocess
 import gc
 from pathlib import Path
+from typing import Optional
 from faster_whisper import WhisperModel
 import requests
 import math
 from collections import OrderedDict
 import re
+from smil_extractor import SmilExtractor
 
 from logging_utils import sanitize_log_data, time_execution
 
@@ -35,6 +37,7 @@ class AudioTranscriber:
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         self.cache_root = data_dir / "audio_cache"
         self.cache_root.mkdir(parents=True, exist_ok=True)
+        self.smil_extractor = SmilExtractor()
         
         self.model_size = os.environ.get("WHISPER_MODEL", "base")
         
@@ -43,6 +46,64 @@ class AudioTranscriber:
         
         # Unified threshold logic
         self.match_threshold = int(os.environ.get("TRANSCRIPT_MATCH_THRESHOLD", os.environ.get("FUZZY_MATCH_THRESHOLD", 80)))
+
+    def try_extract_from_smil(self, abs_id: str, epub_path: str) -> Optional[Path]:
+        """
+        Try to extract transcript from EPUB3 media overlays (SMIL).
+        
+        Args:
+            abs_id: Audiobookshelf item ID
+            epub_path: Path to the matched EPUB file
+            
+        Returns:
+            Path to transcript JSON if successful, None otherwise
+        """
+        output_file = self.transcripts_dir / f"{abs_id}.json"
+        
+        # Skip if transcript already exists
+        if output_file.exists():
+            logger.info(f"Transcript already exists for {abs_id}")
+            return output_file
+        
+        # Check if EPUB has media overlays
+        if not epub_path or not Path(epub_path).exists():
+            logger.debug(f"No EPUB path provided or file doesn't exist: {epub_path}")
+            return None
+        
+        if not self.smil_extractor.has_media_overlays(epub_path):
+            logger.debug(f"EPUB does not have media overlays: {epub_path}")
+            return None
+        
+        logger.info(f"📖 EPUB3 media overlays detected - extracting transcript from SMIL")
+        
+        try:
+            transcript = self.smil_extractor.extract_transcript(epub_path)
+            
+            if not transcript:
+                logger.warning(f"SMIL extraction returned empty transcript")
+                return None
+            
+            # Validate transcript has reasonable data
+            if len(transcript) < 10:
+                logger.warning(f"SMIL extraction returned too few segments ({len(transcript)})")
+                return None
+            
+            # Check duration makes sense (at least 1 minute)
+            duration = transcript[-1]['end'] - transcript[0]['start']
+            if duration < 60:
+                logger.warning(f"SMIL transcript duration too short: {duration:.1f}s")
+                return None
+            
+            # Save transcript
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(transcript, f, ensure_ascii=False)
+            
+            logger.info(f"✅ Extracted {len(transcript)} segments from SMIL ({duration/60:.1f} min)")
+            return output_file
+            
+        except Exception as e:
+            logger.error(f"SMIL extraction failed: {e}")
+            return None
 
     def _get_cached_transcript(self, path):
         """Load transcript with LRU caching."""
@@ -174,11 +235,18 @@ class AudioTranscriber:
         return new_files if new_files else [file_path]
 
     @time_execution
-    def process_audio(self, abs_id, audio_urls):
+    def process_audio(self, abs_id, audio_urls, epub_path=None):
         output_file = self.transcripts_dir / f"{abs_id}.json"
         if output_file.exists():
             logger.info(f"Transcript already exists for {abs_id}")
             return output_file
+        
+        # NEW: Try SMIL extraction first if epub_path provided
+        if epub_path:
+            smil_result = self.try_extract_from_smil(abs_id, epub_path)
+            if smil_result:
+                return smil_result
+            logger.info("📝 SMIL extraction not available, falling back to Whisper...")
 
         book_cache_dir = self.cache_root / str(abs_id)
         if book_cache_dir.exists():
@@ -219,9 +287,8 @@ class AudioTranscriber:
                     resuming = False
 
             # Phase 1: Download and Normalize (if not resuming)
-            # Phase 1: Download and Normalize (if not resuming)
             if not resuming:
-                # FIX: Check if files exist from a previous run before wiping
+                # Check if files exist from a previous run before wiping
                 existing_files = sorted(book_cache_dir.glob("part_*_split_*.wav"))
                 
                 if existing_files:
@@ -465,4 +532,3 @@ class AudioTranscriber:
         except Exception as e:
             logger.error(f"Error searching transcript {transcript_path}: {e}")
         return None
-# [END FILE]

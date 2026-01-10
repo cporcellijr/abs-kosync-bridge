@@ -340,7 +340,7 @@ class SyncManager:
 
             # Step 2: Download and transcribe audio
             audio_files = self.abs_client.get_audio_files(abs_id)
-            transcript_path = self.transcriber.process_audio(abs_id, audio_files)
+            transcript_path = self.transcriber.process_audio(abs_id, audio_files, epub_path=str(epub_path))
 
             # Step 3: Parse EPUB
             self.ebook_parser.extract_text_and_map(epub_path)

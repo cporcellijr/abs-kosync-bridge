@@ -38,6 +38,7 @@ COPY main.py /app/src/main.py
 COPY storyteller_db.py /app/src/storyteller_db.py
 COPY storyteller_api.py /app/src/storyteller_api.py
 COPY transcriber.py /app/src/transcriber.py
+COPY smil_extractor.py /app/src/smil_extractor.py
 COPY logging_utils.py /app/src/logging_utils.py
 COPY ebook_utils.py /app/src/ebook_utils.py
 COPY api_clients.py /app/src/api_clients.py
