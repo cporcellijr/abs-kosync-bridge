@@ -204,14 +204,47 @@ class SyncManager:
                 current_percentage=percentage
             )
 
-    def _update_abs_progress_with_offset(self, abs_id, ts):
-        """Apply offset to timestamp and update ABS progress."""
+    def _update_abs_progress_with_offset(self, abs_id, ts, session_id=None):
+        """Apply offset to timestamp and update ABS progress using the new session-based sync endpoint."""
         adjusted_ts = round(ts + self.abs_progress_offset, 2)
         if self.abs_progress_offset != 0:
             logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
-        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts)
-        if abs_ok: logger.info("✅ ABS update successful")
-        return abs_ok, adjusted_ts
+
+        # If there is no current session, create a new session
+        if not session_id:
+            session_id = self.abs_client.create_session(abs_id)
+            if session_id:
+                self._store_abs_session_id(self.db, abs_id, session_id)
+
+        # Now update progress using the sessionId
+        abs_result = {"success": False, "code": None, "response": None}
+        if session_id:
+            abs_result = self.abs_client.update_progress(session_id, adjusted_ts)
+            # Retry logic for 404: create new session and try again
+            if abs_result.get("code") == 404:
+                logger.warning(f"ABS sessionId {session_id} not found (404). Attempting to create a new session and retry progress update.")
+                new_session_id = self.abs_client.create_session(abs_id)
+                if new_session_id:
+                    self._store_abs_session_id(self.db, abs_id, session_id)
+                    abs_result = self.abs_client.update_progress(new_session_id, adjusted_ts)
+                else:
+                    logger.error("Failed to create new ABS session for retry after 404.")
+        else:
+            logger.error("No sessionId available for ABS progress update.")
+        if abs_result.get("success"):
+            logger.info("✅ ABS update successful")
+        return abs_result, adjusted_ts
+
+    def _store_abs_session_id(self, db, abs_id, session_id):
+        updated = False
+        for mapping in db.get('mappings', []):
+            if mapping.get('abs_id') == abs_id:
+                mapping['abs_session_id'] = session_id
+                updated = True
+        if updated:
+            self.db_handler.save(db)
+            logger.info(f"ABS sessionId saved for {abs_id}: {session_id}")
+        return db
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
@@ -221,7 +254,7 @@ class SyncManager:
                 return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
         except: return None
 
-    def _get_local_epub(self, ebook_filename, working_dir=None):
+    def _get_local_epub(self, ebook_filename):
         """
         Get local path to EPUB file, downloading from Booklore if necessary.
         """
@@ -426,7 +459,7 @@ class SyncManager:
 
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
-            abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
+            abs_id, abs_session_id, ko_id, epub = mapping['abs_id'], mapping.get('abs_session_id'), mapping['kosync_doc_id'], mapping['ebook_filename']
             title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
 
             try:
@@ -570,7 +603,7 @@ class SyncManager:
                             kosync_ok = self.kosync_client.update_progress(ko_id, match_pct, kosync_xpath)
                             st_ok = self.storyteller_db.update_progress(epub, match_pct, rich_locator)
                             bl_ok = self.booklore_client.update_progress(epub, match_pct, rich_locator)
-                            
+
                             if kosync_ok: logger.info("✅ KoSync update successful")
                             if st_ok: logger.info("✅ Storyteller update successful")
                             if bl_ok: logger.info("✅ Booklore update successful")
@@ -596,7 +629,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
                                 logger.debug(f"📚 [{title_snip}] Matched text at {match_pct:.1%}. Kosync is at {ko_pct:.1%}")
@@ -620,9 +653,9 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
-                            
+
                             # --- NEW: Hybrid Logic ---
                             if match_pct:
                                 perfect_xpath = None
@@ -655,15 +688,15 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
-                            
+
                             # --- NEW: Hybrid Logic ---
                             if match_pct:
                                 perfect_xpath = None
                                 if rich_locator and 'match_index' in rich_locator:
                                     perfect_xpath, _ = self.ebook_parser.get_xpath_and_percentage(epub, rich_locator['match_index'])
-                                
+
                                 if perfect_xpath:
                                     kosync_xpath = perfect_xpath
                                 elif rich_locator and rich_locator.get("xpath"):

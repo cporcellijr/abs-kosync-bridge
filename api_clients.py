@@ -109,26 +109,35 @@ class ABSClient:
         except: pass
         return 0.0
 
-    def update_progress(self, item_id, timestamp):
+    def update_progress(self, session_id, timestamp):
+        """
+        Update progress using the new sync endpoint, which requires a sessionId.
+        Returns a dict with status, code, and response for advanced error handling.
+        """
+        if not session_id:
+            logger.error("No sessionId provided for ABS progress update.")
+            return {"success": False, "code": None, "reason": "no_session_id"}
         # Sanity check: if timestamp looks like milliseconds (greater than 1,000,000), convert to seconds
         if timestamp > 1000000:
             timestamp = timestamp / 1000.0
             logger.warning(f"⚠️ Converted ABS timestamp from milliseconds to seconds: {timestamp}")
-        # Ensure we use a float for the payload
         timestamp = float(timestamp)
-        url = f"{self.base_url}/api/me/progress/{item_id}"
-        payload = {"currentTime": timestamp, "duration": 0, "isFinished": False}
+        url = f"{self.base_url}/api/session/{session_id}/sync"
+        payload = {"currentTime": timestamp}
         try:
-            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            r = requests.post(url, headers=self.headers, json=payload, timeout=10)
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
-                return True
+                logger.debug(f"ABS progress updated (session): {session_id} -> {timestamp}")
+                return {"success": True, "code": r.status_code, "response": r.text}
+            elif r.status_code == 404:
+                logger.warning(f"ABS session not found (404): {session_id}. May need to recreate session.")
+                return {"success": False, "code": 404, "response": r.text}
             else:
                 logger.error(f"ABS update failed: {r.status_code} - {r.text}")
-                return False
+                return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
             logger.error(f"Failed to update ABS progress: {e}")
-            return False
+            return {"success": False, "code": None, "reason": str(e)}
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
@@ -169,6 +178,28 @@ class ABSClient:
         except Exception as e:
             logger.error(f"Error fetching ABS sessions: {e}")
             return []
+
+    def create_session(self, abs_id):
+        """Create a new ABS session for the given abs_id (item id). Returns session_id or None."""
+        play_url = f"{self.base_url}/api/items/{abs_id}/play"
+        play_payload = {
+            "deviceInfo": {"clientName": "Kosync-bridge", "deviceId": "Kosync-bridge"},
+            "supportedMimeTypes": [
+                "audio/flac", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/aac", "audio/webm"
+            ],
+            "mediaPlayer": "html5",
+            "forceTranscode": False,
+            "forceDirectPlay": False
+        }
+        try:
+            r = requests.post(play_url, headers=self.headers, json=play_payload, timeout=10)
+            if r.status_code == 200:
+                return r.json().get('id')
+            else:
+                logger.error(f"Failed to create ABS session: {r.status_code} - {r.text}")
+        except Exception as e:
+            logger.error(f"Exception creating ABS session: {e}")
+        return None
 
 class KoSyncClient:
     def __init__(self):
