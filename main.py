@@ -209,7 +209,11 @@ class SyncManager:
         adjusted_ts = round(ts + self.abs_progress_offset, 2)
         if self.abs_progress_offset != 0:
             logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
-        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts)
+        prev_state = self.state.get(abs_id, {})
+        prev_ts = prev_state.get('abs_ts', 0)
+        time_delta = adjusted_ts - prev_ts
+        time_listened = max(0, min(time_delta, 600))
+        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts, time_listened)
         if abs_ok: logger.info("✅ ABS update successful")
         return abs_ok, adjusted_ts
 

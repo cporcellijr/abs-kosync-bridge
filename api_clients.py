@@ -109,26 +109,75 @@ class ABSClient:
         except: pass
         return 0.0
 
-    def update_progress(self, item_id, timestamp):
-        # Sanity check: if timestamp looks like milliseconds (greater than 1,000,000), convert to seconds
+    def update_progress(self, item_id, timestamp, time_listened=0):
+        # Sanity check: if timestamp looks like milliseconds, convert to seconds
         if timestamp > 1000000:
             timestamp = timestamp / 1000.0
             logger.warning(f"⚠️ Converted ABS timestamp from milliseconds to seconds: {timestamp}")
-        # Ensure we use a float for the payload
+        
         timestamp = float(timestamp)
-        url = f"{self.base_url}/api/me/progress/{item_id}"
-        payload = {"currentTime": timestamp, "duration": 0, "isFinished": False}
+        time_listened = float(time_listened)
+        session_id = None
+        
         try:
-            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
-            if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
+            # 1. Start a playback session
+            start_url = f"{self.base_url}/api/items/{item_id}/play"
+            start_payload = {
+                "deviceInfo": {
+                    "id": "abs-kosync-bot",
+                    "deviceId": "abs-kosync-bot",
+                    "clientName": "ABS-KoSync-Bridge",
+                    "clientVersion": "1.0",
+                    "manufacturer": "ABS-KoSync",
+                    "model": "Bridge",
+                    "sdkVersion": "1.0"
+                },
+                "mediaPlayer": "ABS-KoSync-Bridge",
+                "supportedMimeTypes": ["audio/mpeg", "audio/mp4"],
+                "forceDirectPlay": True,
+                "forceTranscode": False
+            }
+            
+            r_start = requests.post(start_url, headers=self.headers, json=start_payload, timeout=10)
+            
+            if r_start.status_code != 200:
+                logger.error(f"❌ Failed to start ABS session: {r_start.status_code}")
+                return False
+            
+            session_data = r_start.json()
+            session_id = session_data.get('id')
+            if not session_id:
+                logger.error("❌ No session ID in response")
+                return False
+            
+            # 2. Sync the progress
+            sync_url = f"{self.base_url}/api/session/{session_id}/sync"
+            sync_payload = {
+                "currentTime": timestamp,
+                "timeListened": time_listened,  # Now using calculated value
+                "duration": session_data.get('duration', 0)
+            }
+            
+            r_sync = requests.post(sync_url, headers=self.headers, json=sync_payload, timeout=10)
+            
+            if r_sync.status_code == 200:
+                logger.debug(f"✅ ABS session synced: {item_id} -> {timestamp}s (+{time_listened:.1f}s listened)")
                 return True
             else:
-                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                logger.error(f"❌ ABS sync failed: {r_sync.status_code}")
                 return False
+            
         except Exception as e:
-            logger.error(f"Failed to update ABS progress: {e}")
+            logger.error(f"❌ Session update failed: {e}")
             return False
+            
+        finally:
+            if session_id:
+                try:
+                    close_url = f"{self.base_url}/api/session/{session_id}/close"
+                    requests.post(close_url, headers=self.headers, timeout=5)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to close session: {e}")
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
