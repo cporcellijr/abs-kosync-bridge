@@ -467,6 +467,7 @@ class SyncManager:
                         'threshold': self.delta_abs_thresh,
                         'is_configured': True,
                         'display': ("ABS", "{prev:.4%} -> {curr:.4%}"),
+                        'value_seconds_formatter': lambda v: f"{v:.2f}s",
                         'value_formatter': lambda v: f"{v:.4%}"
                     },
                     'KOSYNC': {
@@ -515,7 +516,7 @@ class SyncManager:
                     threshold = cfg['threshold']
                     if 0 < delta < threshold:
                         label, fmt = cfg['display']
-                        delta_str = cfg['value_formatter'](delta)
+                        delta_str = cfg.get('value_seconds_formatter', cfg['value_formatter'])(delta)
                         small_changes.append(f"✋ {label} delta {delta_str} (Below threshold): {title_snip}")
 
                 if small_changes and not any(cfg['delta'] >= cfg['threshold'] for cfg in filtered_config.values()):

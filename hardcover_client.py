@@ -30,7 +30,7 @@ class HardcoverClient:
         self.user_id = None
         
         if not self.token:
-            logger.warning("HARDCOVER_TOKEN not set")
+            logger.info("HARDCOVER_TOKEN not set")
             return
         
         self.headers = {
