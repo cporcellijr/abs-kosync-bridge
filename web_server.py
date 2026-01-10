@@ -835,12 +835,12 @@ def clear_progress(abs_id):
         if not abs_session_id:
             # Create a new session if one doesn't exist
             abs_session_id = manager.abs_client.create_session(abs_id)
-            mapping['abs_session_id'] = abs_session_id
-            db_handler.save(db)
 
         if abs_session_id:
-            manager.abs_client.update_progress(abs_session_id, 0)
+            manager.abs_client.update_progress(abs_session_id, 0, 0)
             manager.abs_client.close_session(abs_session_id)
+            del mapping['abs_session_id']
+            db_handler.save(db)
             logger.info(f"  ✓ ABS progress cleared")
         else:
             logger.warning(f"  ⚠️ Could not clear ABS progress - no valid session")

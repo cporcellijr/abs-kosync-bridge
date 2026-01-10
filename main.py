@@ -226,8 +226,8 @@ class SyncManager:
                 logger.warning(f"ABS sessionId {session_id} not found (404). Attempting to create a new session and retry progress update.")
                 new_session_id = self.abs_client.create_session(abs_id)
                 if new_session_id:
-                    self._store_abs_session_id(self.db, abs_id, session_id)
-                    abs_result = self.abs_client.update_progress(new_session_id, adjusted_ts)
+                    self._store_abs_session_id(self.db, abs_id, new_session_id)
+                    abs_result = self.abs_client.update_progress(new_session_id, adjusted_ts, time_listened)
                 else:
                     logger.error("Failed to create new ABS session for retry after 404.")
         else:
@@ -461,7 +461,7 @@ class SyncManager:
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
             abs_id, abs_session_id, ko_id, epub = mapping['abs_id'], mapping.get('abs_session_id'), mapping['kosync_doc_id'], mapping['ebook_filename']
-            logger.info(f"🔄 Syncing '{sanitize_log_data(mapping.get('abs_title', 'Unknown'))} using abs_session_id={abs_session_id}'")
+            logger.info(f"🔄 Syncing '{sanitize_log_data(mapping.get('abs_title', 'Unknown'))}'")
             title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
 
             try:

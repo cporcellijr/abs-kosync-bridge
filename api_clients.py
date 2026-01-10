@@ -206,8 +206,9 @@ class ABSClient:
         try:
             r = requests.post(play_url, headers=self.headers, json=play_payload, timeout=10)
             if r.status_code == 200:
-                logger.info(f"Created new ABS session for item {abs_id}")
-                return r.json().get('id')
+                id = r.json().get('id')
+                logger.debug(f"Created new ABS session for item {abs_id}, id: {id}")
+                return id
             else:
                 logger.error(f"Failed to create ABS session: {r.status_code} - {r.text}")
         except Exception as e:
