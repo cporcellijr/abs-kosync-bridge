@@ -204,9 +204,9 @@ class SyncManager:
                 current_percentage=percentage
             )
 
-    def _update_abs_progress_with_offset(self, abs_id, ts, session_id=None):
+    def _update_abs_progress_with_offset(self, abs_id, ts, delta, session_id=None):
         """Apply offset to timestamp and update ABS progress using the new session-based sync endpoint."""
-        adjusted_ts = round(ts + self.abs_progress_offset, 2)
+        adjusted_ts = max(round(ts + self.abs_progress_offset, 2), 0)
         if self.abs_progress_offset != 0:
             logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
 
@@ -219,7 +219,8 @@ class SyncManager:
         # Now update progress using the sessionId
         abs_result = {"success": False, "code": None, "response": None}
         if session_id:
-            abs_result = self.abs_client.update_progress(session_id, adjusted_ts)
+            time_listened = max(0, min(delta, 600))
+            abs_result = self.abs_client.update_progress(session_id, adjusted_ts, time_listened)
             # Retry logic for 404: create new session and try again
             if abs_result.get("code") == 404:
                 logger.warning(f"ABS sessionId {session_id} not found (404). Attempting to create a new session and retry progress update.")
@@ -631,7 +632,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
                                 logger.debug(f"📚 [{title_snip}] Matched text at {match_pct:.1%}. Kosync is at {ko_pct:.1%}")
@@ -655,7 +656,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
 
                             # --- NEW: Hybrid Logic ---
@@ -690,7 +691,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
 
                             # --- NEW: Hybrid Logic ---

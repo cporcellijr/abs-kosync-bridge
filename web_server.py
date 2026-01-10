@@ -803,6 +803,9 @@ def delete_mapping(abs_id):
         if mapping.get('transcript_file'):
             try: Path(mapping['transcript_file']).unlink()
             except: pass
+        session_id = mapping.get('abs_session_id')
+        if session_id:
+            manager.abs_client.close_session(session_id)
     def remove_mapping(db):
         db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
         return db
@@ -834,9 +837,10 @@ def clear_progress(abs_id):
             abs_session_id = manager.abs_client.create_session(abs_id)
             mapping['abs_session_id'] = abs_session_id
             db_handler.save(db)
-        
+
         if abs_session_id:
             manager.abs_client.update_progress(abs_session_id, 0)
+            manager.abs_client.close_session(abs_session_id)
             logger.info(f"  ✓ ABS progress cleared")
         else:
             logger.warning(f"  ⚠️ Could not clear ABS progress - no valid session")
@@ -959,7 +963,7 @@ def api_logs():
             line = line.strip()
             if not line:
                 continue
-                
+
             # Parse log line format: [2024-01-09 10:30:45] LEVEL - MODULE: MESSAGE
             try:
                 if line.startswith('[') and '] ' in line:
@@ -969,7 +973,7 @@ def api_logs():
 
                     if ': ' in rest:
                         level_module_str, message = rest.split(': ', 1)
-                        
+
                         # Check if format includes module (LEVEL - MODULE)
                         if ' - ' in level_module_str:
                             level_str, module_str = level_module_str.split(' - ', 1)
@@ -977,7 +981,7 @@ def api_logs():
                             # Old format without module
                             level_str = level_module_str
                             module_str = 'unknown'
-                            
+
                         level_num = log_levels.get(level_str.upper(), 20)
 
                         # Apply filters
