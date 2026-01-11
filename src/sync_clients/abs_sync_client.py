@@ -3,6 +3,8 @@ import logging
 import os
 from typing import Optional
 
+from api_clients import ABSClient
+from ebook_utils import EbookParser
 from json_db import JsonDB
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 
@@ -10,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ABSSyncClient(SyncClient):
-    def __init__(self, abs_client, transcriber, ebook_parser, db_handler: JsonDB):
+    def __init__(self, abs_client: ABSClient, transcriber, ebook_parser: EbookParser, db_handler: JsonDB):
         super().__init__(ebook_parser)
         self.abs_client = abs_client
         self.transcriber = transcriber
@@ -93,47 +95,29 @@ class ABSSyncClient(SyncClient):
                                                           book_title=book_title)
         if ts_for_text is not None:
             delta = ts_for_text - request.previous_location
-            result, final_pct = self._update_abs_progress_with_offset(mapping['abs_id'], ts_for_text, delta, mapping.get('abs_session_id'))
-            return SyncResult(final_pct, result.get("success", False))
+            result, final_ts = self._update_abs_progress_with_offset(mapping['abs_id'], ts_for_text, delta)
+            return SyncResult(final_ts, result.get("success", False))
         return SyncResult(None, False)
 
-    def _store_abs_session_id(self, abs_id, session_id):
-        db = self.db_handler.load()
-        updated = False
-        for mapping in db.get('mappings', []):
-            if mapping.get('abs_id') == abs_id:
-                mapping['abs_session_id'] = session_id
-                updated = True
-        if updated:
-            self.db_handler.save(db)
-            logger.info(f"ABS sessionId saved for {abs_id}: {session_id}")
+    def _update_abs_progress_with_offset(self, abs_id, ts, prev_abs_ts=0):
+        """Apply offset to timestamp and update ABS progress.
 
-    def _update_abs_progress_with_offset(self, abs_id, ts, delta, session_id=None):
-        """Apply offset to timestamp and update ABS progress using the new session-based sync endpoint."""
+        Args:
+            abs_id: ABS library item ID
+            ts: New timestamp to set (seconds)
+            prev_abs_ts: Previous ABS timestamp for calculating time_listened
+        """
         adjusted_ts = max(round(ts + self.abs_progress_offset, 2), 0)
         if self.abs_progress_offset != 0:
             logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
 
-        # If there is no current session, create a new session
-        if not session_id:
-            session_id = self.abs_client.create_session(abs_id)
-            if session_id:
-                self._store_abs_session_id(abs_id, session_id)
+        # Calculate time_listened as the difference between new and previous position
+        time_listened = max(0, adjusted_ts - prev_abs_ts)
 
-        # Now update progress using the sessionId
-        abs_result = {"success": False, "code": None, "response": None}
-        if session_id:
-            time_listened = max(0, min(delta, 600))
-            abs_result = self.abs_client.update_progress(session_id, adjusted_ts, time_listened)
-            # Retry logic for 404: create new session and try again
-            if abs_result.get("code") == 404:
-                logger.warning(f"ABS sessionId {session_id} not found (404). Attempting to create a new session and retry progress update.")
-                new_session_id = self.abs_client.create_session(abs_id)
-                if new_session_id:
-                    self._store_abs_session_id(abs_id, new_session_id)
-                    abs_result = self.abs_client.update_progress(new_session_id, adjusted_ts, time_listened)
-                else:
-                    logger.error("Failed to create new ABS session for retry after 404.")
-        else:
-            logger.error("No sessionId available for ABS progress update.")
-        return abs_result, adjusted_ts
+        # Don't send negative time_listened (shouldn't happen, but safety check)
+        if time_listened < 0:
+            time_listened = 0
+
+        logger.debug(f"   ⏱️ time_listened: {time_listened:.1f}s (prev: {prev_abs_ts:.1f}s → new: {adjusted_ts:.1f}s)")
+        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts, time_listened)
+        return abs_ok, adjusted_ts

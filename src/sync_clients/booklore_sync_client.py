@@ -1,11 +1,13 @@
 import os
 from typing import Optional
 
+from booklore_client import BookloreClient
+from ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 
 
 class BookloreSyncClient(SyncClient):
-    def __init__(self, booklore_client, ebook_parser):
+    def __init__(self, booklore_client: BookloreClient, ebook_parser: EbookParser):
         super().__init__(ebook_parser)
         self.booklore_client = booklore_client
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0

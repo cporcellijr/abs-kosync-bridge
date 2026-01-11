@@ -56,55 +56,57 @@ DB_FILE = DATA_DIR / "mapping_db.json"
 STATE_FILE = DATA_DIR / "last_state.json"
 
 class SyncManager:
-    def __init__(self):
-        logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath) ===")
-        self.abs_client = ABSClient()
-        self.kosync_client = KoSyncClient()
-        self.hardcover_client = HardcoverClient()
-        # FIX: Wrap instantiation in try/except to prevent crash on init failure
-        try:
-            if StorytellerClientClass:
-                self.storyteller_db = StorytellerClientClass()
-            else:
-                raise ImportError("No Storyteller client available")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to init Storyteller client: {e}. Storyteller sync will be DISABLED.")
+    def __init__(self,
+                 abs_client=None,
+                 kosync_client=None,
+                 hardcover_client=None,
+                 storyteller_db=None,
+                 booklore_client=None,
+                 transcriber=None,
+                 ebook_parser=None,
+                 db_handler=None,
+                 state_handler=None,
+                 abs_sync_client=None,
+                 kosync_sync_client=None,
+                 storyteller_sync_client=None,
+                 booklore_sync_client=None,
+                 kosync_use_percentage_from_server=None,
+                 epub_cache_dir=None):
 
-            # Minimal dummy class to prevent crashes in the rest of the app
-            class DummyST:
-                def check_connection(self): return False
+        logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===")
+        # Use dependency injection
+        self.abs_client = abs_client
+        self.kosync_client = kosync_client
+        self.hardcover_client = hardcover_client
+        self.storyteller_db = storyteller_db
+        self.booklore_client = booklore_client
+        self._transcriber = transcriber
+        self.ebook_parser = ebook_parser
+        self.db_handler = db_handler
+        self.state_handler = state_handler
 
-                def get_progress_with_fragment(self, *args): return None, None, None, None
+        self.kosync_use_percentage_from_server = kosync_use_percentage_from_server if kosync_use_percentage_from_server is not None else os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
 
-                def update_progress(self, *args): return False
+        self.epub_cache_dir = epub_cache_dir or DATA_DIR / "epub_cache"
 
-                def is_configured(self): return False
-
-            self.storyteller_db = DummyST()
-        self.booklore_client = BookloreClient()
-        self._transcriber = None
-        self.epub_cache_dir = DATA_DIR / "epub_cache"
-        self.ebook_parser = EbookParser(BOOKS_DIR, epub_cache_dir=self.epub_cache_dir)
-        self.db_handler = JsonDB(DB_FILE)
-        self.state_handler = JsonDB(STATE_FILE)
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={})
+
+        # Initialize sync clients
+        self.abs_sync_client = abs_sync_client
+        self.kosync_sync_client = kosync_sync_client
+        self.storyteller_sync_client = storyteller_sync_client
+        self.booklore_sync_client = booklore_sync_client
 
         self._job_queue = []
         self._job_lock = threading.Lock()
         self._job_thread = None
-        self.delta_abs_thresh = float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60))
-        self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
-        self.kosync_use_percentage_from_server = os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
+
         self.startup_checks()
         self.cleanup_stale_jobs()
+        self._setup_sync_clients()
 
-        # Use new sync client classes
-        self.abs_sync_client = ABSSyncClient(self.abs_client, self.transcriber, self.ebook_parser, self.db_handler)
-        self.kosync_sync_client = KoSyncSyncClient(self.kosync_client, self.ebook_parser)
-        self.storyteller_sync_client = StorytellerSyncClient(self.storyteller_db, self.ebook_parser)
-        self.booklore_sync_client = BookloreSyncClient(self.booklore_client, self.ebook_parser)
-
+    def _setup_sync_clients(self):
         # Only include configured clients in sync_clients
         all_clients = {
             'ABS': self.abs_sync_client,
@@ -576,8 +578,64 @@ class SyncManager:
             time.sleep(30)
 
 
+def create_sync_manager_with_di() -> SyncManager:
+    """Create a SyncManager using dependency injection."""
+    from di_container import create_container
+
+    container = create_container()
+
+    # Get all dependencies from the container
+    abs_client = container.get(ABSClient)
+    kosync_client = container.get(KoSyncClient)
+    hardcover_client = container.get(HardcoverClient)
+    booklore_client = container.get(BookloreClient)
+    ebook_parser = container.get(EbookParser)
+
+    # Get factory-created instances
+    storyteller_db = container.get('storyteller_db')
+    transcriber = container.get('transcriber')
+    db_handler = container.get('db_handler')
+    state_handler = container.get('state_handler')
+
+    # Get sync clients
+    abs_sync_client = container.get(ABSSyncClient)
+    kosync_sync_client = container.get(KoSyncSyncClient)
+    storyteller_sync_client = container.get(StorytellerSyncClient)
+    booklore_sync_client = container.get(BookloreSyncClient)
+
+    # Get configuration values
+    kosync_use_percentage_from_server = container.get_config_value('kosync_use_percentage_from_server')
+    epub_cache_dir = container.get_config_value('epub_cache_dir')
+
+    return SyncManager(
+        abs_client=abs_client,
+        kosync_client=kosync_client,
+        hardcover_client=hardcover_client,
+        storyteller_db=storyteller_db,
+        booklore_client=booklore_client,
+        transcriber=transcriber,
+        ebook_parser=ebook_parser,
+        db_handler=db_handler,
+        state_handler=state_handler,
+        abs_sync_client=abs_sync_client,
+        kosync_sync_client=kosync_sync_client,
+        storyteller_sync_client=storyteller_sync_client,
+        booklore_sync_client=booklore_sync_client,
+        kosync_use_percentage_from_server=kosync_use_percentage_from_server,
+        epub_cache_dir=epub_cache_dir
+    )
+
 if __name__ == "__main__":
     # This is only used for standalone testing - production uses web_server.py
     logger.info("🚀 Running sync manager in standalone mode (for testing)")
-    SyncManager().run_daemon()
+
+    # Try to use dependency injection, fall back to legacy if there are issues
+    try:
+        sync_manager = create_sync_manager_with_di()
+        logger.info("✅ Using dependency injection")
+    except Exception as e:
+        logger.warning(f"⚠️ DI initialization failed: {e}, falling back to legacy initialization")
+        sync_manager = SyncManager()
+
+    sync_manager.run_daemon()
 # [END FILE]

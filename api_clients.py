@@ -168,8 +168,7 @@ class ABSClient:
             logger.error(f"Failed to sync ABS session progress: {e}")
             return {"success": False, "code": None, "reason": str(e)}
 
-
-def get_in_progress(self, min_progress=0.01):
+    def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
         try:
             r = requests.get(url, headers=self.headers, timeout=10)

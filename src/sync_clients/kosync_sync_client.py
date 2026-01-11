@@ -1,12 +1,15 @@
 import os
 from typing import Optional
 import logging
+
+from api_clients import KoSyncClient
+from ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 
 logger = logging.getLogger(__name__)
 
 class KoSyncSyncClient(SyncClient):
-    def __init__(self, kosync_client, ebook_parser):
+    def __init__(self, kosync_client: KoSyncClient, ebook_parser: EbookParser):
         super().__init__(ebook_parser)
         self.kosync_client = kosync_client
         self.ebook_parser = ebook_parser
