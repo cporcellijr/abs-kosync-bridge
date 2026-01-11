@@ -98,7 +98,8 @@ class ABSClient:
         try:
             r = requests.get(url, headers=self.headers)
             if r.status_code == 200: return r.json()
-        except: pass
+        except:
+            pass
         return None
 
     def get_progress(self, item_id):
@@ -106,29 +107,43 @@ class ABSClient:
         try:
             r = requests.get(url, headers=self.headers)
             if r.status_code == 200: return r.json().get('currentTime', 0)
-        except: pass
+        except:
+            pass
         return 0.0
 
-    def update_progress(self, item_id, timestamp):
+    def update_progress(self, session_id, timestamp, time_listened):
+        """
+        Update progress using the new sync endpoint, which requires a sessionId.
+        Returns a dict with status, code, and response for advanced error handling.
+        """
+        if not session_id:
+            logger.error("No sessionId provided for ABS progress update.")
+            return {"success": False, "code": None, "reason": "no_session_id"}
         # Sanity check: if timestamp looks like milliseconds (greater than 1,000,000), convert to seconds
         if timestamp > 1000000:
             timestamp = timestamp / 1000.0
             logger.warning(f"⚠️ Converted ABS timestamp from milliseconds to seconds: {timestamp}")
-        # Ensure we use a float for the payload
         timestamp = float(timestamp)
-        url = f"{self.base_url}/api/me/progress/{item_id}"
-        payload = {"currentTime": timestamp, "duration": 0, "isFinished": False}
+        time_listened = float(time_listened)
+        url = f"{self.base_url}/api/session/{session_id}/sync"
+        payload = {
+            "currentTime": timestamp,
+            "timeListened": time_listened
+        }
         try:
-            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            r = requests.post(url, headers=self.headers, json=payload, timeout=10)
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
-                return True
+                logger.debug(f"ABS progress updated (session): {session_id} -> {timestamp}")
+                return {"success": True, "code": r.status_code, "response": r.text}
+            elif r.status_code == 404:
+                logger.warning(f"ABS session not found (404): {session_id}. May need to recreate session.")
+                return {"success": False, "code": 404, "response": r.text}
             else:
                 logger.error(f"ABS update failed: {r.status_code} - {r.text}")
-                return False
+                return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
             logger.error(f"Failed to update ABS progress: {e}")
-            return False
+            return {"success": False, "code": None, "reason": str(e)}
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
@@ -170,6 +185,43 @@ class ABSClient:
             logger.error(f"Error fetching ABS sessions: {e}")
             return []
 
+    def create_session(self, abs_id):
+        """Create a new ABS session for the given abs_id (item id). Returns session_id or None."""
+        play_url = f"{self.base_url}/api/items/{abs_id}/play"
+        play_payload = {
+            "deviceInfo": {
+                "id": "abs-kosync-bot",
+                "deviceId": "abs-kosync-bot",
+                "clientName": "ABS-KoSync-Bridge",
+                "clientVersion": "1.0",
+                "manufacturer": "ABS-KoSync",
+                "model": "Bridge",
+                "sdkVersion": "1.0"
+            },
+            "mediaPlayer": "ABS-KoSync-Bridge",
+            "supportedMimeTypes": ["audio/mpeg", "audio/mp4"],
+            "forceDirectPlay": True,
+            "forceTranscode": False
+        }
+        try:
+            r = requests.post(play_url, headers=self.headers, json=play_payload, timeout=10)
+            if r.status_code == 200:
+                id = r.json().get('id')
+                logger.debug(f"Created new ABS session for item {abs_id}, id: {id}")
+                return id
+            else:
+                logger.error(f"Failed to create ABS session: {r.status_code} - {r.text}")
+        except Exception as e:
+            logger.error(f"Exception creating ABS session: {e}")
+        return None
+
+    def close_session(self, session_id):
+        try:
+            close_url = f"{self.base_url}/api/session/{session_id}/close"
+            requests.post(close_url, headers=self.headers, timeout=5)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to close session for ABS: {e}")
+
 class KoSyncClient:
     def __init__(self):
         self.base_url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
@@ -187,22 +239,22 @@ class KoSyncClient:
         url = f"{self.base_url}/healthcheck"
         try:
             headers = {'accept': 'application/vnd.koreader.v1+json'}
-            r = requests.get(url, timeout=5, headers = headers)
+            r = requests.get(url, timeout=5, headers=headers)
             if r.status_code == 200:
-                 # First-run visible INFO, otherwise DEBUG
-                 first_run_marker = '/data/.first_run_done'
-                 try:
-                     first_run = not os.path.exists(first_run_marker)
-                 except Exception:
-                     first_run = False
+                # First-run visible INFO, otherwise DEBUG
+                first_run_marker = '/data/.first_run_done'
+                try:
+                    first_run = not os.path.exists(first_run_marker)
+                except Exception:
+                    first_run = False
 
-                 if first_run:
-                     logger.info(f"✅ Connected to KoSync Server at {self.base_url}")
-                     try:
-                         open(first_run_marker, 'w').close()
-                     except Exception:
-                         pass
-                 return True
+                if first_run:
+                    logger.info(f"✅ Connected to KoSync Server at {self.base_url}")
+                    try:
+                        open(first_run_marker, 'w').close()
+                    except Exception:
+                        pass
+                return True
             # Fallback check
             url_sync = f"{self.base_url}/syncs/progress/test-connection"
             headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
@@ -242,7 +294,8 @@ class KoSyncClient:
                 # Grab the raw progress string (XPath)
                 xpath = data.get('progress')
                 return pct, xpath
-        except: pass
+        except:
+            pass
         return 0.0, None
 
     def update_progress(self, doc_id, percentage, xpath=None):
