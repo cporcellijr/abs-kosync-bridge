@@ -2,10 +2,13 @@
 import os
 import time
 import logging
+from typing import Optional
+
 import requests
 from pathlib import Path
 
 from logging_utils import sanitize_log_data
+from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +224,7 @@ class BookloreClient:
                 return (pct / 100.0 if pct else 0.0), None
         return None, None
 
-    def update_progress(self, ebook_filename, percentage, rich_locator=None):
+    def update_progress(self, ebook_filename, percentage, rich_locator: Optional[LocatorResult] = None):
         book = self.find_book_by_filename(ebook_filename)
         if not book:
             logger.debug(f"Booklore: Book not found: {ebook_filename}")
@@ -230,7 +233,7 @@ class BookloreClient:
         book_id = book['id']
         book_type = (book.get('bookType') or '').upper()
         pct_display = percentage * 100
-        cfi = rich_locator.get('cfi') if rich_locator and isinstance(rich_locator, dict) else None
+        cfi = rich_locator.cfi if rich_locator and rich_locator.cfi else None
 
         if book_type == 'EPUB':
             payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}

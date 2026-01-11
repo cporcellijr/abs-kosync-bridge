@@ -6,6 +6,8 @@ import time
 import json
 from pathlib import Path
 
+from src.sync_clients.sync_client_interface import LocatorResult
+
 logger = logging.getLogger(__name__)
 
 class StorytellerDB:
@@ -67,7 +69,7 @@ class StorytellerDB:
             return None, None, None, None
         except: return None, None, None, None
 
-    def update_progress(self, ebook_filename, percentage, rich_locator=None):
+    def update_progress(self, ebook_filename, percentage, rich_locator: LocatorResult = None):
         if not self.db_path.exists():
             return False  # Silently skip if Storyteller DB not available
 
@@ -97,8 +99,8 @@ class StorytellerDB:
 
                 # Apply Rich Locator if available
                 if rich_locator:
-                    if rich_locator.get('href'): locator['href'] = rich_locator['href']
-                    if rich_locator.get('cssSelector'): locator['locations']['cssSelector'] = rich_locator['cssSelector']
+                    if rich_locator.href: locator['href'] = rich_locator.href
+                    if rich_locator.css_selector: locator['locations']['cssSelector'] = rich_locator.css_selector
 
                 # Clear conflicting fields if we are just setting percentage
                 elif not rich_locator:

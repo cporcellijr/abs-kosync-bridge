@@ -1,22 +1,24 @@
 # [START FILE: abs-kosync-enhanced/web_server.py]
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
-# Import memory logging setup - this must happen early to capture all logs
-from logging_utils import memory_log_handler, LOG_PATH
+import html
 import logging
-from pathlib import Path
-import time
-import requests
 import os
 import shutil
 import subprocess
 import threading
-from urllib.parse import urljoin
-import html
-from json_db import JsonDB
-from logging_utils import sanitize_log_data
+import time
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urljoin
+
+import requests
 import schedule
-from main import SyncManager
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session
+
+from json_db import JsonDB
+# Import memory logging setup - this must happen early to capture all logs
+from logging_utils import memory_log_handler, LOG_PATH
+from logging_utils import sanitize_log_data
+from main import create_sync_manager_with_di
 
 # ---------------- APP SETUP ----------------
 
@@ -28,7 +30,7 @@ app.secret_key = "kosync-queue-secret-unified-app"
 logger = logging.getLogger(__name__)
 logger.info("Starting ABS-KOSync Bridge Web Server")
 
-manager = SyncManager()
+manager = create_sync_manager_with_di()
 
 # ---------------- DATA DIR CONFIG ----------------
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -92,18 +94,18 @@ def search_abs_audiobooks_linker(query: str):
     """Search ABS for audiobooks - Book Linker version"""
     try:
         logger.info(f"🔍 Book Linker searching for: '{query}'")
-        
+
         # Get all audiobooks
         all_audiobooks = manager.abs_client.get_all_audiobooks()
         logger.info(f"📚 Got {len(all_audiobooks)} total audiobooks from ABS")
-        
+
         if not query:
             logger.warning("⚠️ Empty query provided")
             return []
-        
+
         query_lower = query.lower()
         results = []
-        
+
         for ab in all_audiobooks:
             # Use the SAME matching logic as Single/Batch
             if audiobook_matches_search(ab, query_lower):
@@ -111,20 +113,20 @@ def search_abs_audiobooks_linker(query: str):
                 item_details = manager.abs_client.get_item_details(ab.get('id'))
                 if not item_details:
                     continue
-                
+
                 media = item_details.get('media', {})
                 metadata = media.get('metadata', {})
                 audio_files = media.get('audioFiles', [])
-                
+
                 title = metadata.get('title', ab.get('name', 'Unknown'))
                 logger.debug(f"  ✅ Matched: {title}")
-                
+
                 if not audio_files:
                     logger.debug(f"  ⚠️ Skipping {title} - no audio files")
                     continue
-                
+
                 size_mb = sum(f.get('metadata', {}).get('size', 0) for f in audio_files) / (1024*1024)
-                
+
                 results.append({
                     "id": ab.get("id"),
                     "title": title,
@@ -132,10 +134,10 @@ def search_abs_audiobooks_linker(query: str):
                     "file_size_mb": round(size_mb, 2),
                     "num_files": len(audio_files),
                 })
-        
+
         logger.info(f"📊 Found {len(results)} matching audiobooks")
         return results
-        
+
     except Exception as e:
         logger.error(f"❌ Book Linker ABS search failed: {e}", exc_info=True)
         return []
@@ -853,21 +855,8 @@ def clear_progress(abs_id):
     try:
         # Reset progress to 0 in all three systems
         logger.info(f"Clearing progress for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
-
-        # ABS: Set to 0 seconds using session-based endpoint
-        abs_session_id = mapping.get('abs_session_id')
-        if not abs_session_id:
-            # Create a new session if one doesn't exist
-            abs_session_id = manager.abs_client.create_session(abs_id)
-
-        if abs_session_id:
-            manager.abs_client.update_progress(abs_session_id, 0, 0)
-            manager.abs_client.close_session(abs_session_id)
-            del mapping['abs_session_id']
-            db_handler.save(db)
-            logger.info(f"  ✓ ABS progress cleared")
-        else:
-            logger.warning(f"  ⚠️ Could not clear ABS progress - no valid session")
+        manager.abs_client.update_progress(abs_id, 0, 0)
+        logger.info(f"  ✓ ABS progress cleared")
 
         # KOSync: Set to 0%
         kosync_id = mapping.get('kosync_doc_id')

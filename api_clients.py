@@ -111,7 +111,24 @@ class ABSClient:
             pass
         return 0.0
 
-    def update_progress(self, abs_id, timestamp, time_listened=None):
+    def update_ebook_progress(self, item_id, timestamp):
+        # Ensure we use a float for the payload
+        timestamp = float(timestamp)
+        url = f"{self.base_url}/api/me/progress/{item_id}"
+        payload = {"ebookProgress": timestamp}
+        try:
+            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            if r.status_code in (200, 204):
+                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
+                return True
+            else:
+                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to update ABS progress: {e}")
+            return False
+
+    def update_progress(self, abs_id, timestamp, time_listened):
         """
         Update progress using session-based sync.
         Creates a session, syncs progress, then closes the session.
@@ -128,7 +145,7 @@ class ABSClient:
         session_id = self.create_session(abs_id)
         if not session_id:
             logger.error(f"Failed to create ABS session for item {abs_id}")
-            return False
+            return {"success": False, "code": None, "reason": f"Failed to create ABS session for item {abs_id}"}
 
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
@@ -137,23 +154,19 @@ class ABSClient:
                 "timeListened": time_listened
             }
             r = requests.post(url, headers=self.headers, json=payload, timeout=10)
-
             if r.status_code in (200, 204):
                 logger.debug(f"ABS progress updated via session: {abs_id} -> {timestamp}s")
-                success = True
+                self.close_session(session_id)
+                return {"success": True, "code": r.status_code, "response": r.text}
             elif r.status_code == 404:
                 logger.warning(f"ABS session not found (404): {session_id}")
-                success = False
+                return {"success": False, "code": 404, "response": r.text}
             else:
                 logger.error(f"ABS session sync failed: {r.status_code} - {r.text}")
-                success = False
+                return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
             logger.error(f"Failed to sync ABS session progress: {e}")
-            success = False
-
-        self.close_session(session_id)
-
-        return success
+            return {"success": False, "code": None, "reason": str(e)}
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
@@ -309,7 +322,7 @@ class KoSyncClient:
         return 0.0, None
 
     def update_progress(self, doc_id, percentage, xpath=None):
-        if not self.is_configured(): return
+        if not self.is_configured(): return False
 
         headers = {
             "x-auth-user": self.user,
