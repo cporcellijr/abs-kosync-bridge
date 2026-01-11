@@ -90,30 +90,54 @@ def get_stats(ebooks, audiobooks):
 
 def search_abs_audiobooks_linker(query: str):
     """Search ABS for audiobooks - Book Linker version"""
-    headers = {"Authorization": f"Bearer {ABS_API_TOKEN}"}
-    url = urljoin(ABS_API_URL, f"/api/libraries/{ABS_LIBRARY_ID}/search")
     try:
-        r = requests.get(url, headers=headers, params={"q": query}, timeout=15)
-        r.raise_for_status()
+        logger.info(f"🔍 Book Linker searching for: '{query}'")
+        
+        # Get all audiobooks
+        all_audiobooks = manager.abs_client.get_all_audiobooks()
+        logger.info(f"📚 Got {len(all_audiobooks)} total audiobooks from ABS")
+        
+        if not query:
+            logger.warning("⚠️ Empty query provided")
+            return []
+        
+        query_lower = query.lower()
         results = []
-        for entry in r.json().get("book", []):
-            item = entry.get("libraryItem", {})
-            media = item.get("media", {})
-            audio_files = media.get("audioFiles", [])
-            if not audio_files: continue
-            size_mb = sum(f.get("metadata", {}).get("size", 0) for f in audio_files) / (1024*1024)
-            meta = media.get("metadata", {})
-            author = meta.get("authorName") or (meta.get("authors") or [{}])[0].get("name") or "Unknown"
-            results.append({
-                "id": item.get("id"),
-                "title": meta.get("title", "Unknown"),
-                "author": author,
-                "file_size_mb": round(size_mb, 2),
-                "num_files": len(audio_files),
-            })
+        
+        for ab in all_audiobooks:
+            # Use the SAME matching logic as Single/Batch
+            if audiobook_matches_search(ab, query_lower):
+                # Get full item details to access audio files
+                item_details = manager.abs_client.get_item_details(ab.get('id'))
+                if not item_details:
+                    continue
+                
+                media = item_details.get('media', {})
+                metadata = media.get('metadata', {})
+                audio_files = media.get('audioFiles', [])
+                
+                title = metadata.get('title', ab.get('name', 'Unknown'))
+                logger.debug(f"  ✅ Matched: {title}")
+                
+                if not audio_files:
+                    logger.debug(f"  ⚠️ Skipping {title} - no audio files")
+                    continue
+                
+                size_mb = sum(f.get('metadata', {}).get('size', 0) for f in audio_files) / (1024*1024)
+                
+                results.append({
+                    "id": ab.get("id"),
+                    "title": title,
+                    "author": metadata.get('authorName') or get_abs_author(ab),
+                    "file_size_mb": round(size_mb, 2),
+                    "num_files": len(audio_files),
+                })
+        
+        logger.info(f"📊 Found {len(results)} matching audiobooks")
         return results
+        
     except Exception as e:
-        logger.error(f"ABS search failed: {e}")
+        logger.error(f"❌ Book Linker ABS search failed: {e}", exc_info=True)
         return []
 
 def copy_abs_audiobook_linker(abs_id: str, dest_folder: Path):

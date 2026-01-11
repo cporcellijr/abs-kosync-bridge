@@ -440,8 +440,7 @@ class SyncManager:
 
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
-            abs_id, abs_session_id, ko_id, epub = mapping['abs_id'], mapping.get('abs_session_id'), mapping['kosync_doc_id'], mapping[
-                'ebook_filename']
+            abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
             logger.info(f"🔄 Syncing '{sanitize_log_data(mapping.get('abs_title', 'Unknown'))}'")
             title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
 

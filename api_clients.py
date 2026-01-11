@@ -128,41 +128,48 @@ class ABSClient:
             logger.error(f"Failed to update ABS progress: {e}")
             return False
 
-    def update_progress(self, session_id, timestamp, time_listened):
+    def update_progress(self, abs_id, timestamp, time_listened):
         """
-        Update progress using the new sync endpoint, which requires a sessionId.
-        Returns a dict with status, code, and response for advanced error handling.
+        Update progress using session-based sync.
+        Creates a session, syncs progress, then closes the session.
         """
-        if not session_id:
-            logger.error("No sessionId provided for ABS progress update.")
-            return {"success": False, "code": None, "reason": "no_session_id"}
-        # Sanity check: if timestamp looks like milliseconds (greater than 1,000,000), convert to seconds
         if timestamp > 1000000:
             timestamp = timestamp / 1000.0
             logger.warning(f"⚠️ Converted ABS timestamp from milliseconds to seconds: {timestamp}")
+
         timestamp = float(timestamp)
+        if time_listened is None:
+            time_listened = 0.0
         time_listened = float(time_listened)
-        url = f"{self.base_url}/api/session/{session_id}/sync"
-        payload = {
-            "currentTime": timestamp,
-            "timeListened": time_listened
-        }
+
+        session_id = self.create_session(abs_id)
+        if not session_id:
+            logger.error(f"Failed to create ABS session for item {abs_id}")
+            return {"success": False, "code": None, "reason": f"Failed to create ABS session for item {abs_id}"}
+
         try:
+            url = f"{self.base_url}/api/session/{session_id}/sync"
+            payload = {
+                "currentTime": timestamp,
+                "timeListened": time_listened
+            }
             r = requests.post(url, headers=self.headers, json=payload, timeout=10)
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated (session): {session_id} -> {timestamp}")
+                logger.debug(f"ABS progress updated via session: {abs_id} -> {timestamp}s")
+                self.close_session(session_id)
                 return {"success": True, "code": r.status_code, "response": r.text}
             elif r.status_code == 404:
-                logger.warning(f"ABS session not found (404): {session_id}. May need to recreate session.")
+                logger.warning(f"ABS session not found (404): {session_id}")
                 return {"success": False, "code": 404, "response": r.text}
             else:
-                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                logger.error(f"ABS session sync failed: {r.status_code} - {r.text}")
                 return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
-            logger.error(f"Failed to update ABS progress: {e}")
+            logger.error(f"Failed to sync ABS session progress: {e}")
             return {"success": False, "code": None, "reason": str(e)}
 
-    def get_in_progress(self, min_progress=0.01):
+
+def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
         try:
             r = requests.get(url, headers=self.headers, timeout=10)
