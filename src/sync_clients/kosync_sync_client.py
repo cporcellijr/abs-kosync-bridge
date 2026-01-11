@@ -1,0 +1,63 @@
+import os
+from typing import Optional
+import logging
+from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
+
+logger = logging.getLogger(__name__)
+
+class KoSyncSyncClient(SyncClient):
+    def __init__(self, kosync_client, ebook_parser):
+        super().__init__(ebook_parser)
+        self.kosync_client = kosync_client
+        self.ebook_parser = ebook_parser
+        self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
+
+    def is_configured(self) -> bool:
+        return self.kosync_client.is_configured()
+
+    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> ServiceState:
+        ko_id = mapping['kosync_doc_id']
+        ko_pct, ko_xpath = (0.0, None)
+
+        if self.kosync_client.is_configured():
+            ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
+            logger.debug(f"📚 [{title_snip}] KoSync response: pct={ko_pct:.1%}, xpath={ko_xpath}")
+            if ko_xpath is None:
+                logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
+
+        if ko_pct is None:
+            ko_pct = 0.0
+
+        prev_kosync_pct = prev.get('kosync_pct', 0)
+        delta = abs(ko_pct - prev_kosync_pct)
+
+        return ServiceState(
+            current={"pct": ko_pct, "xpath": ko_xpath},
+            previous_pct=prev_kosync_pct,
+            delta=delta,
+            threshold=self.delta_kosync_thresh,
+            is_configured=self.kosync_client.is_configured(),
+            display=("KoSync", "{prev:.4%} -> {curr:.4%}"),
+            value_formatter=lambda v: f"{v*100:.4f}%"
+        )
+
+    def get_text_from_current_state(self, mapping: dict, state: ServiceState) -> Optional[str]:
+        ko_xpath = state.current.get('xpath')
+        ko_pct = state.current.get('pct')
+        epub = mapping['ebook_filename']
+        if ko_xpath and epub:
+            txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
+            if txt:
+                return txt
+        if ko_pct is not None and epub:
+            return self.ebook_parser.get_text_at_percentage(epub, ko_pct)
+        return None
+
+    def update_progress(self, mapping: dict, request: UpdateProgressRequest) -> SyncResult:
+        pct = request.locator_result.percentage
+        locator = request.locator_result
+        ko_id = mapping['kosync_doc_id'] if mapping else None
+        # use perfect_ko_xpath if available
+        xpath = locator.perfect_ko_xpath if locator and locator.perfect_ko_xpath else locator.xpath
+        return SyncResult(pct, self.kosync_client.update_progress(ko_id, pct, xpath))
+

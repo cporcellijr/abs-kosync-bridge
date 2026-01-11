@@ -111,6 +111,23 @@ class ABSClient:
             pass
         return 0.0
 
+    def update_ebook_progress(self, item_id, timestamp):
+        # Ensure we use a float for the payload
+        timestamp = float(timestamp)
+        url = f"{self.base_url}/api/me/progress/{item_id}"
+        payload = {"ebookProgress": timestamp}
+        try:
+            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            if r.status_code in (200, 204):
+                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
+                return True
+            else:
+                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to update ABS progress: {e}")
+            return False
+
     def update_progress(self, session_id, timestamp, time_listened):
         """
         Update progress using the new sync endpoint, which requires a sessionId.
@@ -299,7 +316,7 @@ class KoSyncClient:
         return 0.0, None
 
     def update_progress(self, doc_id, percentage, xpath=None):
-        if not self.is_configured(): return
+        if not self.is_configured(): return False
 
         headers = {
             "x-auth-user": self.user,

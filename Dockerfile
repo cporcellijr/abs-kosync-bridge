@@ -45,6 +45,9 @@ COPY json_db.py /app/src/json_db.py
 COPY hardcover_client.py /app/src/hardcover_client.py
 COPY booklore_client.py /app/src/booklore_client.py
 
+# Copy sync client modules
+COPY src/sync_clients/ /app/src/sync_clients/
+
 COPY web_server.py /app/web_server.py
 COPY templates/ /app/templates/
 COPY static/ /app/static/
