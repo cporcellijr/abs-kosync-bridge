@@ -152,23 +152,18 @@ class SmilExtractor:
             logger.debug(f"Error finding OPF: {e}")
             return None
     
-    def _get_smil_files_in_order(self, opf_content: str, opf_dir: str, 
-                                  zf: zipfile.ZipFile) -> List[str]:
-        """
-        Get SMIL files in spine order.
-        
-        EPUB spine defines reading order. Each spine item may have a
-        media-overlay attribute pointing to its SMIL file.
-        """
+    def _natural_sort_key(self, s):
+        """Key for natural sorting (handles numbers correctly: 2 before 10)"""
+        return [int(text) if text.isdigit() else text.lower()
+                for text in re.split(r'(\d+)', s)]
+
+    def _get_smil_files_in_order(self, opf_content: str, opf_dir: str, zf: zipfile.ZipFile) -> List[str]:
         root = ET.fromstring(opf_content)
-        
-        # Build manifest lookup
         manifest_elem = root.find('.//{http://www.idpf.org/2007/opf}manifest')
-        if manifest_elem is None:
-            return []
+        if manifest_elem is None: return []
         
-        smil_items = {}  # id -> href for SMIL files
-        content_to_overlay = {}  # content id -> media-overlay id
+        smil_items = {}
+        content_to_overlay = {}
         
         for item in manifest_elem.findall('{http://www.idpf.org/2007/opf}item'):
             item_id = item.get('id')
@@ -178,11 +173,9 @@ class SmilExtractor:
             
             if media_type == 'application/smil+xml':
                 smil_items[item_id] = href
-            
             if media_overlay:
                 content_to_overlay[item_id] = media_overlay
         
-        # Walk spine and collect SMIL files in order
         spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
         smil_files = []
         seen_smil = set()
@@ -190,8 +183,6 @@ class SmilExtractor:
         if spine is not None:
             for itemref in spine.findall('{http://www.idpf.org/2007/opf}itemref'):
                 idref = itemref.get('idref')
-                
-                # Check if this spine item has a media-overlay
                 if idref in content_to_overlay:
                     smil_id = content_to_overlay[idref]
                     if smil_id in smil_items and smil_id not in seen_smil:
@@ -199,24 +190,22 @@ class SmilExtractor:
                         smil_files.append(smil_path)
                         seen_smil.add(smil_id)
         
-        # If we didn't find any via spine, fall back to all SMIL files sorted by name
+        # Fallback: Natural Sort if spine lookup failed
         if not smil_files:
+            logger.info("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
             all_smil = [self._resolve_path(opf_dir, href) for href in smil_items.values()]
-            smil_files = sorted(all_smil)
+            # Apply Natural Sort
+            smil_files = sorted(all_smil, key=self._natural_sort_key)
         
-        # Verify files exist in ZIP
         valid_files = []
         for smil_path in smil_files:
-            # Try a few path variations
-            for path_variant in [smil_path, smil_path.lstrip('/'), 
-                                smil_path.replace('\\', '/')]:
+            for path_variant in [smil_path, smil_path.lstrip('/'), smil_path.replace('\\', '/')]:
                 try:
                     zf.getinfo(path_variant)
                     valid_files.append(path_variant)
                     break
                 except KeyError:
                     continue
-        
         return valid_files
     
     def _resolve_path(self, base_dir: str, relative_path: str) -> str:
