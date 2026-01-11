@@ -204,48 +204,32 @@ class SyncManager:
                 current_percentage=percentage
             )
 
-    def _update_abs_progress_with_offset(self, abs_id, ts, delta, session_id=None):
-        """Apply offset to timestamp and update ABS progress using the new session-based sync endpoint."""
+    def _update_abs_progress_with_offset(self, abs_id, ts, prev_abs_ts=0):
+        """Apply offset to timestamp and update ABS progress.
+        
+        Args:
+            abs_id: ABS library item ID
+            ts: New timestamp to set (seconds)
+            prev_abs_ts: Previous ABS timestamp for calculating time_listened
+        """
         adjusted_ts = max(round(ts + self.abs_progress_offset, 2), 0)
         if self.abs_progress_offset != 0:
             logger.debug(f"   📐 Adjusted timestamp: {ts}s → {adjusted_ts}s (offset: {self.abs_progress_offset:+.1f}s)")
 
-        # If there is no current session, create a new session
-        if not session_id:
-            session_id = self.abs_client.create_session(abs_id)
-            if session_id:
-                self._store_abs_session_id(self.db, abs_id, session_id)
+        # Calculate time_listened as the difference between new and previous position
+        
+        time_listened = max(0, adjusted_ts - prev_abs_ts)
+        
+        # Don't send negative time_listened (shouldn't happen, but safety check)
+        if time_listened < 0:
+            time_listened = 0
+            
+        logger.debug(f"   ⏱️ time_listened: {time_listened:.1f}s (prev: {prev_abs_ts:.1f}s → new: {adjusted_ts:.1f}s)")
+        abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts, time_listened)
 
-        # Now update progress using the sessionId
-        abs_result = {"success": False, "code": None, "response": None}
-        if session_id:
-            time_listened = max(0, min(delta, 600))
-            abs_result = self.abs_client.update_progress(session_id, adjusted_ts, time_listened)
-            # Retry logic for 404: create new session and try again
-            if abs_result.get("code") == 404:
-                logger.warning(f"ABS sessionId {session_id} not found (404). Attempting to create a new session and retry progress update.")
-                new_session_id = self.abs_client.create_session(abs_id)
-                if new_session_id:
-                    self._store_abs_session_id(self.db, abs_id, new_session_id)
-                    abs_result = self.abs_client.update_progress(new_session_id, adjusted_ts, time_listened)
-                else:
-                    logger.error("Failed to create new ABS session for retry after 404.")
-        else:
-            logger.error("No sessionId available for ABS progress update.")
-        if abs_result.get("success"):
+        if abs_ok:
             logger.info("✅ ABS update successful")
-        return abs_result, adjusted_ts
-
-    def _store_abs_session_id(self, db, abs_id, session_id):
-        updated = False
-        for mapping in db.get('mappings', []):
-            if mapping.get('abs_id') == abs_id:
-                mapping['abs_session_id'] = session_id
-                updated = True
-        if updated:
-            self.db_handler.save(db)
-            logger.info(f"ABS sessionId saved for {abs_id}: {session_id}")
-        return db
+        return abs_ok, adjusted_ts
 
     def _abs_to_percentage(self, abs_seconds, transcript_path):
         try:
@@ -460,7 +444,7 @@ class SyncManager:
 
         for mapping in self.db.get('mappings', []):
             if mapping.get('status') != 'active': continue
-            abs_id, abs_session_id, ko_id, epub = mapping['abs_id'], mapping.get('abs_session_id'), mapping['kosync_doc_id'], mapping['ebook_filename']
+            abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
             logger.info(f"🔄 Syncing '{sanitize_log_data(mapping.get('abs_title', 'Unknown'))}'")
             title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
 
@@ -563,10 +547,10 @@ class SyncManager:
                 status_lines = []
                 for key, cfg in filtered_config.items():
                     if cfg['delta'] > 0:
-                        prev = cfg['previous']
+                        prev_val = cfg['previous']
                         curr = cfg['current']
                         label, fmt = cfg['display']
-                        status_lines.append(f"📊 {label}: {fmt.format(prev=prev, curr=curr)}")
+                        status_lines.append(f"📊 {label}: {fmt.format(prev=prev_val, curr=curr)}")
 
                 for line in status_lines:
                     logger.info(line)
@@ -632,7 +616,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=ko_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, prev.get('abs_ts', 0))
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=ko_pct)
                             if match_pct:
                                 logger.debug(f"📚 [{title_snip}] Matched text at {match_pct:.1%}. Kosync is at {ko_pct:.1%}")
@@ -656,7 +640,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=st_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, prev.get('abs_ts', 0))
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=st_pct)
 
                             # --- NEW: Hybrid Logic ---
@@ -691,7 +675,7 @@ class SyncManager:
                     if txt:
                         ts = self.transcriber.find_time_for_text(mapping.get('transcript_file'), txt, hint_percentage=bl_pct)
                         if ts:
-                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, config['ABS']['delta'], abs_session_id)
+                            abs_ok, final_ts = self._update_abs_progress_with_offset(abs_id, ts, prev.get('abs_ts', 0))
                             match_pct, rich_locator = self.ebook_parser.find_text_location(epub, txt, hint_percentage=bl_pct)
 
                             # --- NEW: Hybrid Logic ---
