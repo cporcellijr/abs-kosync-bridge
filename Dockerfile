@@ -44,6 +44,8 @@ COPY api_clients.py /app/src/api_clients.py
 COPY json_db.py /app/src/json_db.py
 COPY hardcover_client.py /app/src/hardcover_client.py
 COPY booklore_client.py /app/src/booklore_client.py
+COPY di_container.py /app/src/di_container.py
+COPY autowiring.py /app/autowiring.py
 
 # Copy sync client modules
 COPY src/sync_clients/ /app/src/sync_clients/
