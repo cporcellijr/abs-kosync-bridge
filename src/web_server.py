@@ -23,7 +23,7 @@ from src.sync_manager import SyncManager
 
 # ---------------- APP SETUP ----------------
 
-app = Flask(__name__, static_folder='/app/static', static_url_path='/static')
+app = Flask(__name__, static_folder='/app/static', static_url_path='/static', template_folder='/app/templates')
 app.secret_key = "kosync-queue-secret-unified-app"
 
 # NOTE: Logging is configured centrally in `main.py`. Avoid calling

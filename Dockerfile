@@ -4,7 +4,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     FLASK_APP=web_server.py \
-    PYTHONPATH="/app/src"
+    PYTHONPATH="/app"
 
 WORKDIR /app
 
