@@ -24,7 +24,6 @@ class KoSyncSyncClient(SyncClient):
 
         if self.kosync_client.is_configured():
             ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
-            logger.debug(f"📚 [{title_snip}] KoSync response: pct={ko_pct:.1%}, xpath={ko_xpath}")
             if ko_xpath is None:
                 logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 

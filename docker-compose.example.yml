@@ -84,6 +84,8 @@ services:
       - SYNC_DELTA_KOSYNC_PERCENT=0.5
       # Minimum word count change to trigger sync
       - SYNC_DELTA_KOSYNC_WORDS=400
+      # Minimum progress difference between clients to trigger sync (percentage, 0-100)
+      - SYNC_DELTA_BETWEEN_CLIENTS_PERCENT=0.5
       # Fuzzy text matching threshold (0-100, higher = stricter)
       - FUZZY_MATCH_THRESHOLD=88
 

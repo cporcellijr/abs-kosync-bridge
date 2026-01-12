@@ -86,7 +86,7 @@ class SyncManager:
         self.state_handler = state_handler
 
         self.kosync_use_percentage_from_server = kosync_use_percentage_from_server if kosync_use_percentage_from_server is not None else os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
-
+        self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
         self.epub_cache_dir = epub_cache_dir or DATA_DIR / "epub_cache"
 
         self.db = self.db_handler.load(default={"mappings": []})
@@ -453,6 +453,7 @@ class SyncManager:
                 config: dict[str, ServiceState] = {}
                 for client_name, client in self.sync_clients.items():
                     config[client_name] = client.get_service_state(mapping, prev, title_snip)
+                    logger.debug(f"[{title_snip}] {client_name} state: {config[client_name].current}")
 
                 # Check for ABS offline condition
                 abs_state = config.get('ABS')
@@ -467,10 +468,26 @@ class SyncManager:
                 # Check if all 'delta' fields in config are zero, if so, skip processing
                 if all(round(cfg.delta, 2) == 0 for cfg in config.values()):
                     if abs_id not in self.state:
-                        self.state[abs_id] = prev
+                        # no state yet, initialize
+                        self.state[abs_id] = {}
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
-                    logger.debug("Nothing to sync (no changes detected)")
                     continue
+                
+                # check for sync delta threshold between clients. This is to prevent small differences causing constant hops between who is the leader
+                # Example, when ABS is playing, at 40 percent, it. could be that KOSYNC is at 41 percent in the book. The next cycle would make KOSYNC probably 
+                # the leader, causing ABS to jump to 41 percent (while then on 40.5 percent), and so on. This is especially the case when having low interval syncing (1 minute)
+                progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
+                if len(progress_values) > 1:
+                    max_progress = max(progress_values)
+                    min_progress = min(progress_values)
+                    progress_diff = max_progress - min_progress
+                    if progress_diff < self.sync_delta_between_clients:
+                        if abs_id not in self.state:
+                            # no state yet, initialize
+                            self.state[abs_id] = {}
+                        self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
+                        logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
+                        continue
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
@@ -480,7 +497,7 @@ class SyncManager:
                     if 0 < delta < threshold:
                         label, fmt = cfg.display
                         delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
-                        small_changes.append(f"✋ {label} delta {delta_str} (Below threshold): {title_snip}")
+                        small_changes.append(f"✋ [{title_snip}] {label} delta {delta_str} (Below threshold): {title_snip}")
 
                 if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
                     for s in small_changes:
@@ -489,7 +506,7 @@ class SyncManager:
                     continue
 
                 # At this point we have a significant change to act on
-                logger.info(f"🔄 Change detected for '{title_snip}'")
+                logger.info(f"🔄 [{title_snip}] Change detected")
 
                 # Status block - show only changed lines
                 status_lines = []
@@ -559,7 +576,7 @@ class SyncManager:
                     'last_updated': time.time()
                 }
                 self.state_handler.save(self.state)
-                logger.info("💾 State saved to last_state.json")
+                logger.info("💾 [{title_snip}] State saved to last_state.json")
 
             except Exception as e:
                 logger.error(traceback.format_exc())
@@ -630,12 +647,8 @@ if __name__ == "__main__":
     logger.info("🚀 Running sync manager in standalone mode (for testing)")
 
     # Try to use dependency injection, fall back to legacy if there are issues
-    try:
-        sync_manager = create_sync_manager_with_di()
-        logger.info("✅ Using dependency injection")
-    except Exception as e:
-        logger.warning(f"⚠️ DI initialization failed: {e}, falling back to legacy initialization")
-        sync_manager = SyncManager()
+    sync_manager = create_sync_manager_with_di()
+    logger.info("✅ Using dependency injection")
 
     sync_manager.run_daemon()
 # [END FILE]
