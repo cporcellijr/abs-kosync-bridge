@@ -46,7 +46,7 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
     def get_progress_mock_returns(self):
         """Return progress mock return values that EXACTLY match current state."""
         return {
-            'abs_progress': 150.0,  # 15% = 150 seconds (SAME as state)
+            'abs_progress': {'ebookProgress': 0.15, 'currentTime': 150.0, 'ebookLocation': 'epubcfi(/6/2[chapter1]!/4/2[content]/4/1:0)'},  # 15%
             'abs_in_progress': [{'id': 'test-abs-id-nochange', 'progress': 0.15, 'duration': 1000}],
             'kosync_progress': (0.25, "/html/body/div[1]/p[6]"),  # 25% (SAME as state)
             'storyteller_progress': (0.18, 18.0, "ch2", "frag2"),  # 18% (SAME as state)

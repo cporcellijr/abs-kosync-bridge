@@ -119,6 +119,7 @@ def create_container() -> DIContainer:
     from src.sync_clients.kosync_sync_client import KoSyncSyncClient
     from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
     from src.sync_clients.booklore_sync_client import BookloreSyncClient
+    from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
 
     container.register_factory(ABSSyncClient, lambda: ABSSyncClient(
         container.get(ABSClient),
@@ -133,7 +134,18 @@ def create_container() -> DIContainer:
     ))
 
     container.register_singleton(KoSyncSyncClient)
+    container.register_singleton(ABSEbookSyncClient)
     container.register_singleton(BookloreSyncClient)
+
+    # Register sync_clients dictionary for reuse
+    container.register_factory('sync_clients', lambda: {
+        "ABS": container.get(ABSSyncClient),
+        # todo needs further testing
+        # "ABS eBook": container.get(ABSEbookSyncClient),
+        "KoSync": container.get(KoSyncSyncClient),
+        "Storyteller": container.get(StorytellerSyncClient),
+        "BookLore": container.get(BookloreSyncClient)
+    })
 
     from src.sync_manager import SyncManager
     container.register_factory(SyncManager, lambda: SyncManager(
@@ -146,10 +158,7 @@ def create_container() -> DIContainer:
         ebook_parser=container.get(EbookParser),
         db_handler=container.get(DBHandler),
         state_handler=container.get(StateHandler),
-        abs_sync_client=container.get(ABSSyncClient),
-        kosync_sync_client=container.get(KoSyncSyncClient),
-        storyteller_sync_client=container.get(StorytellerSyncClient),
-        booklore_sync_client=container.get(BookloreSyncClient),
+        sync_clients=container.get('sync_clients'),
         kosync_use_percentage_from_server=container.get_config_value('kosync_use_percentage_from_server'),
         epub_cache_dir=container.get_config_value('epub_cache_dir')
     ))
@@ -182,8 +191,11 @@ def _create_storyteller_client():
     # Return dummy implementation
     class DummyStoryteller:
         def check_connection(self): return False
+
         def get_progress_with_fragment(self, *args): return None, None, None, None
+
         def update_progress(self, *args): return False
+
         def is_configured(self): return False
 
     return DummyStoryteller()

@@ -45,7 +45,7 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
     def get_progress_mock_returns(self):
         """Return progress mock return values for ABS leading scenario."""
         return {
-            'abs_progress': 400.0,  # 40% = 400 seconds
+            'abs_progress': {'ebookProgress': 0.32035211267605633805, 'currentTime': 400.0, 'ebookLocation': 'epubcfi(/6/10[Afscheid_voor_even-2]!/4[Afscheid_voor_even-2]/2[book-columns]/2[book-inner]/2/230/4/2[kobo.115.2]/1:29)'},  # 40%
             'abs_in_progress': [{'id': 'test-abs-id-123', 'progress': 0.4, 'duration': 1000}],
             'kosync_progress': (0.2, "/html/body/div[1]/p[5]"),  # 20%
             'storyteller_progress': (0.1, 10.0, "ch1", "frag1"),  # 10%

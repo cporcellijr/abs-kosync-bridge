@@ -106,26 +106,44 @@ class ABSClient:
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
             r = requests.get(url, headers=self.headers)
-            if r.status_code == 200: return r.json().get('currentTime', 0)
+            if r.status_code == 200: return r.json()
         except:
+            logger.error(f"Error fetching ABS progress for item {item_id}")
             pass
-        return 0.0
+        return None
 
-    def update_ebook_progress(self, item_id, timestamp):
-        # Ensure we use a float for the payload
-        timestamp = float(timestamp)
+    def update_ebook_progress(self, item_id, progress, location):
+        """
+        Update ebook progress for an item.
+
+        Args:
+            item_id: The item ID to update
+            progress: The ebook progress as a float (0.0 to 1.0)
+            location: Required ebook location (EPUB CFI format)
+        """
+        # Validate required parameters
+        if not location:
+            logger.error("Ebook location is required for progress updates")
+            return False
+
+        # Ensure we use a float for the progress
+        progress = float(progress)
         url = f"{self.base_url}/api/me/progress/{item_id}"
-        payload = {"ebookProgress": timestamp}
+        payload = {
+            "ebookProgress": progress,
+            "ebookLocation": location
+        }
+
         try:
             r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated: {item_id} -> {timestamp}")
+                logger.debug(f"ABS ebook progress updated: {item_id} -> {progress} at location: {location[:50]}...")
                 return True
             else:
-                logger.error(f"ABS update failed: {r.status_code} - {r.text}")
+                logger.error(f"ABS ebook update failed: {r.status_code} - {r.text}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to update ABS progress: {e}")
+            logger.error(f"Failed to update ABS ebook progress: {e}")
             return False
 
     def update_progress(self, abs_id, timestamp, time_listened):
@@ -142,6 +160,13 @@ class ABSClient:
             time_listened = 0.0
         time_listened = float(time_listened)
 
+        payload = {
+            "currentTime": timestamp,
+            "timeListened": time_listened
+        }
+        return self.update_progress_using_payload(abs_id, payload)
+
+    def update_progress_using_payload(self, abs_id, payload: dict):
         session_id = self.create_session(abs_id)
         if not session_id:
             logger.error(f"Failed to create ABS session for item {abs_id}")
@@ -149,13 +174,9 @@ class ABSClient:
 
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
-            payload = {
-                "currentTime": timestamp,
-                "timeListened": time_listened
-            }
             r = requests.post(url, headers=self.headers, json=payload, timeout=10)
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated via session: {abs_id} -> {timestamp}s")
+                logger.debug(f"ABS progress updated via session: {abs_id}, payload: {payload}")
                 self.close_session(session_id)
                 return {"success": True, "code": r.status_code, "response": r.text}
             elif r.status_code == 404:
@@ -318,8 +339,9 @@ class KoSyncClient:
                 xpath = data.get('progress')
                 return pct, xpath
         except:
+            logger.error(f"Error fetching KoSync progress for doc {doc_id}")
             pass
-        return 0.0, None
+        return None, None
 
     def update_progress(self, doc_id, percentage, xpath=None):
         if not self.is_configured(): return False

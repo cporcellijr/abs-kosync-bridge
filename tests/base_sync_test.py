@@ -12,6 +12,7 @@ import json
 from unittest.mock import Mock, patch
 from abc import ABC, abstractmethod
 
+from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
 # Import the LocatorResult class for mocking
 from src.sync_clients.sync_client_interface import LocatorResult
 
@@ -177,6 +178,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             mocks['db_handler']
         )
         kosync_sync_client = KoSyncSyncClient(mocks['kosync_client'], mocks['ebook_parser'])
+        abs_ebook_sync_client = ABSEbookSyncClient(mocks['abs_client'], mocks['ebook_parser'])
         storyteller_sync_client = StorytellerSyncClient(mocks['storyteller_db'], mocks['ebook_parser'])
         booklore_sync_client = BookloreSyncClient(mocks['booklore_client'], mocks['ebook_parser'])
 
@@ -191,16 +193,19 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             ebook_parser=mocks['ebook_parser'],
             db_handler=mocks['db_handler'],
             state_handler=mocks['state_handler'],
-            abs_sync_client=abs_sync_client,
-            kosync_sync_client=kosync_sync_client,
-            storyteller_sync_client=storyteller_sync_client,
-            booklore_sync_client=booklore_sync_client,
+            sync_clients={
+                "ABS": abs_sync_client,
+                "ABS eBook": abs_ebook_sync_client,
+                "KoSync": kosync_sync_client,
+                "Storyteller": storyteller_sync_client,
+                "BookLore": booklore_sync_client
+            },
             kosync_use_percentage_from_server=False,
             epub_cache_dir=Path(self.temp_dir) / 'epub_cache'
         )
 
         # Mock the ABS client's _update_abs_progress_with_offset method
-        manager.abs_sync_client._update_abs_progress_with_offset = Mock(
+        manager.sync_clients['ABS']._update_abs_progress_with_offset = Mock(
             return_value=({"success": True}, self.expected_final_pct * 1000)
         )
 
@@ -242,7 +247,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             if leader != 'ABS':
                 # For ABS updates, check either the client update or the internal method
                 abs_updated = (mocks['abs_client'].update_progress.called or
-                               manager.abs_sync_client._update_abs_progress_with_offset.called)
+                               manager.sync_clients['ABS']._update_abs_progress_with_offset.called)
                 self.assertTrue(abs_updated, "ABS update was not called")
             if leader != 'KOSYNC':
                 self.assertTrue(mocks['kosync_client'].update_progress.called, "KoSync update_progress was not called")
@@ -319,7 +324,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                 self.verify_final_state(manager)
 
                 # Check that the expected service was identified as leader
-                self.assertIn(f"{self.get_expected_leader().upper()} leads at {target_percentage}.0000%", log_output,
+                self.assertIn(f"{self.get_expected_leader()} leads at {target_percentage}.0000%", log_output,
                               f"Logs should show {self.get_expected_leader()} as leader")
 
                 # Verify progress changes are logged

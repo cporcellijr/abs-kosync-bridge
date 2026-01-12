@@ -18,17 +18,15 @@ class KoSyncSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return self.kosync_client.is_configured()
 
-    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> ServiceState:
+    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
         ko_id = mapping['kosync_doc_id']
-        ko_pct, ko_xpath = (0.0, None)
-
-        if self.kosync_client.is_configured():
-            ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
-            if ko_xpath is None:
-                logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
+        ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
+        if ko_xpath is None:
+            logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 
         if ko_pct is None:
-            ko_pct = 0.0
+            logger.warning("⚠️ KoSync percentage is None - returning None for service state")
+            return None
 
         prev_kosync_pct = prev.get('kosync_pct', 0)
         delta = abs(ko_pct - prev_kosync_pct)

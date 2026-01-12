@@ -46,7 +46,7 @@ class TestStorytellerLeadsSync(BaseSyncCycleTestCase):
     def get_progress_mock_returns(self):
         """Return progress mock return values for Storyteller leading scenario."""
         return {
-            'abs_progress': 300.0,  # 30%
+            'abs_progress': {'ebookProgress': 0.3, 'currentTime': 300.0, 'ebookLocation': 'epubcfi(/6/6[chapter3]!/4/2[content]/8/1:0)'},  # 30%
             'abs_in_progress': [{'id': 'test-abs-id-storyteller', 'progress': 0.3, 'duration': 1000}],
             'kosync_progress': (0.35, "/html/body/div[1]/p[12]"),  # 35%
             'storyteller_progress': (0.6, 60.0, "ch6", "frag6"),  # 60% - LEADER

@@ -4,23 +4,15 @@ import logging
 import os
 import threading
 import time
-from pathlib import Path
 import traceback
+from pathlib import Path
 
 import schedule
 
-from src.api.api_clients import ABSClient, KoSyncClient
-from src.api.booklore_client import BookloreClient
+from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
 from src.utils.di_container import create_container
-from src.utils.ebook_utils import EbookParser
-from src.api.hardcover_client import HardcoverClient
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
-from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult
-from src.sync_clients.abs_sync_client import ABSSyncClient
-from src.sync_clients.booklore_sync_client import BookloreSyncClient
-from src.sync_clients.kosync_sync_client import KoSyncSyncClient
-from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
 
 # FIX: Safer import logic that doesn't crash immediately
 StorytellerClientClass = None
@@ -66,10 +58,7 @@ class SyncManager:
                  ebook_parser=None,
                  db_handler=None,
                  state_handler=None,
-                 abs_sync_client=None,
-                 kosync_sync_client=None,
-                 storyteller_sync_client=None,
-                 booklore_sync_client=None,
+                 sync_clients: dict[str, SyncClient]=None,
                  kosync_use_percentage_from_server=None,
                  epub_cache_dir=None):
 
@@ -92,30 +81,16 @@ class SyncManager:
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={})
 
-        # Initialize sync clients
-        self.abs_sync_client = abs_sync_client
-        self.kosync_sync_client = kosync_sync_client
-        self.storyteller_sync_client = storyteller_sync_client
-        self.booklore_sync_client = booklore_sync_client
-
         self._job_queue = []
         self._job_lock = threading.Lock()
         self._job_thread = None
 
         self.startup_checks()
         self.cleanup_stale_jobs()
-        self._setup_sync_clients()
+        self._setup_sync_clients(sync_clients)
 
-    def _setup_sync_clients(self):
-        # Only include configured clients in sync_clients
-        all_clients = {
-            'ABS': self.abs_sync_client,
-            'KOSYNC': self.kosync_sync_client,
-            'STORYTELLER': self.storyteller_sync_client,
-            'BOOKLORE': self.booklore_sync_client,
-        }
-
-        self.sync_clients = {name: client for name, client in all_clients.items() if client.is_configured()}
+    def _setup_sync_clients(self, clients: dict[str, SyncClient]):
+        self.sync_clients = {name: client for name, client in clients.items() if client.is_configured()}
 
     @property
     def transcriber(self):
@@ -452,18 +427,19 @@ class SyncManager:
                 # Build config using sync_clients - each client fetches its own state
                 config: dict[str, ServiceState] = {}
                 for client_name, client in self.sync_clients.items():
-                    config[client_name] = client.get_service_state(mapping, prev, title_snip)
-                    logger.debug(f"[{title_snip}] {client_name} state: {config[client_name].current}")
+                    state = client.get_service_state(mapping, prev, title_snip)
+                    if state is not None:
+                        config[client_name] = state
+                        logger.debug(f"[{title_snip}] {client_name} state: {state.current}")
+
+                # Filtered config now only contains non-None states
+                if not config:
+                    continue  # No valid states to process
 
                 # Check for ABS offline condition
                 abs_state = config.get('ABS')
-                current_abs_ts = abs_state.current.get('ts')
-                if abs_state and current_abs_ts is None:
+                if abs_state is None:
                     continue  # ABS offline
-
-                # Check for invalid transcript condition
-                if abs_state and current_abs_ts and current_abs_ts > 0 and abs_state.current.get('pct') is None:
-                    continue  # Invalid transcript
 
                 # Check if all 'delta' fields in config are zero, if so, skip processing
                 if all(round(cfg.delta, 2) == 0 for cfg in config.values()):
@@ -474,8 +450,6 @@ class SyncManager:
                     continue
 
                 # check for sync delta threshold between clients. This is to prevent small differences causing constant hops between who is the leader
-                # Example, when ABS is playing, at 40 percent, it. could be that KOSYNC is at 41 percent in the book. The next cycle would make KOSYNC probably
-                # the leader, causing ABS to jump to 41 percent (while then on 40.5 percent), and so on. This is especially the case when having low interval syncing (1 minute)
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
                 if len(progress_values) > 1:
                     max_progress = max(progress_values)
@@ -546,13 +520,13 @@ class SyncManager:
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}
                 for client_name, client in self.sync_clients.items():
-                    if client_name == leader:
+                    if client_name == leader or client_name not in config:
                         continue
                     request = UpdateProgressRequest(locator, txt, previous_location=config[client_name].previous_pct)
                     result = client.update_progress(mapping, request)
                     results[client_name] = result
                     if result.success:
-                        logger.info(f"✅ [{title_snip}] {client_name} update successful")
+                        logger.info(f"✅ [{title_snip}] {client_name} update successful to {result.location}")
 
                 # Set final_pct based on results (use match_pct or aggregate if needed)
                 final_pct = locator.percentage
@@ -561,22 +535,24 @@ class SyncManager:
                     if not mapping.get('hardcover_book_id'): self._automatch_hardcover(mapping)
                     if mapping.get('hardcover_book_id'): self._sync_to_hardcover(mapping, final_pct)
 
-                # TODO also offload this storing of state to the client itself, possibly combining it with a real DB instead of JSON files
+                # todo the results of the clients should contain the state which should be saved to last_state.json
+                # combine that with the leader state and we should have all the info
 
-                # Store abs timestamp for state update
-                final_abs_timestamp = results['ABS'].location if 'ABS' in results and results['ABS'].location else current_abs_ts
+                # Store abs timestamp for state update. Either the result from ABS update if its not the leader or simply the ABS's leader state
+                final_abs_timestamp = results['ABS'].location if 'ABS' in results and results['ABS'].location else abs_state.current.get('ts')
 
                 self.state[abs_id] = {
                     'abs_ts': final_abs_timestamp,
                     'abs_pct': self._abs_to_percentage(final_abs_timestamp, mapping.get('transcript_file')) or 0,
-                    'kosync_pct': config['KOSYNC'].current.get('pct') if self.kosync_use_percentage_from_server and leader == 'KOSYNC' else final_pct,
+                    'abs_ebook_pct': config['ABS eBook'].current.get('pct') if leader == 'ABS eBook' and 'ABS eBook' in config else final_pct,
+                    'kosync_pct': config['KoSync'].current.get('pct') if self.kosync_use_percentage_from_server and 'KoSync' in config and leader == 'KoSync' else final_pct,
                     'storyteller_pct': final_pct,
                     'booklore_pct': final_pct,
                     'hardcover_pct': final_pct,
                     'last_updated': time.time()
                 }
                 self.state_handler.save(self.state)
-                logger.info("💾 [{title_snip}] State saved to last_state.json")
+                logger.info(f"💾 [{title_snip}] State saved to last_state.json")
 
             except Exception as e:
                 logger.error(traceback.format_exc())

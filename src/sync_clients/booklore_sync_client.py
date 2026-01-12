@@ -1,10 +1,12 @@
 import os
 from typing import Optional
+import logging
 
 from src.api.booklore_client import BookloreClient
 from src.utils.ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 
+logger = logging.getLogger(__name__)
 
 class BookloreSyncClient(SyncClient):
     def __init__(self, booklore_client: BookloreClient, ebook_parser: EbookParser):
@@ -15,12 +17,13 @@ class BookloreSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return self.booklore_client.is_configured()
 
-    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> ServiceState:
+    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
         epub = mapping['ebook_filename']
         bl_pct, _ = self.booklore_client.get_progress(epub)
 
         if bl_pct is None:
-            bl_pct = 0.0
+            logger.warning("⚠️ BookLore percentage is None - returning None for service state")
+            return None
 
         prev_booklore_pct = prev.get('booklore_pct', 0)
         delta = abs(bl_pct - prev_booklore_pct)

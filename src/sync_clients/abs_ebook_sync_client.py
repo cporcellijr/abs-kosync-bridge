@@ -1,0 +1,65 @@
+import logging
+import os
+from typing import Optional
+
+from src.api.api_clients import ABSClient
+from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
+from src.utils.ebook_utils import EbookParser
+
+logger = logging.getLogger(__name__)
+
+class ABSEbookSyncClient(SyncClient):
+    def __init__(self, abs_client: ABSClient, ebook_parser: EbookParser):
+        super().__init__(ebook_parser)
+        self.abs_client = abs_client
+        self.ebook_parser = ebook_parser
+        self.delta_abs_thresh = float(os.getenv("SYNC_DELTA_ABS_EBOOK_PERCENT", 1))
+
+    def is_configured(self) -> bool:
+        return True
+
+    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
+        abs_id = mapping['abs_id']
+        response = self.abs_client.get_progress(abs_id)
+        abs_pct, abs_cfi = response.get('ebookProgress'), response.get('ebookLocation') if response is not None else None
+
+        if abs_pct is None:
+            logger.warning("⚠️ ABS ebook percentage is None - returning None for service state")
+            return None
+
+        prev_abs_pct = prev.get('abs_ebook_pct', 0)
+        delta = abs(abs_pct - prev_abs_pct)
+
+        return ServiceState(
+            current={"pct": abs_pct, "cfi": abs_cfi},
+            previous_pct=prev_abs_pct,
+            delta=delta,
+            threshold=self.delta_abs_thresh,
+            is_configured=True,
+            display=("ABS eBook", "{prev:.4%} -> {curr:.4%}"),
+            value_formatter=lambda v: f"{v*100:.4f}%"
+        )
+
+    def get_text_from_current_state(self, mapping: dict, state: ServiceState) -> Optional[str]:
+        cfi = state.current.get('cfi')
+        pct = state.current.get('pct')
+        epub = mapping['ebook_filename']
+        if cfi and epub:
+            txt = self.ebook_parser.get_text_around_cfi(epub, cfi)
+            if txt:
+                return txt
+        if pct is not None and epub:
+            return self.ebook_parser.get_text_at_percentage(epub, pct)
+        return None
+
+    def update_progress(self, mapping: dict, request: UpdateProgressRequest) -> SyncResult:
+        locator = request.locator_result
+        if locator.cfi is None:
+            logger.error("⚠️ Cannot update ABS eBook progress - cfi is not set")
+            return SyncResult(0, False)
+
+        pct = locator.percentage
+        abs_id = mapping['abs_id']
+        cfi = locator.cfi
+        return SyncResult(pct, self.abs_client.update_ebook_progress(abs_id, pct, cfi))
+

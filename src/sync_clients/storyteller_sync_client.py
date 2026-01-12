@@ -1,8 +1,10 @@
 import os
 from typing import Optional
+import logging
 
 from src.utils.ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
+logger = logging.getLogger(__name__)
 
 class StorytellerSyncClient(SyncClient):
     def __init__(self, storyteller_db, ebook_parser: EbookParser):
@@ -14,12 +16,13 @@ class StorytellerSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return self.storyteller_db.is_configured()
 
-    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> ServiceState:
+    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
         epub = mapping['ebook_filename']
         st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
 
         if st_pct is None:
-            st_pct = 0.0
+            logger.warning("⚠️ Storyteller percentage is None - returning None for service state")
+            return None
 
         prev_storyteller_pct = prev.get('storyteller_pct', 0)
         delta = abs(st_pct - prev_storyteller_pct)
