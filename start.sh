@@ -16,7 +16,7 @@ echo ""
 
 # Start the unified web server (includes integrated sync daemon)
 echo "  🌐 Starting unified service (web + sync daemon)..."
-python /app/web_server.py &
+python /app/src/web_server.py &
 WEB_PID=$!
 
 echo ""

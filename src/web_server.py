@@ -14,11 +14,12 @@ import requests
 import schedule
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
-from json_db import JsonDB
+from src.db.json_db import JsonDB
+from src.utils.di_container import create_container
 # Import memory logging setup - this must happen early to capture all logs
-from logging_utils import memory_log_handler, LOG_PATH
-from logging_utils import sanitize_log_data
-from main import create_sync_manager_with_di
+from src.utils.logging_utils import memory_log_handler, LOG_PATH
+from src.utils.logging_utils import sanitize_log_data
+from src.sync_manager import SyncManager
 
 # ---------------- APP SETUP ----------------
 
@@ -30,7 +31,9 @@ app.secret_key = "kosync-queue-secret-unified-app"
 logger = logging.getLogger(__name__)
 logger.info("Starting ABS-KOSync Bridge Web Server")
 
-manager = create_sync_manager_with_di()
+container = create_container()
+
+manager = container.get(SyncManager)
 
 # ---------------- DATA DIR CONFIG ----------------
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))

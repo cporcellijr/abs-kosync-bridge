@@ -7,7 +7,7 @@ from typing import Optional
 import requests
 from pathlib import Path
 
-from logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data
 from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)

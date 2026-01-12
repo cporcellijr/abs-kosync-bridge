@@ -162,7 +162,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         transcriber.find_time_for_text.return_value = self.expected_final_pct * 1000
 
         # Import SyncManager and create with dependency injection
-        from main import SyncManager
+        from src.sync_manager import SyncManager
 
         # Create sync clients with mocked dependencies
         from src.sync_clients.abs_sync_client import ABSSyncClient

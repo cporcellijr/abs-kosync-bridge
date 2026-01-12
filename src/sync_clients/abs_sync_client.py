@@ -3,10 +3,10 @@ import logging
 import os
 from typing import Optional
 
-from api_clients import ABSClient
-from ebook_utils import EbookParser
-from json_db import JsonDB
-from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
+from src.api.api_clients import ABSClient
+from src.utils.ebook_utils import EbookParser
+from src.db.json_db import JsonDB
+from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 
 logger = logging.getLogger(__name__)
 

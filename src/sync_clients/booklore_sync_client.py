@@ -1,9 +1,9 @@
 import os
 from typing import Optional
 
-from booklore_client import BookloreClient
-from ebook_utils import EbookParser
-from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
+from src.api.booklore_client import BookloreClient
+from src.utils.ebook_utils import EbookParser
+from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 
 
 class BookloreSyncClient(SyncClient):

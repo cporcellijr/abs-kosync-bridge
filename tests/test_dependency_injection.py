@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 def test_dependency_injection():
@@ -30,17 +30,17 @@ def test_dependency_injection():
 
         # Test 1: Create DI container
         print("📦 Creating DI container...")
-        from di_container import create_container
+        from src.utils.di_container import create_container
         container = create_container()
         print("✅ DI container created successfully")
 
         # Test 2: Test individual component creation
         print("\n🔧 Testing individual components...")
 
-        from api_clients import ABSClient, KoSyncClient
-        from booklore_client import BookloreClient
-        from hardcover_client import HardcoverClient
-        from ebook_utils import EbookParser
+        from src.api.api_clients import ABSClient, KoSyncClient
+        from src.api.booklore_client import BookloreClient
+        from src.api.hardcover_client import HardcoverClient
+        from src.utils.ebook_utils import EbookParser
 
         abs_client = container.get(ABSClient)
         print(f"✅ ABSClient: {type(abs_client).__name__}")
@@ -57,13 +57,16 @@ def test_dependency_injection():
         # Test 3: Test factory-created components
         print("\n🏭 Testing factory components...")
 
-        storyteller_db = container.get('storyteller_db')
+        # Use the new type keys for DI container
+        from src.utils.di_container import DBHandler, StateHandler, StorytellerDBKey
+
+        storyteller_db = container.get(StorytellerDBKey)
         print(f"✅ Storyteller DB: {type(storyteller_db).__name__}")
 
-        db_handler = container.get('db_handler')
+        db_handler = container.get(DBHandler)
         print(f"✅ DB Handler: {type(db_handler).__name__}")
 
-        state_handler = container.get('state_handler')
+        state_handler = container.get(StateHandler)
         print(f"✅ State Handler: {type(state_handler).__name__}")
 
         # Test 4: Test sync clients
@@ -89,8 +92,8 @@ def test_dependency_injection():
         # Test 5: Test SyncManager creation with DI
         print("\n🎯 Testing SyncManager creation with DI...")
 
-        from main import create_sync_manager_with_di
-        sync_manager = create_sync_manager_with_di()
+        from src.sync_manager import SyncManager
+        sync_manager = container.get(SyncManager)
         print(f"✅ SyncManager created: {type(sync_manager).__name__}")
 
         # Test 6: Verify autowired dependencies

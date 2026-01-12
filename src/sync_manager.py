@@ -9,13 +9,13 @@ import traceback
 
 import schedule
 
-from api_clients import ABSClient, KoSyncClient
-from booklore_client import BookloreClient
-from ebook_utils import EbookParser
-from hardcover_client import HardcoverClient
-from json_db import JsonDB
+from src.api.api_clients import ABSClient, KoSyncClient
+from src.api.booklore_client import BookloreClient
+from src.utils.di_container import create_container
+from src.utils.ebook_utils import EbookParser
+from src.api.hardcover_client import HardcoverClient
 # Logging utilities (placed at top to ensure availability during sync)
-from logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult
 from src.sync_clients.abs_sync_client import ABSSyncClient
 from src.sync_clients.booklore_sync_client import BookloreSyncClient
@@ -25,14 +25,14 @@ from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
 # FIX: Safer import logic that doesn't crash immediately
 StorytellerClientClass = None
 try:
-    from storyteller_api import StorytellerDBWithAPI
+    from src.api.storyteller_api import StorytellerDBWithAPI
     StorytellerClientClass = StorytellerDBWithAPI
 except ImportError:
     pass
 
 if not StorytellerClientClass:
     try:
-        from storyteller_db import StorytellerDB as StorytellerClientClass
+        from src.api.storyteller_db import StorytellerDB as StorytellerClientClass
     except ImportError:
         StorytellerClientClass = None
 
@@ -120,7 +120,7 @@ class SyncManager:
     @property
     def transcriber(self):
         if self._transcriber is None:
-            from transcriber import AudioTranscriber
+            from src.utils.transcriber import AudioTranscriber
             self._transcriber = AudioTranscriber(DATA_DIR)
         return self._transcriber
 
@@ -472,9 +472,9 @@ class SyncManager:
                         self.state[abs_id] = {}
                     self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
-                
+
                 # check for sync delta threshold between clients. This is to prevent small differences causing constant hops between who is the leader
-                # Example, when ABS is playing, at 40 percent, it. could be that KOSYNC is at 41 percent in the book. The next cycle would make KOSYNC probably 
+                # Example, when ABS is playing, at 40 percent, it. could be that KOSYNC is at 41 percent in the book. The next cycle would make KOSYNC probably
                 # the leader, causing ABS to jump to 41 percent (while then on 40.5 percent), and so on. This is especially the case when having low interval syncing (1 minute)
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
                 if len(progress_values) > 1:
@@ -594,60 +594,13 @@ class SyncManager:
             schedule.run_pending()
             time.sleep(30)
 
-
-def create_sync_manager_with_di() -> SyncManager:
-    """Create a SyncManager using dependency injection."""
-    from di_container import create_container
-
-    container = create_container()
-
-    # Get all dependencies from the container
-    abs_client = container.get(ABSClient)
-    kosync_client = container.get(KoSyncClient)
-    hardcover_client = container.get(HardcoverClient)
-    booklore_client = container.get(BookloreClient)
-    ebook_parser = container.get(EbookParser)
-
-    # Get factory-created instances
-    storyteller_db = container.get('storyteller_db')
-    transcriber = container.get('transcriber')
-    db_handler = container.get('db_handler')
-    state_handler = container.get('state_handler')
-
-    # Get sync clients
-    abs_sync_client = container.get(ABSSyncClient)
-    kosync_sync_client = container.get(KoSyncSyncClient)
-    storyteller_sync_client = container.get(StorytellerSyncClient)
-    booklore_sync_client = container.get(BookloreSyncClient)
-
-    # Get configuration values
-    kosync_use_percentage_from_server = container.get_config_value('kosync_use_percentage_from_server')
-    epub_cache_dir = container.get_config_value('epub_cache_dir')
-
-    return SyncManager(
-        abs_client=abs_client,
-        kosync_client=kosync_client,
-        hardcover_client=hardcover_client,
-        storyteller_db=storyteller_db,
-        booklore_client=booklore_client,
-        transcriber=transcriber,
-        ebook_parser=ebook_parser,
-        db_handler=db_handler,
-        state_handler=state_handler,
-        abs_sync_client=abs_sync_client,
-        kosync_sync_client=kosync_sync_client,
-        storyteller_sync_client=storyteller_sync_client,
-        booklore_sync_client=booklore_sync_client,
-        kosync_use_percentage_from_server=kosync_use_percentage_from_server,
-        epub_cache_dir=epub_cache_dir
-    )
-
 if __name__ == "__main__":
     # This is only used for standalone testing - production uses web_server.py
     logger.info("🚀 Running sync manager in standalone mode (for testing)")
 
+    di_container = create_container()
     # Try to use dependency injection, fall back to legacy if there are issues
-    sync_manager = create_sync_manager_with_di()
+    sync_manager = di_container.get(SyncManager)
     logger.info("✅ Using dependency injection")
 
     sync_manager.run_daemon()

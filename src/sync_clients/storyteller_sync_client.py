@@ -1,8 +1,8 @@
 import os
 from typing import Optional
 
-from ebook_utils import EbookParser
-from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
+from src.utils.ebook_utils import EbookParser
+from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 
 class StorytellerSyncClient(SyncClient):
     def __init__(self, storyteller_db, ebook_parser: EbookParser):

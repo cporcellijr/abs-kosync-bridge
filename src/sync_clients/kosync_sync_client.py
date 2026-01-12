@@ -2,9 +2,9 @@ import os
 from typing import Optional
 import logging
 
-from api_clients import KoSyncClient
-from ebook_utils import EbookParser
-from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
+from src.api.api_clients import KoSyncClient
+from src.utils.ebook_utils import EbookParser
+from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 
 logger = logging.getLogger(__name__)
 

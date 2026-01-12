@@ -6,13 +6,20 @@ Provides Spring-like autowiring functionality for Python.
 
 import inspect
 import logging
-from typing import Type, TypeVar, Dict, Any, Optional, Callable
+from typing import Type, TypeVar, Dict, Any, Callable
 from pathlib import Path
 import os
+from src.utils.autowiring import autowire_constructor
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+
+class DBHandler: pass
+class StateHandler: pass
+class StorytellerDBKey: pass
+class TranscriberKey: pass
 
 
 class DIContainer:
@@ -38,18 +45,6 @@ class DIContainer:
 
     def get(self, interface):
         """Get an instance of the requested type, creating it if necessary."""
-        # Handle string-based keys for factories
-        if isinstance(interface, str):
-            if interface in self._factories:
-                if interface not in self._singletons or inspect.isclass(self._singletons.get(interface)):
-                    instance = self._factories[interface]()
-                    self._singletons[interface] = instance
-                    return instance
-                else:
-                    return self._singletons[interface]
-            else:
-                raise ValueError(f"No factory registered for '{interface}'")
-
         # Check if already instantiated
         if interface in self._singletons and not inspect.isclass(self._singletons[interface]):
             return self._singletons[interface]
@@ -74,8 +69,11 @@ class DIContainer:
 
     def _create_with_autowiring(self, cls: Type[T]) -> T:
         """Create an instance with autowired dependencies."""
-        from autowiring import autowire_constructor
         return autowire_constructor(self, cls)
+
+    def get_config_value(self, name: str):
+        """Helper method to get config values."""
+        return self._config_values.get(name)
 
 
 def create_container() -> DIContainer:
@@ -96,34 +94,27 @@ def create_container() -> DIContainer:
     container.register_value('kosync_use_percentage_from_server', os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true")
 
     # Register client singletons
-    from api_clients import ABSClient, KoSyncClient
-    from booklore_client import BookloreClient
-    from hardcover_client import HardcoverClient
-    from ebook_utils import EbookParser
-    from json_db import JsonDB
+    from src.api.api_clients import ABSClient, KoSyncClient
+    from src.api.booklore_client import BookloreClient
+    from src.api.hardcover_client import HardcoverClient
+    from src.utils.ebook_utils import EbookParser
+    from src.db.json_db import JsonDB
 
     container.register_singleton(ABSClient)
     container.register_singleton(KoSyncClient)
     container.register_singleton(BookloreClient)
     container.register_singleton(HardcoverClient)
 
-    # Register EbookParser with custom factory (needs special constructor args)
     container.register_factory(EbookParser, lambda: EbookParser(
         container.get_config_value('books_dir'),
         epub_cache_dir=container.get_config_value('epub_cache_dir')
     ))
 
-    # Register JsonDB factories for different files
-    container.register_factory('db_handler', lambda: JsonDB(container.get_config_value('db_file')))
-    container.register_factory('state_handler', lambda: JsonDB(container.get_config_value('state_file')))
+    container.register_factory(DBHandler, lambda: JsonDB(container.get_config_value('db_file')))
+    container.register_factory(StateHandler, lambda: JsonDB(container.get_config_value('state_file')))
+    container.register_factory(StorytellerDBKey, _create_storyteller_client)
+    container.register_factory(TranscriberKey, lambda: _create_transcriber(container.get_config_value('data_dir')))
 
-    # Register Storyteller with error handling
-    container.register_factory('storyteller_db', _create_storyteller_client)
-
-    # Register transcriber with lazy loading
-    container.register_factory('transcriber', lambda: _create_transcriber(container.get_config_value('data_dir')))
-
-    # Register sync clients with manual factory for ABSSyncClient and StorytellerSyncClient (need special handling)
     from src.sync_clients.abs_sync_client import ABSSyncClient
     from src.sync_clients.kosync_sync_client import KoSyncSyncClient
     from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
@@ -131,18 +122,37 @@ def create_container() -> DIContainer:
 
     container.register_factory(ABSSyncClient, lambda: ABSSyncClient(
         container.get(ABSClient),
-        container.get('transcriber'),
+        container.get(TranscriberKey),
         container.get(EbookParser),
-        container.get('db_handler')
+        container.get(DBHandler)
     ))
 
     container.register_factory(StorytellerSyncClient, lambda: StorytellerSyncClient(
-        container.get('storyteller_db'),
+        container.get(StorytellerDBKey),
         container.get(EbookParser)
     ))
 
     container.register_singleton(KoSyncSyncClient)
     container.register_singleton(BookloreSyncClient)
+
+    from src.sync_manager import SyncManager
+    container.register_factory(SyncManager, lambda: SyncManager(
+        abs_client=container.get(ABSClient),
+        kosync_client=container.get(KoSyncClient),
+        hardcover_client=container.get(HardcoverClient),
+        storyteller_db=container.get(StorytellerDBKey),
+        booklore_client=container.get(BookloreClient),
+        transcriber=container.get(TranscriberKey),
+        ebook_parser=container.get(EbookParser),
+        db_handler=container.get(DBHandler),
+        state_handler=container.get(StateHandler),
+        abs_sync_client=container.get(ABSSyncClient),
+        kosync_sync_client=container.get(KoSyncSyncClient),
+        storyteller_sync_client=container.get(StorytellerSyncClient),
+        booklore_sync_client=container.get(BookloreSyncClient),
+        kosync_use_percentage_from_server=container.get_config_value('kosync_use_percentage_from_server'),
+        epub_cache_dir=container.get_config_value('epub_cache_dir')
+    ))
 
     return container
 
@@ -152,14 +162,14 @@ def _create_storyteller_client():
     StorytellerClientClass = None
 
     try:
-        from storyteller_api import StorytellerDBWithAPI
+        from src.api.storyteller_api import StorytellerDBWithAPI
         StorytellerClientClass = StorytellerDBWithAPI
     except ImportError:
         pass
 
     if not StorytellerClientClass:
         try:
-            from storyteller_db import StorytellerDB as StorytellerClientClass
+            from src.api.storyteller_db import StorytellerDB as StorytellerClientClass
         except ImportError:
             StorytellerClientClass = None
 
@@ -181,14 +191,5 @@ def _create_storyteller_client():
 
 def _create_transcriber(data_dir):
     """Factory for creating transcriber with lazy loading."""
-    from transcriber import AudioTranscriber
+    from src.utils.transcriber import AudioTranscriber
     return AudioTranscriber(data_dir)
-
-
-# Extension methods for the container
-def _get_config_value(self, name: str):
-    """Helper method to get config values."""
-    return self._config_values.get(name)
-
-# Monkey patch the helper method
-DIContainer.get_config_value = _get_config_value

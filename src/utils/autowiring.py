@@ -6,8 +6,8 @@ Provides @Autowired and @Component functionality.
 
 import inspect
 import logging
-from typing import Type, TypeVar, Callable, Any
 from functools import wraps
+from typing import Type, TypeVar
 
 logger = logging.getLogger(__name__)
 

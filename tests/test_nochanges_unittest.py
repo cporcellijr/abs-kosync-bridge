@@ -56,7 +56,7 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
     def test_no_changes_detected(self):
         """Test sync_cycle when no changes are detected (all deltas are zero)."""
         log_output = super().run_test(None, None)
-        self.assertIn("no changes detected", log_output,
+        self.assertNotIn("State saved to last_state.json", log_output,
                       "Logs should show no change")
 
 

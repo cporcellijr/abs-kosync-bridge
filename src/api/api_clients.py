@@ -5,7 +5,7 @@ import logging
 import time
 import hashlib
 
-from logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data
 
 logger = logging.getLogger(__name__)
 
