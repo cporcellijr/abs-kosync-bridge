@@ -10,23 +10,8 @@ from pathlib import Path
 import schedule
 
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
-from src.utils.di_container import create_container
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
-
-# FIX: Safer import logic that doesn't crash immediately
-StorytellerClientClass = None
-try:
-    from src.api.storyteller_api import StorytellerDBWithAPI
-    StorytellerClientClass = StorytellerDBWithAPI
-except ImportError:
-    pass
-
-if not StorytellerClientClass:
-    try:
-        from src.api.storyteller_db import StorytellerDB as StorytellerClientClass
-    except ImportError:
-        StorytellerClientClass = None
 
 # Silence noisy third-party loggers
 for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
@@ -41,11 +26,6 @@ if not hasattr(root_logger, '_configured') or not root_logger._configured:
     )
 logger = logging.getLogger(__name__)
 
-# Use environment variable for DATA_DIR and BOOKS_DIR, defaulting to /data and /books
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-BOOKS_DIR = Path(os.environ.get("BOOKS_DIR", "/books"))
-DB_FILE = DATA_DIR / "mapping_db.json"
-STATE_FILE = DATA_DIR / "last_state.json"
 
 class SyncManager:
     def __init__(self,
@@ -60,7 +40,9 @@ class SyncManager:
                  state_handler=None,
                  sync_clients: dict[str, SyncClient]=None,
                  kosync_use_percentage_from_server=None,
-                 epub_cache_dir=None):
+                 epub_cache_dir=None,
+                 data_dir=None,
+                 books_dir=None):
 
         logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===")
         # Use dependency injection
@@ -73,10 +55,12 @@ class SyncManager:
         self.ebook_parser = ebook_parser
         self.db_handler = db_handler
         self.state_handler = state_handler
+        self.data_dir = data_dir
+        self.books_dir = books_dir
 
         self.kosync_use_percentage_from_server = kosync_use_percentage_from_server if kosync_use_percentage_from_server is not None else os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
         self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
-        self.epub_cache_dir = epub_cache_dir or DATA_DIR / "epub_cache"
+        self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
         self.db = self.db_handler.load(default={"mappings": []})
         self.state = self.state_handler.load(default={})
@@ -96,7 +80,7 @@ class SyncManager:
     def transcriber(self):
         if self._transcriber is None:
             from src.utils.transcriber import AudioTranscriber
-            self._transcriber = AudioTranscriber(DATA_DIR)
+            self._transcriber = AudioTranscriber(self.data_dir or Path("/data"))
         return self._transcriber
 
     def startup_checks(self):
@@ -214,7 +198,8 @@ class SyncManager:
         Get local path to EPUB file, downloading from Booklore if necessary.
         """
         # First, try to find on filesystem
-        filesystem_matches = list(BOOKS_DIR.glob(f"**/{ebook_filename}"))
+        books_search_dir = self.books_dir or Path("/books")
+        filesystem_matches = list(books_search_dir.glob(f"**/{ebook_filename}"))
         if filesystem_matches:
             logger.info(f"📚 Found EPUB on filesystem: {filesystem_matches[0]}")
             return filesystem_matches[0]
@@ -535,22 +520,23 @@ class SyncManager:
                     if not mapping.get('hardcover_book_id'): self._automatch_hardcover(mapping)
                     if mapping.get('hardcover_book_id'): self._sync_to_hardcover(mapping, final_pct)
 
-                # todo the results of the clients should contain the state which should be saved to last_state.json
-                # combine that with the leader state and we should have all the info
+                # Build state from sync results and leader state
+                new_state = {'last_updated': time.time()}
 
-                # Store abs timestamp for state update. Either the result from ABS update if its not the leader or simply the ABS's leader state
-                final_abs_timestamp = results['ABS'].location if 'ABS' in results and results['ABS'].location else abs_state.current.get('ts')
+                # Add leader state with client name prefix
+                leader_state_data = leader_state.current
+                for key, value in leader_state_data.items():
+                    new_state[f"{leader.lower()}_{key}"] = value
 
-                self.state[abs_id] = {
-                    'abs_ts': final_abs_timestamp,
-                    'abs_pct': self._abs_to_percentage(final_abs_timestamp, mapping.get('transcript_file')) or 0,
-                    'abs_ebook_pct': config['ABS eBook'].current.get('pct') if leader == 'ABS eBook' and 'ABS eBook' in config else final_pct,
-                    'kosync_pct': config['KoSync'].current.get('pct') if self.kosync_use_percentage_from_server and 'KoSync' in config and leader == 'KoSync' else final_pct,
-                    'storyteller_pct': final_pct,
-                    'booklore_pct': final_pct,
-                    'hardcover_pct': final_pct,
-                    'last_updated': time.time()
-                }
+                # Add sync results from other clients with client name prefix
+                for client_name, result in results.items():
+                    if result.success:
+                        # Use updated_state if provided, otherwise fall back to basic state
+                        state_data = result.updated_state if result.updated_state else {'pct': result.location}
+                        for key, value in state_data.items():
+                            new_state[f"{client_name.lower()}_{key}"] = value
+
+                self.state[abs_id] = new_state
                 self.state_handler.save(self.state)
                 logger.info(f"💾 [{title_snip}] State saved to last_state.json")
 
@@ -574,9 +560,10 @@ if __name__ == "__main__":
     # This is only used for standalone testing - production uses web_server.py
     logger.info("🚀 Running sync manager in standalone mode (for testing)")
 
+    from src.utils.di_container import create_container
     di_container = create_container()
     # Try to use dependency injection, fall back to legacy if there are issues
-    sync_manager = di_container.get(SyncManager)
+    sync_manager = di_container.sync_manager()
     logger.info("✅ Using dependency injection")
 
     sync_manager.run_daemon()

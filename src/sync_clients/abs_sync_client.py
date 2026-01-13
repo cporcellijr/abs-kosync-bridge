@@ -80,7 +80,13 @@ class ABSSyncClient(SyncClient):
                                                           book_title=book_title)
         if ts_for_text is not None:
             result, final_ts = self._update_abs_progress_with_offset(mapping['abs_id'], ts_for_text, request.previous_location)
-            return SyncResult(final_ts, result.get("success", False))
+            # Calculate percentage from timestamp for state
+            pct = self._abs_to_percentage(final_ts, mapping.get('transcript_file'))
+            updated_state = {
+                'ts': final_ts,
+                'pct': pct or 0
+            }
+            return SyncResult(final_ts, result.get("success", False), updated_state)
         logger.warning(f"[{book_title}] Not updating ABS progress - could not find timestamp for provided text.")
         return SyncResult(None, False)
 

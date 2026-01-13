@@ -42,31 +42,28 @@ def test_dependency_injection():
         from src.api.hardcover_client import HardcoverClient
         from src.utils.ebook_utils import EbookParser
 
-        abs_client = container.get(ABSClient)
+        abs_client = container.abs_client()
         print(f"✅ ABSClient: {type(abs_client).__name__}")
 
-        kosync_client = container.get(KoSyncClient)
+        kosync_client = container.kosync_client()
         print(f"✅ KoSyncClient: {type(kosync_client).__name__}")
 
-        booklore_client = container.get(BookloreClient)
+        booklore_client = container.booklore_client()
         print(f"✅ BookloreClient: {type(booklore_client).__name__}")
 
-        ebook_parser = container.get(EbookParser)
+        ebook_parser = container.ebook_parser()
         print(f"✅ EbookParser: {type(ebook_parser).__name__}")
 
         # Test 3: Test factory-created components
         print("\n🏭 Testing factory components...")
 
-        # Use the new type keys for DI container
-        from src.utils.di_container import DBHandler, StateHandler, StorytellerDBKey
-
-        storyteller_db = container.get(StorytellerDBKey)
+        storyteller_db = container.storyteller_client()
         print(f"✅ Storyteller DB: {type(storyteller_db).__name__}")
 
-        db_handler = container.get(DBHandler)
+        db_handler = container.db_handler()
         print(f"✅ DB Handler: {type(db_handler).__name__}")
 
-        state_handler = container.get(StateHandler)
+        state_handler = container.state_handler()
         print(f"✅ State Handler: {type(state_handler).__name__}")
 
         # Test 4: Test sync clients
@@ -77,23 +74,23 @@ def test_dependency_injection():
         from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
         from src.sync_clients.booklore_sync_client import BookloreSyncClient
 
-        abs_sync_client = container.get(ABSSyncClient)
+        abs_sync_client = container.abs_sync_client()
         print(f"✅ ABSSyncClient: {type(abs_sync_client).__name__}")
 
-        kosync_sync_client = container.get(KoSyncSyncClient)
+        kosync_sync_client = container.kosync_sync_client()
         print(f"✅ KoSyncSyncClient: {type(kosync_sync_client).__name__}")
 
-        storyteller_sync_client = container.get(StorytellerSyncClient)
+        storyteller_sync_client = container.storyteller_sync_client()
         print(f"✅ StorytellerSyncClient: {type(storyteller_sync_client).__name__}")
 
-        booklore_sync_client = container.get(BookloreSyncClient)
+        booklore_sync_client = container.booklore_sync_client()
         print(f"✅ BookloreSyncClient: {type(booklore_sync_client).__name__}")
 
         # Test 5: Test SyncManager creation with DI
         print("\n🎯 Testing SyncManager creation with DI...")
 
         from src.sync_manager import SyncManager
-        sync_manager = container.get(SyncManager)
+        sync_manager = container.sync_manager()
         print(f"✅ SyncManager created: {type(sync_manager).__name__}")
 
         # Test 6: Verify autowired dependencies

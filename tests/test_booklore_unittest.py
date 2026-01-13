@@ -3,8 +3,17 @@
 Unit test for the BookLore leading scenario using unittest.TestCase.
 """
 
+import sys
+import os
 import unittest
 from pathlib import Path
+
+# Add the tests directory and parent directory to Python path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(test_dir)
+sys.path.insert(0, test_dir)
+sys.path.insert(0, parent_dir)
+
 from base_sync_test import BaseSyncCycleTestCase
 
 

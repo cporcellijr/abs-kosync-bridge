@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Callable, Tuple
 
 @dataclass
@@ -36,6 +36,7 @@ class SyncResult:
     # can be percentage or timestamp (ABS)
     location: Optional[float] = None
     success: bool = False
+    updated_state: dict = field(default_factory=dict)
 
 class SyncClient:
 

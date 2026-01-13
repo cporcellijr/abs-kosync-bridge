@@ -37,20 +37,20 @@ logger.info("Starting ABS-KOSync Bridge Web Server")
 
 container = create_container()
 
-manager = container.get(SyncManager)
+manager = container.sync_manager()
 
 # ---------------- DATA DIR CONFIG ----------------
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+DATA_DIR = container.data_dir()
 
 # Use DATA_DIR for DB and logs
 
-db_handler = JsonDB(str(DATA_DIR / "mapping_db.json"))
-state_handler = JsonDB(str(DATA_DIR / "last_state.json"))
+db_handler = container.db_handler()
+state_handler = container.state_handler()
 
 # ---------------- BOOK LINKER CONFIG ----------------
 
 # Book Matching - ebooks for sync matching (original functionality)
-EBOOK_DIR = Path(os.environ.get("BOOKS_DIR", "/books"))
+EBOOK_DIR = container.books_dir()
 
 # Book Linker - source ebooks for Storyteller workflow
 LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
@@ -858,7 +858,7 @@ def clear_progress(abs_id):
     if not mapping:
         logger.warning(f"Cannot clear progress: mapping not found for {abs_id}")
         return redirect(url_for('index'))
-
+    # todo create a method in the sync manager to clear progress
     try:
         # Reset progress to 0 in all three systems
         logger.info(f"Clearing progress for {sanitize_log_data(mapping.get('abs_title', abs_id))}")

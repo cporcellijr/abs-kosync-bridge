@@ -61,5 +61,10 @@ class ABSEbookSyncClient(SyncClient):
         pct = locator.percentage
         abs_id = mapping['abs_id']
         cfi = locator.cfi
-        return SyncResult(pct, self.abs_client.update_ebook_progress(abs_id, pct, cfi))
+        success = self.abs_client.update_ebook_progress(abs_id, pct, cfi)
+        updated_state = {
+            'pct': pct,
+            'cfi': cfi
+        }
+        return SyncResult(pct, success, updated_state)
 

@@ -273,11 +273,24 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         self.assertIn(abs_id, manager.state, f"Final state not found for {abs_id}")
         final_state = manager.state[abs_id]
 
-        # Verify final state values
-        abs_pct = final_state.get('abs_pct', 0)
-        kosync_pct = final_state.get('kosync_pct', 0)
-        storyteller_pct = final_state.get('storyteller_pct', 0)
-        booklore_pct = final_state.get('booklore_pct', 0)
+        # Verify final state values - now using client-prefixed keys
+        # Look for both old format (for backwards compatibility) and new format with prefixes (both original and lowercase)
+        abs_pct = (final_state.get('abs_pct', 0) or
+                  final_state.get('ABS_pct', 0) or
+                  final_state.get('abs_pct', 0))
+        kosync_pct = (final_state.get('kosync_pct', 0) or
+                     final_state.get('KoSync_pct', 0) or
+                     final_state.get('kosync_pct', 0))
+        storyteller_pct = (final_state.get('storyteller_pct', 0) or
+                          final_state.get('Storyteller_pct', 0) or
+                          final_state.get('storyteller_pct', 0))
+        booklore_pct = (final_state.get('booklore_pct', 0) or
+                       final_state.get('BookLore_pct', 0) or
+                       final_state.get('booklore_pct', 0))
+
+        # Debug: Print the actual final state to help with debugging
+        print(f"🔍 Final state keys: {list(final_state.keys())}")
+        print(f"🔍 Final state: {final_state}")
 
         # All services should be synced to expected percentage
         expected_pct = self.expected_final_pct

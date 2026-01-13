@@ -50,5 +50,9 @@ class StorytellerSyncClient(SyncClient):
         epub = mapping['ebook_filename']
         pct = request.locator_result.percentage
         locator = request.locator_result
-        return SyncResult(pct, self.storyteller_db.update_progress(epub, pct, locator))
+        success = self.storyteller_db.update_progress(epub, pct, locator)
+        updated_state = {
+            'pct': pct
+        }
+        return SyncResult(pct, success, updated_state)
 

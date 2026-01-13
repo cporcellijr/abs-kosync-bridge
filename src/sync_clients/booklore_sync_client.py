@@ -48,4 +48,8 @@ class BookloreSyncClient(SyncClient):
     def update_progress(self, mapping: dict, request: UpdateProgressRequest) -> SyncResult:
         epub = mapping['ebook_filename']
         pct = request.locator_result.percentage
-        return SyncResult(pct, self.booklore_client.update_progress(epub, pct, request.locator_result))
+        success = self.booklore_client.update_progress(epub, pct, request.locator_result)
+        updated_state = {
+            'pct': pct
+        }
+        return SyncResult(pct, success, updated_state)

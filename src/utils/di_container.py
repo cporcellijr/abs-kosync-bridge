@@ -1,169 +1,30 @@
 #!/usr/bin/env python3
 """
 Dependency Injection Container for abs-kosync-bridge.
-Provides Spring-like autowiring functionality for Python.
+Using python-dependency-injector library for proper DI functionality.
 """
 
-import inspect
 import logging
-from typing import Type, TypeVar, Dict, Any, Callable
 from pathlib import Path
 import os
-from src.utils.autowiring import autowire_constructor
+
+from dependency_injector import containers, providers
+
+# Import all the classes we'll be using
+from src.api.api_clients import ABSClient, KoSyncClient
+from src.api.booklore_client import BookloreClient
+from src.api.hardcover_client import HardcoverClient
+from src.db.json_db import JsonDB
+from src.utils.ebook_utils import EbookParser
+from src.utils.transcriber import AudioTranscriber
+from src.sync_clients.abs_sync_client import ABSSyncClient
+from src.sync_clients.kosync_sync_client import KoSyncSyncClient
+from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
+from src.sync_clients.booklore_sync_client import BookloreSyncClient
+from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
+from src.sync_manager import SyncManager
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar('T')
-
-
-class DBHandler: pass
-class StateHandler: pass
-class StorytellerDBKey: pass
-class TranscriberKey: pass
-
-
-class DIContainer:
-    """Dependency Injection Container with autowiring support."""
-
-    def __init__(self):
-        self._singletons: Dict[Type, Any] = {}
-        self._factories: Dict[Type, Callable] = {}
-        self._config_values: Dict[str, Any] = {}
-
-    def register_singleton(self, interface: Type[T], implementation: Type[T] = None) -> None:
-        """Register a class as a singleton. Implementation defaults to interface."""
-        impl = implementation or interface
-        self._singletons[interface] = impl
-
-    def register_factory(self, interface: Type[T], factory: Callable[[], T]) -> None:
-        """Register a factory function for creating instances."""
-        self._factories[interface] = factory
-
-    def register_value(self, name: str, value: Any) -> None:
-        """Register a configuration value."""
-        self._config_values[name] = value
-
-    def get(self, interface):
-        """Get an instance of the requested type, creating it if necessary."""
-        # Check if already instantiated
-        if interface in self._singletons and not inspect.isclass(self._singletons[interface]):
-            return self._singletons[interface]
-
-        # Check for factory
-        if interface in self._factories:
-            instance = self._factories[interface]()
-            self._singletons[interface] = instance
-            return instance
-
-        # Get the class to instantiate
-        impl_class = self._singletons.get(interface, interface)
-
-        # Autowire dependencies
-        instance = self._create_with_autowiring(impl_class)
-
-        # Store as singleton if registered as such
-        if interface in self._singletons:
-            self._singletons[interface] = instance
-
-        return instance
-
-    def _create_with_autowiring(self, cls: Type[T]) -> T:
-        """Create an instance with autowired dependencies."""
-        return autowire_constructor(self, cls)
-
-    def get_config_value(self, name: str):
-        """Helper method to get config values."""
-        return self._config_values.get(name)
-
-
-def create_container() -> DIContainer:
-    """Create and configure the DI container with all application dependencies."""
-    container = DIContainer()
-
-    # Configuration values from environment
-    DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-    BOOKS_DIR = Path(os.environ.get("BOOKS_DIR", "/books"))
-
-    container.register_value('data_dir', DATA_DIR)
-    container.register_value('books_dir', BOOKS_DIR)
-    container.register_value('db_file', DATA_DIR / "mapping_db.json")
-    container.register_value('state_file', DATA_DIR / "last_state.json")
-    container.register_value('epub_cache_dir', DATA_DIR / "epub_cache")
-    container.register_value('delta_abs_thresh', float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60)))
-    container.register_value('delta_kosync_thresh', float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0)
-    container.register_value('kosync_use_percentage_from_server', os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true")
-
-    # Register client singletons
-    from src.api.api_clients import ABSClient, KoSyncClient
-    from src.api.booklore_client import BookloreClient
-    from src.api.hardcover_client import HardcoverClient
-    from src.utils.ebook_utils import EbookParser
-    from src.db.json_db import JsonDB
-
-    container.register_singleton(ABSClient)
-    container.register_singleton(KoSyncClient)
-    container.register_singleton(BookloreClient)
-    container.register_singleton(HardcoverClient)
-
-    container.register_factory(EbookParser, lambda: EbookParser(
-        container.get_config_value('books_dir'),
-        epub_cache_dir=container.get_config_value('epub_cache_dir')
-    ))
-
-    container.register_factory(DBHandler, lambda: JsonDB(container.get_config_value('db_file')))
-    container.register_factory(StateHandler, lambda: JsonDB(container.get_config_value('state_file')))
-    container.register_factory(StorytellerDBKey, _create_storyteller_client)
-    container.register_factory(TranscriberKey, lambda: _create_transcriber(container.get_config_value('data_dir')))
-
-    from src.sync_clients.abs_sync_client import ABSSyncClient
-    from src.sync_clients.kosync_sync_client import KoSyncSyncClient
-    from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
-    from src.sync_clients.booklore_sync_client import BookloreSyncClient
-    from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
-
-    container.register_factory(ABSSyncClient, lambda: ABSSyncClient(
-        container.get(ABSClient),
-        container.get(TranscriberKey),
-        container.get(EbookParser),
-        container.get(DBHandler)
-    ))
-
-    container.register_factory(StorytellerSyncClient, lambda: StorytellerSyncClient(
-        container.get(StorytellerDBKey),
-        container.get(EbookParser)
-    ))
-
-    container.register_singleton(KoSyncSyncClient)
-    container.register_singleton(ABSEbookSyncClient)
-    container.register_singleton(BookloreSyncClient)
-
-    # Register sync_clients dictionary for reuse
-    container.register_factory('sync_clients', lambda: {
-        "ABS": container.get(ABSSyncClient),
-        # todo needs further testing
-        # "ABS eBook": container.get(ABSEbookSyncClient),
-        "KoSync": container.get(KoSyncSyncClient),
-        "Storyteller": container.get(StorytellerSyncClient),
-        "BookLore": container.get(BookloreSyncClient)
-    })
-
-    from src.sync_manager import SyncManager
-    container.register_factory(SyncManager, lambda: SyncManager(
-        abs_client=container.get(ABSClient),
-        kosync_client=container.get(KoSyncClient),
-        hardcover_client=container.get(HardcoverClient),
-        storyteller_db=container.get(StorytellerDBKey),
-        booklore_client=container.get(BookloreClient),
-        transcriber=container.get(TranscriberKey),
-        ebook_parser=container.get(EbookParser),
-        db_handler=container.get(DBHandler),
-        state_handler=container.get(StateHandler),
-        sync_clients=container.get('sync_clients'),
-        kosync_use_percentage_from_server=container.get_config_value('kosync_use_percentage_from_server'),
-        epub_cache_dir=container.get_config_value('epub_cache_dir')
-    ))
-
-    return container
 
 
 def _create_storyteller_client():
@@ -174,7 +35,7 @@ def _create_storyteller_client():
         from src.api.storyteller_api import StorytellerDBWithAPI
         StorytellerClientClass = StorytellerDBWithAPI
     except ImportError:
-        pass
+        StorytellerClientClass = None
 
     if not StorytellerClientClass:
         try:
@@ -201,7 +62,135 @@ def _create_storyteller_client():
     return DummyStoryteller()
 
 
-def _create_transcriber(data_dir):
-    """Factory for creating transcriber with lazy loading."""
-    from src.utils.transcriber import AudioTranscriber
-    return AudioTranscriber(data_dir)
+class Container(containers.DeclarativeContainer):
+    """Main dependency injection container using dependency-injector library."""
+
+    # Configuration
+    config = providers.Configuration()
+
+    # Configuration values from environment
+    data_dir = providers.Object(Path(os.environ.get("DATA_DIR", "/data")))
+    books_dir = providers.Object(Path(os.environ.get("BOOKS_DIR", "/books")))
+    db_file = providers.Factory(
+        lambda data_dir: data_dir / "mapping_db.json",
+        data_dir=data_dir
+    )
+    state_file = providers.Factory(
+        lambda data_dir: data_dir / "last_state.json",
+        data_dir=data_dir
+    )
+    epub_cache_dir = providers.Factory(
+        lambda data_dir: data_dir / "epub_cache",
+        data_dir=data_dir
+    )
+    delta_abs_thresh = providers.Object(float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60)))
+    delta_kosync_thresh = providers.Object(float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0)
+    kosync_use_percentage_from_server = providers.Object(os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true")
+
+    # API Clients
+    abs_client = providers.Singleton(ABSClient)
+
+    kosync_client = providers.Singleton(KoSyncClient)
+
+    booklore_client = providers.Singleton(BookloreClient)
+
+    hardcover_client = providers.Singleton(HardcoverClient)
+
+    # Database handlers
+    db_handler = providers.Singleton(
+        JsonDB,
+        db_file
+    )
+
+    state_handler = providers.Singleton(
+        JsonDB,
+        state_file
+    )
+
+    # Ebook parser
+    ebook_parser = providers.Singleton(
+        EbookParser,
+        books_dir,
+        epub_cache_dir=epub_cache_dir
+    )
+
+    # Storyteller client with factory
+    storyteller_client = providers.Factory(
+        _create_storyteller_client
+    )
+
+    # Transcriber
+    transcriber = providers.Singleton(
+        AudioTranscriber,
+        data_dir
+    )
+
+    # Sync clients
+    abs_sync_client = providers.Singleton(
+        ABSSyncClient,
+        abs_client,
+        transcriber,
+        ebook_parser,
+        db_handler
+    )
+
+    kosync_sync_client = providers.Singleton(
+        KoSyncSyncClient,
+        kosync_client,
+        ebook_parser
+    )
+
+    storyteller_sync_client = providers.Singleton(
+        StorytellerSyncClient,
+        storyteller_client,
+        ebook_parser
+    )
+
+    booklore_sync_client = providers.Singleton(
+        BookloreSyncClient,
+        booklore_client,
+        ebook_parser
+    )
+
+    abs_ebook_sync_client = providers.Singleton(
+        ABSEbookSyncClient,
+        abs_client,
+        ebook_parser
+    )
+
+    # Sync clients dictionary for reuse
+    sync_clients = providers.Dict(
+        ABS=abs_sync_client,
+        # TODO: needs further testing
+        # "ABS eBook"=abs_ebook_sync_client,
+        KoSync=kosync_sync_client,
+        Storyteller=storyteller_sync_client,
+        BookLore=booklore_sync_client
+    )
+
+    # Sync Manager
+    sync_manager = providers.Singleton(
+        SyncManager,
+        abs_client=abs_client,
+        kosync_client=kosync_client,
+        hardcover_client=hardcover_client,
+        storyteller_db=storyteller_client,
+        booklore_client=booklore_client,
+        transcriber=transcriber,
+        ebook_parser=ebook_parser,
+        db_handler=db_handler,
+        state_handler=state_handler,
+        sync_clients=sync_clients,
+        kosync_use_percentage_from_server=kosync_use_percentage_from_server,
+        epub_cache_dir=epub_cache_dir,
+        data_dir=data_dir,
+        books_dir=books_dir
+    )
+
+
+# Global container instance
+container = Container()
+
+def create_container() -> Container:
+    """Create and configure the DI container with all application dependencies."""
+    return container

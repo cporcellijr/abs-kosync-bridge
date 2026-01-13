@@ -59,5 +59,10 @@ class KoSyncSyncClient(SyncClient):
         ko_id = mapping['kosync_doc_id'] if mapping else None
         # use perfect_ko_xpath if available
         xpath = locator.perfect_ko_xpath if locator and locator.perfect_ko_xpath else locator.xpath
-        return SyncResult(pct, self.kosync_client.update_progress(ko_id, pct, xpath))
+        success = self.kosync_client.update_progress(ko_id, pct, xpath)
+        updated_state = {
+            'pct': pct,
+            'xpath': xpath
+        }
+        return SyncResult(pct, success, updated_state)
 

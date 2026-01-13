@@ -10,3 +10,4 @@ gTTs
 ffmpeg
 flask
 lxml
+dependency-injector
