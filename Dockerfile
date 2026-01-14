@@ -18,17 +18,11 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+COPY requirements.txt /app/requirements.txt
+
 # 2. Install Python Dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    flask \
-    requests \
-    lxml \
-    rapidfuzz \
-    schedule \
-    faster-whisper \
-    EbookLib \
-    beautifulsoup4
+    pip install --no-cache-dir -r /app/requirements.txt
 
 # 3. Create directories
 RUN mkdir -p /app/src /app/templates /app/static /data/audio_cache /data/logs /data/transcripts
