@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 class SmilExtractor:
     """
     Extracts transcript data from EPUB3 media overlays.
-    Hybrid Version: Uses V1 Regex (Proven) + V2 Alignment (Feature).
+    Matches Storyteller/Whisper JSON format.
     """
     
     def __init__(self):
         self._xhtml_cache = {}
 
     def has_media_overlays(self, epub_path: str) -> bool:
+        """Check if an EPUB has media overlay (SMIL) files."""
         try:
             with zipfile.ZipFile(epub_path, 'r') as zf:
                 opf_path = self._find_opf_path(zf)
@@ -39,6 +40,9 @@ class SmilExtractor:
             return False
 
     def extract_transcript(self, epub_path: str, abs_chapters: List[Dict] = None, audio_offset: float = 0.0) -> List[Dict]:
+        """
+        Extract transcript, syncing SMIL timestamps to ABS Chapter start times.
+        """
         transcript = []
         self._xhtml_cache = {}
         
@@ -61,31 +65,29 @@ class SmilExtractor:
                 
                 logger.info(f"📖 Found {len(smil_files)} SMIL files in EPUB")
                 
-                # --- AUTO ALIGNMENT ---
+                # --- AUTO ALIGNMENT (NEW FEATURE) ---
                 chapter_map = {}
                 if abs_chapters:
                     chapter_map = self._align_chapters(zf, smil_files, abs_chapters)
-                # ----------------------
+                # ------------------------------------
 
                 current_offset = audio_offset
                 
                 for idx, smil_path in enumerate(smil_files):
                     file_offset = current_offset
-                    abs_title_log = f"Loop #{idx+1}"
 
+                    # Apply Intelligent Map
                     if idx in chapter_map:
                         mapped_chap = chapter_map[idx]
                         file_offset = float(mapped_chap.get('start', 0))
-                        abs_title = mapped_chap.get('title', f"Chapter {idx+1}")
-                        abs_title_log = f"'{abs_title}'"
-                    
-                    # LOGGING UPDATE: Shows the actual ABS title it mapped to
-                    if idx < 5: # Only log first 5 to reduce spam
-                        logger.debug(f"   Mapping {Path(smil_path).name} -> ABS {abs_title_log} (Start: {file_offset:.2f}s)")
+                        # Optional: Log the alignment for the first few chapters to verify
+                        if idx < 3:
+                            logger.debug(f"   Mapping {Path(smil_path).name} -> Chapter {idx+1} (Start: {file_offset:.2f}s)")
                     
                     segments = self._process_smil_file(zf, smil_path, file_offset)
                     transcript.extend(segments)
                     
+                    # Accumulate offset flow for fallback
                     if not chapter_map and segments:
                         max_end = max(s['end'] for s in segments)
                         current_offset = max(current_offset, max_end)
@@ -107,6 +109,7 @@ class SmilExtractor:
             dur = 0.0
             try:
                 content = zf.read(path).decode('utf-8')
+                # Reuse the working parser logic, but simplified for duration check
                 clips = re.findall(r'clipEnd=["\']([^"\']+)["\']', content)
                 if clips:
                     dur = self._parse_timestamp(clips[-1])
@@ -149,51 +152,7 @@ class SmilExtractor:
                 mapping[smil_idx] = abs_chapters[abs_idx]
         return mapping
 
-    def _process_smil_file(self, zf, smil_path, audio_offset):
-        segments = []
-        try:
-            smil_content = zf.read(smil_path).decode('utf-8')
-            smil_dir = str(Path(smil_path).parent)
-            if smil_dir == '.': smil_dir = ''
-            
-            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'epub:', '', smil_content)
-            
-            root = ET.fromstring(smil_content)
-            
-            for par in root.iter('par'):
-                segment = self._parse_par_element(par, zf, smil_dir, audio_offset)
-                if segment:
-                    segments.append(segment)
-        except Exception as e:
-            logger.warning(f"Error processing SMIL {smil_path}: {e}")
-        return segments
-
-    def _parse_par_element(self, par, zf, smil_dir, audio_offset):
-        text_elem = par.find('text')
-        audio_elem = par.find('audio')
-        
-        if text_elem is None or audio_elem is None: return None
-        
-        clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
-        clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
-        
-        start_time = clip_begin + audio_offset
-        end_time = clip_end + audio_offset
-        
-        text_src = text_elem.get('src', '')
-        text_content = self._get_text_content(zf, smil_dir, text_src)
-        
-        if not text_content: return None
-        
-        return {
-            'start': round(start_time, 3),
-            'end': round(end_time, 3),
-            'text': text_content
-        }
-
-    # --- Helpers ---
+    # --- Original Helpers from your Working File ---
 
     def _find_opf_path(self, zf: zipfile.ZipFile) -> Optional[str]:
         try:
@@ -215,8 +174,8 @@ class SmilExtractor:
         spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
         if manifest is None: return []
         
-        smil_items = {} 
-        content_to_overlay = {} 
+        smil_items = {}
+        content_to_overlay = {}
         
         for item in manifest.findall('{http://www.idpf.org/2007/opf}item'):
             if item.get('media-type') == 'application/smil+xml':
@@ -225,37 +184,99 @@ class SmilExtractor:
                 content_to_overlay[item.get('id')] = item.get('media-overlay')
         
         smil_files = []
-        seen = set()
+        seen_smil = set()
         
         if spine is not None:
             for itemref in spine.findall('{http://www.idpf.org/2007/opf}itemref'):
                 idref = itemref.get('idref')
                 if idref in content_to_overlay:
-                    overlay_id = content_to_overlay[idref]
-                    if overlay_id in smil_items and overlay_id not in seen:
-                        path = self._resolve_path(opf_dir, smil_items[overlay_id])
-                        smil_files.append(path)
-                        seen.add(overlay_id)
-
+                    smil_id = content_to_overlay[idref]
+                    if smil_id in smil_items and smil_id not in seen_smil:
+                        smil_path = self._resolve_path(opf_dir, smil_items[smil_id])
+                        smil_files.append(smil_path)
+                        seen_smil.add(smil_id)
+        
         if not smil_files and smil_items:
-            logger.warning("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
+            logger.info("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
             all_smil = [self._resolve_path(opf_dir, href) for href in smil_items.values()]
             smil_files = sorted(all_smil, key=self._natural_sort_key)
         
         valid_files = []
-        for path in smil_files:
-            for variant in [path, path.lstrip('/'), path.replace('\\', '/')]:
+        for smil_path in smil_files:
+            for path_variant in [smil_path, smil_path.lstrip('/'), smil_path.replace('\\', '/')]:
                 try:
-                    zf.getinfo(variant)
-                    valid_files.append(variant)
+                    zf.getinfo(path_variant)
+                    valid_files.append(path_variant)
                     break
-                except KeyError: continue
+                except KeyError:
+                    continue
         return valid_files
-
-    def _resolve_path(self, base, rel):
-        if not base: return rel
-        return str(Path(base) / rel).replace('\\', '/')
-
+    
+    def _resolve_path(self, base_dir: str, relative_path: str) -> str:
+        if not base_dir: return relative_path
+        full = str(Path(base_dir) / relative_path)
+        parts = []
+        for part in full.replace('\\', '/').split('/'):
+            if part == '..':
+                if parts: parts.pop()
+            elif part and part != '.':
+                parts.append(part)
+        return '/'.join(parts)
+    
+    def _process_smil_file(self, zf: zipfile.ZipFile, smil_path: str,
+                           audio_offset: float) -> List[Dict]:
+        segments = []
+        try:
+            smil_content = zf.read(smil_path).decode('utf-8')
+            smil_dir = str(Path(smil_path).parent)
+            if smil_dir == '.': smil_dir = ''
+            
+            # --- USING V1 REGEX (PROVEN TO WORK) ---
+            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'epub:', '', smil_content)
+            
+            root = ET.fromstring(smil_content)
+            
+            for par in root.iter('par'):
+                # Call the method name that actually exists!
+                segment = self._parse_par_element(par, zf, smil_dir, audio_offset)
+                if segment:
+                    segments.append(segment)
+                    
+        except Exception as e:
+            logger.warning(f"Error processing SMIL {smil_path}: {e}")
+        
+        return segments
+    
+    def _parse_par_element(self, par: ET.Element, zf: zipfile.ZipFile,
+                           smil_dir: str, audio_offset: float) -> Optional[Dict]:
+        text_elem = par.find('text')
+        audio_elem = par.find('audio')
+        
+        if text_elem is None or audio_elem is None:
+            return None
+        
+        clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
+        clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
+        
+        start_time = clip_begin + audio_offset
+        end_time = clip_end + audio_offset
+        
+        text_src = text_elem.get('src', '')
+        
+        # KEY FIX: Call _get_text_content, NOT _get_text
+        text_content = self._get_text_content(zf, smil_dir, text_src)
+        
+        if not text_content:
+            return None
+        
+        return {
+            'start': round(start_time, 3),
+            'end': round(end_time, 3),
+            'text': text_content
+        }
+    
     def _parse_timestamp(self, ts_str: str) -> float:
         if not ts_str: return 0.0
         ts_str = ts_str.strip().replace('s', '')
@@ -264,13 +285,15 @@ class SmilExtractor:
             return sum(float(p) * (60 ** i) for i, p in enumerate(reversed(parts)))
         try: return float(ts_str)
         except ValueError: return 0.0
-
-    def _get_text_content(self, zf, smil_dir, text_src):
+    
+    def _get_text_content(self, zf: zipfile.ZipFile, smil_dir: str, 
+                          text_src: str) -> Optional[str]:
         if not text_src: return None
         if '#' in text_src: file_path, fragment_id = text_src.split('#', 1)
         else: file_path, fragment_id = text_src, None
         
         full_path = self._resolve_path(smil_dir, file_path)
+        
         if full_path not in self._xhtml_cache:
             for variant in [full_path, full_path.lstrip('/'), full_path.replace('\\', '/')]:
                 try:
