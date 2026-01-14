@@ -88,6 +88,8 @@ services:
       - SYNC_DELTA_BETWEEN_CLIENTS_PERCENT=0.5
       # Fuzzy text matching threshold (0-100, higher = stricter)
       - FUZZY_MATCH_THRESHOLD=88
+      # Enable ABS ebook sync (for EPUB progress synchronization)
+      - SYNC_ABS_EBOOK=false
 
       # ============================================
       # Book Linker Settings (OPTIONAL)

@@ -51,7 +51,7 @@ class SyncManager:
         self.hardcover_client = hardcover_client
         self.storyteller_db = storyteller_db
         self.booklore_client = booklore_client
-        self._transcriber = transcriber
+        self.transcriber = transcriber
         self.ebook_parser = ebook_parser
         self.db_handler = db_handler
         self.state_handler = state_handler
@@ -75,13 +75,6 @@ class SyncManager:
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
         self.sync_clients = {name: client for name, client in clients.items() if client.is_configured()}
-
-    @property
-    def transcriber(self):
-        if self._transcriber is None:
-            from src.utils.transcriber import AudioTranscriber
-            self._transcriber = AudioTranscriber(self.data_dir or Path("/data"))
-        return self._transcriber
 
     def startup_checks(self):
         self.abs_client.check_connection()
@@ -183,15 +176,6 @@ class SyncManager:
                 is_finished=is_finished,
                 current_percentage=percentage
             )
-
-    def _abs_to_percentage(self, abs_seconds, transcript_path):
-        try:
-            with open(transcript_path, 'r') as f:
-                data = json.load(f)
-                dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
-                return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
-        except:
-            return None
 
     def _get_local_epub(self, ebook_filename):
         """
