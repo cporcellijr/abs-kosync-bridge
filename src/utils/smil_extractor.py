@@ -1,171 +1,188 @@
-# [START FILE: abs-kosync-enhanced/smil_extractor.py]
-
-
+# [START FILE: src/utils/smil_extractor.py]
 import json
 import logging
 import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-
 class SmilExtractor:
- 
+    """
+    Extracts transcript data from EPUB3 media overlays.
+    Matches Storyteller/Whisper JSON format.
+    """
     
     def __init__(self):
-        self._xhtml_cache = {}  # Cache parsed XHTML files within a single extraction
-    
+        self._xhtml_cache = {}
+
     def has_media_overlays(self, epub_path: str) -> bool:
-        """
-        Check if an EPUB has media overlay (SMIL) files.
-        """
+        """Check if an EPUB has media overlay (SMIL) files."""
         try:
             with zipfile.ZipFile(epub_path, 'r') as zf:
-                # Find the OPF file
                 opf_path = self._find_opf_path(zf)
-                if not opf_path:
-                    return False
+                if not opf_path: return False
                 
-                # Parse OPF and look for SMIL items in manifest
                 opf_content = zf.read(opf_path).decode('utf-8')
                 root = ET.fromstring(opf_content)
-                
-                # Look for media-type="application/smil+xml" in manifest
                 manifest = root.find('.//{http://www.idpf.org/2007/opf}manifest')
-                if manifest is None:
-                    return False
+                if manifest is None: return False
                 
                 for item in manifest.findall('{http://www.idpf.org/2007/opf}item'):
                     if item.get('media-type') == 'application/smil+xml':
                         return True
-                
                 return False
-                
         except Exception as e:
-            logger.debug(f"Error checking for media overlays in {epub_path}: {e}")
+            logger.debug(f"Error checking media overlays: {e}")
             return False
-    
-    def extract_transcript(self, epub_path: str, abs_chapters: List[Dict] = None, 
-                          audio_offset: float = 0.0) -> List[Dict]:
+
+    def extract_transcript(self, epub_path: str, abs_chapters: List[Dict] = None, audio_offset: float = 0.0) -> List[Dict]:
         """
-        Extract transcript from EPUB3 media overlays.
-        
-        Args:
-            epub_path: Path to the EPUB file
-            abs_chapters: List of dicts from ABS metadata [{"id":0, "start":0, ...}]
-            audio_offset: Global offset to add (fallback if abs_chapters missing)
-                           
-        Returns:
-            List of transcript segments: [{"start": float, "end": float, "text": str}, ...]
+        Extract transcript, syncing SMIL timestamps to ABS Chapter start times.
         """
         transcript = []
-        self._xhtml_cache = {}  # Clear cache for new extraction
+        self._xhtml_cache = {}
         
         try:
             with zipfile.ZipFile(epub_path, 'r') as zf:
-                # Find OPF and get SMIL files in spine order
                 opf_path = self._find_opf_path(zf)
                 if not opf_path:
                     logger.error(f"Could not find OPF file in EPUB: {epub_path}")
                     return []
                 
                 opf_dir = str(Path(opf_path).parent)
-                if opf_dir == '.':
-                    opf_dir = ''
-                    
-                opf_content = zf.read(opf_path).decode('utf-8')
+                if opf_dir == '.': opf_dir = ''
                 
-                # Get ordered list of SMIL files
+                opf_content = zf.read(opf_path).decode('utf-8')
                 smil_files = self._get_smil_files_in_order(opf_content, opf_dir, zf)
                 
                 if not smil_files:
                     logger.warning(f"No SMIL files found in EPUB: {epub_path}")
                     return []
                 
-                logger.info(f"📖 Found {len(smil_files)} SMIL files in {Path(epub_path).name}")
+                logger.info(f"📖 Found {len(smil_files)} SMIL files in EPUB")
                 
-                # Process each SMIL file
+                # --- AUTO ALIGNMENT (NEW FEATURE) ---
+                chapter_map = {}
+                if abs_chapters:
+                    chapter_map = self._align_chapters(zf, smil_files, abs_chapters)
+                # ------------------------------------
+
                 current_offset = audio_offset
                 
                 for idx, smil_path in enumerate(smil_files):
                     file_offset = current_offset
 
-                    # INTELLIGENT MAPPING: Map SMIL file to ABS Chapter
-                    # If we have chapter data, force the offset to match the ABS chapter start.
-                    if abs_chapters and idx < len(abs_chapters):
-                        # Match by index (most reliable for Storyteller output)
-                        chapter = abs_chapters[idx]
-                        file_offset = float(chapter.get('start', 0))
-                        logger.debug(f"   Mapping {Path(smil_path).name} -> Chapter {idx+1} (Start: {file_offset:.2f}s)")
+                    # Apply Intelligent Map
+                    if idx in chapter_map:
+                        mapped_chap = chapter_map[idx]
+                        file_offset = float(mapped_chap.get('start', 0))
+                        # Optional: Log the alignment for the first few chapters to verify
+                        if idx < 3:
+                            logger.debug(f"   Mapping {Path(smil_path).name} -> Chapter {idx+1} (Start: {file_offset:.2f}s)")
                     
                     segments = self._process_smil_file(zf, smil_path, file_offset)
                     transcript.extend(segments)
                     
-                    # If we don't have ABS chapters, accumulate offset flow
-                    if not abs_chapters and segments:
+                    # Accumulate offset flow for fallback
+                    if not chapter_map and segments:
                         max_end = max(s['end'] for s in segments)
                         current_offset = max(current_offset, max_end)
                 
-                # Sort by start time (should already be sorted, but ensure it)
                 transcript.sort(key=lambda x: x['start'])
-                
                 logger.info(f"✅ Extracted {len(transcript)} segments from SMIL")
+                return transcript
                 
-        except zipfile.BadZipFile:
-            logger.error(f"Invalid EPUB file: {epub_path}")
         except Exception as e:
-            logger.error(f"Error extracting transcript from {epub_path}: {e}")
+            logger.error(f"Error extracting SMIL transcript: {e}")
+            return []
+
+    def _align_chapters(self, zf, smil_files, abs_chapters) -> Dict[int, Dict]:
+        """Maps SMIL file indices to ABS Chapters by comparing Durations."""
+        if not abs_chapters or not smil_files: return {}
+
+        smil_durations = []
+        for path in smil_files:
+            dur = 0.0
+            try:
+                content = zf.read(path).decode('utf-8')
+                # Reuse the working parser logic, but simplified for duration check
+                clips = re.findall(r'clipEnd=["\']([^"\']+)["\']', content)
+                if clips:
+                    dur = self._parse_timestamp(clips[-1])
+            except: pass
+            smil_durations.append(dur)
+
+        abs_durations = []
+        for ch in abs_chapters:
+            start = float(ch.get('start', 0))
+            end = float(ch.get('end', 0))
+            abs_durations.append(end - start)
+
+        best_offset = 0
+        min_error = float('inf')
+
+        # Check shifts from 0 to 2
+        for offset in range(0, 3): 
+            error = 0.0
+            matches = 0
+            for smil_idx, smil_dur in enumerate(smil_durations):
+                abs_idx = smil_idx + offset
+                if abs_idx < len(abs_durations):
+                    abs_dur = abs_durations[abs_idx]
+                    diff = abs(smil_dur - abs_dur)
+                    if abs_dur > 0:
+                        error += diff
+                        matches += 1
+            if matches > 0:
+                avg_error = error / matches
+                if avg_error < min_error:
+                    min_error = avg_error
+                    best_offset = offset
+
+        logger.info(f"🧩 Auto-Aligned Chapters: Offset={best_offset} (Avg Error: {min_error:.2f}s)")
         
-        return transcript
-    
+        mapping = {}
+        for smil_idx in range(len(smil_files)):
+            abs_idx = smil_idx + best_offset
+            if 0 <= abs_idx < len(abs_chapters):
+                mapping[smil_idx] = abs_chapters[abs_idx]
+        return mapping
+
+    # --- Original Helpers from your Working File ---
+
     def _find_opf_path(self, zf: zipfile.ZipFile) -> Optional[str]:
-        """Find the OPF file path from container.xml"""
         try:
             container = zf.read('META-INF/container.xml').decode('utf-8')
             root = ET.fromstring(container)
-            
-            # Find rootfile element
             for rootfile in root.iter():
                 if rootfile.tag.endswith('rootfile'):
                     return rootfile.get('full-path')
-            
-            return None
-        except Exception as e:
-            logger.debug(f"Error finding OPF: {e}")
-            return None
-    
+        except: pass
+        return None
+
     def _natural_sort_key(self, s):
-        """Key for natural sorting (handles numbers correctly: 2 before 10)"""
         return [int(text) if text.isdigit() else text.lower()
                 for text in re.split(r'(\d+)', s)]
 
     def _get_smil_files_in_order(self, opf_content: str, opf_dir: str, zf: zipfile.ZipFile) -> List[str]:
         root = ET.fromstring(opf_content)
-        
-        # 1. Parse Manifest
-        manifest_elem = root.find('.//{http://www.idpf.org/2007/opf}manifest')
-        if manifest_elem is None: return []
+        manifest = root.find('.//{http://www.idpf.org/2007/opf}manifest')
+        spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
+        if manifest is None: return []
         
         smil_items = {}
         content_to_overlay = {}
         
-        for item in manifest_elem.findall('{http://www.idpf.org/2007/opf}item'):
-            item_id = item.get('id')
-            href = item.get('href')
-            media_type = item.get('media-type')
-            media_overlay = item.get('media-overlay')
-            
-            if media_type == 'application/smil+xml':
-                smil_items[item_id] = href
-            if media_overlay:
-                content_to_overlay[item_id] = media_overlay
+        for item in manifest.findall('{http://www.idpf.org/2007/opf}item'):
+            if item.get('media-type') == 'application/smil+xml':
+                smil_items[item.get('id')] = item.get('href')
+            if item.get('media-overlay'):
+                content_to_overlay[item.get('id')] = item.get('media-overlay')
         
-        # 2. Parse Spine to get order
-        spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
         smil_files = []
         seen_smil = set()
         
@@ -179,16 +196,13 @@ class SmilExtractor:
                         smil_files.append(smil_path)
                         seen_smil.add(smil_id)
         
-        # 3. Fallback: Natural Sort if spine lookup failed
         if not smil_files and smil_items:
             logger.info("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
             all_smil = [self._resolve_path(opf_dir, href) for href in smil_items.values()]
             smil_files = sorted(all_smil, key=self._natural_sort_key)
         
-        # 4. Validate existence in zip
         valid_files = []
         for smil_path in smil_files:
-            # Try variations for path separators
             for path_variant in [smil_path, smil_path.lstrip('/'), smil_path.replace('\\', '/')]:
                 try:
                     zf.getinfo(path_variant)
@@ -199,10 +213,7 @@ class SmilExtractor:
         return valid_files
     
     def _resolve_path(self, base_dir: str, relative_path: str) -> str:
-        """Resolve a relative path against a base directory."""
-        if not base_dir:
-            return relative_path
-        
+        if not base_dir: return relative_path
         full = str(Path(base_dir) / relative_path)
         parts = []
         for part in full.replace('\\', '/').split('/'):
@@ -210,21 +221,17 @@ class SmilExtractor:
                 if parts: parts.pop()
             elif part and part != '.':
                 parts.append(part)
-        
         return '/'.join(parts)
     
     def _process_smil_file(self, zf: zipfile.ZipFile, smil_path: str,
-                          audio_offset: float) -> List[Dict]:
-        """
-        Process a single SMIL file and extract transcript segments.
-        """
+                           audio_offset: float) -> List[Dict]:
         segments = []
         try:
             smil_content = zf.read(smil_path).decode('utf-8')
             smil_dir = str(Path(smil_path).parent)
             if smil_dir == '.': smil_dir = ''
             
-            # Clean namespaces
+            # --- USING V1 REGEX (PROVEN TO WORK) ---
             smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
             smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
             smil_content = re.sub(r'epub:', '', smil_content)
@@ -232,6 +239,7 @@ class SmilExtractor:
             root = ET.fromstring(smil_content)
             
             for par in root.iter('par'):
+                # Call the method name that actually exists!
                 segment = self._parse_par_element(par, zf, smil_dir, audio_offset)
                 if segment:
                     segments.append(segment)
@@ -242,10 +250,7 @@ class SmilExtractor:
         return segments
     
     def _parse_par_element(self, par: ET.Element, zf: zipfile.ZipFile,
-                          smil_dir: str, audio_offset: float) -> Optional[Dict]:
-        """
-        Parse a <par> element containing text and audio references.
-        """
+                           smil_dir: str, audio_offset: float) -> Optional[Dict]:
         text_elem = par.find('text')
         audio_elem = par.find('audio')
         
@@ -255,11 +260,12 @@ class SmilExtractor:
         clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
         clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
         
-        # Apply ABS Chapter Offset
         start_time = clip_begin + audio_offset
         end_time = clip_end + audio_offset
         
         text_src = text_elem.get('src', '')
+        
+        # KEY FIX: Call _get_text_content, NOT _get_text
         text_content = self._get_text_content(zf, smil_dir, text_src)
         
         if not text_content:
@@ -274,36 +280,27 @@ class SmilExtractor:
     def _parse_timestamp(self, ts_str: str) -> float:
         if not ts_str: return 0.0
         ts_str = ts_str.strip().replace('s', '')
-        
         if ':' in ts_str:
             parts = ts_str.split(':')
-            seconds = 0.0
-            for i, part in enumerate(reversed(parts)):
-                seconds += float(part) * (60 ** i)
-            return seconds
-        try:
-            return float(ts_str)
-        except ValueError:
-            return 0.0
+            return sum(float(p) * (60 ** i) for i, p in enumerate(reversed(parts)))
+        try: return float(ts_str)
+        except ValueError: return 0.0
     
     def _get_text_content(self, zf: zipfile.ZipFile, smil_dir: str, 
-                         text_src: str) -> Optional[str]:
+                          text_src: str) -> Optional[str]:
         if not text_src: return None
-        
-        if '#' in text_src:
-            file_path, fragment_id = text_src.split('#', 1)
-        else:
-            file_path = text_src
-            fragment_id = None
+        if '#' in text_src: file_path, fragment_id = text_src.split('#', 1)
+        else: file_path, fragment_id = text_src, None
         
         full_path = self._resolve_path(smil_dir, file_path)
         
         if full_path not in self._xhtml_cache:
-            soup = self._load_xhtml(zf, full_path)
-            if soup:
-                self._xhtml_cache[full_path] = soup
-            else:
-                return None
+            for variant in [full_path, full_path.lstrip('/'), full_path.replace('\\', '/')]:
+                try:
+                    content = zf.read(variant).decode('utf-8')
+                    self._xhtml_cache[full_path] = BeautifulSoup(content, 'html.parser')
+                    break
+                except KeyError: continue
         
         soup = self._xhtml_cache.get(full_path)
         if not soup: return None
@@ -315,28 +312,14 @@ class SmilExtractor:
                 return re.sub(r'\s+', ' ', text).strip()
         
         return None
-    
-    def _load_xhtml(self, zf: zipfile.ZipFile, path: str) -> Optional[BeautifulSoup]:
-        for path_variant in [path, path.lstrip('/'), path.replace('\\', '/')]:
-            try:
-                content = zf.read(path_variant).decode('utf-8')
-                return BeautifulSoup(content, 'html.parser')
-            except KeyError:
-                continue
-        return None
 
 def extract_transcript_from_epub(epub_path: str, abs_chapters: List[Dict] = None, 
                                output_path: str = None) -> Optional[str]:
-    """Convenience function."""
     extractor = SmilExtractor()
-    
-    if not extractor.has_media_overlays(epub_path):
-        return None
+    if not extractor.has_media_overlays(epub_path): return None
     
     transcript = extractor.extract_transcript(epub_path, abs_chapters)
-    
-    if not transcript:
-        return None
+    if not transcript: return None
     
     if output_path is None:
         output_path = str(Path(epub_path).with_suffix('.transcript.json'))
@@ -345,4 +328,12 @@ def extract_transcript_from_epub(epub_path: str, abs_chapters: List[Dict] = None
         json.dump(transcript, f, ensure_ascii=False)
     
     return output_path
+
+if __name__ == '__main__':
+    import sys
+    logging.basicConfig(level=logging.INFO)
+    if len(sys.argv) < 2:
+        print("Usage: python smil_extractor.py <epub_file>")
+        sys.exit(1)
+    extract_transcript_from_epub(sys.argv[1])
 # [END FILE]
