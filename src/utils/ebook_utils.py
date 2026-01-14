@@ -26,6 +26,8 @@ from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
+# Import epubcfi library for accurate CFI parsing
+import epubcfi
 
 class LRUCache:
     def __init__(self, capacity: int = 3):
@@ -663,36 +665,138 @@ class EbookParser:
     def get_text_around_cfi(self, filename, cfi, context=50):
         """
         Returns a text fragment of length 2*context centered on the position indicated by the CFI.
-        Supports real-world CFIs with bracketed IDs and complex paths.
-        If the CFI cannot be resolved, returns None.
+        Uses the epubcfi library for precise parsing.
+
+        Example supported CFI: epubcfi(/6/16[chapter_6]!/4/2[book-columns]/2[book-inner]/268/4/2[kobo.134.3]/1:11)
         """
         try:
-            import re
+            # Parse CFI using the epubcfi library
+            parsed_cfi = epubcfi.parse(cfi)
+
+            # Extract spine information and element steps
+            spine_step = None
+            element_steps = []
+
+            for step in parsed_cfi.steps:
+                if hasattr(step, 'index'):
+                    if step.index == 6:  # Skip spine reference marker
+                        continue
+                    elif not spine_step and step.index > 6:  # First step after /6/ is spine
+                        spine_step = step.index
+                    elif isinstance(step, epubcfi.cfi.Step):
+                        element_steps.append(step)
+                # Skip Redirect objects (!)
+
+            char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
+
+            if not spine_step:
+                logger.error(f"Could not extract spine step from CFI: {cfi}")
+                return None
+
+            # Load the EPUB and find the spine item
             book_path = self._resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
-            # Robust CFI parsing: extract first number after /6/ and number after colon
-            # Example: epubcfi(/6/10[Afscheid_voor_even-2]!/4[Afscheid_voor_even-2]/.../1:29)
-            cfi_pattern = r"epubcfi\(/6/(\d+)(?:\[[^\]]*\])?!.*:(\d+)\)"
-            match = re.match(cfi_pattern, cfi)
-            if not match:
-                logger.error(f"Invalid or unsupported CFI format: {cfi}")
-                return None
-            spine_step = int(match.group(1))
-            char_offset = int(match.group(2))
-
-            # EPUB CFI spine_step is 2x the spine index (see _generate_cfi)
+            # Calculate spine index (CFI spine steps are 2x the actual index)
             spine_index = (spine_step // 2) - 1
             if not (0 <= spine_index < len(spine_map)):
                 logger.error(f"Spine index {spine_index} out of range for CFI {cfi}")
                 return None
+
             item = spine_map[spine_index]
-            start = item['start'] + char_offset
-            end = start + context
-            begin = max(0, start - context)
-            snippet = full_text[begin:end]
+
+            # Parse the HTML content with lxml for precise navigation
+            tree = html.fromstring(item['content'])
+
+            # Follow the CFI path precisely through the DOM
+            current_element = tree
+            text_count = 0
+
+            logger.debug(f"Following CFI path with {len(element_steps)} steps")
+
+            for i, step in enumerate(element_steps):
+                if not hasattr(step, 'index'):
+                    continue
+
+                step_index = step.index
+                step_assertion = step.assertion
+
+                logger.debug(f"Step {i}: index={step_index}, assertion={step_assertion}")
+
+                if step_assertion:
+                    # Look for element with specific ID or class
+                    candidates = current_element.xpath(f".//*[contains(@id, '{step_assertion}') or contains(@class, '{step_assertion}')]")
+                    if candidates:
+                        current_element = candidates[0]
+                        logger.debug(f"Found element with assertion: {step_assertion}")
+                        continue
+
+                # CFI uses 1-based indexing, even numbers for elements
+                if step_index % 2 == 0:  # Even number = element
+                    element_index = (step_index // 2) - 1
+                    children = [child for child in current_element if hasattr(child, 'tag')]
+
+                    if 0 <= element_index < len(children):
+                        current_element = children[element_index]
+                        logger.debug(f"Navigated to child element {element_index}: {current_element.tag}")
+                    else:
+                        logger.warning(f"Element index {element_index} out of range (have {len(children)} children)")
+                        break
+                else:  # Odd number = text node
+                    text_index = (step_index // 2)
+                    # For text nodes, we need to count text content
+                    text_nodes = []
+                    for child in current_element:
+                        if child.text and child.text.strip():
+                            text_nodes.append(child.text.strip())
+                        if child.tail and child.tail.strip():
+                            text_nodes.append(child.tail.strip())
+
+                    if 0 <= text_index < len(text_nodes):
+                        # Calculate position up to this text node
+                        text_count += sum(len(text) for text in text_nodes[:text_index])
+                        logger.debug(f"Text node {text_index}, accumulated count: {text_count}")
+                    break
+
+            # Calculate text position within the current element
+            if current_element is not None:
+                # Get all text content up to the current element's position in the document
+                soup = BeautifulSoup(item['content'], 'html.parser')
+                chapter_text = soup.get_text(separator=' ', strip=True)
+
+                # Find the current element's text in the chapter
+                element_text = ""
+                if hasattr(current_element, 'text_content'):
+                    element_text = current_element.text_content()
+
+                if element_text and len(element_text.strip()) > 5:
+                    # Find where this element's content appears in the chapter
+                    element_start = chapter_text.find(element_text.strip()[:50])
+                    if element_start != -1:
+                        local_offset = element_start + char_offset
+                    else:
+                        # Fallback: use text_count + char_offset
+                        local_offset = text_count + char_offset
+                else:
+                    local_offset = text_count + char_offset
+            else:
+                local_offset = text_count + char_offset
+
+            # Clamp to chapter bounds
+            chapter_text = BeautifulSoup(item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            local_offset = min(max(0, local_offset), len(chapter_text))
+
+            # Calculate global position
+            global_offset = item['start'] + local_offset
+
+            # Extract context
+            start_pos = max(0, global_offset - context)
+            end_pos = min(len(full_text), global_offset + context)
+
+            snippet = full_text[start_pos:end_pos]
+            logger.debug(f"epubcfi CFI resolved: spine_index={spine_index}, local_offset={local_offset}, global_offset={global_offset}")
             return snippet
+
         except Exception as e:
-            logger.error(f"Error resolving CFI {cfi} in {filename}: {e}")
+            logger.error(f"Error using epubcfi library for {cfi}: {e}")
             return None
-# [END FILE]

@@ -16,11 +16,13 @@ class ABSEbookSyncClient(SyncClient):
         self.delta_abs_thresh = float(os.getenv("SYNC_DELTA_ABS_EBOOK_PERCENT", 1))
 
     def is_configured(self) -> bool:
-        return True
+        return os.getenv("SYNC_ABS_EBOOK", "false").lower() == "true"
 
     def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
         abs_id = mapping['abs_id']
         response = self.abs_client.get_progress(abs_id)
+        if response is None:
+            return None
         abs_pct, abs_cfi = response.get('ebookProgress'), response.get('ebookLocation') if response is not None else None
 
         if abs_pct is None:

@@ -161,8 +161,7 @@ class Container(containers.DeclarativeContainer):
     # Sync clients dictionary for reuse
     sync_clients = providers.Dict(
         ABS=abs_sync_client,
-        # TODO: needs further testing
-        # "ABS eBook"=abs_ebook_sync_client,
+        ABSEbook=abs_ebook_sync_client,
         KoSync=kosync_sync_client,
         Storyteller=storyteller_sync_client,
         BookLore=booklore_sync_client
