@@ -2,6 +2,7 @@ requests
 schedule
 faster-whisper
 ebooklib
+epubcfi
 beautifulsoup4
 rapidfuzz
 fuzzysearch
