@@ -26,6 +26,7 @@ from collections import OrderedDict
 import re
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
+from src.utils.smil_extractor import SmilExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,32 @@ class AudioTranscriber:
 
         # Unified threshold logic
         self.match_threshold = int(os.environ.get("TRANSCRIPT_MATCH_THRESHOLD", os.environ.get("FUZZY_MATCH_THRESHOLD", 80)))
+        self.smil_extractor = SmilExtractor()
+
+    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list) -> Optional[Path]:
+        """
+        Attempts to extract a transcript directly from the EPUB's SMIL overlay data.
+        """
+        output_file = self.transcripts_dir / f"{abs_id}.json"
+        
+        if not self.smil_extractor.has_media_overlays(str(epub_path)):
+            return None
+            
+        logger.info(f"⚡ Fast-Path: Extracting transcript from SMIL for {abs_id}...")
+        
+        try:
+            transcript = self.smil_extractor.extract_transcript(str(epub_path), abs_chapters)
+            if not transcript:
+                return None
+                
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(transcript, f, ensure_ascii=False)
+                
+            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments saved.")
+            return output_file
+        except Exception as e:
+            logger.error(f"Failed to extract SMIL transcript: {e}")
+            return None    
 
     def _get_cached_transcript(self, path):
         """Load transcript with LRU caching."""

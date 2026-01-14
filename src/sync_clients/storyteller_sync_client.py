@@ -3,7 +3,7 @@ from typing import Optional
 import logging
 
 from src.utils.ebook_utils import EbookParser
-from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
+from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 logger = logging.getLogger(__name__)
 
 class StorytellerSyncClient(SyncClient):
@@ -50,9 +50,52 @@ class StorytellerSyncClient(SyncClient):
         epub = mapping['ebook_filename']
         pct = request.locator_result.percentage
         locator = request.locator_result
+
+        if not locator.href:
+            # Try to enrich using the matched text if available
+            if request.txt:
+                enriched = self.ebook_parser.find_text_location(
+                    epub, request.txt, hint_percentage=pct
+                )
+                if enriched and enriched.href:
+                    logger.debug(f"Enriched Storyteller locator with href={enriched.href}")
+                    locator = enriched
+            
+            # Fallback: if we still don't have href, try to resolve from percentage
+            if not locator.href:
+                fallback_locator = self._resolve_href_from_percentage(epub, pct)
+                if fallback_locator and fallback_locator.href:
+                    # Merge: keep the percentage but add the href
+                    locator = LocatorResult(
+                        percentage=pct,
+                        href=fallback_locator.href,
+                        css_selector=fallback_locator.css_selector,
+                        xpath=locator.xpath,
+                        match_index=locator.match_index,
+                        cfi=locator.cfi,
+                        fragment=locator.fragment,
+                        perfect_ko_xpath=locator.perfect_ko_xpath
+                    )
+                    logger.debug(f"Resolved Storyteller href from percentage: {locator.href}")
+
         success = self.storyteller_db.update_progress(epub, pct, locator)
-        updated_state = {
-            'pct': pct
-        }
-        return SyncResult(pct, success, updated_state)
+        return SyncResult(pct, success)
+
+    def _resolve_href_from_percentage(self, epub: str, pct: float) -> Optional[str]:
+        """Find which spine item href contains the given percentage."""
+        try:
+            book_path = self.ebook_parser._resolve_book_path(epub)
+            full_text, spine_map = self.ebook_parser.extract_text_and_map(book_path)
+            if not full_text or not spine_map:
+                return None
+            target_index = int(len(full_text) * pct)
+            for item in spine_map:
+                if item['start'] <= target_index < item['end']:
+                    return item['href']
+        except Exception:
+            pass
+        return None
+         
+    
+
 

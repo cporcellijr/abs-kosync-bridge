@@ -28,7 +28,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     schedule \
     faster-whisper \
     EbookLib \
-    beautifulsoup4
+    beautifulsoup4 \
+    dependency-injector
 
 # 3. Create directories
 RUN mkdir -p /app/src /app/templates /app/static /data/audio_cache /data/logs /data/transcripts
