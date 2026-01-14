@@ -32,7 +32,7 @@ class ABSSyncClient(SyncClient):
         if abs_ts is None:
             logger.warning("⚠️ ABS timestamp is None - returning None for service state")
             # Return a state indicating ABS is offline
-            return None
+            abs_ts = 0.0
 
         # Convert timestamp to percentage
         abs_pct = self._abs_to_percentage(abs_ts, mapping.get('transcript_file'))

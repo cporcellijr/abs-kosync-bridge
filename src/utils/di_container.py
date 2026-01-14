@@ -17,6 +17,7 @@ from src.api.hardcover_client import HardcoverClient
 from src.db.json_db import JsonDB
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
+from src.utils.smil_extractor import SmilExtractor  # [ADDED IMPORT]
 from src.sync_clients.abs_sync_client import ABSSyncClient
 from src.sync_clients.kosync_sync_client import KoSyncSyncClient
 from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
@@ -114,6 +115,11 @@ class Container(containers.DeclarativeContainer):
         epub_cache_dir=epub_cache_dir
     )
 
+    # [ADDED] Smil Extractor Provider
+    smil_extractor = providers.Singleton(
+        SmilExtractor
+    )
+
     # Storyteller client with factory
     storyteller_client = providers.Factory(
         _create_storyteller_client
@@ -122,7 +128,8 @@ class Container(containers.DeclarativeContainer):
     # Transcriber
     transcriber = providers.Singleton(
         AudioTranscriber,
-        data_dir
+        data_dir,
+        smil_extractor  # [UPDATED] Injected dependency
     )
 
     # Sync clients

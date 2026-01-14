@@ -296,11 +296,24 @@ class SyncManager:
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
 
-            # Step 2: Download and transcribe audio
-            audio_files = self.abs_client.get_audio_files(abs_id)
-            transcript_path = self.transcriber.process_audio(abs_id, audio_files)
+            # Step 2: Try Fast-Path (SMIL Extraction)
+            transcript_path = None
+            
+            # Fetch item details to get chapters (for time alignment)
+            item_details = self.abs_client.get_item_details(abs_id)
+            chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+            
+            # Attempt SMIL extraction
+            if hasattr(self.transcriber, 'transcribe_from_smil'):
+                 transcript_path = self.transcriber.transcribe_from_smil(abs_id, epub_path, chapters)
 
-            # Step 3: Parse EPUB
+            # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
+            if not transcript_path:
+                logger.info("ℹ️ SMIL data not found or failed, falling back to Whisper transcription.")
+                audio_files = self.abs_client.get_audio_files(abs_id)
+                transcript_path = self.transcriber.process_audio(abs_id, audio_files)
+
+            # Step 4: Parse EPUB
             self.ebook_parser.extract_text_and_map(epub_path)
 
             # --- Atomic Success Update ---
