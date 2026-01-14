@@ -8,6 +8,7 @@ UPDATED VERSION with:
 - Long file splitting
 - Configurable fuzzy match threshold
 - Context gathering for text matching
+- Dependency Injection for SmilExtractor
 """
 
 import json
@@ -26,13 +27,15 @@ from collections import OrderedDict
 import re
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
-from src.utils.smil_extractor import SmilExtractor
+# We keep the import for type hinting, but we don't instantiate it directly anymore
+from src.utils.smil_extractor import SmilExtractor 
 
 logger = logging.getLogger(__name__)
 
 
 class AudioTranscriber:
-    def __init__(self, data_dir):
+    # [UPDATED] Accepted smil_extractor as an argument
+    def __init__(self, data_dir, smil_extractor):
         self.data_dir = data_dir
         self.transcripts_dir = data_dir / "transcripts"
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +49,9 @@ class AudioTranscriber:
 
         # Unified threshold logic
         self.match_threshold = int(os.environ.get("TRANSCRIPT_MATCH_THRESHOLD", os.environ.get("FUZZY_MATCH_THRESHOLD", 80)))
-        self.smil_extractor = SmilExtractor()
+        
+        # [UPDATED] Use the injected instance
+        self.smil_extractor = smil_extractor
 
     def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list) -> Optional[Path]:
         """
@@ -247,7 +252,6 @@ class AudioTranscriber:
                     book_cache_dir.mkdir(parents=True, exist_ok=True)
                     resuming = False
 
-            # Phase 1: Download and Normalize (if not resuming)
             # Phase 1: Download and Normalize (if not resuming)
             if not resuming:
                 # FIX: Check if files exist from a previous run before wiping
