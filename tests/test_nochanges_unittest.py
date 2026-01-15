@@ -4,8 +4,12 @@ Unit test for the "no changes detected" scenario using unittest.TestCase.
 """
 
 import unittest
+import sys
 from pathlib import Path
-from base_sync_test import BaseSyncCycleTestCase
+# Add the project root to the path to resolve module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from tests.base_sync_test import BaseSyncCycleTestCase
 
 
 class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
@@ -25,12 +29,21 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
     def get_test_state_data(self):
         """Return no changes test state data - EXACTLY matches mock returns."""
         return {
-            'test-abs-id-nochange': {
-                'abs_ts': 150.0,       # Same as mock (15%)
-                'abs_pct': 0.15,       # Same as mock (15%)
-                'kosync_pct': 0.25,    # Same as mock (25%)
-                'storyteller_pct': 0.18,  # Same as mock (18%)
-                'booklore_pct': 0.12,     # Same as mock (12%)
+            'abs': {
+                'pct': 0.15,  # 15%
+                'ts': 150.0,  # timestamp
+                'last_updated': 1234567890
+            },
+            'kosync': {
+                'pct': 0.25,  # 25%
+                'last_updated': 1234567890
+            },
+            'storyteller': {
+                'pct': 0.18,  # 18%
+                'last_updated': 1234567890
+            },
+            'booklore': {
+                'pct': 0.12,  # 12%
                 'last_updated': 1234567890
             }
         }

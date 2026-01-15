@@ -14,12 +14,11 @@ import requests
 import schedule
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
-from src.db.json_db import JsonDB
 from src.utils.di_container import create_container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
-from src.sync_manager import SyncManager
+from src.db.migration_utils import initialize_database
 
 # ---------------- APP SETUP ----------------
 
@@ -1114,6 +1113,15 @@ def view_log():
 
 if __name__ == '__main__':
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
+
+    # Initialize database and perform migration if needed
+    logger.info("🗄️ Initializing database...")
+    try:
+        db_service = initialize_database(DATA_DIR)
+        logger.info("✅ Database initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database: {e}")
+        raise e
 
     # Check ebook source configuration
     booklore_configured = manager.booklore_client.is_configured()

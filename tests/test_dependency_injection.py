@@ -60,11 +60,8 @@ def test_dependency_injection():
         storyteller_db = container.storyteller_client()
         print(f"✅ Storyteller DB: {type(storyteller_db).__name__}")
 
-        db_handler = container.db_handler()
-        print(f"✅ DB Handler: {type(db_handler).__name__}")
-
-        state_handler = container.state_handler()
-        print(f"✅ State Handler: {type(state_handler).__name__}")
+        db = container.database_service()
+        print(f"✅ DB: {type(db).__name__}")
 
         # Test 4: Test sync clients
         print("\n🔄 Testing sync clients...")

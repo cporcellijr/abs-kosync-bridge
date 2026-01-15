@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Tuple
 
+from src.db.models import Book, State
+
 @dataclass
 class ServiceState:
     # can contain xpath, ts, pct, href, frag
@@ -45,11 +47,11 @@ class SyncClient:
 
     def is_configured(self) -> bool:
         ...
-    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         ...
-    def get_text_from_current_state(self, mapping: dict, state: ServiceState) -> Optional[str]:
+    def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         ...
-    def update_progress(self, mapping: dict, request: UpdateProgressRequest) -> SyncResult:
+    def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         ...
 
     def get_locator_from_text(self, txt: str, epub_file_name: str, hint_percentage: float) -> Optional[LocatorResult]:

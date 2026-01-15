@@ -14,7 +14,7 @@ from dependency_injector import containers, providers
 from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.booklore_client import BookloreClient
 from src.api.hardcover_client import HardcoverClient
-from src.db.json_db import JsonDB
+from src.db.database_service import DatabaseService
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
 from src.utils.smil_extractor import SmilExtractor  # [ADDED IMPORT]
@@ -97,16 +97,15 @@ class Container(containers.DeclarativeContainer):
 
     hardcover_client = providers.Singleton(HardcoverClient)
 
-    # Database handlers
-    db_handler = providers.Singleton(
-        JsonDB,
-        db_file
+    # SQLAlchemy Database Service
+    database_service = providers.Singleton(
+        DatabaseService,
+        providers.Factory(
+            lambda data_dir: str(data_dir / "database.db"),
+            data_dir=data_dir
+        )
     )
 
-    state_handler = providers.Singleton(
-        JsonDB,
-        state_file
-    )
 
     # Ebook parser
     ebook_parser = providers.Singleton(
@@ -137,8 +136,7 @@ class Container(containers.DeclarativeContainer):
         ABSSyncClient,
         abs_client,
         transcriber,
-        ebook_parser,
-        db_handler
+        ebook_parser
     )
 
     kosync_sync_client = providers.Singleton(
@@ -184,8 +182,7 @@ class Container(containers.DeclarativeContainer):
         booklore_client=booklore_client,
         transcriber=transcriber,
         ebook_parser=ebook_parser,
-        db_handler=db_handler,
-        state_handler=state_handler,
+        database_service=database_service,
         sync_clients=sync_clients,
         kosync_use_percentage_from_server=kosync_use_percentage_from_server,
         epub_cache_dir=epub_cache_dir,

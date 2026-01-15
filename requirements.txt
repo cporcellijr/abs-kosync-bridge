@@ -12,3 +12,4 @@ ffmpeg
 flask
 lxml
 dependency-injector
+sqlalchemy

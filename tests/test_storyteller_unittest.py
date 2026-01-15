@@ -4,8 +4,12 @@ Unit test for the Storyteller leading scenario using unittest.TestCase.
 """
 
 import unittest
+import sys
 from pathlib import Path
-from base_sync_test import BaseSyncCycleTestCase
+# Add the project root to the path to resolve module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from tests.base_sync_test import BaseSyncCycleTestCase
 
 
 class TestStorytellerLeadsSync(BaseSyncCycleTestCase):
@@ -25,12 +29,21 @@ class TestStorytellerLeadsSync(BaseSyncCycleTestCase):
     def get_test_state_data(self):
         """Return Storyteller test state data."""
         return {
-            'test-abs-id-storyteller': {
-                'abs_ts': 200.0,  # 20%
-                'abs_pct': 0.2,
-                'kosync_pct': 0.25,  # 25%
-                'storyteller_pct': 0.3,  # 30%
-                'booklore_pct': 0.1,  # 10%
+            'abs': {
+                'pct': 0.2,  # 20%
+                'ts': 200.0,  # timestamp
+                'last_updated': 1234567890
+            },
+            'kosync': {
+                'pct': 0.25,  # 25%
+                'last_updated': 1234567890
+            },
+            'storyteller': {
+                'pct': 0.3,  # 30%
+                'last_updated': 1234567890
+            },
+            'booklore': {
+                'pct': 0.1,  # 10%
                 'last_updated': 1234567890
             }
         }

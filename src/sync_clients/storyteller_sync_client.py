@@ -2,6 +2,7 @@ import os
 from typing import Optional
 import logging
 
+from src.db.models import Book, State
 from src.utils.ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 logger = logging.getLogger(__name__)
@@ -16,15 +17,17 @@ class StorytellerSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return self.storyteller_db.is_configured()
 
-    def get_service_state(self, mapping: dict, prev: dict, title_snip: str = "") -> Optional[ServiceState]:
-        epub = mapping['ebook_filename']
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+        epub = book.ebook_filename
         st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
 
         if st_pct is None:
             logger.warning("⚠️ Storyteller percentage is None - returning None for service state")
             return None
 
-        prev_storyteller_pct = prev.get('storyteller_pct', 0)
+        # Get previous Storyteller state
+        prev_storyteller_pct = prev_state.percentage if prev_state else 0
+
         delta = abs(st_pct - prev_storyteller_pct)
 
         return ServiceState(
@@ -37,17 +40,17 @@ class StorytellerSyncClient(SyncClient):
             value_formatter=lambda v: f"{v*100:.4f}%"
         )
 
-    def get_text_from_current_state(self, mapping: dict, state: ServiceState) -> Optional[str]:
+    def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         # This needs to be updated to work with the new interface
-        epub = mapping.get('ebook_filename')
+        epub = book.ebook_filename
         st_pct, href, frag = state.current.get('pct'), state.current.get('href'), state.current.get('frag')
         txt = self.ebook_parser.resolve_locator_id(epub, href, frag)
         if not txt:
             txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
         return txt
 
-    def update_progress(self, mapping: dict, request: UpdateProgressRequest) -> SyncResult:
-        epub = mapping['ebook_filename']
+    def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
+        epub = book.ebook_filename
         pct = request.locator_result.percentage
         locator = request.locator_result
 
@@ -60,16 +63,16 @@ class StorytellerSyncClient(SyncClient):
                 if enriched and enriched.href:
                     logger.debug(f"Enriched Storyteller locator with href={enriched.href}")
                     locator = enriched
-            
+
             # Fallback: if we still don't have href, try to resolve from percentage
             if not locator.href:
-                fallback_locator = self._resolve_href_from_percentage(epub, pct)
-                if fallback_locator and fallback_locator.href:
+                fallback_href = self._resolve_href_from_percentage(epub, pct)
+                if fallback_href:
                     # Merge: keep the percentage but add the href
                     locator = LocatorResult(
                         percentage=pct,
-                        href=fallback_locator.href,
-                        css_selector=fallback_locator.css_selector,
+                        href=fallback_href,
+                        css_selector=None,
                         xpath=locator.xpath,
                         match_index=locator.match_index,
                         cfi=locator.cfi,
@@ -95,7 +98,7 @@ class StorytellerSyncClient(SyncClient):
         except Exception:
             pass
         return None
-         
-    
+
+
 
 

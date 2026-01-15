@@ -1,0 +1,461 @@
+"""
+Unified SQLAlchemy database service for abs-kosync-bridge.
+Direct model-based interface without dictionary conversions.
+"""
+
+import json
+import logging
+from pathlib import Path
+from typing import List, Optional
+from contextlib import contextmanager
+from sqlalchemy.exc import SQLAlchemyError
+
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails
+
+logger = logging.getLogger(__name__)
+
+
+class DatabaseService:
+    """
+    Unified SQLAlchemy-based database service providing direct model operations.
+
+    This service works exclusively with SQLAlchemy models, avoiding dictionary
+    conversions for better type safety and cleaner code.
+    """
+
+    def __init__(self, db_path: str):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_manager = DatabaseManager(str(self.db_path))
+
+    @contextmanager
+    def get_session(self):
+        """Context manager for database sessions with automatic commit/rollback."""
+        session = self.db_manager.get_session()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database error: {e}")
+            raise
+        finally:
+            session.close()
+
+    # Book operations
+    def get_book(self, abs_id: str) -> Optional[Book]:
+        """Get a book by its ABS ID."""
+        with self.get_session() as session:
+            book = session.query(Book).filter(Book.abs_id == abs_id).first()
+            if book:
+                session.expunge(book)  # Detach from session
+            return book
+
+    def get_all_books(self) -> List[Book]:
+        """Get all books as model objects."""
+        with self.get_session() as session:
+            books = session.query(Book).all()
+            for book in books:
+                session.expunge(book)
+            return books
+
+    def create_book(self, book: Book) -> Book:
+        """Create a new book from a Book model."""
+        with self.get_session() as session:
+            session.add(book)
+            session.flush()
+            session.refresh(book)
+            session.expunge(book)
+            return book
+
+    def save_book(self, book: Book) -> Book:
+        """Save or update a book model."""
+        with self.get_session() as session:
+            existing = session.query(Book).filter(Book.abs_id == book.abs_id).first()
+
+            if existing:
+                # Update existing book
+                for attr in ['abs_title', 'ebook_filename', 'kosync_doc_id',
+                           'transcript_file', 'status', 'abs_session_id']:
+                    if hasattr(book, attr):
+                        setattr(existing, attr, getattr(book, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                # Create new book
+                session.add(book)
+                session.flush()
+                session.refresh(book)
+                session.expunge(book)
+                return book
+
+    def delete_book(self, abs_id: str) -> bool:
+        """Delete a book and all its related data."""
+        with self.get_session() as session:
+            book = session.query(Book).filter(Book.abs_id == abs_id).first()
+            if book:
+                session.delete(book)  # Cascade will handle states and jobs
+                return True
+            return False
+
+    def get_books_by_status(self, status: str) -> List[Book]:
+        """Get books by status."""
+        with self.get_session() as session:
+            books = session.query(Book).filter(Book.status == status).all()
+            for book in books:
+                session.expunge(book)
+            return books
+
+    # State operations
+    def get_state(self, abs_id: str, client_name: str) -> Optional[State]:
+        """Get a specific state by book and client."""
+        with self.get_session() as session:
+            state = session.query(State).filter(
+                State.abs_id == abs_id,
+                State.client_name == client_name
+            ).first()
+            if state:
+                session.expunge(state)
+            return state
+
+    def get_states_for_book(self, abs_id: str) -> List[State]:
+        """Get all states for a book."""
+        with self.get_session() as session:
+            states = session.query(State).filter(State.abs_id == abs_id).all()
+            for state in states:
+                session.expunge(state)
+            return states
+
+    def get_all_states(self) -> List[State]:
+        """Get all states."""
+        with self.get_session() as session:
+            states = session.query(State).all()
+            for state in states:
+                session.expunge(state)
+            return states
+
+    def save_state(self, state: State) -> State:
+        """Save or update a state model."""
+        with self.get_session() as session:
+            existing = session.query(State).filter(
+                State.abs_id == state.abs_id,
+                State.client_name == state.client_name
+            ).first()
+
+            if existing:
+                # Update existing state
+                for attr in ['last_updated', 'percentage', 'timestamp', 'xpath', 'cfi']:
+                    if hasattr(state, attr):
+                        setattr(existing, attr, getattr(state, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                # Create new state
+                session.add(state)
+                session.flush()
+                session.refresh(state)
+                session.expunge(state)
+                return state
+
+    def delete_states_for_book(self, abs_id: str) -> int:
+        """Delete all states for a book."""
+        with self.get_session() as session:
+            count = session.query(State).filter(State.abs_id == abs_id).count()
+            session.query(State).filter(State.abs_id == abs_id).delete()
+            return count
+
+    # Job operations
+    def get_latest_job(self, abs_id: str) -> Optional[Job]:
+        """Get the latest job for a book."""
+        with self.get_session() as session:
+            job = session.query(Job).filter(Job.abs_id == abs_id).order_by(Job.last_attempt.desc()).first()
+            if job:
+                session.expunge(job)
+            return job
+
+    def get_jobs_for_book(self, abs_id: str) -> List[Job]:
+        """Get all jobs for a book."""
+        with self.get_session() as session:
+            jobs = session.query(Job).filter(Job.abs_id == abs_id).order_by(Job.last_attempt.desc()).all()
+            for job in jobs:
+                session.expunge(job)
+            return jobs
+
+    def get_all_jobs(self) -> List[Job]:
+        """Get all jobs."""
+        with self.get_session() as session:
+            jobs = session.query(Job).all()
+            for job in jobs:
+                session.expunge(job)
+            return jobs
+
+    def save_job(self, job: Job) -> Job:
+        """Save a new job."""
+        with self.get_session() as session:
+            session.add(job)
+            session.flush()
+            session.refresh(job)
+            session.expunge(job)
+            return job
+
+    def update_latest_job(self, abs_id: str, **kwargs) -> Optional[Job]:
+        """Update the latest job for a book."""
+        with self.get_session() as session:
+            job = session.query(Job).filter(Job.abs_id == abs_id).order_by(Job.last_attempt.desc()).first()
+            if job:
+                for key, value in kwargs.items():
+                    if hasattr(job, key):
+                        setattr(job, key, value)
+                session.flush()
+                session.refresh(job)
+                session.expunge(job)
+                return job
+            return None
+
+    def delete_jobs_for_book(self, abs_id: str) -> int:
+        """Delete all jobs for a book."""
+        with self.get_session() as session:
+            count = session.query(Job).filter(Job.abs_id == abs_id).count()
+            session.query(Job).filter(Job.abs_id == abs_id).delete()
+            return count
+
+    # HardcoverDetails operations
+    def get_hardcover_details(self, abs_id: str) -> Optional[HardcoverDetails]:
+        """Get hardcover details for a book."""
+        with self.get_session() as session:
+            details = session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == abs_id).first()
+            if details:
+                session.expunge(details)
+            return details
+
+    def save_hardcover_details(self, details: HardcoverDetails) -> HardcoverDetails:
+        """Save or update hardcover details."""
+        with self.get_session() as session:
+            existing = session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == details.abs_id).first()
+
+            if existing:
+                # Update existing details
+                for attr in ['hardcover_book_id', 'hardcover_edition_id', 'hardcover_pages',
+                           'isbn', 'asin', 'matched_by']:
+                    if hasattr(details, attr):
+                        setattr(existing, attr, getattr(details, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                # Create new details
+                session.add(details)
+                session.flush()
+                session.refresh(details)
+                session.expunge(details)
+                return details
+
+    def delete_hardcover_details(self, abs_id: str) -> bool:
+        """Delete hardcover details for a book."""
+        with self.get_session() as session:
+            details = session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == abs_id).first()
+            if details:
+                session.delete(details)
+                return True
+            return False
+
+    def get_all_hardcover_details(self) -> List[HardcoverDetails]:
+        """Get all hardcover details."""
+        with self.get_session() as session:
+            details = session.query(HardcoverDetails).all()
+            for detail in details:
+                session.expunge(detail)
+            return details
+
+    # Advanced queries
+    def get_books_with_recent_activity(self, limit: int = 10) -> List[Book]:
+        """Get books with the most recent state updates."""
+        with self.get_session() as session:
+            books = session.query(Book).join(State).order_by(State.last_updated.desc()).limit(limit).all()
+            for book in books:
+                session.expunge(book)
+            return books
+
+    def get_failed_jobs(self, limit: int = 20) -> List[Job]:
+        """Get recent failed jobs."""
+        with self.get_session() as session:
+            jobs = session.query(Job).filter(Job.last_error.isnot(None)).order_by(Job.last_attempt.desc()).limit(limit).all()
+            for job in jobs:
+                session.expunge(job)
+            return jobs
+
+    def get_statistics(self) -> dict:
+        """Get database statistics."""
+        with self.get_session() as session:
+            from sqlalchemy import func
+
+            stats = {
+                'total_books': session.query(Book).count(),
+                'active_books': session.query(Book).filter(Book.status == 'active').count(),
+                'total_states': session.query(State).count(),
+                'total_jobs': session.query(Job).count(),
+                'failed_jobs': session.query(Job).filter(Job.last_error.isnot(None)).count(),
+            }
+
+            # Get client breakdown
+            client_counts = session.query(
+                State.client_name,
+                func.count(State.id)
+            ).group_by(State.client_name).all()
+            stats['states_by_client'] = {client: count for client, count in client_counts}
+
+            return stats
+
+
+class DatabaseMigrator:
+    """Handles migration from JSON files to SQLAlchemy database."""
+
+    def __init__(self, db_service: DatabaseService, json_db_path: str, json_state_path: str):
+        self.db_service = db_service
+        self.json_db_path = Path(json_db_path)
+        self.json_state_path = Path(json_state_path)
+
+    def migrate(self):
+        """Perform migration from JSON to SQLAlchemy database."""
+        logger.info("Starting migration from JSON to SQLAlchemy database...")
+
+        # Migrate mappings/books
+        if self.json_db_path.exists():
+            try:
+                with open(self.json_db_path, 'r') as f:
+                    mapping_data = json.load(f)
+
+                if 'mappings' in mapping_data:
+                    self._migrate_books(mapping_data['mappings'])
+                    logger.info(f"Migrated {len(mapping_data['mappings'])} book mappings")
+
+            except Exception as e:
+                logger.error(f"Failed to migrate mapping data: {e}")
+
+        # Migrate state
+        if self.json_state_path.exists():
+            try:
+                with open(self.json_state_path, 'r') as f:
+                    state_data = json.load(f)
+
+                self._migrate_states(state_data)
+                logger.info(f"Migrated state for {len(state_data)} books")
+
+            except Exception as e:
+                logger.error(f"Failed to migrate state data: {e}")
+
+        logger.info("Migration completed")
+
+    def _migrate_books(self, mappings_list: List[dict]):
+        """Migrate book mappings to Book models."""
+        for mapping in mappings_list:
+            book = Book(
+                abs_id=mapping['abs_id'],
+                abs_title=mapping.get('abs_title'),
+                ebook_filename=mapping.get('ebook_filename'),
+                kosync_doc_id=mapping.get('kosync_doc_id'),
+                transcript_file=mapping.get('transcript_file'),
+                status=mapping.get('status', 'active'),
+                abs_session_id=mapping.get('abs_session_id')
+            )
+            self.db_service.save_book(book)
+
+            # Also migrate job data if present
+            if any(key in mapping for key in ['last_attempt', 'retry_count', 'last_error']):
+                job = Job(
+                    abs_id=mapping['abs_id'],
+                    last_attempt=mapping.get('last_attempt'),
+                    retry_count=mapping.get('retry_count', 0),
+                    last_error=mapping.get('last_error')
+                )
+                self.db_service.save_job(job)
+
+            # Also migrate hardcover details if present
+            if any(key in mapping for key in ['hardcover_book_id', 'hardcover_edition_id', 'hardcover_pages']):
+                hardcover_details = HardcoverDetails(
+                    abs_id=mapping['abs_id'],
+                    hardcover_book_id=mapping.get('hardcover_book_id'),
+                    hardcover_edition_id=mapping.get('hardcover_edition_id'),
+                    hardcover_pages=mapping.get('hardcover_pages'),
+                    isbn=mapping.get('isbn'),
+                    asin=mapping.get('asin'),
+                    matched_by=mapping.get('matched_by', 'unknown')
+                )
+                self.db_service.save_hardcover_details(hardcover_details)
+
+    def _migrate_states(self, state_dict: dict):
+        """Migrate state data to State models."""
+        for abs_id, data in state_dict.items():
+            last_updated = data.get('last_updated')
+
+            # Handle kosync data
+            if 'kosync_pct' in data:
+                state = State(
+                    abs_id=abs_id,
+                    client_name='kosync',
+                    last_updated=last_updated,
+                    percentage=data['kosync_pct'],
+                    xpath=data.get('kosync_xpath')
+                )
+                self.db_service.save_state(state)
+
+            # Handle ABS data
+            if 'abs_pct' in data:
+                state = State(
+                    abs_id=abs_id,
+                    client_name='abs',
+                    last_updated=last_updated,
+                    percentage=data['abs_pct'],
+                    timestamp=data.get('abs_ts')
+                )
+                self.db_service.save_state(state)
+
+            # Handle ABS ebook data
+            if 'absebook_pct' in data:
+                state = State(
+                    abs_id=abs_id,
+                    client_name='absebook',
+                    last_updated=last_updated,
+                    percentage=data['absebook_pct'],
+                    cfi=data.get('absebook_cfi')
+                )
+                self.db_service.save_state(state)
+
+            # Handle Storyteller data
+            if 'storyteller_pct' in data:
+                state = State(
+                    abs_id=abs_id,
+                    client_name='storyteller',
+                    last_updated=last_updated,
+                    percentage=data['storyteller_pct'],
+                    xpath=data.get('storyteller_xpath'),
+                    cfi=data.get('storyteller_cfi')
+                )
+                self.db_service.save_state(state)
+
+            # Handle Booklore data
+            if 'booklore_pct' in data:
+                state = State(
+                    abs_id=abs_id,
+                    client_name='booklore',
+                    last_updated=last_updated,
+                    percentage=data['booklore_pct'],
+                    xpath=data.get('booklore_xpath'),
+                    cfi=data.get('booklore_cfi')
+                )
+                self.db_service.save_state(state)
+
+    def should_migrate(self) -> bool:
+        """Check if migration is needed (JSON files exist but no data in SQLAlchemy)."""
+        # Check if we have any books in database
+        books = self.db_service.get_all_books()
+        if books:
+            return False  # Already have data, no migration needed
+
+        # Check if JSON files exist
+        return (self.json_db_path.exists() or self.json_state_path.exists())

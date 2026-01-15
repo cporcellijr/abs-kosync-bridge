@@ -1,14 +1,14 @@
 # [START FILE: abs-kosync-enhanced/main.py]
-import json
 import logging
 import os
 import threading
 import time
 import traceback
 from pathlib import Path
-
 import schedule
 
+from src.db.models import Job
+from src.db.models import State, HardcoverDetails, Book
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
@@ -36,8 +36,7 @@ class SyncManager:
                  booklore_client=None,
                  transcriber=None,
                  ebook_parser=None,
-                 db_handler=None,
-                 state_handler=None,
+                 database_service=None,
                  sync_clients: dict[str, SyncClient]=None,
                  kosync_use_percentage_from_server=None,
                  epub_cache_dir=None,
@@ -53,17 +52,13 @@ class SyncManager:
         self.booklore_client = booklore_client
         self.transcriber = transcriber
         self.ebook_parser = ebook_parser
-        self.db_handler = db_handler
-        self.state_handler = state_handler
+        self.database_service = database_service
         self.data_dir = data_dir
         self.books_dir = books_dir
 
         self.kosync_use_percentage_from_server = kosync_use_percentage_from_server if kosync_use_percentage_from_server is not None else os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
         self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
-
-        self.db = self.db_handler.load(default={"mappings": []})
-        self.state = self.state_handler.load(default={})
 
         self._job_queue = []
         self._job_lock = threading.Lock()
@@ -84,32 +79,55 @@ class SyncManager:
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
-        changed = False
-        for mapping in self.db.get('mappings', []):
-            status = mapping.get('status')
-            if status == 'crashed':
-                mapping['status'] = 'active'
-                changed = True
-            elif status == 'processing':
-                # Job was interrupted mid-process, retry it
-                logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(mapping.get('abs_title'))}")
-                mapping['status'] = 'failed_retry_later'
-                mapping['last_error'] = 'Interrupted by restart'
-                changed = True
-        if changed: self.db_handler.save(self.db)
+        try:
+            # Get books with crashed status and reset them to active
+            crashed_books = self.database_service.get_books_by_status('crashed')
+            for book in crashed_books:
+                book.status = 'active'
+                self.database_service.save_book(book)
+                logger.info(f"[JOB] Reset crashed book status: {sanitize_log_data(book.abs_title)}")
+
+            # Get books with processing status and mark them for retry
+            processing_books = self.database_service.get_books_by_status('processing')
+            for book in processing_books:
+                logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(book.abs_title)}")
+                book.status = 'failed_retry_later'
+                self.database_service.save_book(book)
+
+                # Also update the job record with error info
+                job = Job(
+                    abs_id=book.abs_id,
+                    last_attempt=time.time(),
+                    retry_count=0,
+                    last_error='Interrupted by restart'
+                )
+                self.database_service.save_job(job)
+
+        except Exception as e:
+            logger.error(f"Error cleaning up stale jobs: {e}")
 
     def _get_abs_title(self, ab):
         media = ab.get('media', {})
         metadata = media.get('metadata', {})
         return metadata.get('title') or ab.get('name', 'Unknown')
 
-    def _automatch_hardcover(self, mapping):
-        if not self.hardcover_client.is_configured(): return
-        item = self.abs_client.get_item_details(mapping['abs_id'])
-        if not item: return
+    def _automatch_hardcover(self, book):
+        """Match a book with Hardcover using various search strategies."""
+        if not self.hardcover_client.is_configured():
+            return
+
+        # Check if we already have hardcover details for this book
+        existing_details = self.database_service.get_hardcover_details(book.abs_id)
+        if existing_details:
+            return  # Already matched
+
+        item = self.abs_client.get_item_details(book.abs_id)
+        if not item:
+            return
 
         meta = item.get('media', {}).get('metadata', {})
         match = None
+        matched_by = None
 
         # Extract metadata fields for clarity
         isbn = meta.get('isbn')
@@ -117,65 +135,102 @@ class SyncManager:
         title = meta.get('title')
         author = meta.get('authorName')
 
+        # Try different search strategies in order of preference
         if isbn:
             match = self.hardcover_client.search_by_isbn(isbn)
+            if match:
+                matched_by = 'isbn'
+
         if not match and asin:
             match = self.hardcover_client.search_by_isbn(asin)
+            if match:
+                matched_by = 'asin'
+
         if not match and title and author:
             match = self.hardcover_client.search_by_title_author(title, author)
+            if match:
+                matched_by = 'title_author'
+
         if not match and title:
             match = self.hardcover_client.search_by_title_author(title, "")
+            if match:
+                matched_by = 'title'
+
         if match:
-            mapping.update(
-                {'hardcover_book_id': match['book_id'], 'hardcover_edition_id': match.get('edition_id'), 'hardcover_pages': match.get('pages')})
-            self.db_handler.save(self.db)
-            # UPDATED: Set status to 1 (Want to Read) initially
-            self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' status promoted to Want to Read")
-
-    def _sync_to_hardcover(self, mapping, percentage):
-        # 1. Basic checks
-        if not self.hardcover_client.token: return
-        if not mapping.get('hardcover_book_id'): return
-
-        # 2. DEFINE 'ub' BEFORE USING IT
-        ub = self.hardcover_client.get_user_book(mapping['hardcover_book_id'])
-
-        # 3. Now it is safe to check 'if ub:'
-        if ub:
-            total_pages = mapping.get('hardcover_pages') or 0
-
-            # SAFETY: If total_pages is zero we cannot compute a valid page number
-            if total_pages == 0:
-                logger.warning(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(mapping.get('abs_title'))} has 0 pages.")
-                return
-
-            page_num = int(total_pages * percentage)
-            is_finished = percentage > 0.99
-
-            current_status = ub.get('status_id')
-
-            # Handle Status Changes
-            # If Finished, prefer marking as Read (3) first
-            if is_finished and current_status != 3:
-                self.hardcover_client.update_status(mapping['hardcover_book_id'], 3, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: '{sanitize_log_data(mapping.get('abs_title'))}' status promoted to Read")
-                current_status = 3
-
-            # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
-            elif percentage > 0.02 and current_status == 1:
-                self.hardcover_client.update_status(mapping['hardcover_book_id'], 2, mapping.get('hardcover_edition_id'))
-                logger.info(f"📚 Hardcover: '{sanitize_log_data(mapping.get('abs_title'))}' status promoted to Currently Reading")
-                current_status = 2
-
-            # Now it's safe to update progress (Hardcover rejects page updates for Want to Read)
-            self.hardcover_client.update_progress(
-                ub['id'],
-                page_num,
-                edition_id=mapping.get('hardcover_edition_id'),
-                is_finished=is_finished,
-                current_percentage=percentage
+            # Create HardcoverDetails model
+            hardcover_details = HardcoverDetails(
+                abs_id=book.abs_id,
+                hardcover_book_id=match.get('book_id'),
+                hardcover_edition_id=match.get('edition_id'),
+                hardcover_pages=match.get('pages'),
+                isbn=isbn,
+                asin=asin,
+                matched_by=matched_by
             )
+
+            # Save to database
+            self.database_service.save_hardcover_details(hardcover_details)
+
+            # Set initial status to "Want to Read" (status 1)
+            self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
+            logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
+
+    def _sync_to_hardcover(self, book, percentage):
+        """Sync reading progress to Hardcover using HardcoverDetails model."""
+        # Basic checks
+        if not self.hardcover_client.token:
+            return
+
+        # Get hardcover details for this book
+        hardcover_details = self.database_service.get_hardcover_details(book.abs_id)
+        if not hardcover_details or not hardcover_details.hardcover_book_id:
+            return
+
+        # Get user book from Hardcover
+        ub = self.hardcover_client.get_user_book(hardcover_details.hardcover_book_id)
+        if not ub:
+            return
+
+        total_pages = hardcover_details.hardcover_pages or 0
+
+        # Safety check: If total_pages is zero we cannot compute a valid page number
+        if total_pages == 0:
+            logger.warning(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} has 0 pages.")
+            return
+
+        page_num = int(total_pages * percentage)
+        is_finished = percentage > 0.99
+        current_status = ub.get('status_id')
+
+        # Handle Status Changes
+        # If Finished, prefer marking as Read (3) first
+        if is_finished and current_status != 3:
+            self.hardcover_client.update_status(
+                hardcover_details.hardcover_book_id,
+                3,
+                hardcover_details.hardcover_edition_id
+            )
+            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Read")
+            current_status = 3
+
+        # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
+        elif percentage > 0.02 and current_status == 1:
+            self.hardcover_client.update_status(
+                hardcover_details.hardcover_book_id,
+                2,
+                hardcover_details.hardcover_edition_id
+            )
+            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Currently Reading")
+            current_status = 2
+
+        # Update progress (Hardcover rejects page updates for Want to Read)
+        self.hardcover_client.update_progress(
+            ub['id'],
+            page_num,
+            edition_id=hardcover_details.hardcover_edition_id,
+            is_finished=is_finished,
+            current_percentage=percentage
+        )
 
     def _get_local_epub(self, ebook_filename):
         """
@@ -226,64 +281,76 @@ class SyncManager:
         if self._job_thread and self._job_thread.is_alive():
             return
 
-        # 2. Find ONE pending job to start (prioritize pending, then eligible retries)
-        # Reload DB to ensure we have fresh status
-        self.db = self.db_handler.load(default={"mappings": []})
-        target_mapping = None
-        eligible_jobs = []
+        # 2. Find ONE pending book/job to start using database service
+        target_book = None
+        eligible_books = []
         max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
         retry_delay_mins = int(os.getenv("JOB_RETRY_DELAY_MINS", 15))
 
-        for mapping in self.db.get('mappings', []):
-            status = mapping.get('status')
-            if status == 'pending':
-                eligible_jobs.append(mapping)
-                if not target_mapping:
-                    target_mapping = mapping
-            elif status == 'failed_retry_later':
-                last_attempt = mapping.get('last_attempt', 0)
-                retry_count = mapping.get('retry_count', 0)
-                if retry_count >= max_retries:
-                    continue
-                if time.time() - last_attempt > retry_delay_mins * 60:
-                    eligible_jobs.append(mapping)
-                    if not target_mapping:
-                        target_mapping = mapping
+        # Get books with pending status
+        pending_books = self.database_service.get_books_by_status('pending')
+        for book in pending_books:
+            eligible_books.append(book)
+            if not target_book:
+                target_book = book
 
-        if not target_mapping:
+        # Get books that failed but are eligible for retry
+        if not target_book:
+            failed_books = self.database_service.get_books_by_status('failed_retry_later')
+            for book in failed_books:
+                # Check if this book has a job record and if it's eligible for retry
+                job = self.database_service.get_latest_job(book.abs_id)
+                if job:
+                    retry_count = job.retry_count or 0
+                    last_attempt = job.last_attempt or 0
+
+                    # Skip if max retries exceeded
+                    if retry_count >= max_retries:
+                        continue
+
+                    # Check if enough time has passed since last attempt
+                    if time.time() - last_attempt > retry_delay_mins * 60:
+                        eligible_books.append(book)
+                        if not target_book:
+                            target_book = book
+
+        if not target_book:
             return
 
-        total_jobs = len(eligible_jobs)
-        job_idx = (eligible_jobs.index(target_mapping) + 1) if total_jobs else 1
+        total_jobs = len(eligible_books)
+        job_idx = (eligible_books.index(target_book) + 1) if total_jobs else 1
 
-        # 3. Mark as 'processing' immediately so we don't pick it up again
-        logger.info(f"[JOB {job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_mapping.get('abs_title'))}")
+        # 3. Mark book as 'processing' and create/update job record
+        logger.info(f"[JOB {job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_book.abs_title)}")
 
-        # Atomic update to mark processing
-        def set_processing(db):
-            for m in db.get('mappings', []):
-                if m['abs_id'] == target_mapping['abs_id']:
-                    m['status'] = 'processing'
-                    m['last_attempt'] = time.time()
-            return db
+        # Update book status to processing
+        target_book.status = 'processing'
+        self.database_service.save_book(target_book)
 
-        self.db_handler.update(set_processing)
+        # Create or update job record
+        job = Job(
+            abs_id=target_book.abs_id,
+            last_attempt=time.time(),
+            retry_count=0,  # Will be updated on failure
+            last_error=None
+        )
+        self.database_service.save_job(job)
 
         # 4. Launch the heavy work in a separate thread
         self._job_thread = threading.Thread(
             target=self._run_background_job,
-            args=(target_mapping, job_idx, total_jobs),
+            args=(target_book, job_idx, total_jobs),
             daemon=True
         )
         self._job_thread.start()
 
-    def _run_background_job(self, mapping_data, job_idx=1, job_total=1):
+    def _run_background_job(self, book: Book, job_idx=1, job_total=1):
         """
         Threaded worker that handles transcription without blocking the main loop.
         """
-        abs_id = mapping_data['abs_id']
-        abs_title = mapping_data.get('abs_title', 'Unknown')
-        ebook_filename = mapping_data['ebook_filename']
+        abs_id = book.abs_id
+        abs_title = book.abs_title or 'Unknown'
+        ebook_filename = book.ebook_filename
         max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
 
         # Milestone log for background job
@@ -298,11 +365,11 @@ class SyncManager:
 
             # Step 2: Try Fast-Path (SMIL Extraction)
             transcript_path = None
-            
+
             # Fetch item details to get chapters (for time alignment)
             item_details = self.abs_client.get_item_details(abs_id)
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
-            
+
             # Attempt SMIL extraction
             if hasattr(self.transcriber, 'transcribe_from_smil'):
                  transcript_path = self.transcriber.transcribe_from_smil(abs_id, epub_path, chapters)
@@ -316,100 +383,84 @@ class SyncManager:
             # Step 4: Parse EPUB
             self.ebook_parser.extract_text_and_map(epub_path)
 
-            # --- Atomic Success Update ---
-            def success_update(db):
-                for m in db.get('mappings', []):
-                    if m['abs_id'] == abs_id:
-                        m['transcript_file'] = str(transcript_path)
-                        m['status'] = 'active'
-                        m['retry_count'] = 0
-                return db
+            # --- Success Update using database service ---
+            # Update book with transcript path and set to active
+            book.transcript_file = str(transcript_path)
+            book.status = 'active'
+            self.database_service.save_book(book)
 
-            self.db_handler.update(success_update)
+            # Update job record to reset retry count
+            job = self.database_service.get_latest_job(abs_id)
+            if job:
+                job.retry_count = 0
+                job.last_error = None
+                self.database_service.save_job(job)
 
-            self.db = self.db_handler.load()
-
-            # Trigger Hardcover Match (using fresh DB data)
-            final_db = self.db_handler.load()
-            final_mapping = next((m for m in final_db.get('mappings', []) if m['abs_id'] == abs_id), None)
-            if final_mapping:
-                self._automatch_hardcover(final_mapping)
+            # Trigger Hardcover Match using the updated book
+            updated_book = self.database_service.get_book(abs_id)
+            if updated_book:
+                self._automatch_hardcover(updated_book)
 
             logger.info(f"[JOB] Completed: {sanitize_log_data(abs_title)}")
 
         except Exception as e:
             logger.error(f"[FAIL] {sanitize_log_data(abs_title)}: {e}")
 
-            # Atomic Failure Update
-            def fail_update(db):
-                for m in db.get('mappings', []):
-                    if m['abs_id'] == abs_id:
-                        # Increment retry count
-                        curr_retries = m.get('retry_count', 0) + 1
-                        m['retry_count'] = curr_retries
-                        m['last_error'] = str(e)
+            # --- Failure Update using database service ---
+            # Get current job to increment retry count
+            job = self.database_service.get_latest_job(abs_id)
+            current_retry_count = job.retry_count if job else 0
+            new_retry_count = current_retry_count + 1
 
-                        if curr_retries >= max_retries:
-                            m['status'] = 'failed_permanent'
-                            logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
-                        else:
-                            m['status'] = 'failed_retry_later'
-                return db
+            # Update job record
+            from src.db.models import Job
+            updated_job = Job(
+                abs_id=abs_id,
+                last_attempt=time.time(),
+                retry_count=new_retry_count,
+                last_error=str(e)
+            )
+            self.database_service.save_job(updated_job)
 
-            self.db_handler.update(fail_update)
+            # Update book status based on retry count
+            if new_retry_count >= max_retries:
+                book.status = 'failed_permanent'
+                logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
+            else:
+                book.status = 'failed_retry_later'
 
-            self.db = self.db_handler.load()
-
-    def get_text_from_storyteller_fragment(self, ebook_filename, href, fragment_id):
-        return self.ebook_parser.resolve_locator_id(ebook_filename, href, fragment_id)
+            self.database_service.save_book(book)
 
     def sync_cycle(self):
-        self.db = self.db_handler.load(default={"mappings": []})
-        self.state = self.state_handler.load(default={})
+        # Get active books directly from database service
+        active_books = self.database_service.get_books_by_status('active')
+        if active_books:
+            logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
 
-        # --- NEW: Bulk Fetch ABS Progress ---
-        abs_in_progress = {}
-        try:
-            for item in self.abs_client.get_in_progress():
-                abs_in_progress[item['id']] = item
-        except Exception as e:
-            logger.error(f"Failed to bulk fetch progress: {e}")
-            abs_in_progress = {}
-
-        active_books = [m for m in self.db.get('mappings', []) if m.get('status') == 'active']
-        if active_books: logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
-
-        db_dirty = False
-
-        for mapping in self.db.get('mappings', []):
-            if mapping.get('status') != 'active': continue
-
-            abs_id = mapping['abs_id']
-
-            # --- NEW: Update Web Stats ---
-            abs_item = abs_in_progress.get(abs_id)
-            if abs_item:
-                new_prog = abs_item.get('progress', 0) * 100
-                new_dur = abs_item.get('duration', 0)
-
-                if mapping.get('unified_progress') != new_prog or mapping.get('duration') != new_dur:
-                    mapping['unified_progress'] = new_prog
-                    mapping['duration'] = new_dur
-                    db_dirty = True
-
-        for mapping in self.db.get('mappings', []):
-            if mapping.get('status') != 'active': continue
-            abs_id, ko_id, epub = mapping['abs_id'], mapping['kosync_doc_id'], mapping['ebook_filename']
-            logger.info(f"🔄 Syncing '{sanitize_log_data(mapping.get('abs_title', 'Unknown'))}'")
-            title_snip = sanitize_log_data(mapping.get('abs_title', 'Unknown'))
+        # Main sync loop - process each active book
+        for book in active_books:
+            abs_id = book.abs_id
+            logger.info(f"🔄 Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
+            title_snip = sanitize_log_data(book.abs_title or 'Unknown')
 
             try:
-                prev = self.state.get(abs_id, {})
+                # Get previous state for this book from database
+                previous_states = self.database_service.get_states_for_book(abs_id)
+
+                # Create a mapping of client names to their previous states
+                prev_states_by_client = {}
+                last_updated = 0
+                for state in previous_states:
+                    prev_states_by_client[state.client_name] = state
+                    if state.last_updated and state.last_updated > last_updated:
+                        last_updated = state.last_updated
 
                 # Build config using sync_clients - each client fetches its own state
                 config: dict[str, ServiceState] = {}
                 for client_name, client in self.sync_clients.items():
-                    state = client.get_service_state(mapping, prev, title_snip)
+                    # Get the previous state for this specific client
+                    prev_state = prev_states_by_client.get(client_name.lower())
+                    state = client.get_service_state(book, prev_state, title_snip)
                     if state is not None:
                         config[client_name] = state
                         logger.debug(f"[{title_snip}] {client_name} state: {state.current}")
@@ -425,10 +476,6 @@ class SyncManager:
 
                 # Check if all 'delta' fields in config are zero, if so, skip processing
                 if all(round(cfg.delta, 2) == 0 for cfg in config.values()):
-                    if abs_id not in self.state:
-                        # no state yet, initialize
-                        self.state[abs_id] = {}
-                    self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                     continue
 
                 # check for sync delta threshold between clients. This is to prevent small differences causing constant hops between who is the leader
@@ -438,10 +485,6 @@ class SyncManager:
                     min_progress = min(progress_values)
                     progress_diff = max_progress - min_progress
                     if progress_diff < self.sync_delta_between_clients:
-                        if abs_id not in self.state:
-                            # no state yet, initialize
-                            self.state[abs_id] = {}
-                        self.state[abs_id]['last_updated'] = prev.get('last_updated', 0)
                         logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
                         continue
 
@@ -488,12 +531,13 @@ class SyncManager:
                 leader_state = config[leader]
 
                 # Get canonical text from leader
-                txt = leader_client.get_text_from_current_state(mapping, leader_state)
+                txt = leader_client.get_text_from_current_state(book, leader_state)
                 if not txt:
                     logger.warning(f"⚠️ [{title_snip}] Could not get text from leader {leader}")
                     continue
 
                 # Get locator (percentage, xpath, etc) from text
+                epub = book.ebook_filename
                 locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
                 if not locator:
                     logger.warning(f"⚠️ [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
@@ -505,42 +549,57 @@ class SyncManager:
                     if client_name == leader or client_name not in config:
                         continue
                     request = UpdateProgressRequest(locator, txt, previous_location=config[client_name].previous_pct)
-                    result = client.update_progress(mapping, request)
+                    result = client.update_progress(book, request)
                     results[client_name] = result
-                    if result.success:
-                        logger.info(f"✅ [{title_snip}] {client_name} update successful to {result.location}")
-
                 # Set final_pct based on results (use match_pct or aggregate if needed)
                 final_pct = locator.percentage
 
+                # Hardcover sync using HardcoverDetails model
                 if final_pct > 0.01:
-                    if not mapping.get('hardcover_book_id'): self._automatch_hardcover(mapping)
-                    if mapping.get('hardcover_book_id'): self._sync_to_hardcover(mapping, final_pct)
+                    self._automatch_hardcover(book)
+                    hardcover_details = self.database_service.get_hardcover_details(book.abs_id)
+                    if hardcover_details and hardcover_details.hardcover_book_id:
+                        self._sync_to_hardcover(book, final_pct)
 
-                # Build state from sync results and leader state
-                new_state = {'last_updated': time.time()}
+                # Save states directly to database service using State models
+                current_time = time.time()
 
-                # Add leader state with client name prefix
+                # Save leader state
                 leader_state_data = leader_state.current
-                for key, value in leader_state_data.items():
-                    new_state[f"{leader.lower()}_{key}"] = value
 
-                # Add sync results from other clients with client name prefix
+                leader_state_model = State(
+                    abs_id=book.abs_id,
+                    client_name=leader.lower(),
+                    last_updated=current_time,
+                    percentage=leader_state_data.get('pct'),
+                    timestamp=leader_state_data.get('ts'),
+                    xpath=leader_state_data.get('xpath'),
+                    cfi=leader_state_data.get('cfi')
+                )
+                self.database_service.save_state(leader_state_model)
+
+                # Save sync results from other clients
                 for client_name, result in results.items():
                     if result.success:
                         # Use updated_state if provided, otherwise fall back to basic state
                         state_data = result.updated_state if result.updated_state else {'pct': result.location}
-                        for key, value in state_data.items():
-                            new_state[f"{client_name.lower()}_{key}"] = value
 
-                self.state[abs_id] = new_state
-                self.state_handler.save(self.state)
-                logger.info(f"💾 [{title_snip}] State saved to last_state.json")
+                        client_state_model = State(
+                            abs_id=book.abs_id,
+                            client_name=client_name.lower(),
+                            last_updated=current_time,
+                            percentage=state_data.get('pct'),
+                            timestamp=state_data.get('ts'),
+                            xpath=state_data.get('xpath'),
+                            cfi=state_data.get('cfi')
+                        )
+                        self.database_service.save_state(client_state_model)
+
+                logger.info(f"💾 [{title_snip}] States saved to database")
 
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"Sync error: {e}", e)
-        if db_dirty: self.db_handler.save(self.db)
 
     def run_daemon(self):
         """Legacy method - daemon is now run from web_server.py"""

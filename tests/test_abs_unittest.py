@@ -4,8 +4,12 @@ Unit test for the ABS leading scenario using unittest.TestCase.
 """
 
 import unittest
+import sys
 from pathlib import Path
-from base_sync_test import BaseSyncCycleTestCase
+# Add the project root to the path to resolve module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from tests.base_sync_test import BaseSyncCycleTestCase
 
 class TestABSLeadsSync(BaseSyncCycleTestCase):
     """Test case for ABS leading sync_cycle scenario."""
@@ -24,12 +28,21 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
     def get_test_state_data(self):
         """Return ABS test state data."""
         return {
-            'test-abs-id-123': {
-                'abs_ts': 100.0,  # 10%
-                'abs_pct': 0.1,
-                'kosync_pct': 0.2,  # 20%
-                'storyteller_pct': 0.1,  # 10%
-                'booklore_pct': 0.0,  # 0%
+            'abs': {
+                'pct': 0.1,  # 10%
+                'ts': 100.0,  # timestamp
+                'last_updated': 1234567890
+            },
+            'kosync': {
+                'pct': 0.2,  # 20%
+                'last_updated': 1234567890
+            },
+            'storyteller': {
+                'pct': 0.1,  # 10%
+                'last_updated': 1234567890
+            },
+            'booklore': {
+                'pct': 0.0,  # 0%
                 'last_updated': 1234567890
             }
         }

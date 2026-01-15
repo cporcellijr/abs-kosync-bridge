@@ -4,17 +4,13 @@ Unit test for the BookLore leading scenario using unittest.TestCase.
 """
 
 import sys
-import os
 import unittest
 from pathlib import Path
 
-# Add the tests directory and parent directory to Python path
-test_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(test_dir)
-sys.path.insert(0, test_dir)
-sys.path.insert(0, parent_dir)
+# Add the project root to the path to resolve module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from base_sync_test import BaseSyncCycleTestCase
+from tests.base_sync_test import BaseSyncCycleTestCase
 
 
 class TestBookLoreLeadsSync(BaseSyncCycleTestCase):
@@ -34,12 +30,21 @@ class TestBookLoreLeadsSync(BaseSyncCycleTestCase):
     def get_test_state_data(self):
         """Return BookLore test state data."""
         return {
-            'test-abs-id-booklore': {
-                'abs_ts': 300.0,  # 30%
-                'abs_pct': 0.3,
-                'kosync_pct': 0.4,  # 40%
-                'storyteller_pct': 0.5,  # 50%
-                'booklore_pct': 0.6,  # 60%
+            'abs': {
+                'pct': 0.3,  # 30%
+                'ts': 300.0,  # timestamp
+                'last_updated': 1234567890
+            },
+            'kosync': {
+                'pct': 0.4,  # 40%
+                'last_updated': 1234567890
+            },
+            'storyteller': {
+                'pct': 0.5,  # 50%
+                'last_updated': 1234567890
+            },
+            'booklore': {
+                'pct': 0.6,  # 60%
                 'last_updated': 1234567890
             }
         }
