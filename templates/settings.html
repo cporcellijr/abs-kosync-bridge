@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Settings - ABS-KoSync</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; 
+            background: #0a0a0a; color: #ffffff; min-height: 100vh; 
+        }
+        
+        /* Nav Bar (Matches Index) */
+        .top-nav {
+            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            backdrop-filter: blur(20px); padding: 20px 40px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .logo-section h1 {
+            font-size: 24px; font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .nav-actions { display: flex; gap: 12px; }
+        .btn {
+            padding: 8px 16px; background: rgba(255,255,255,0.05); color: #ccc;
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+            text-decoration: none; font-size: 14px; transition: all 0.2s; cursor: pointer;
+        }
+        .btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .btn-primary { 
+            background: rgba(102, 126, 234, 0.2); color: #667eea; border-color: rgba(102, 126, 234, 0.4); 
+        }
+        .btn-primary:hover {
+            background: rgba(102, 126, 234, 0.3); border-color: rgba(102, 126, 234, 0.6);
+        }
+
+        /* Container */
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; padding-bottom: 100px; }
+
+        /* Settings Form Structure */
+        .settings-form { display: flex; flex-direction: column; gap: 30px; }
+        
+        .settings-section {
+            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 12px; overflow: hidden;
+        }
+        
+        .section-header {
+            padding: 20px; background: rgba(255,255,255,0.02);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; user-select: none;
+        }
+        .section-header h3 { font-size: 18px; color: #fff; margin: 0; }
+        .section-toggle { font-size: 12px; color: #667eea; font-weight: 600; text-transform: uppercase; }
+        
+        .section-body { padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .section-body.collapsed { display: none; }
+        .full-width { grid-column: span 2; }
+
+        /* Form Inputs */
+        .form-group { display: flex; flex-direction: column; gap: 8px; }
+        .form-group label { font-size: 13px; color: rgba(255,255,255,0.6); font-weight: 600; }
+        .form-group input, .form-group select {
+            padding: 10px; background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+            color: #fff; font-size: 14px; width: 100%;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none; border-color: #667eea;
+        }
+        .help-text { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: -4px; }
+
+        /* Custom Checkbox */
+        .checkbox-wrapper {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.05); cursor: pointer;
+        }
+        .checkbox-wrapper input { width: 16px; height: 16px; cursor: pointer; accent-color: #667eea; }
+        .checkbox-wrapper label { margin: 0; cursor: pointer; color: #fff; font-size: 14px; }
+
+        /* Flash Messages */
+        .flash { 
+            padding: 15px; border-radius: 8px; margin-bottom: 20px; 
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .flash-success { background: rgba(76, 175, 80, 0.1); border-color: rgba(76, 175, 80, 0.3); color: #81c784; }
+        .flash-error { background: rgba(244, 67, 54, 0.1); border-color: rgba(244, 67, 54, 0.3); color: #e57373; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .section-body { grid-template-columns: 1fr; }
+            .full-width { grid-column: span 1; }
+        }
+        
+        .submit-bar {
+            position: fixed; bottom: 20px; right: 20px; left: 20px; z-index: 90;
+            max-width: 960px; margin: 0 auto;
+            background: rgba(20,20,20,0.9); backdrop-filter: blur(10px);
+            padding: 15px; border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.3);
+            display: flex; justify-content: flex-end; align-items: center; gap: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .restart-warn { color: #FF9800; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    </style>
+</head>
+<body>
+    <div class="top-nav">
+        <div class="logo-section">
+            <a href="/" style="text-decoration:none;"><h1>📚 ABS-KoSync</h1></a>
+        </div>
+        <div class="nav-actions">
+            <a href="/" class="btn">← Dashboard</a>
+            <a href="/logs" class="btn">Logs</a>
+        </div>
+    </div>
+
+    <div class="container">
+        {% if message %}
+        <div class="flash {% if is_error %}flash-error{% else %}flash-success{% endif %}">
+            {{ message }}
+        </div>
+        {% endif %}
+
+        <div class="section-header" style="background:none; border:none; padding-left:0; margin-bottom:20px;">
+            <h2 style="font-size: 28px;">⚙️ Application Settings</h2>
+        </div>
+
+        <form method="POST" action="/settings" class="settings-form">
+            
+            <div class="settings-section">
+                <div class="section-header">
+                    <h3>General Settings</h3>
+                </div>
+                <div class="section-body">
+                    <div class="form-group">
+                        <label>Timezone</label>
+                        <input type="text" name="TZ" value="{{ get_val('TZ') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Log Level</label>
+                        <select name="LOG_LEVEL">
+                            {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] %}
+                            <option value="{{ level }}" {% if get_val('LOG_LEVEL') == level %}selected{% endif %}>{{ level }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Data Directory (Internal)</label>
+                        <input type="text" name="DATA_DIR" value="{{ get_val('DATA_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Books Directory (Internal)</label>
+                        <input type="text" name="BOOKS_DIR" value="{{ get_val('BOOKS_DIR') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section" style="border-color: rgba(102, 126, 234, 0.3);">
+                <div class="section-header">
+                    <h3 style="color: #667eea;">Audiobookshelf (Required)</h3>
+                </div>
+                <div class="section-body">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="ABS_SERVER" value="{{ get_val('ABS_SERVER') }}" required>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>API Token</label>
+                        <input type="password" name="ABS_KEY" value="{{ get_val('ABS_KEY') }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Library ID</label>
+                        <input type="text" name="ABS_LIBRARY_ID" value="{{ get_val('ABS_LIBRARY_ID') }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Collection Name (Auto-Add)</label>
+                        <input type="text" name="ABS_COLLECTION_NAME" value="{{ get_val('ABS_COLLECTION_NAME') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Progress Offset (Seconds)</label>
+                        <input type="number" name="ABS_PROGRESS_OFFSET_SECONDS" value="{{ get_val('ABS_PROGRESS_OFFSET_SECONDS') }}">
+                        <div class="help-text">Rewind progress sent to ABS (e.g. -60)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>KOSync Server</h3>
+                    <span class="section-toggle">{% if get_val('KOSYNC_SERVER') %}open{% else %}Config{% endif %}</span>
+                </div>
+                <div class="section-body {% if not get_val('KOSYNC_SERVER') %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="KOSYNC_SERVER" value="{{ get_val('KOSYNC_SERVER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="KOSYNC_USER" value="{{ get_val('KOSYNC_USER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Password (or existing hash)</label>
+                        <input type="password" name="KOSYNC_KEY" value="{{ get_val('KOSYNC_KEY') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Hash Method</label>
+                        <select name="KOSYNC_HASH_METHOD">
+                            <option value="content" {% if get_val('KOSYNC_HASH_METHOD') == 'content' %}selected{% endif %}>Content (Slower/Accurate)</option>
+                            <option value="filename" {% if get_val('KOSYNC_HASH_METHOD') == 'filename' %}selected{% endif %}>Filename (Fast)</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="kosync_pct" name="KOSYNC_USE_PERCENTAGE_FROM_SERVER" {% if get_bool('KOSYNC_USE_PERCENTAGE_FROM_SERVER') %}checked{% endif %}>
+                        <label for="kosync_pct">Use Percentage from Server (Ignore Text Matching)</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Storyteller</h3>
+                    <span class="section-toggle">{% if get_val('STORYTELLER_API_URL') %}open{% else %}Config{% endif %}</span>
+                </div>
+                <div class="section-body {% if not get_val('STORYTELLER_API_URL') %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>API URL</label>
+                        <input type="text" name="STORYTELLER_API_URL" value="{{ get_val('STORYTELLER_API_URL') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="STORYTELLER_USER" value="{{ get_val('STORYTELLER_USER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="STORYTELLER_PASSWORD" value="{{ get_val('STORYTELLER_PASSWORD') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>DB Path (Legacy)</label>
+                        <input type="text" name="STORYTELLER_DB_PATH" value="{{ get_val('STORYTELLER_DB_PATH') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>User ID (Legacy)</label>
+                        <input type="text" name="STORYTELLER_USER_ID" value="{{ get_val('STORYTELLER_USER_ID') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Booklore</h3>
+                    <span class="section-toggle">{% if get_val('BOOKLORE_SERVER') %}open{% else %}Config{% endif %}</span>
+                </div>
+                <div class="section-body {% if not get_val('BOOKLORE_SERVER') %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="BOOKLORE_SERVER" value="{{ get_val('BOOKLORE_SERVER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="BOOKLORE_USER" value="{{ get_val('BOOKLORE_USER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="BOOKLORE_PASSWORD" value="{{ get_val('BOOKLORE_PASSWORD') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Shelf Name</label>
+                        <input type="text" name="BOOKLORE_SHELF_NAME" value="{{ get_val('BOOKLORE_SHELF_NAME') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Hardcover.app</h3>
+                    <span class="section-toggle">{% if get_val('HARDCOVER_TOKEN') %}open{% else %}Config{% endif %}</span>
+                </div>
+                <div class="section-body {% if not get_val('HARDCOVER_TOKEN') %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>API Token</label>
+                        <input type="password" name="HARDCOVER_TOKEN" value="{{ get_val('HARDCOVER_TOKEN') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Sync Behavior</h3>
+                    <span class="section-toggle">Settings</span>
+                </div>
+                <div class="section-body collapsed">
+                    <div class="form-group">
+                        <label>Sync Period (Minutes)</label>
+                        <input type="number" name="SYNC_PERIOD_MINS" value="{{ get_val('SYNC_PERIOD_MINS') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Min ABS Change (Seconds)</label>
+                        <input type="number" name="SYNC_DELTA_ABS_SECONDS" value="{{ get_val('SYNC_DELTA_ABS_SECONDS') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Min Ebook Change (%)</label>
+                        <input type="number" step="0.1" name="SYNC_DELTA_KOSYNC_PERCENT" value="{{ get_val('SYNC_DELTA_KOSYNC_PERCENT') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Client Diff Threshold (%)</label>
+                        <input type="number" step="0.1" name="SYNC_DELTA_BETWEEN_CLIENTS_PERCENT" value="{{ get_val('SYNC_DELTA_BETWEEN_CLIENTS_PERCENT') }}">
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="abs_ebook" name="SYNC_ABS_EBOOK" {% if get_bool('SYNC_ABS_EBOOK') %}checked{% endif %}>
+                        <label for="abs_ebook">Enable ABS Ebook Sync (Bi-directional)</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Text & Transcription</h3>
+                    <span class="section-toggle">Settings</span>
+                </div>
+                <div class="section-body collapsed">
+                    <div class="form-group">
+                        <label>Fuzzy Match Threshold (0-100)</label>
+                        <input type="number" name="FUZZY_MATCH_THRESHOLD" value="{{ get_val('FUZZY_MATCH_THRESHOLD') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Whisper Model</label>
+                        <select name="WHISPER_MODEL">
+                            {% for model in ['tiny', 'base', 'small', 'medium', 'large'] %}
+                            <option value="{{ model }}" {% if get_val('WHISPER_MODEL') == model %}selected{% endif %}>{{ model }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="xpath_fallback" name="XPATH_FALLBACK_TO_PREVIOUS_SEGMENT" {% if get_bool('XPATH_FALLBACK_TO_PREVIOUS_SEGMENT') %}checked{% endif %}>
+                        <label for="xpath_fallback">XPath Fallback (Try previous segment if missing)</label>
+                    </div>
+                    <div class="form-group">
+                        <label>Ebook Cache Size</label>
+                        <input type="number" name="EBOOK_CACHE_SIZE" value="{{ get_val('EBOOK_CACHE_SIZE', '3') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Book Linker Directories</h3>
+                    <span class="section-toggle">Paths</span>
+                </div>
+                <div class="section-body collapsed">
+                     <div class="form-group">
+                        <label>Linker Source Dir</label>
+                        <input type="text" name="LINKER_BOOKS_DIR" value="{{ get_val('LINKER_BOOKS_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Processing Dir</label>
+                        <input type="text" name="PROCESSING_DIR" value="{{ get_val('PROCESSING_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Storyteller Ingest Dir</label>
+                        <input type="text" name="STORYTELLER_INGEST_DIR" value="{{ get_val('STORYTELLER_INGEST_DIR') }}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Telegram Notifications</h3>
+                    <span class="section-toggle">{% if get_val('TELEGRAM_BOT_TOKEN') %}open{% else %}Config{% endif %}</span>
+                </div>
+                <div class="section-body {% if not get_val('TELEGRAM_BOT_TOKEN') %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Bot Token</label>
+                        <input type="password" name="TELEGRAM_BOT_TOKEN" value="{{ get_val('TELEGRAM_BOT_TOKEN') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Chat ID</label>
+                        <input type="text" name="TELEGRAM_CHAT_ID" value="{{ get_val('TELEGRAM_CHAT_ID') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Min Log Level</label>
+                        <select name="TELEGRAM_LOG_LEVEL">
+                            {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] %}
+                            <option value="{{ level }}" {% if get_val('TELEGRAM_LOG_LEVEL', 'ERROR') == level %}selected{% endif %}>{{ level }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="submit-bar">
+                <span class="restart-warn">⚠️ Changes require container restart</span>
+                <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function toggleSection(header) {
+            const body = header.nextElementSibling;
+            body.classList.toggle('collapsed');
+            const span = header.querySelector('.section-toggle');
+        }
+    </script>
+</body>
+</html>

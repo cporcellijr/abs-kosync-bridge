@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import threading
 import time
+import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -34,6 +36,34 @@ app.secret_key = "kosync-queue-secret-unified-app"
 # `logging.basicConfig` here to prevent adding duplicate handlers.
 logger = logging.getLogger(__name__)
 logger.info("Starting ABS-KOSync Bridge Web Server")
+
+def load_settings():
+    """
+    Priority Level 1: Load settings from settings.json
+    Priority Level 2: Fallback to existing os.environ (Docker Compose)
+    """
+    try:
+        data_dir = os.environ.get('DATA_DIR', '/data')
+        settings_path = Path(data_dir) / 'settings.json'
+        
+        if settings_path.exists():
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+                count = 0
+                for key, value in settings.items():
+                    # [FIX] Ignore None and Empty Strings to prevent int("") crashes
+                    if value is not None and str(value).strip() != "":
+                        if isinstance(value, bool):
+                            os.environ[key] = str(value).lower()
+                        else:
+                            os.environ[key] = str(value)
+                        count += 1
+            print(f"⚙️  Loaded {count} settings from {settings_path}")
+    except Exception as e:
+        print(f"⚠️  Error loading settings: {e}")
+
+# Run immediately on startup
+load_settings()
 
 container = create_container()
 
@@ -356,6 +386,14 @@ def sync_daemon():
 sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
 sync_daemon_thread.start()
 logger.info("Sync daemon thread started")
+
+def restart_server():
+    """Restarts the current Python process to reload settings."""
+    logger.info("♻️  Restarting application to apply new settings...")
+    time.sleep(1.5)  # Give Flask time to send the redirect response
+    # Re-execute the current script with the same arguments
+    # This replaces the current process, so the PID stays the same (keeping start.sh happy)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 # ---------------- ORIGINAL ABS-KOSYNC HELPERS ----------------
 
@@ -1106,6 +1144,91 @@ def api_logs_live():
     except Exception as e:
         logger.error(f"Error fetching live logs: {e}")
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
+    
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    data_dir = os.environ.get('DATA_DIR', '/data')
+    settings_path = Path(data_dir) / 'settings.json'
+    
+    # Priority Level 3: Application Defaults
+    DEFAULTS = {
+        'TZ': 'America/New_York',
+        'LOG_LEVEL': 'INFO',
+        'DATA_DIR': '/data',
+        'BOOKS_DIR': '/books',
+        'ABS_COLLECTION_NAME': 'Synced with KOReader',
+        'BOOKLORE_SHELF_NAME': 'Kobo',
+        'SYNC_PERIOD_MINS': '5',
+        'SYNC_DELTA_ABS_SECONDS': '60',
+        'SYNC_DELTA_KOSYNC_PERCENT': '0.5',
+        'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
+        'SYNC_DELTA_KOSYNC_WORDS': '400',
+        'FUZZY_MATCH_THRESHOLD': '80',
+        'WHISPER_MODEL': 'tiny',
+        'JOB_MAX_RETRIES': '5',
+        'JOB_RETRY_DELAY_MINS': '15',
+        'MONITOR_INTERVAL': '3600',
+        'LINKER_BOOKS_DIR': '/linker_books',
+        'PROCESSING_DIR': '/processing',
+        'STORYTELLER_INGEST_DIR': '/linker_books',
+        'AUDIOBOOKS_DIR': '/audiobooks',
+        'ABS_PROGRESS_OFFSET_SECONDS': '0', # Added missing default
+        'EBOOK_CACHE_SIZE': '3'             # Added missing default
+    }
+
+    if request.method == 'POST':
+        bool_keys = [
+            'KOSYNC_USE_PERCENTAGE_FROM_SERVER', 
+            'SYNC_ABS_EBOOK', 
+            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
+        ]
+        
+        new_settings = {}
+        
+        for key, value in request.form.items():
+            if key in bool_keys: continue
+            
+            # [FIX] Only save non-empty strings
+            clean_value = value.strip()
+            if clean_value:
+                new_settings[key] = clean_value
+            
+        for key in bool_keys:
+            new_settings[key] = (key in request.form)
+            
+        try:
+            with open(settings_path, 'w') as f:
+                json.dump(new_settings, f, indent=2)
+            
+            # Trigger Auto-Restart
+            threading.Thread(target=restart_server).start()
+                
+            session['message'] = "Settings saved. Application is restarting..."
+            session['is_error'] = False
+        except Exception as e:
+            session['message'] = f"Error saving settings: {e}"
+            session['is_error'] = True
+            
+        return redirect(url_for('settings'))
+
+    # GET Request
+    message = session.pop('message', None)
+    is_error = session.pop('is_error', False)
+    
+    def get_val(key, default_val=None):
+        if key in os.environ: return os.environ[key]
+        if key in DEFAULTS: return DEFAULTS[key]
+        return default_val if default_val is not None else ''
+        
+    def get_bool(key):
+        val = os.environ.get(key, 'false')
+        return val.lower() in ('true', '1', 'yes', 'on')
+
+    return render_template('settings.html', 
+                         get_val=get_val, 
+                         get_bool=get_bool, 
+                         message=message, 
+                         is_error=is_error)
 
 @app.route('/view_log')
 def view_log():
