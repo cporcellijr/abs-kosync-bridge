@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>ABS-KoSync Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,10 +21,10 @@
 
         /* Top Navigation Bar */
         .top-nav {
-            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -120,9 +121,9 @@
             align-items: center;
             margin-bottom: 30px;
             padding: 16px 24px;
-            background: rgba(255,255,255,0.03);
+            background: rgba(255, 255, 255, 0.03);
             border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.05);
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
         .control-group {
@@ -134,7 +135,7 @@
         .control-group label {
             font-size: 14px;
             font-weight: 600;
-            color: rgba(255,255,255,0.7);
+            color: rgba(255, 255, 255, 0.7);
         }
 
         /* UPDATED: Clickable Arrow Styles */
@@ -147,7 +148,7 @@
             padding: 4px 8px;
             border-radius: 4px;
             transition: all 0.2s;
-            background: rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.05);
         }
 
         .sort-direction:hover {
@@ -158,8 +159,8 @@
 
         select {
             padding: 8px 16px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             color: #ffffff;
             font-size: 14px;
@@ -174,14 +175,14 @@
         }
 
         select:hover {
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
             border-color: rgba(102, 126, 234, 0.3);
         }
 
         select:focus {
             outline: none;
             border-color: #667eea;
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
         }
 
         /* Book Grid - COMPACT DYNAMIC SCALING */
@@ -219,7 +220,7 @@
             aspect-ratio: 1/1;
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
             transition: all 0.4s;
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
         }
@@ -248,7 +249,7 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             backdrop-filter: blur(10px);
             display: flex;
             align-items: center;
@@ -275,14 +276,28 @@
             font-size: 9px;
             font-weight: 700;
             text-transform: uppercase;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             backdrop-filter: blur(10px);
         }
 
-        .status-active { color: #4CAF50; border: 1px solid rgba(76, 175, 80, 0.3); }
-        .status-pending { color: #FF9800; border: 1px solid rgba(255, 152, 0, 0.3); }
-        .status-processing { color: #2196F3; border: 1px solid rgba(33, 150, 243, 0.3); }
-        .status-failed, .status-crashed, .status-failed_retry_later {
+        .status-active {
+            color: #4CAF50;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+
+        .status-pending {
+            color: #FF9800;
+            border: 1px solid rgba(255, 152, 0, 0.3);
+        }
+
+        .status-processing {
+            color: #2196F3;
+            border: 1px solid rgba(33, 150, 243, 0.3);
+        }
+
+        .status-failed,
+        .status-crashed,
+        .status-failed_retry_later {
             color: #f44336;
             border: 1px solid rgba(244, 67, 54, 0.3);
         }
@@ -293,7 +308,7 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.95) 60%);
+            background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.95) 60%);
             padding: 40px 12px 12px 12px;
             opacity: 0;
             transition: opacity 0.3s;
@@ -314,7 +329,7 @@
 
         .book-filename {
             font-size: 11px;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.6);
             margin-bottom: 8px;
             display: -webkit-box;
             -webkit-line-clamp: 1;
@@ -335,7 +350,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            color: rgba(255,255,255,0.8);
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .progress-item img,
@@ -347,7 +362,7 @@
 
         .progress-bar-mini {
             height: 3px;
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             border-radius: 2px;
             overflow: hidden;
             margin-bottom: 6px;
@@ -361,7 +376,7 @@
 
         .last-sync {
             font-size: 9px;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.5);
         }
 
         /* Quick Actions */
@@ -374,8 +389,8 @@
         .action-btn {
             flex: 1;
             padding: 6px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 4px;
             color: white;
             font-size: 10px;
@@ -385,8 +400,8 @@
         }
 
         .action-btn:hover {
-            background: rgba(255,255,255,0.2);
-            border-color: rgba(255,255,255,0.4);
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
         }
 
         .action-btn.danger {
@@ -413,7 +428,7 @@
         .empty-state {
             text-align: center;
             padding: 120px 40px;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.5);
         }
 
         .empty-state-icon {
@@ -424,7 +439,7 @@
 
         .empty-state h2 {
             font-size: 28px;
-            color: rgba(255,255,255,0.7);
+            color: rgba(255, 255, 255, 0.7);
             margin-bottom: 12px;
         }
 
@@ -470,6 +485,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="top-nav">
         <div class="logo-section">
@@ -477,6 +493,7 @@
         </div>
 
         <div class="nav-actions">
+            <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
@@ -486,15 +503,16 @@
 
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <div class="flash-messages" style="margin-bottom:16px;">
-              {% for category, msg in messages %}
-                <div class="flash flash-{{ category }}" style="padding:12px;border-radius:8px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.04);">
-                  {{ msg }}
-                </div>
-              {% endfor %}
+        {% if messages %}
+        <div class="flash-messages" style="margin-bottom:16px;">
+            {% for category, msg in messages %}
+            <div class="flash flash-{{ category }}"
+                style="padding:12px;border-radius:8px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.04);">
+                {{ msg }}
             </div>
-          {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
         {% endwith %}
         {% if mappings %}
         <div class="controls-bar">
@@ -516,16 +534,13 @@
 
         <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-            <div class="book-card"
-                 data-progress="{{ mapping.unified_progress }}"
-                 data-last-sync="{{ mapping.last_sync }}"
-                 data-status="{{ mapping.status }}"
-                 data-title="{{ mapping.abs_title }}">
+            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %} <div class="book-card"
+                data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
+                data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
                 <div class="book-cover-container">
                     {% if mapping.cover_url %}
                     <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                     <div class="book-cover-placeholder" style="display:none;">📖</div>
                     {% else %}
                     <div class="book-cover-placeholder">📖</div>
@@ -535,206 +550,209 @@
                         {{ mapping.status }}
                     </div>
 
-                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-                    <div class="progress-ring reading">
+                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100
+                        %} <div class="progress-ring reading">
                         {{ '%.0f' | format(mapping.unified_progress) }}%
-                    </div>
-                    {% endif %}
+                </div>
+                {% endif %}
 
-                    <div class="book-overlay">
-                        <div class="book-title">{{ mapping.abs_title }}</div>
-                        <div class="book-filename">{{ mapping.ebook_filename }}</div>
+                <div class="book-overlay">
+                    <div class="book-title">{{ mapping.abs_title }}</div>
+                    <div class="book-filename">{{ mapping.ebook_filename }}</div>
 
-                        {% if mapping.status == 'active' %}
-                        <div class="progress-details">
-                            {% if integrations.abs %}
-                            <div class="progress-item" title="Audiobookshelf">
-                                <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
-                                <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.kosync %}
-                            <div class="progress-item" title="KOReader">
-                                <span>📖</span>
-                                <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.storyteller %}
-                            <div class="progress-item" title="Storyteller">
-                                <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
-                                <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.booklore %}
-                            <div class="progress-item" title="Booklore">
-                                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
-                                <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
-                            </div>
-                            {% endif %}
-
-                            {% if integrations.hardcover %}
-                            <div class="progress-item"
-                                 title="Hardcover:
-                                   {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                                 onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                                 style="cursor: pointer; position: relative;">
-                              <img src="/static/hardcover.png" alt="HC"
-                                   style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                                   onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-                              <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                              {% if mapping.hardcover_book_id %}
-                                <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-                              {% else %}
-                                <span style="font-size: 10px; opacity: 0.5;">+</span>
-                              {% endif %}
-                            </div>
-                            {% endif %}
+                    {% if mapping.status == 'active' %}
+                    <div class="progress-details">
+                        {% if integrations.abs %}
+                        <div class="progress-item" title="Audiobookshelf">
+                            <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
+                            <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600,
+                                ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
                         </div>
-
-                        <div class="progress-bar-mini">
-                            <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+                        {% endif %}
+                        {% if integrations.kosync %}
+                        <div class="progress-item" title="KOReader">
+                            <span>📖</span>
+                            <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
                         </div>
-
-                        <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                        {% endif %}
+                        {% if integrations.storyteller %}
+                        <div class="progress-item" title="Storyteller">
+                            <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
+                            <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
+                        </div>
+                        {% endif %}
+                        {% if integrations.booklore %}
+                        <div class="progress-item" title="Booklore">
+                            <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                            <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
+                        </div>
                         {% endif %}
 
-                        <div class="quick-actions">
-                             <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
-                                <button type="submit" class="action-btn warning"
-                                        onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
-                                    🔄 Clear
-                                </button>
-                            </form>
-                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
-                                <button type="submit" class="action-btn danger"
-                                        onclick="return confirm('Delete this mapping?')">
-                                    🗑️ Delete
-                                </button>
-                            </form>
+                        {% if integrations.hardcover %}
+                        <div class="progress-item"
+                            title="Hardcover:
+                                   {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
+                            onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                            style="cursor: pointer; position: relative;">
+                            <img src="/static/hardcover.png" alt="HC"
+                                style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                            <span
+                                style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
+
+                            {% if mapping.hardcover_book_id %}
+                            <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
+                            {% else %}
+                            <span style="font-size: 10px; opacity: 0.5;">+</span>
+                            {% endif %}
                         </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="progress-bar-mini">
+                        <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+                    </div>
+
+                    <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                    {% endif %}
+
+                    <div class="quick-actions">
+                        <form method="POST" action="/clear-progress/{{ mapping.abs_id }}"
+                            style="flex: 1; margin-right: 6px;">
+                            <button type="submit" class="action-btn warning"
+                                onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                                🔄 Clear
+                            </button>
+                        </form>
+                        <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
+                            <button type="submit" class="action-btn danger"
+                                onclick="return confirm('Delete this mapping?')">
+                                🗑️ Delete
+                            </button>
+                        </form>
                     </div>
                 </div>
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+    </div>
+
+    <div class="section-header" style="margin-top: 80px;">
+        <h2>All Books</h2>
+    </div>
+
+    <div class="book-grid" id="all-books-grid">
+        {% for mapping in mappings %}
+        <div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
+            data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
+            <div class="book-cover-container">
+                {% if mapping.cover_url %}
+                <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="book-cover-placeholder" style="display:none;">📖</div>
+                {% else %}
+                <div class="book-cover-placeholder">📖</div>
+                {% endif %}
+
+                <div class="status-badge-mini status-{{ mapping.status }}">
+                    {{ mapping.status }}
+                </div>
+
+                {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
+                    <div class="progress-ring reading">
+                    {{ '%.0f' | format(mapping.unified_progress) }}%
             </div>
             {% endif %}
-            {% endfor %}
-        </div>
 
-        <div class="section-header" style="margin-top: 80px;">
-            <h2>All Books</h2>
-        </div>
+            <div class="book-overlay">
+                <div class="book-title">{{ mapping.abs_title }}</div>
+                <div class="book-filename">{{ mapping.ebook_filename }}</div>
 
-        <div class="book-grid" id="all-books-grid">
-            {% for mapping in mappings %}
-            <div class="book-card"
-                 data-progress="{{ mapping.unified_progress }}"
-                 data-last-sync="{{ mapping.last_sync }}"
-                 data-status="{{ mapping.status }}"
-                 data-title="{{ mapping.abs_title }}">
-                <div class="book-cover-container">
-                    {% if mapping.cover_url %}
-                    <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="book-cover-placeholder" style="display:none;">📖</div>
-                    {% else %}
-                    <div class="book-cover-placeholder">📖</div>
-                    {% endif %}
-
-                    <div class="status-badge-mini status-{{ mapping.status }}">
-                        {{ mapping.status }}
-                    </div>
-
-                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-                    <div class="progress-ring reading">
-                        {{ '%.0f' | format(mapping.unified_progress) }}%
+                {% if mapping.status == 'active' %}
+                <div class="progress-details">
+                    {% if integrations.abs %}
+                    <div class="progress-item" title="Audiobookshelf">
+                        <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
+                        <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int)
+                            % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
                     </div>
                     {% endif %}
+                    {% if integrations.kosync %}
+                    <div class="progress-item" title="KOReader">
+                        <span>📖</span>
+                        <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
+                    </div>
+                    {% endif %}
+                    {% if integrations.storyteller %}
+                    <div class="progress-item" title="Storyteller">
+                        <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
+                        <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
+                    </div>
+                    {% endif %}
+                    {% if integrations.booklore %}
+                    <div class="progress-item" title="Booklore">
+                        <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                        <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
+                    </div>
+                    {% endif %}
 
-                    <div class="book-overlay">
-                        <div class="book-title">{{ mapping.abs_title }}</div>
-                        <div class="book-filename">{{ mapping.ebook_filename }}</div>
+                    {% if integrations.hardcover %}
+                    <div class="progress-item"
+                        title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
+                        onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                        style="cursor: pointer; position: relative;">
+                        <img src="/static/hardcover.png" alt="HC"
+                            style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                            onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                        <span
+                            style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
 
-                        {% if mapping.status == 'active' %}
-                        <div class="progress-details">
-                            {% if integrations.abs %}
-                            <div class="progress-item" title="Audiobookshelf">
-                                <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
-                                <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.kosync %}
-                            <div class="progress-item" title="KOReader">
-                                <span>📖</span>
-                                <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.storyteller %}
-                            <div class="progress-item" title="Storyteller">
-                                <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
-                                <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
-                            </div>
-                            {% endif %}
-                            {% if integrations.booklore %}
-                            <div class="progress-item" title="Booklore">
-                                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
-                                <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
-                            </div>
-                            {% endif %}
-
-                            {% if integrations.hardcover %}
-                            <div class="progress-item"
-                                 title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                                 onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                                 style="cursor: pointer; position: relative;">
-                                <img src="/static/hardcover.png" alt="HC"
-                                     style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-                                <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                                {% if mapping.hardcover_book_id %}
-                                    <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-                                {% else %}
-                                    <span style="font-size: 10px; opacity: 0.5;">+</span>
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                        </div>
-
-                        <div class="progress-bar-mini">
-                            <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
-                        </div>
-
-                        <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                        {% if mapping.hardcover_book_id %}
+                        <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
+                        {% else %}
+                        <span style="font-size: 10px; opacity: 0.5;">+</span>
                         {% endif %}
-
-                        <div class="quick-actions">
-                            <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
-                                <button type="submit" class="action-btn warning"
-                                        onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
-                                    🔄 Clear
-                                </button>
-                            </form>
-                            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
-                                <button type="submit" class="action-btn danger"
-                                        onclick="return confirm('Delete this mapping?')">
-                                    🗑️ Delete
-                                </button>
-                            </form>
-                        </div>
                     </div>
+                    {% endif %}
+                </div>
+
+                <div class="progress-bar-mini">
+                    <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+                </div>
+
+                <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+                {% endif %}
+
+                <div class="quick-actions">
+                    <form method="POST" action="/clear-progress/{{ mapping.abs_id }}"
+                        style="flex: 1; margin-right: 6px;">
+                        <button type="submit" class="action-btn warning"
+                            onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                            🔄 Clear
+                        </button>
+                    </form>
+                    <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
+                        <button type="submit" class="action-btn danger"
+                            onclick="return confirm('Delete this mapping?')">
+                            🗑️ Delete
+                        </button>
+                    </form>
                 </div>
             </div>
-            {% endfor %}
         </div>
+    </div>
+    {% endfor %}
+    </div>
 
-        {% else %}
-        <div class="empty-state">
-            <div class="empty-state-icon">📚</div>
-            <h2>No books syncing yet</h2>
-            <p>Start by adding your first audiobook mapping</p>
-            <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
-        </div>
-        {% endif %}
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📚</div>
+        <h2>No books syncing yet</h2>
+        <p>Start by adding your first audiobook mapping</p>
+        <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
+    </div>
+    {% endif %}
     </div>
 
     <script>
@@ -902,4 +920,5 @@
         setTimeout(() => location.reload(), 30000);
     </script>
 </body>
+
 </html>

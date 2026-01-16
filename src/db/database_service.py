@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,48 @@ class DatabaseService:
             raise
         finally:
             session.close()
+
+    # Setting operations
+    def get_setting(self, key: str, default: str = None) -> Optional[str]:
+        """Get a setting value by key."""
+        with self.get_session() as session:
+            setting = session.query(Setting).filter(Setting.key == key).first()
+            if setting:
+                return setting.value
+            return default
+
+    def set_setting(self, key: str, value: str) -> Setting:
+        """Set a setting value."""
+        with self.get_session() as session:
+            existing = session.query(Setting).filter(Setting.key == key).first()
+            if existing:
+                existing.value = str(value) if value is not None else None
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                new_setting = Setting(key=key, value=str(value) if value is not None else None)
+                session.add(new_setting)
+                session.flush()
+                session.refresh(new_setting)
+                session.expunge(new_setting)
+                return new_setting
+
+    def get_all_settings(self) -> dict:
+        """Get all settings as a dictionary."""
+        with self.get_session() as session:
+            settings = session.query(Setting).all()
+            return {s.key: s.value for s in settings}
+            
+    def delete_setting(self, key: str) -> bool:
+        """Delete a setting by key."""
+        with self.get_session() as session:
+            setting = session.query(Setting).filter(Setting.key == key).first()
+            if setting:
+                session.delete(setting)
+                return True
+            return False
 
     # Book operations
     def get_book(self, abs_id: str) -> Optional[Book]:

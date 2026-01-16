@@ -135,6 +135,24 @@ class Job(Base):
         return f"<Job(abs_id='{self.abs_id}', retries={self.retry_count})>"
 
 
+
+class Setting(Base):
+    """
+    Setting model storing application configuration.
+    """
+    __tablename__ = 'settings'
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=True)
+
+    def __init__(self, key: str, value: str = None):
+        self.key = key
+        self.value = value
+
+    def __repr__(self):
+        return f"<Setting(key='{self.key}', value='{self.value}')>"
+
+
 # Database configuration
 class DatabaseManager:
     """

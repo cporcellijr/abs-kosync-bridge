@@ -22,6 +22,8 @@ from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.di_container import create_container, Container
 from src.db.migration_utils import initialize_database
+from src.utils.config_loader import ConfigLoader
+import sys
 
 # ---------------- APP SETUP ----------------
 
@@ -71,6 +73,12 @@ def setup_dependencies(test_container=None):
     # Initialize database service
     from src.db.migration_utils import initialize_database
     database_service = initialize_database(DATA_DIR)
+
+    # LOAD SETTINGS FROM DB (Priority Level 1)
+    if database_service:
+        ConfigLoader.load_settings(database_service)
+        # Re-initialize any components that depend on env vars if needed
+        # But for now, most use os.environ directly at runtime or are re-instantiated below
 
     logger.info("Web server dependencies initialized")
 
@@ -497,7 +505,118 @@ def get_searchable_ebooks(search_term):
     ]
 
 
+
+def restart_server():
+    """Restarts the current Python process to reload settings."""
+    logger.info("♻️  Restarting application to apply new settings...")
+    time.sleep(1.5)  # Give Flask time to send the redirect response
+    # Re-execute the current script with the same arguments
+    # This replaces the current process, so the PID stays the same
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    # Priority Level 3: Application Defaults
+    DEFAULTS = {
+        'TZ': 'America/New_York',
+        'LOG_LEVEL': 'INFO',
+        'DATA_DIR': '/data',
+        'BOOKS_DIR': '/books',
+        'ABS_COLLECTION_NAME': 'Synced with KOReader',
+        'BOOKLORE_SHELF_NAME': 'Kobo',
+        'SYNC_PERIOD_MINS': '5',
+        'SYNC_DELTA_ABS_SECONDS': '60',
+        'SYNC_DELTA_KOSYNC_PERCENT': '0.5',
+        'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
+        'SYNC_DELTA_KOSYNC_WORDS': '400',
+        'FUZZY_MATCH_THRESHOLD': '80',
+        'WHISPER_MODEL': 'tiny',
+        'JOB_MAX_RETRIES': '5',
+        'JOB_RETRY_DELAY_MINS': '15',
+        'MONITOR_INTERVAL': '3600',
+        'LINKER_BOOKS_DIR': '/linker_books',
+        'PROCESSING_DIR': '/processing',
+        'STORYTELLER_INGEST_DIR': '/linker_books',
+        'AUDIOBOOKS_DIR': '/audiobooks',
+        'ABS_PROGRESS_OFFSET_SECONDS': '0',
+        'EBOOK_CACHE_SIZE': '3',
+        'KOSYNC_HASH_METHOD': 'content',
+        'TELEGRAM_LOG_LEVEL': 'ERROR'
+    }
+
+    if request.method == 'POST':
+        bool_keys = [
+            'KOSYNC_USE_PERCENTAGE_FROM_SERVER', 
+            'SYNC_ABS_EBOOK', 
+            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
+        ]
+        
+        # Current settings in DB
+        current_settings = database_service.get_all_settings()
+        
+        # 1. Handle Boolean Toggles (Checkbox logic)
+        # Checkboxes are NOT sent if unchecked, so we must check every known bool key
+        for key in bool_keys:
+            is_checked = (key in request.form)
+            # Save "true" or "false"
+            database_service.set_setting(key, str(is_checked).lower())
+
+        # 2. Handle Text Inputs
+        # Iterate over form to find other keys
+        for key, value in request.form.items():
+            if key in bool_keys: continue
+            
+            clean_value = value.strip()
+            
+            # Special handling: If empty, deciding whether to delete or save empty
+            # Strategy: If it was previously set, allow clearing it? 
+            # Or just save empty string? 
+            # User snippet logic: Only save non-empty. Let's stick to that for now, 
+            # BUT if it's in DB and now empty, we probably want to update it to empty/delete?
+            # Let's save standard string representation.
+            
+            if clean_value:
+                database_service.set_setting(key, clean_value)
+            elif key in current_settings:
+                # If key exists in DB but user cleared it, set to empty (or delete?)
+                # Setting to empty string is safer than deleting if defaults exist
+                database_service.set_setting(key, "")
+
+        try:
+            # Trigger Auto-Restart in a separate thread so this request finishes
+            threading.Thread(target=restart_server).start()
+                
+            session['message'] = "Settings saved. Application is restarting..."
+            session['is_error'] = False
+        except Exception as e:
+            session['message'] = f"Error saving settings: {e}"
+            session['is_error'] = True
+            logger.error(f"Error saving settings: {e}")
+            
+        return redirect(url_for('settings'))
+
+    # GET Request
+    message = session.pop('message', None)
+    is_error = session.pop('is_error', False)
+    
+    # helper to get value from Env (which is loaded from DB) > Defaults
+    def get_val(key, default_val=None):
+        if key in os.environ: return os.environ[key]
+        if key in DEFAULTS: return DEFAULTS[key]
+        return default_val if default_val is not None else ''
+        
+    def get_bool(key):
+        val = os.environ.get(key, 'false')
+        return val.lower() in ('true', '1', 'yes', 'on')
+
+    return render_template('settings.html', 
+                         get_val=get_val, 
+                         get_bool=get_bool, 
+                         message=message, 
+                         is_error=is_error)
+
 def get_abs_author(ab):
+
     """Extract author from ABS audiobook metadata."""
     media = ab.get('media', {})
     metadata = media.get('metadata', {})
