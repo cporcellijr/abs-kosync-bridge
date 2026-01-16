@@ -14,6 +14,7 @@ from dependency_injector import containers, providers
 from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.booklore_client import BookloreClient
 from src.api.hardcover_client import HardcoverClient
+from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.database_service import DatabaseService
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
@@ -27,42 +28,6 @@ from src.sync_clients.hardcover_sync_client import HardcoverSyncClient
 from src.sync_manager import SyncManager
 
 logger = logging.getLogger(__name__)
-
-
-def _create_storyteller_client():
-    """Factory for creating Storyteller client with error handling."""
-    StorytellerClientClass = None
-
-    try:
-        from src.api.storyteller_api import StorytellerDBWithAPI
-        StorytellerClientClass = StorytellerDBWithAPI
-    except ImportError:
-        StorytellerClientClass = None
-
-    if not StorytellerClientClass:
-        try:
-            from src.api.storyteller_db import StorytellerDB as StorytellerClientClass
-        except ImportError:
-            StorytellerClientClass = None
-
-    if StorytellerClientClass:
-        try:
-            return StorytellerClientClass()
-        except Exception as e:
-            logger.error(f"⚠️ Failed to init Storyteller client: {e}. Using dummy implementation.")
-
-    # Return dummy implementation
-    class DummyStoryteller:
-        def check_connection(self): return False
-
-        def get_progress_with_fragment(self, *args): return None, None, None, None
-
-        def update_progress(self, *args): return False
-
-        def is_configured(self): return False
-
-    return DummyStoryteller()
-
 
 class Container(containers.DeclarativeContainer):
     """Main dependency injection container using dependency-injector library."""
@@ -121,8 +86,8 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Storyteller client with factory
-    storyteller_client = providers.Factory(
-        _create_storyteller_client
+    storyteller_client = providers.Singleton(
+        StorytellerDBWithAPI
     )
 
     # Transcriber
@@ -187,6 +152,7 @@ class Container(containers.DeclarativeContainer):
         SyncManager,
         abs_client=abs_client,
         booklore_client=booklore_client,
+        storyteller_client=storyteller_client,
         transcriber=transcriber,
         ebook_parser=ebook_parser,
         database_service=database_service,

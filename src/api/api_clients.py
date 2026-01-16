@@ -266,6 +266,46 @@ class ABSClient:
         except Exception as e:
             logger.warning(f"⚠️ Failed to close session for ABS: {e}")
 
+    def add_to_collection(self, item_id, collection_name="abs-kosync"):
+        """Add an audiobook to a collection, creating the collection if it doesn't exist."""
+        try:
+            collections_url = f"{self.base_url}/api/collections"
+            r = requests.get(collections_url, headers=self.headers)
+            if r.status_code != 200:
+                return False
+
+            collections = r.json().get('collections', [])
+            target_collection = next((c for c in collections if c.get('name') == collection_name), None)
+
+            if not target_collection:
+                lib_url = f"{self.base_url}/api/libraries"
+                r_lib = requests.get(lib_url, headers=self.headers)
+                if r_lib.status_code == 200:
+                    libraries = r_lib.json().get('libraries', [])
+                    if libraries:
+                        r_create = requests.post(collections_url, headers=self.headers,
+                                                 json={"libraryId": libraries[0]['id'], "name": collection_name})
+                        if r_create.status_code in [200, 201]:
+                            target_collection = r_create.json()
+
+            if not target_collection:
+                return False
+
+            add_url = f"{self.base_url}/api/collections/{target_collection['id']}/book"
+            r_add = requests.post(add_url, headers=self.headers, json={"id": item_id})
+            if r_add.status_code in [200, 201, 204]:
+                try:
+                    details = self.get_item_details(item_id)
+                    title = details.get('media', {}).get('metadata', {}).get('title') if details else None
+                except Exception:
+                    title = None
+                logger.info(f"🏷️ Added '{sanitize_log_data(title or str(item_id))}' to ABS Collection: {collection_name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error adding item to ABS collection: {e}")
+            return False
+
 class KoSyncClient:
     def __init__(self):
         self.base_url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')

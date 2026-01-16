@@ -8,16 +8,19 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urljoin
 
 import requests
 import schedule
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
+from src.db.database_service import DatabaseService
+from src.sync_manager import SyncManager
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
-from src.utils.di_container import create_container
+from src.utils.di_container import create_container, Container
 from src.db.migration_utils import initialize_database
 
 # ---------------- APP SETUP ----------------
@@ -32,22 +35,44 @@ app.secret_key = "kosync-queue-secret-unified-app"
 # NOTE: Logging is configured centrally in `main.py`. Avoid calling
 # `logging.basicConfig` here to prevent adding duplicate handlers.
 logger = logging.getLogger(__name__)
-logger.info("Starting ABS-KOSync Bridge Web Server")
 
-container = create_container()
+# Global variables - will be initialized via setup_dependencies()
+container: Optional[Container] = None
+manager: Optional[SyncManager] = None
+database_service: Optional[DatabaseService] = None
+DATA_DIR: Optional[str] = None
+EBOOK_DIR: Optional[str] = None
 
-manager = container.sync_manager()
+def setup_dependencies(test_container=None):
+    """
+    Initialize dependencies for the web server.
 
-# ---------------- DATA DIR CONFIG ----------------
-DATA_DIR = container.data_dir()
+    Args:
+        test_container: Optional test container for dependency injection during testing.
+                       If None, creates production container from environment.
+    """
+    global container, manager, database_service, DATA_DIR, EBOOK_DIR
 
-# Initialize the unified database service
-database_service = initialize_database(DATA_DIR)
+    if test_container is not None:
+        # Use injected test container
+        container = test_container
+    else:
+        # Create production container
+        from src.utils.di_container import create_container
+        container = create_container()
 
-# ---------------- BOOK LINKER CONFIG ----------------
+    # Initialize manager and services
+    manager = container.sync_manager()
 
-# Book Matching - ebooks for sync matching (original functionality)
-EBOOK_DIR = container.books_dir()
+    # Initialize data directories
+    DATA_DIR = container.data_dir()
+    EBOOK_DIR = container.books_dir()
+
+    # Initialize database service
+    from src.db.migration_utils import initialize_database
+    database_service = initialize_database(DATA_DIR)
+
+    logger.info("Web server dependencies initialized")
 
 # Book Linker - source ebooks for Storyteller workflow
 LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
@@ -74,7 +99,6 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 
-
 # ---------------- BOOK LINKER HELPERS ----------------
 
 def safe_folder_name(name: str) -> str:
@@ -86,7 +110,6 @@ def safe_folder_name(name: str) -> str:
 
 
 app.jinja_env.globals['safe_folder_name'] = safe_folder_name
-
 
 def get_stats(ebooks, audiobooks):
     total = sum(m["file_size_mb"] for m in ebooks) + sum(m.get("file_size_mb", 0) for m in audiobooks)
@@ -498,81 +521,6 @@ def audiobook_matches_search(ab, search_term):
     author = get_abs_author(ab).lower()
     return search_term in title or search_term in author
 
-
-def add_to_abs_collection(abs_client, item_id, collection_name=None):
-    if collection_name is None: collection_name = ABS_COLLECTION_NAME
-    try:
-        collections_url = f"{abs_client.base_url}/api/collections"
-        r = requests.get(collections_url, headers=abs_client.headers)
-        if r.status_code != 200: return False
-
-        collections = r.json().get('collections', [])
-        target_collection = next((c for c in collections if c.get('name') == collection_name), None)
-
-        if not target_collection:
-            lib_url = f"{abs_client.base_url}/api/libraries"
-            r_lib = requests.get(lib_url, headers=abs_client.headers)
-            if r_lib.status_code == 200:
-                libraries = r_lib.json().get('libraries', [])
-                if libraries:
-                    r_create = requests.post(collections_url, headers=abs_client.headers,
-                                             json={"libraryId": libraries[0]['id'], "name": collection_name})
-                    if r_create.status_code in [200, 201]: target_collection = r_create.json()
-
-        if not target_collection: return False
-        add_url = f"{abs_client.base_url}/api/collections/{target_collection['id']}/book"
-        r_add = requests.post(add_url, headers=abs_client.headers, json={"id": item_id})
-        if r_add.status_code in [200, 201, 204]:
-            try:
-                details = abs_client.get_item_details(item_id)
-                title = details.get('media', {}).get('metadata', {}).get('title') if details else None
-            except Exception:
-                title = None
-            logger.info(f"🏷️ Added '{sanitize_log_data(title or str(item_id))}' to ABS Collection: {collection_name}")
-            return True
-        return False
-    except:
-        return False
-
-
-def add_to_booklore_shelf(ebook_filename, shelf_name=None):
-    if shelf_name is None: shelf_name = BOOKLORE_SHELF_NAME
-    booklore_url = os.environ.get("BOOKLORE_SERVER")
-    booklore_user = os.environ.get("BOOKLORE_USER")
-    booklore_pass = os.environ.get("BOOKLORE_PASSWORD")
-    if not all([booklore_url, booklore_user, booklore_pass]): return False
-
-    try:
-        booklore_url = booklore_url.rstrip('/')
-        r_login = requests.post(f"{booklore_url}/api/v1/auth/login", json={"username": booklore_user, "password": booklore_pass})
-        if r_login.status_code != 200: return False
-        headers = {"Authorization": f"Bearer {r_login.json().get('refreshToken')}"}
-
-        r_books = requests.get(f"{booklore_url}/api/v1/books", headers=headers)
-        target_book = next((b for b in r_books.json() if b.get('fileName') == ebook_filename), None)
-        if not target_book: return False
-
-        r_shelves = requests.get(f"{booklore_url}/api/v1/shelves", headers=headers)
-        target_shelf = next((s for s in r_shelves.json() if s.get('name') == shelf_name), None)
-
-        if not target_shelf:
-            r_create = requests.post(f"{booklore_url}/api/v1/shelves", headers=headers,
-                                     json={"name": shelf_name, "icon": "📚", "iconType": "PRIME_NG"})
-            if r_create.status_code == 201:
-                target_shelf = r_create.json()
-            else:
-                return False
-
-        r_assign = requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers,
-                                 json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
-        if r_assign.status_code in [200, 201, 204]:
-            logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
-            return True
-        return False
-    except:
-        return False
-
-
 # ---------------- ROUTES ----------------
 @app.route('/')
 def index():
@@ -825,9 +773,9 @@ def match():
         )
 
         database_service.save_book(book)
-        add_to_abs_collection(manager.abs_client, abs_id)
-        add_to_booklore_shelf(ebook_filename)
-        manager.storyteller_db.add_to_collection(ebook_filename)
+        manager.abs_client.add_to_collection(abs_id)
+        manager.booklore_client.add_to_shelf(ebook_filename)
+        manager.storyteller_client.add_to_collection(ebook_filename)
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
@@ -903,9 +851,9 @@ def batch_match():
                 )
 
                 database_service.save_book(book)
-                add_to_abs_collection(manager.abs_client, item['abs_id'])
-                add_to_booklore_shelf(item['ebook_filename'])
-                manager.storyteller_db.add_to_collection(item['ebook_filename'])
+                manager.abs_client.add_to_collection(item['abs_id'])
+                manager.booklore_client.add_to_shelf(item['ebook_filename'])
+                manager.storyteller_client.add_to_collection(item['ebook_filename'])
 
             session['queue'] = []
             session.modified = True
@@ -1231,6 +1179,9 @@ def view_log():
 
 
 if __name__ == '__main__':
+    # Initialize dependencies for production mode
+    setup_dependencies()
+
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 
     # Check ebook source configuration

@@ -64,7 +64,7 @@ class EbookParser:
 
         logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
-    def _resolve_book_path(self, filename):
+    def resolve_book_path(self, filename):
         try:
             safe_name = glob.escape(filename)
             return next(self.books_dir.glob(f"**/{safe_name}"))
@@ -121,7 +121,7 @@ class EbookParser:
         """
         filepath = Path(filepath)
         if not filepath.exists():
-            filepath = self._resolve_book_path(filepath.name)
+            filepath = self.resolve_book_path(filepath.name)
         str_path = str(filepath)
 
         cached = self.cache.get(str_path)
@@ -168,7 +168,7 @@ class EbookParser:
     def get_text_at_percentage(self, filename, percentage):
         """Get text snippet at a given percentage through the book."""
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             if not full_text:
@@ -187,7 +187,7 @@ class EbookParser:
     def get_character_delta(self, filename, percentage_prev, percentage_new):
         """Calculate character difference between two percentages."""
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, _ = self.extract_text_and_map(book_path)
             if not full_text:
                 return None
@@ -208,7 +208,7 @@ class EbookParser:
         Useful for syncing from Storyteller or any Readium-based reader that uses DOM IDs.
         """
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             target_item = None
@@ -366,7 +366,7 @@ class EbookParser:
         Returns: LocatorResult or None
         """
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             if not full_text:
@@ -451,7 +451,7 @@ class EbookParser:
         """
         try:
             # Get full text and spine mapping
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             if not full_text or not spine_map:
@@ -579,7 +579,7 @@ class EbookParser:
                 return None
             spine_index = int(match.group(1))
 
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
@@ -694,7 +694,7 @@ class EbookParser:
                 return None
 
             # Load the EPUB and find the spine item
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             # Calculate spine index (CFI spine steps are 2x the actual index)

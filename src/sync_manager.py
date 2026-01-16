@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 import schedule
 
+from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.models import Job
 from src.db.models import State, Book
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
@@ -34,6 +35,7 @@ class SyncManager:
                  transcriber=None,
                  ebook_parser=None,
                  database_service=None,
+                 storyteller_client: StorytellerDBWithAPI=None,
                  sync_clients: dict[str, SyncClient]=None,
                  epub_cache_dir=None,
                  data_dir=None,
@@ -46,6 +48,7 @@ class SyncManager:
         self.transcriber = transcriber
         self.ebook_parser = ebook_parser
         self.database_service = database_service
+        self.storyteller_client = storyteller_client
         self.data_dir = data_dir
         self.books_dir = books_dir
 

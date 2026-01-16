@@ -2,27 +2,28 @@ import os
 from typing import Optional
 import logging
 
+from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.models import Book, State
 from src.utils.ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 logger = logging.getLogger(__name__)
 
 class StorytellerSyncClient(SyncClient):
-    def __init__(self, storyteller_db, ebook_parser: EbookParser):
+    def __init__(self, storyteller_client: StorytellerDBWithAPI, ebook_parser: EbookParser):
         super().__init__(ebook_parser)
-        self.storyteller_db = storyteller_db
+        self.storyteller_client = storyteller_client
         self.ebook_parser = ebook_parser
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
 
     def is_configured(self) -> bool:
-        return self.storyteller_db.is_configured()
+        return self.storyteller_client.is_configured()
 
     def check_connection(self):
-        return self.storyteller_db.check_connection()
+        return self.storyteller_client.check_connection()
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         epub = book.ebook_filename
-        st_pct, st_ts, st_href, st_frag = self.storyteller_db.get_progress_with_fragment(epub)
+        st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
 
         if st_pct is None:
             logger.warning("⚠️ Storyteller percentage is None - returning None for service state")
@@ -38,7 +39,7 @@ class StorytellerSyncClient(SyncClient):
             previous_pct=prev_storyteller_pct,
             delta=delta,
             threshold=self.delta_kosync_thresh,
-            is_configured=self.storyteller_db.is_configured(),
+            is_configured=self.storyteller_client.is_configured(),
             display=("Storyteller", "{prev:.4%} -> {curr:.4%}"),
             value_formatter=lambda v: f"{v*100:.4f}%"
         )
@@ -84,13 +85,13 @@ class StorytellerSyncClient(SyncClient):
                     )
                     logger.debug(f"Resolved Storyteller href from percentage: {locator.href}")
 
-        success = self.storyteller_db.update_progress(epub, pct, locator)
+        success = self.storyteller_client.update_progress(epub, pct, locator)
         return SyncResult(pct, success)
 
     def _resolve_href_from_percentage(self, epub: str, pct: float) -> Optional[str]:
         """Find which spine item href contains the given percentage."""
         try:
-            book_path = self.ebook_parser._resolve_book_path(epub)
+            book_path = self.ebook_parser.resolve_book_path(epub)
             full_text, spine_map = self.ebook_parser.extract_text_and_map(book_path)
             if not full_text or not spine_map:
                 return None
