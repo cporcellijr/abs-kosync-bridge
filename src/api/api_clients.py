@@ -107,8 +107,8 @@ class ABSClient:
         try:
             r = requests.get(url, headers=self.headers)
             if r.status_code == 200: return r.json()
-        except:
-            logger.error(f"Error fetching ABS progress for item {item_id}")
+        except Exception:
+            logger.exception(f"Error fetching ABS progress for item {item_id}")
             pass
         return None
 

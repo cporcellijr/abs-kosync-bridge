@@ -29,8 +29,7 @@ class ABSSyncClient(SyncClient):
         abs_ts = response.get('currentTime') if response is not None else None
 
         if abs_ts is None:
-            logger.warning("⚠️ ABS timestamp is None - returning None for service state")
-            # Return a state indicating ABS is offline
+            logger.info("ABS timestamp is None, probably not started the book yet.")
             abs_ts = 0.0
 
         # Convert timestamp to percentage
