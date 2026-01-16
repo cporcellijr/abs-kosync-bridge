@@ -109,9 +109,55 @@ class HardcoverSyncClient(SyncClient):
             # Save to database
             self.database_service.save_hardcover_details(hardcover_details)
 
-            # Set initial status to "Want to Read" (status 1)
             self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
             logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
+
+    def set_manual_match(self, book_abs_id: str, input_str: str) -> bool:
+        """
+        Manually match an ABS book to a Hardcover book via URL, ID, or Slug.
+        """
+        if not self.hardcover_client.is_configured():
+            logger.error("Hardcover client not configured")
+            return False
+
+        # Resolve the input string to a Hardcover book
+        match = self.hardcover_client.resolve_book_from_input(input_str)
+        if not match:
+            logger.error(f"Could not resolve Hardcover book from '{input_str}'")
+            return False
+
+        # Try to get existing metadata from ABS for completeness
+        isbn = None
+        asin = None
+        
+        if self.abs_client:
+            try:
+                item = self.abs_client.get_item_details(book_abs_id)
+                if item:
+                    meta = item.get('media', {}).get('metadata', {})
+                    isbn = meta.get('isbn')
+                    asin = meta.get('asin')
+            except Exception as e:
+                logger.warning(f"Failed to fetch ABS details during manual match: {e}")
+
+        # Create/Update HardcoverDetails
+        # We need to upsert. save_hardcover_details likely handles upsert (merging/replacing).
+        details = HardcoverDetails(
+            abs_id=book_abs_id,
+            hardcover_book_id=match['book_id'],
+            hardcover_edition_id=match.get('edition_id'),
+            hardcover_pages=match.get('pages'),
+            isbn=isbn,
+            asin=asin,
+            matched_by='manual'
+        )
+        
+        self.database_service.save_hardcover_details(details)
+        logger.info(f"✅ Manually matched ABS {book_abs_id} to Hardcover {match['book_id']} ({match.get('title')})")
+        
+        # Trigger an initial status update to ensure it's tracked
+        self.hardcover_client.update_status(match['book_id'], 1, match.get('edition_id'))
+        return True
 
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         """
@@ -148,8 +194,19 @@ class HardcoverSyncClient(SyncClient):
 
         # Safety check: If total_pages is zero we cannot compute a valid page number
         if total_pages == 0:
-            logger.info(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} has 0 pages.")
-            return SyncResult(None, False)
+            # Attempt to refresh page count if it is zero (maybe the edition was updated or we matched a bad edition)
+            logger.info(f"Hardcover: Pages are 0 for {sanitize_log_data(book.abs_title)}, attempting to refresh details...")
+            refreshed_edition = self.hardcover_client.get_default_edition(hardcover_details.hardcover_book_id)
+            if refreshed_edition and refreshed_edition.get('pages'):
+                total_pages = refreshed_edition['pages']
+                # Update DB
+                hardcover_details.hardcover_pages = total_pages
+                hardcover_details.hardcover_edition_id = refreshed_edition['id']
+                self.database_service.save_hardcover_details(hardcover_details)
+                logger.info(f"Hardcover: Updated page count to {total_pages}")
+            else:
+                logger.info(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} still has 0 pages after refresh.")
+                return SyncResult(None, False)
 
         page_num = int(total_pages * percentage)
         is_finished = percentage > 0.99

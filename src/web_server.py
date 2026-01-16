@@ -389,6 +389,7 @@ def sync_daemon():
         # Main daemon loop
         while True:
             try:
+                # logger.debug("Running pending schedule jobs...")
                 schedule.run_pending()
                 time.sleep(30)  # Check every 30 seconds
             except Exception as e:
@@ -1040,36 +1041,22 @@ def link_hardcover(abs_id):
     if not url:
         return redirect(url_for('index'))
 
-    # Resolve book
-    book_data = manager.hardcover_client.resolve_book_from_input(url)
-    if not book_data:
-        flash(f"❌ Could not find book for: {url}", "error")
+    # Retrieve the sync client from manager
+    # Note: keys in sync_clients are capitalized (e.g. 'Hardcover')
+    hc_sync_client = manager.sync_clients.get('Hardcover')
+    if not hc_sync_client:
+        flash("❌ Hardcover sync is not enabled/configured.", "error")
         return redirect(url_for('index'))
 
-    # Create or update hardcover details using database service
-    from src.db.models import HardcoverDetails
+    # Use the client's manual match method which handles resolution, DB updates, and status setting
+    success = hc_sync_client.set_manual_match(abs_id, url)
 
-    try:
-        hardcover_details = HardcoverDetails(
-            abs_id=abs_id,
-            hardcover_book_id=book_data['book_id'],
-            hardcover_edition_id=book_data.get('edition_id'),
-            hardcover_pages=book_data.get('pages'),
-            matched_by='manual'  # Since this was manually linked
-        )
-
-        database_service.save_hardcover_details(hardcover_details)
-
-        # Force status to 'Want to Read' (1)
-        try:
-            manager.hardcover_client.update_status(book_data['book_id'], 1, book_data.get('edition_id'))
-        except Exception as e:
-            logger.warning(f"Failed to set Hardcover status: {e}")
-
-        flash(f"✅ Linked Hardcover: {book_data.get('title')}", "success")
-    except Exception as e:
-        logger.error(f"Failed to save hardcover details: {e}")
-        flash("❌ Database update failed", "error")
+    if success:
+         # Optionally fetch title for the flash message, but set_manual_match doesn't return it.
+         # We can just say "success".
+         flash(f"✅ Linked Hardcover book successfully.", "success")
+    else:
+         flash(f"❌ Could not resolve or link Hardcover book: {url}", "error")
 
     return redirect(url_for('index'))
 
@@ -1299,6 +1286,21 @@ def view_log():
 if __name__ == '__main__':
     # Initialize dependencies for production mode
     setup_dependencies()
+
+    # Setup signal handlers to catch unexpected kills
+    import signal
+    def handle_exit_signal(signum, frame):
+        logger.warning(f"⚠️ Received signal {signum} - Shutting down...")
+        # Flush logs immediately
+        for handler in logger.handlers:
+            handler.flush()
+        if hasattr(logging.getLogger(), 'handlers'):
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, handle_exit_signal)
+    signal.signal(signal.SIGINT, handle_exit_signal)
 
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 

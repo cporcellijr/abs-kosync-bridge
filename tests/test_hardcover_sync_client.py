@@ -255,6 +255,9 @@ class TestHardcoverSyncClient(unittest.TestCase):
             locator_result=LocatorResult(percentage=0.5)
         )
 
+        # Mock get_default_edition to return None (refresh fails)
+        self.mock_hardcover_client.get_default_edition.return_value = None
+
         # Execute update_progress
         result = self.hardcover_sync_client.update_progress(self.test_book, update_request)
 

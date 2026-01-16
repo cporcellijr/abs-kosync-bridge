@@ -474,10 +474,19 @@ class SyncManager:
                         self.database_service.save_state(client_state_model)
 
                 logger.info(f"💾 [{title_snip}] States saved to database")
+                
+                # Debugging crash: Flush logs to ensure we see this before any potential hard crash
+                for handler in logger.handlers:
+                    handler.flush()
+                if hasattr(root_logger, 'handlers'):
+                    for handler in root_logger.handlers:
+                        handler.flush()
 
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"Sync error: {e}", e)
+        
+        logger.debug(f"End of sync cycle for active books")
 
     def clear_progress(self, abs_id):
         """
