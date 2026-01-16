@@ -55,32 +55,42 @@ def setup_dependencies(test_container=None):
     """
     global container, manager, database_service, DATA_DIR, EBOOK_DIR
 
+    # 1. Initialize Database Service FIRST (needed to load settings)
+    # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
+    # If the user changed DATA_DIR in settings, we might need a two-stage init, but 
+    # for now we assume the DB location itself doesn't move dynamically based on DB settings 
+    # (chicken and egg).
+    initial_data_dir = Path(os.environ.get("DATA_DIR", "/data"))
+    from src.db.migration_utils import initialize_database
+    database_service = initialize_database(initial_data_dir)
+
+    # 2. LOAD SETTINGS FROM DB (Priority Level 1)
+    # This updates os.environ with values from the database
+    if database_service:
+        ConfigLoader.load_settings(database_service)
+        logger.info("✅ Settings loaded into environment variables")
+
     if test_container is not None:
         # Use injected test container
         container = test_container
     else:
-        # Create production container
+        # 3. Create production container AFTER loading settings
+        # The container providers (Factories) will now read the updated os.environ values
         from src.utils.di_container import create_container
         container = create_container()
+    
+    # 4. Override the container's database_service with our already-initialized instance
+    # This ensures consistency and prevents re-initialization
+    container.database_service.override(providers.Object(database_service))
 
     # Initialize manager and services
     manager = container.sync_manager()
 
-    # Initialize data directories
+    # Get data directories (now using updated env vars)
     DATA_DIR = container.data_dir()
     EBOOK_DIR = container.books_dir()
 
-    # Initialize database service
-    from src.db.migration_utils import initialize_database
-    database_service = initialize_database(DATA_DIR)
-
-    # LOAD SETTINGS FROM DB (Priority Level 1)
-    if database_service:
-        ConfigLoader.load_settings(database_service)
-        # Re-initialize any components that depend on env vars if needed
-        # But for now, most use os.environ directly at runtime or are re-instantiated below
-
-    logger.info("Web server dependencies initialized")
+    logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
 # Book Linker - source ebooks for Storyteller workflow
 LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
