@@ -64,7 +64,8 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             abs_title='Test Book Creation',
             ebook_filename='test-create.epub',
             kosync_doc_id='test-create-doc',
-            status='active'
+            status='active',
+            duration=3600.0  # 1 hour test duration
         )
 
         saved_book = self.db_service.save_book(book)
@@ -88,7 +89,8 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             abs_title='Test Book Deletion',
             ebook_filename='test-delete.epub',
             kosync_doc_id='test-delete-doc',
-            status='active'
+            status='active',
+            duration=7200.0  # 2 hour test duration
         )
 
         self.db_service.save_book(book)

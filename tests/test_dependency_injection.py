@@ -95,7 +95,6 @@ def test_dependency_injection():
 
         # Check that SyncManager has all the right clients
         assert hasattr(sync_manager, 'abs_client'), "SyncManager missing abs_client"
-        assert hasattr(sync_manager, 'kosync_client'), "SyncManager missing kosync_client"
         assert hasattr(sync_manager, 'booklore_client'), "SyncManager missing booklore_client"
         assert hasattr(sync_manager, 'ebook_parser'), "SyncManager missing ebook_parser"
         assert hasattr(sync_manager, 'sync_clients'), "SyncManager missing sync_clients"

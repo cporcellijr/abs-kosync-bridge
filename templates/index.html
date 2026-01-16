@@ -516,10 +516,9 @@
 
         <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-              todo fix this. dont use mappings.
             {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
             <div class="book-card"
-                 data-progress="{{ mapping.kosync_progress }}"
+                 data-progress="{{ mapping.unified_progress }}"
                  data-last-sync="{{ mapping.last_sync }}"
                  data-status="{{ mapping.status }}"
                  data-title="{{ mapping.abs_title }}">
@@ -536,7 +535,7 @@
                         {{ mapping.status }}
                     </div>
 
-                    {% if mapping.status == 'active' and mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
                     <div class="progress-ring reading">
                         {{ '%.0f' | format(mapping.unified_progress) }}%
                     </div>
@@ -548,7 +547,7 @@
 
                         {% if mapping.status == 'active' %}
                         <div class="progress-details">
-                            {% if integrations.audiobookshelf %}
+                            {% if integrations.abs %}
                             <div class="progress-item" title="Audiobookshelf">
                                 <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
                                 <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
@@ -574,22 +573,23 @@
                             {% endif %}
 
                             {% if integrations.hardcover %}
-    <div class="progress-item"
-         title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-         onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-         style="cursor: pointer; position: relative;">
-        <img src="/static/hardcover.png" alt="HC"
-             style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-             onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-        <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
+                            <div class="progress-item"
+                                 title="Hardcover:
+                                   {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
+                                 onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                                 style="cursor: pointer; position: relative;">
+                              <img src="/static/hardcover.png" alt="HC"
+                                   style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                                   onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                              <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
 
-        {% if mapping.hardcover_book_id %}
-            <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-        {% else %}
-            <span style="font-size: 10px; opacity: 0.5;">+</span>
-        {% endif %}
-    </div>
-    {% endif %}
+                              {% if mapping.hardcover_book_id %}
+                                <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
+                              {% else %}
+                                <span style="font-size: 10px; opacity: 0.5;">+</span>
+                              {% endif %}
+                            </div>
+                            {% endif %}
                         </div>
 
                         <div class="progress-bar-mini">
@@ -627,7 +627,7 @@
         <div class="book-grid" id="all-books-grid">
             {% for mapping in mappings %}
             <div class="book-card"
-                 data-progress="{{ mapping.kosync_progress }}"
+                 data-progress="{{ mapping.unified_progress }}"
                  data-last-sync="{{ mapping.last_sync }}"
                  data-status="{{ mapping.status }}"
                  data-title="{{ mapping.abs_title }}">
@@ -644,7 +644,7 @@
                         {{ mapping.status }}
                     </div>
 
-                    {% if mapping.status == 'active' and mapping.kosync_progress > 0 and mapping.kosync_progress < 100 %}
+                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
                     <div class="progress-ring reading">
                         {{ '%.0f' | format(mapping.unified_progress) }}%
                     </div>
@@ -656,7 +656,7 @@
 
                         {% if mapping.status == 'active' %}
                         <div class="progress-details">
-                            {% if integrations.audiobookshelf %}
+                            {% if integrations.abs %}
                             <div class="progress-item" title="Audiobookshelf">
                                 <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
                                 <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
@@ -682,22 +682,22 @@
                             {% endif %}
 
                             {% if integrations.hardcover %}
-    <div class="progress-item"
-         title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-         onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-         style="cursor: pointer; position: relative;">
-        <img src="/static/hardcover.png" alt="HC"
-             style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-             onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-        <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
+                            <div class="progress-item"
+                                 title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
+                                 onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                                 style="cursor: pointer; position: relative;">
+                                <img src="/static/hardcover.png" alt="HC"
+                                     style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                                <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
 
-        {% if mapping.hardcover_book_id %}
-            <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-        {% else %}
-            <span style="font-size: 10px; opacity: 0.5;">+</span>
-        {% endif %}
-    </div>
-    {% endif %}
+                                {% if mapping.hardcover_book_id %}
+                                    <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
+                                {% else %}
+                                    <span style="font-size: 10px; opacity: 0.5;">+</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </div>
 
                         <div class="progress-bar-mini">

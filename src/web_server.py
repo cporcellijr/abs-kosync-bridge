@@ -14,10 +14,10 @@ import requests
 import schedule
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
-from src.utils.di_container import create_container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
+from src.utils.di_container import create_container
 from src.db.migration_utils import initialize_database
 
 # ---------------- APP SETUP ----------------
@@ -41,10 +41,8 @@ manager = container.sync_manager()
 # ---------------- DATA DIR CONFIG ----------------
 DATA_DIR = container.data_dir()
 
-# Use DATA_DIR for DB and logs
-
-db_handler = container.db_handler()
-state_handler = container.state_handler()
+# Initialize the unified database service
+database_service = initialize_database(DATA_DIR)
 
 # ---------------- BOOK LINKER CONFIG ----------------
 
@@ -76,6 +74,7 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 
+
 # ---------------- BOOK LINKER HELPERS ----------------
 
 def safe_folder_name(name: str) -> str:
@@ -85,7 +84,9 @@ def safe_folder_name(name: str) -> str:
         name = name.replace(c, '_')
     return name.strip() or "Unknown"
 
+
 app.jinja_env.globals['safe_folder_name'] = safe_folder_name
+
 
 def get_stats(ebooks, audiobooks):
     total = sum(m["file_size_mb"] for m in ebooks) + sum(m.get("file_size_mb", 0) for m in audiobooks)
@@ -95,6 +96,7 @@ def get_stats(ebooks, audiobooks):
         "total_count": len(ebooks) + len(audiobooks),
         "total_size_mb": round(total, 2),
     }
+
 
 def search_abs_audiobooks_linker(query: str):
     """Search ABS for audiobooks - Book Linker version"""
@@ -131,7 +133,7 @@ def search_abs_audiobooks_linker(query: str):
                     logger.debug(f"  ⚠️ Skipping {title} - no audio files")
                     continue
 
-                size_mb = sum(f.get('metadata', {}).get('size', 0) for f in audio_files) / (1024*1024)
+                size_mb = sum(f.get('metadata', {}).get('size', 0) for f in audio_files) / (1024 * 1024)
 
                 results.append({
                     "id": ab.get("id"),
@@ -147,6 +149,7 @@ def search_abs_audiobooks_linker(query: str):
     except Exception as e:
         logger.error(f"❌ Book Linker ABS search failed: {e}", exc_info=True)
         return []
+
 
 def copy_abs_audiobook_linker(abs_id: str, dest_folder: Path):
     """Copy audiobook files from ABS - Book Linker version"""
@@ -203,6 +206,7 @@ def copy_abs_audiobook_linker(abs_id: str, dest_folder: Path):
         logger.error(f"Failed to copy ABS {abs_id}: {e}", exc_info=True)
         return False
 
+
 def find_local_ebooks(query: str):
     """Find ebooks in Book Linker source folder"""
     matches = []
@@ -215,9 +219,10 @@ def find_local_ebooks(query: str):
             matches.append({
                 "full_path": str(epub),
                 "file_name": epub.name,
-                "file_size_mb": round(epub.stat().st_size / (1024*1024), 2),
+                "file_size_mb": round(epub.stat().st_size / (1024 * 1024), 2),
             })
     return matches
+
 
 # ---------------- MONITORING LOGIC (RESTORED) ----------------
 
@@ -265,7 +270,8 @@ def run_processing_scan(manual=False):
                                 if folder_name in line and ('node' in line.lower() or 'storyteller' in line.lower()):
                                     storyteller_active = True
                                     break
-                        except: pass
+                        except:
+                            pass
 
                     if storyteller_active:
                         skipped += 1
@@ -291,7 +297,8 @@ def run_processing_scan(manual=False):
                         try:
                             file.unlink()
                             deleted_count += 1
-                        except: pass
+                        except:
+                            pass
 
                     ingest_dest = STORYTELLER_INGEST / folder.name
                     if ingest_dest.exists(): shutil.rmtree(str(ingest_dest))
@@ -309,6 +316,7 @@ def run_processing_scan(manual=False):
 
     return processed, skipped
 
+
 def monitor_readaloud_files():
     while True:
         try:
@@ -317,9 +325,11 @@ def monitor_readaloud_files():
         except Exception as e:
             logger.error(f"Monitor loop error: {e}", exc_info=True)
 
+
 monitor_thread = threading.Thread(target=monitor_readaloud_files, daemon=True)
 monitor_thread.start()
 logger.info("Readaloud monitor started")
+
 
 # ---------------- SYNC MANAGER DAEMON ----------------
 
@@ -351,10 +361,12 @@ def sync_daemon():
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
 
+
 # Start sync daemon in background thread
 sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
 sync_daemon_thread.start()
 logger.info("Sync daemon thread started")
+
 
 # ---------------- ORIGINAL ABS-KOSYNC HELPERS ----------------
 
@@ -362,6 +374,7 @@ def find_ebook_file(filename):
     base = EBOOK_DIR
     matches = list(base.rglob(filename))
     return matches[0] if matches else None
+
 
 def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
     """Get KOSync document ID for an ebook.
@@ -401,6 +414,7 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
 
 class EbookResult:
     """Wrapper to provide consistent interface for ebooks from Booklore or filesystem."""
+
     def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None):
         self.name = name
         self.title = title or Path(name).stem
@@ -470,17 +484,20 @@ def get_searchable_ebooks(search_term):
         if search_term.lower() in eb.name.lower()
     ]
 
+
 def get_abs_author(ab):
     """Extract author from ABS audiobook metadata."""
     media = ab.get('media', {})
     metadata = media.get('metadata', {})
     return metadata.get('authorName') or (metadata.get('authors') or [{}])[0].get("name", "")
 
+
 def audiobook_matches_search(ab, search_term):
     """Check if audiobook matches search term (searches title AND author)."""
-    title = manager._get_abs_title(ab).lower()
+    title = manager.get_abs_title(ab).lower()
     author = get_abs_author(ab).lower()
     return search_term in title or search_term in author
+
 
 def add_to_abs_collection(abs_client, item_id, collection_name=None):
     if collection_name is None: collection_name = ABS_COLLECTION_NAME
@@ -498,7 +515,8 @@ def add_to_abs_collection(abs_client, item_id, collection_name=None):
             if r_lib.status_code == 200:
                 libraries = r_lib.json().get('libraries', [])
                 if libraries:
-                    r_create = requests.post(collections_url, headers=abs_client.headers, json={"libraryId": libraries[0]['id'], "name": collection_name})
+                    r_create = requests.post(collections_url, headers=abs_client.headers,
+                                             json={"libraryId": libraries[0]['id'], "name": collection_name})
                     if r_create.status_code in [200, 201]: target_collection = r_create.json()
 
         if not target_collection: return False
@@ -513,7 +531,9 @@ def add_to_abs_collection(abs_client, item_id, collection_name=None):
             logger.info(f"🏷️ Added '{sanitize_log_data(title or str(item_id))}' to ABS Collection: {collection_name}")
             return True
         return False
-    except: return False
+    except:
+        return False
+
 
 def add_to_booklore_shelf(ebook_filename, shelf_name=None):
     if shelf_name is None: shelf_name = BOOKLORE_SHELF_NAME
@@ -536,94 +556,152 @@ def add_to_booklore_shelf(ebook_filename, shelf_name=None):
         target_shelf = next((s for s in r_shelves.json() if s.get('name') == shelf_name), None)
 
         if not target_shelf:
-            r_create = requests.post(f"{booklore_url}/api/v1/shelves", headers=headers, json={"name": shelf_name, "icon": "📚", "iconType": "PRIME_NG"})
-            if r_create.status_code == 201: target_shelf = r_create.json()
-            else: return False
+            r_create = requests.post(f"{booklore_url}/api/v1/shelves", headers=headers,
+                                     json={"name": shelf_name, "icon": "📚", "iconType": "PRIME_NG"})
+            if r_create.status_code == 201:
+                target_shelf = r_create.json()
+            else:
+                return False
 
-        r_assign = requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers, json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
+        r_assign = requests.post(f"{booklore_url}/api/v1/books/shelves", headers=headers,
+                                 json={"bookIds": [target_book['id']], "shelvesToAssign": [target_shelf['id']], "shelvesToUnassign": []})
         if r_assign.status_code in [200, 201, 204]:
             logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
             return True
         return False
-    except: return False
+    except:
+        return False
+
 
 # ---------------- ROUTES ----------------
 @app.route('/')
 def index():
-    """Dashboard"""
-    db = db_handler.load(default={"mappings": []})
-    all_states = state_handler.load(default={})
+    """Dashboard - loads books and progress from database service"""
 
-    integrations = {
-        'audiobookshelf': True,
-        'kosync': manager.kosync_client.is_configured(),
-        'storyteller': manager.storyteller_db.check_connection() if hasattr(manager.storyteller_db, 'check_connection') else True,
-        'booklore': manager.booklore_client.is_configured() if hasattr(manager.booklore_client, 'check_connection') else False,
-        'hardcover': bool(manager.hardcover_client.token)
-    }
+    # Load books from database service
+    books = database_service.get_all_books()
 
-    mappings = db.get('mappings', [])
+    integrations = {}
 
+    # Dynamically check all configured sync clients
+    sync_clients = container.sync_clients()
+    for client_name, client in sync_clients.items():
+        if client.is_configured():
+            integrations[client_name.lower()] = True
+        else:
+            integrations[client_name.lower()] = False
+
+    # Convert books to mappings format for template compatibility
+    mappings = []
     total_duration = 0
     total_listened = 0
 
-    for mapping in mappings:
-        abs_id = mapping.get('abs_id')
+    for book in books:
+        # Get states for this book from database service
+        states = database_service.get_states_for_book(book.abs_id)
 
-        # 1. Initialize defaults (Safe for Template)
-        if 'unified_progress' not in mapping: mapping['unified_progress'] = 0
-        if 'duration' not in mapping: mapping['duration'] = 0
+        # Convert states to a dict by client name for easy access
+        state_by_client = {state.client_name: state for state in states}
 
-        # We start these at 0, but will try to overwrite them below
-        mapping.setdefault('kosync_progress', 0)
-        mapping.setdefault('storyteller_progress', 0)
-        mapping.setdefault('booklore_progress', 0)
-        mapping.setdefault('abs_progress', 0)
-        mapping.setdefault('hardcover_progress', 0)
+        # Create mapping dict for template compatibility
+        mapping = {
+            'abs_id': book.abs_id,
+            'abs_title': book.abs_title,
+            'ebook_filename': book.ebook_filename,
+            'kosync_doc_id': book.kosync_doc_id,
+            'transcript_file': book.transcript_file,
+            'status': book.status,
+            # Initialize progress values
+            'unified_progress': 0,
+            'duration': book.duration or 0,
+            'kosync_progress': 0,
+            'storyteller_progress': 0,
+            'booklore_progress': 0,
+            'abs_progress': 0,
+            'hardcover_progress': 0
+        }
 
-        # 2. POPULATE STATS (Try DB first, Fallback to State)
-        # Check if we have state data for this book
-        if abs_id in all_states:
-            state = all_states[abs_id]
+        # Populate progress from states
+        latest_update_time = 0
+        max_progress = 0
 
-            # Helper to get % from state (0.75 -> 75.0)
-            def get_pct(key):
-                return round(state.get(key, 0) * 100, 1)
+        # TODO! Clean this up. Just return the percentage + timestamp per client and let the frontend/index.html figure it out
+        # Process each client state
+        for client_name, state in state_by_client.items():
+            if state.last_updated and state.last_updated > latest_update_time:
+                latest_update_time = state.last_updated
 
-            # If the DB is empty/zero, use the State file for everything
-            if mapping.get('unified_progress', 0) == 0:
-                mapping['kosync_progress'] = get_pct('kosync_pct')
-                mapping['storyteller_progress'] = get_pct('storyteller_pct')
-                mapping['booklore_progress'] = get_pct('booklore_pct')
-                mapping['hardcover_progress'] = get_pct('hardcover_pct')
-                mapping['abs_progress'] = state.get('abs_ts', 0)
+            if client_name == 'kosync':
+                mapping['kosync_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
+                max_progress = max(max_progress, mapping['kosync_progress'])
 
-                # Sanity check: ABS timestamp may be stored in milliseconds in the state file.
-                # If it's a very large value, convert milliseconds -> seconds. Keep the value
-                # as seconds in the mapping so the UI can show time like 08:00:00.
-                if mapping['abs_progress'] > 1_000_000:
-                    mapping['abs_progress'] = mapping['abs_progress'] / 1000.0
+            elif client_name == 'abs':
+                # ABS stores timestamp, convert to progress percentage for display
+                if state.timestamp:
+                    mapping['abs_progress'] = state.timestamp
+                    # Try to get duration from ABS client for percentage calculation
+                    if mapping['duration'] > 0:
+                        abs_pct = min((state.timestamp / mapping['duration']) * 100.0, 100.0)
+                    else:
+                        abs_pct = round(state.percentage * 100, 1) if state.percentage else 0
+                    max_progress = max(max_progress, abs_pct)
 
-                # Compute percentage value for unified progress without overwriting abs_progress.
-                duration = mapping.get('duration', 0)
-                if duration and duration > 0:
-                    abs_pct_value = min((mapping['abs_progress'] / duration) * 100.0, 100.0)
-                else:
-                    # If duration unknown, use the percentage stored in the state (abs_pct) and scale to 0-100.
-                    abs_pct_value = min(state.get('abs_pct', 0) * 100.0, 100.0)
+            elif client_name == 'storyteller':
+                mapping['storyteller_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
+                max_progress = max(max_progress, mapping['storyteller_progress'])
 
-                # Recalculate Unified Progress from the max of these (use abs_pct_value)
-                max_p = max(
-                    mapping['kosync_progress'],
+            elif client_name == 'booklore':
+                mapping['booklore_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
+                max_progress = max(max_progress, mapping['booklore_progress'])
 
-                    mapping['storyteller_progress'],
-                    mapping['booklore_progress'],
-                    abs_pct_value
-                )
-                if max_p > 0:
-                    mapping['unified_progress'] = min(max_p, 100.0)
+            elif client_name == 'hardcover':
+                mapping['hardcover_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
 
-        # 3. Calculate Totals for Top Bar
+        # Add hardcover mapping details
+        hardcover_details = database_service.get_hardcover_details(book.abs_id)
+        if hardcover_details:
+            mapping.update({
+                'hardcover_book_id': hardcover_details.hardcover_book_id,
+                'hardcover_edition_id': hardcover_details.hardcover_edition_id,
+                'hardcover_pages': hardcover_details.hardcover_pages,
+                'isbn': hardcover_details.isbn,
+                'asin': hardcover_details.asin,
+                'matched_by': hardcover_details.matched_by,
+                'hardcover_linked': True,
+                'hardcover_title': book.abs_title  # Use ABS title as fallback for Hardcover title
+            })
+        else:
+            mapping.update({
+                'hardcover_book_id': None,
+                'hardcover_edition_id': None,
+                'hardcover_pages': None,
+                'isbn': None,
+                'asin': None,
+                'matched_by': None,
+                'hardcover_linked': False,
+                'hardcover_title': None
+            })
+
+        # Set unified progress to the maximum progress across all clients
+        mapping['unified_progress'] = min(max_progress, 100.0)
+
+        # Calculate last sync time
+        if latest_update_time > 0:
+            diff = time.time() - latest_update_time
+            if diff < 60:
+                mapping['last_sync'] = f"{int(diff)}s ago"
+            elif diff < 3600:
+                mapping['last_sync'] = f"{int(diff // 60)}m ago"
+            else:
+                mapping['last_sync'] = f"{int(diff // 3600)}h ago"
+        else:
+            mapping['last_sync'] = "Never"
+
+        # Set cover URL
+        if book.abs_id:
+            mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{book.abs_id}/cover?token={manager.abs_client.token}"
+
+        # Add to totals for overall progress calculation
         duration = mapping.get('duration', 0)
         progress_pct = mapping.get('unified_progress', 0)
 
@@ -631,22 +709,14 @@ def index():
             total_duration += duration
             total_listened += (progress_pct / 100.0) * duration
 
-        # 4. Last Sync Time
-        book_state = all_states.get(abs_id, {})
-        last_updated = book_state.get('last_updated', 0)
-        if last_updated > 0:
-            diff = time.time() - last_updated
-            if diff < 60: mapping['last_sync'] = f"{int(diff)}s ago"
-            elif diff < 3600: mapping['last_sync'] = f"{int(diff // 60)}m ago"
-            else: mapping['last_sync'] = f"{int(diff // 3600)}h ago"
-        else:
-            mapping['last_sync'] = "Never"
+        mappings.append(mapping)
 
-        if abs_id:
-             mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"
-
+    # Calculate overall progress based on total duration and listening time
     if total_duration > 0:
         overall_progress = round((total_listened / total_duration) * 100, 1)
+    elif mappings:
+        # Fallback: average progress if no duration data available
+        overall_progress = round(sum(m['unified_progress'] for m in mappings) / len(mappings), 1)
     else:
         overall_progress = 0
 
@@ -669,7 +739,9 @@ def book_linker():
             audiobook_matches = search_abs_audiobooks_linker(book_name)
             stats = get_stats(ebook_matches, audiobook_matches)
 
-    return render_template('book_linker.html', book_name=book_name, ebook_matches=ebook_matches, audiobook_matches=audiobook_matches, stats=stats, message=message, is_error=is_error,linker_books_dir=str(LINKER_BOOKS_DIR), processing_dir=str(DEST_BASE),storyteller_ingest=str(STORYTELLER_INGEST))
+    return render_template('book_linker.html', book_name=book_name, ebook_matches=ebook_matches, audiobook_matches=audiobook_matches, stats=stats,
+                           message=message, is_error=is_error, linker_books_dir=str(LINKER_BOOKS_DIR), processing_dir=str(DEST_BASE),
+                           storyteller_ingest=str(STORYTELLER_INGEST))
 
 
 @app.route('/book-linker/process', methods=['POST'])
@@ -702,6 +774,7 @@ def book_linker_process():
     session["is_error"] = False
     return redirect(url_for('book_linker'))
 
+
 @app.route('/book-linker/trigger-monitor', methods=['POST'])
 def trigger_monitor():
     processed, skipped = run_processing_scan(manual=True)
@@ -715,6 +788,7 @@ def trigger_monitor():
         session["message"] = "Manual scan complete: No ready items found."
         session["is_error"] = False
     return redirect(url_for('book_linker'))
+
 
 @app.route('/match', methods=['GET', 'POST'])
 def match():
@@ -738,12 +812,19 @@ def match():
             logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
 
-        mapping = {"abs_id": abs_id, "abs_title": manager._get_abs_title(selected_ab), "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
-        def add_mapping(db):
-            db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
-            db['mappings'].append(mapping)
-            return db
-        db_handler.update(add_mapping, default={"mappings": []})
+        # Create Book object and save to database service
+        from src.db.models import Book
+        book = Book(
+            abs_id=abs_id,
+            abs_title=manager.get_abs_title(selected_ab),
+            ebook_filename=ebook_filename,
+            kosync_doc_id=kosync_doc_id,
+            transcript_file=None,
+            status="pending",
+            duration=manager.get_duration(selected_ab)
+        )
+
+        database_service.save_book(book)
         add_to_abs_collection(manager.abs_client, abs_id)
         add_to_booklore_shelf(ebook_filename)
         manager.storyteller_db.add_to_collection(ebook_filename)
@@ -759,7 +840,8 @@ def match():
         # Use new search method
         ebooks = get_searchable_ebooks(search)
 
-    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager._get_abs_title)
+    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager.get_abs_title)
+
 
 @app.route('/batch-match', methods=['GET', 'POST'])
 def batch_match():
@@ -773,7 +855,11 @@ def batch_match():
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
             if selected_ab and ebook_filename:
                 if not any(item['abs_id'] == abs_id for item in session['queue']):
-                    session['queue'].append({"abs_id": abs_id, "abs_title": manager._get_abs_title(selected_ab), "ebook_filename": ebook_filename, "cover_url": f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"})
+                    session['queue'].append({"abs_id": abs_id,
+                                             "abs_title": manager.get_abs_title(selected_ab),
+                                             "ebook_filename": ebook_filename,
+                                             "duration": manager.get_duration(selected_ab),
+                                             "cover_url": f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"})
                     session.modified = True
             return redirect(url_for('batch_match', search=request.form.get('search', '')))
         elif action == 'remove_from_queue':
@@ -786,9 +872,11 @@ def batch_match():
             session.modified = True
             return redirect(url_for('batch_match'))
         elif action == 'process_queue':
-            db = db_handler.load(default={"mappings": []})
+            from src.db.models import Book
+
             for item in session.get('queue', []):
                 ebook_filename = item['ebook_filename']
+                duration = item['duration']
 
                 # Get booklore_id if available for API-based hash computation
                 booklore_id = None
@@ -803,13 +891,22 @@ def batch_match():
                     logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
 
-                mapping = {"abs_id": item['abs_id'], "abs_title": item['abs_title'], "ebook_filename": ebook_filename, "kosync_doc_id": kosync_doc_id, "transcript_file": None, "status": "pending"}
-                db['mappings'] = [m for m in db['mappings'] if m['abs_id'] != item['abs_id']]
-                db['mappings'].append(mapping)
+                # Create Book object and save to database service
+                book = Book(
+                    abs_id=item['abs_id'],
+                    abs_title=item['abs_title'],
+                    ebook_filename=ebook_filename,
+                    kosync_doc_id=kosync_doc_id,
+                    transcript_file=None,
+                    status="pending",
+                    duration=duration
+                )
+
+                database_service.save_book(book)
                 add_to_abs_collection(manager.abs_client, item['abs_id'])
                 add_to_booklore_shelf(item['ebook_filename'])
                 manager.storyteller_db.add_to_collection(item['ebook_filename'])
-            db_handler.save(db)
+
             session['queue'] = []
             session.modified = True
             return redirect(url_for('index'))
@@ -825,75 +922,49 @@ def batch_match():
         ebooks = get_searchable_ebooks(search)
         ebooks.sort(key=lambda x: x.name.lower())
 
-    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search, get_title=manager._get_abs_title)
+    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search,
+                           get_title=manager.get_abs_title)
+
 
 @app.route('/delete/<abs_id>', methods=['POST'])
 def delete_mapping(abs_id):
-    db = db_handler.load(default={"mappings": []})
-    mapping = next((m for m in db.get('mappings', []) if m['abs_id'] == abs_id), None)
-    if mapping:
-        if mapping.get('transcript_file'):
-            try: Path(mapping['transcript_file']).unlink()
-            except: pass
-        session_id = mapping.get('abs_session_id')
-        if session_id:
-            manager.abs_client.close_session(session_id)
-    def remove_mapping(db):
-        db['mappings'] = [m for m in db.get('mappings', []) if m['abs_id'] != abs_id]
-        return db
-    db_handler.update(remove_mapping, default={"mappings": []})
-    def remove_state(state):
-        if abs_id in state: del state[abs_id]
-        return state
-    state_handler.update(remove_state, default={})
+    # Get book from database service
+    book = database_service.get_book(abs_id)
+    if book:
+        # Clean up transcript file if it exists
+        if book.transcript_file:
+            try:
+                Path(book.transcript_file).unlink()
+            except:
+                pass
+
+    # Delete book and all associated data (states, jobs, hardcover details) via database service
+    database_service.delete_book(abs_id)
+
     return redirect(url_for('index'))
+
 
 @app.route('/clear-progress/<abs_id>', methods=['POST'])
 def clear_progress(abs_id):
     """Clear progress for a mapping by setting all systems to 0%"""
-    db = db_handler.load(default={"mappings": []})
-    mapping = next((m for m in db.get('mappings', []) if m['abs_id'] == abs_id), None)
+    # Get book from database service
+    book = database_service.get_book(abs_id)
 
-    if not mapping:
-        logger.warning(f"Cannot clear progress: mapping not found for {abs_id}")
+    if not book:
+        logger.warning(f"Cannot clear progress: book not found for {abs_id}")
         return redirect(url_for('index'))
-    # todo create a method in the sync manager to clear progress
+
     try:
         # Reset progress to 0 in all three systems
-        logger.info(f"Clearing progress for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
-        manager.abs_client.update_progress(abs_id, 0, 0)
-        logger.info(f"  ✓ ABS progress cleared")
-
-        # KOSync: Set to 0%
-        kosync_id = mapping.get('kosync_doc_id')
-        if kosync_id:
-            manager.kosync_client.update_progress(kosync_id, 0.0)
-            logger.info(f"  ✓ KOSync progress cleared")
-
-        # Storyteller: Set to 0%
-        ebook_filename = mapping.get('ebook_filename')
-        if ebook_filename:
-            manager.storyteller_db.update_progress(ebook_filename, 0.0)
-            logger.info(f"  ✓ Storyteller progress cleared")
-
-        # Booklore: Set to 0%
-        if ebook_filename:
-            manager.booklore_client.update_progress(ebook_filename, 0.0)
-            logger.info(f"  ✓ Booklore progress cleared")
-
-        # Clear the last state so next sync will properly propagate the 0%
-        state = state_handler.load(default={})
-        if abs_id in state:
-            del state[abs_id]
-            state_handler.save(state)
-            logger.info(f"  ✓ Last state cleared")
-
-        logger.info(f"✅ Progress cleared successfully for {sanitize_log_data(mapping.get('abs_title', abs_id))}")
+        logger.info(f"Clearing progress for {sanitize_log_data(book.abs_title or abs_id)}")
+        manager.clear_progress(abs_id)
+        logger.info(f"✅ Progress cleared successfully for {sanitize_log_data(book.abs_title or abs_id)}")
 
     except Exception as e:
         logger.error(f"Failed to clear progress for {abs_id}: {e}")
 
     return redirect(url_for('index'))
+
 
 @app.route('/link-hardcover/<abs_id>', methods=['POST'])
 def link_hardcover(abs_id):
@@ -908,36 +979,81 @@ def link_hardcover(abs_id):
         flash(f"❌ Could not find book for: {url}", "error")
         return redirect(url_for('index'))
 
-    # Update DB
-    def update_map(db):
-        for m in db.get('mappings', []):
-            if m.get('abs_id') == abs_id:
-                m['hardcover_book_id'] = book_data['book_id']
-                m['hardcover_edition_id'] = book_data.get('edition_id')
-                m['hardcover_pages'] = book_data.get('pages')
-                m['hardcover_title'] = book_data.get('title')
-        return db
+    # Create or update hardcover details using database service
+    from src.db.models import HardcoverDetails
 
-    if db_handler.update(update_map):
+    try:
+        hardcover_details = HardcoverDetails(
+            abs_id=abs_id,
+            hardcover_book_id=book_data['book_id'],
+            hardcover_edition_id=book_data.get('edition_id'),
+            hardcover_pages=book_data.get('pages'),
+            matched_by='manual'  # Since this was manually linked
+        )
+
+        database_service.save_hardcover_details(hardcover_details)
+
         # Force status to 'Want to Read' (1)
         try:
             manager.hardcover_client.update_status(book_data['book_id'], 1, book_data.get('edition_id'))
         except Exception as e:
             logger.warning(f"Failed to set Hardcover status: {e}")
+
         flash(f"✅ Linked Hardcover: {book_data.get('title')}", "success")
-    else:
+    except Exception as e:
+        logger.error(f"Failed to save hardcover details: {e}")
         flash("❌ Database update failed", "error")
 
     return redirect(url_for('index'))
 
+
 @app.route('/api/status')
 def api_status():
-    return jsonify(db_handler.load(default={"mappings": []}))
+    """Return status of all books from database service"""
+    books = database_service.get_all_books()
+
+    # Convert books to mappings format for API compatibility
+    mappings = []
+    for book in books:
+        # Get states for this book
+        states = database_service.get_states_for_book(book.abs_id)
+        state_by_client = {state.client_name: state for state in states}
+
+        mapping = {
+            'abs_id': book.abs_id,
+            'abs_title': book.abs_title,
+            'ebook_filename': book.ebook_filename,
+            'kosync_doc_id': book.kosync_doc_id,
+            'transcript_file': book.transcript_file,
+            'status': book.status,
+            'duration': book.duration
+        }
+
+        # Add progress information from states
+        for client_name, state in state_by_client.items():
+            if client_name == 'kosync':
+                mapping['kosync_pct'] = state.percentage
+                mapping['kosync_xpath'] = state.xpath
+            elif client_name == 'abs':
+                mapping['abs_pct'] = state.percentage
+                mapping['abs_ts'] = state.timestamp
+            elif client_name == 'storyteller':
+                mapping['storyteller_pct'] = state.percentage
+                mapping['storyteller_xpath'] = state.xpath
+            elif client_name == 'booklore':
+                mapping['booklore_pct'] = state.percentage
+                mapping['booklore_xpath'] = state.xpath
+
+        mappings.append(mapping)
+
+    return jsonify({"mappings": mappings})
+
 
 @app.route('/logs')
 def logs_view():
     """Display logs frontend with filtering capabilities."""
     return render_template('logs.html')
+
 
 @app.route('/api/logs')
 def api_logs():
@@ -1064,6 +1180,7 @@ def api_logs():
         logger.error(f"Error fetching logs: {e}")
         return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
 
+
 @app.route('/api/logs/live')
 def api_logs_live():
     """API endpoint for fetching recent live logs from memory."""
@@ -1106,22 +1223,15 @@ def api_logs_live():
         logger.error(f"Error fetching live logs: {e}")
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
 
+
 @app.route('/view_log')
 def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
 
+
 if __name__ == '__main__':
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
-
-    # Initialize database and perform migration if needed
-    logger.info("🗄️ Initializing database...")
-    try:
-        db_service = initialize_database(DATA_DIR)
-        logger.info("✅ Database initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}")
-        raise e
 
     # Check ebook source configuration
     booklore_configured = manager.booklore_client.is_configured()

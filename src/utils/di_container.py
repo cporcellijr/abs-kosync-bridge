@@ -23,6 +23,7 @@ from src.sync_clients.kosync_sync_client import KoSyncSyncClient
 from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
 from src.sync_clients.booklore_sync_client import BookloreSyncClient
 from src.sync_clients.abs_ebook_sync_client import ABSEbookSyncClient
+from src.sync_clients.hardcover_sync_client import HardcoverSyncClient
 from src.sync_manager import SyncManager
 
 logger = logging.getLogger(__name__)
@@ -163,28 +164,33 @@ class Container(containers.DeclarativeContainer):
         ebook_parser
     )
 
+    hardcover_sync_client = providers.Singleton(
+        HardcoverSyncClient,
+        hardcover_client,
+        ebook_parser,
+        abs_client,
+        database_service
+    )
+
     # Sync clients dictionary for reuse
     sync_clients = providers.Dict(
         ABS=abs_sync_client,
         ABSEbook=abs_ebook_sync_client,
         KoSync=kosync_sync_client,
         Storyteller=storyteller_sync_client,
-        BookLore=booklore_sync_client
+        BookLore=booklore_sync_client,
+        Hardcover=hardcover_sync_client
     )
 
     # Sync Manager
     sync_manager = providers.Singleton(
         SyncManager,
         abs_client=abs_client,
-        kosync_client=kosync_client,
-        hardcover_client=hardcover_client,
-        storyteller_db=storyteller_client,
         booklore_client=booklore_client,
         transcriber=transcriber,
         ebook_parser=ebook_parser,
         database_service=database_service,
         sync_clients=sync_clients,
-        kosync_use_percentage_from_server=kosync_use_percentage_from_server,
         epub_cache_dir=epub_cache_dir,
         data_dir=data_dir,
         books_dir=books_dir

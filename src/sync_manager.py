@@ -8,7 +8,7 @@ from pathlib import Path
 import schedule
 
 from src.db.models import Job
-from src.db.models import State, HardcoverDetails, Book
+from src.db.models import State, Book
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
@@ -30,15 +30,11 @@ logger = logging.getLogger(__name__)
 class SyncManager:
     def __init__(self,
                  abs_client=None,
-                 kosync_client=None,
-                 hardcover_client=None,
-                 storyteller_db=None,
                  booklore_client=None,
                  transcriber=None,
                  ebook_parser=None,
                  database_service=None,
                  sync_clients: dict[str, SyncClient]=None,
-                 kosync_use_percentage_from_server=None,
                  epub_cache_dir=None,
                  data_dir=None,
                  books_dir=None):
@@ -46,9 +42,6 @@ class SyncManager:
         logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===")
         # Use dependency injection
         self.abs_client = abs_client
-        self.kosync_client = kosync_client
-        self.hardcover_client = hardcover_client
-        self.storyteller_db = storyteller_db
         self.booklore_client = booklore_client
         self.transcriber = transcriber
         self.ebook_parser = ebook_parser
@@ -56,7 +49,6 @@ class SyncManager:
         self.data_dir = data_dir
         self.books_dir = books_dir
 
-        self.kosync_use_percentage_from_server = kosync_use_percentage_from_server if kosync_use_percentage_from_server is not None else os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true"
         self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
@@ -64,18 +56,21 @@ class SyncManager:
         self._job_lock = threading.Lock()
         self._job_thread = None
 
+        self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
-        self._setup_sync_clients(sync_clients)
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
         self.sync_clients = {name: client for name, client in clients.items() if client.is_configured()}
 
     def startup_checks(self):
-        self.abs_client.check_connection()
-        self.kosync_client.check_connection()
-        self.storyteller_db.check_connection()
-        self.booklore_client.check_connection()
+        # Check configured sync clients
+        for client_name, client in (self.sync_clients or {}).items():
+            try:
+                client.check_connection()
+                logger.info(f"✅ {client_name} connection verified")
+            except Exception as e:
+                logger.warning(f"⚠️ {client_name} connection failed: {e}")
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -106,131 +101,15 @@ class SyncManager:
         except Exception as e:
             logger.error(f"Error cleaning up stale jobs: {e}")
 
-    def _get_abs_title(self, ab):
+    def get_abs_title(self, ab):
         media = ab.get('media', {})
         metadata = media.get('metadata', {})
         return metadata.get('title') or ab.get('name', 'Unknown')
 
-    def _automatch_hardcover(self, book):
-        """Match a book with Hardcover using various search strategies."""
-        if not self.hardcover_client.is_configured():
-            return
-
-        # Check if we already have hardcover details for this book
-        existing_details = self.database_service.get_hardcover_details(book.abs_id)
-        if existing_details:
-            return  # Already matched
-
-        item = self.abs_client.get_item_details(book.abs_id)
-        if not item:
-            return
-
-        meta = item.get('media', {}).get('metadata', {})
-        match = None
-        matched_by = None
-
-        # Extract metadata fields for clarity
-        isbn = meta.get('isbn')
-        asin = meta.get('asin')
-        title = meta.get('title')
-        author = meta.get('authorName')
-
-        # Try different search strategies in order of preference
-        if isbn:
-            match = self.hardcover_client.search_by_isbn(isbn)
-            if match:
-                matched_by = 'isbn'
-
-        if not match and asin:
-            match = self.hardcover_client.search_by_isbn(asin)
-            if match:
-                matched_by = 'asin'
-
-        if not match and title and author:
-            match = self.hardcover_client.search_by_title_author(title, author)
-            if match:
-                matched_by = 'title_author'
-
-        if not match and title:
-            match = self.hardcover_client.search_by_title_author(title, "")
-            if match:
-                matched_by = 'title'
-
-        if match:
-            # Create HardcoverDetails model
-            hardcover_details = HardcoverDetails(
-                abs_id=book.abs_id,
-                hardcover_book_id=match.get('book_id'),
-                hardcover_edition_id=match.get('edition_id'),
-                hardcover_pages=match.get('pages'),
-                isbn=isbn,
-                asin=asin,
-                matched_by=matched_by
-            )
-
-            # Save to database
-            self.database_service.save_hardcover_details(hardcover_details)
-
-            # Set initial status to "Want to Read" (status 1)
-            self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
-
-    def _sync_to_hardcover(self, book, percentage):
-        """Sync reading progress to Hardcover using HardcoverDetails model."""
-        # Basic checks
-        if not self.hardcover_client.token:
-            return
-
-        # Get hardcover details for this book
-        hardcover_details = self.database_service.get_hardcover_details(book.abs_id)
-        if not hardcover_details or not hardcover_details.hardcover_book_id:
-            return
-
-        # Get user book from Hardcover
-        ub = self.hardcover_client.get_user_book(hardcover_details.hardcover_book_id)
-        if not ub:
-            return
-
-        total_pages = hardcover_details.hardcover_pages or 0
-
-        # Safety check: If total_pages is zero we cannot compute a valid page number
-        if total_pages == 0:
-            logger.warning(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} has 0 pages.")
-            return
-
-        page_num = int(total_pages * percentage)
-        is_finished = percentage > 0.99
-        current_status = ub.get('status_id')
-
-        # Handle Status Changes
-        # If Finished, prefer marking as Read (3) first
-        if is_finished and current_status != 3:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                3,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Read")
-            current_status = 3
-
-        # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
-        elif percentage > 0.02 and current_status == 1:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                2,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Currently Reading")
-            current_status = 2
-
-        # Update progress (Hardcover rejects page updates for Want to Read)
-        self.hardcover_client.update_progress(
-            ub['id'],
-            page_num,
-            edition_id=hardcover_details.hardcover_edition_id,
-            is_finished=is_finished,
-            current_percentage=percentage
-        )
+    def get_duration(self, ab):
+        """Extract duration from audiobook media data."""
+        media = ab.get('media', {})
+        return media.get('duration', 0)
 
     def _get_local_epub(self, ebook_filename):
         """
@@ -396,10 +275,6 @@ class SyncManager:
                 job.last_error = None
                 self.database_service.save_job(job)
 
-            # Trigger Hardcover Match using the updated book
-            updated_book = self.database_service.get_book(abs_id)
-            if updated_book:
-                self._automatch_hardcover(updated_book)
 
             logger.info(f"[JOB] Completed: {sanitize_log_data(abs_title)}")
 
@@ -519,8 +394,17 @@ class SyncManager:
                 for line in status_lines:
                     logger.info(line)
 
-                # Build vals from config
-                vals = {k: v.current.get('pct') for k, v in config.items()}
+                # Build vals from config - only include clients that can be leaders
+                vals = {}
+                for k, v in config.items():
+                    client = self.sync_clients[k]
+                    if client.can_be_leader():
+                        vals[k] = v.current.get('pct')
+
+                # Ensure we have at least one potential leader
+                if not vals:
+                    logger.warning(f"⚠️ [{title_snip}] No clients available to be leader")
+                    continue
 
                 leader = max(vals, key=vals.get)
                 leader_formatter = config[leader].value_formatter
@@ -546,20 +430,11 @@ class SyncManager:
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}
                 for client_name, client in self.sync_clients.items():
-                    if client_name == leader or client_name not in config:
+                    if client_name == leader:
                         continue
-                    request = UpdateProgressRequest(locator, txt, previous_location=config[client_name].previous_pct)
+                    request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
                     result = client.update_progress(book, request)
                     results[client_name] = result
-                # Set final_pct based on results (use match_pct or aggregate if needed)
-                final_pct = locator.percentage
-
-                # Hardcover sync using HardcoverDetails model
-                if final_pct > 0.01:
-                    self._automatch_hardcover(book)
-                    hardcover_details = self.database_service.get_hardcover_details(book.abs_id)
-                    if hardcover_details and hardcover_details.hardcover_book_id:
-                        self._sync_to_hardcover(book, final_pct)
 
                 # Save states directly to database service using State models
                 current_time = time.time()
@@ -583,7 +458,7 @@ class SyncManager:
                     if result.success:
                         # Use updated_state if provided, otherwise fall back to basic state
                         state_data = result.updated_state if result.updated_state else {'pct': result.location}
-
+                        logger.info(f"[{title_snip}] Updated state data for {client_name}: " + str(state_data))
                         client_state_model = State(
                             abs_id=book.abs_id,
                             client_name=client_name.lower(),
@@ -600,6 +475,72 @@ class SyncManager:
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"Sync error: {e}", e)
+
+    def clear_progress(self, abs_id):
+        """
+        Clear progress data for a specific book and reset all sync clients to 0%.
+
+        Args:
+            abs_id: The book ID to clear progress for
+
+        Returns:
+            dict: Summary of cleared data
+        """
+        try:
+            logger.info(f"🧹 Clearing progress for book {sanitize_log_data(abs_id)}...")
+
+            # Get the book first
+            book = self.database_service.get_book(abs_id)
+            if not book:
+                raise ValueError(f"Book not found: {abs_id}")
+
+            # Clear all states for this book from database
+            cleared_count = self.database_service.delete_states_for_book(abs_id)
+            logger.info(f"📊 Cleared {cleared_count} state records from database")
+
+            # Reset all sync clients to 0% progress
+            reset_results = {}
+            locator = LocatorResult(percentage=0.0)
+            request = UpdateProgressRequest(locator_result=locator, txt="", previous_location=None)
+
+            for client_name, client in self.sync_clients.items():
+                try:
+                    result = client.update_progress(book, request)
+                    reset_results[client_name] = {
+                        'success': result.success,
+                        'message': 'Reset to 0%' if result.success else 'Failed to reset'
+                    }
+                    if result.success:
+                        logger.info(f"✅ Reset {client_name} to 0%")
+                    else:
+                        logger.warning(f"⚠️ Failed to reset {client_name}")
+                except Exception as e:
+                    reset_results[client_name] = {
+                        'success': False,
+                        'message': str(e)
+                    }
+                    logger.warning(f"⚠️ Error resetting {client_name}: {e}")
+
+            summary = {
+                'book_id': abs_id,
+                'book_title': book.abs_title,
+                'database_states_cleared': cleared_count,
+                'client_reset_results': reset_results,
+                'successful_resets': sum(1 for r in reset_results.values() if r['success']),
+                'total_clients': len(reset_results)
+            }
+
+            logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
+            logger.info(f"   Database states cleared: {cleared_count}")
+            logger.info(f"   Client resets: {summary['successful_resets']}/{summary['total_clients']} successful")
+
+            return summary
+
+        except Exception as e:
+            error_msg = f"Error clearing progress for {abs_id}: {e}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            raise RuntimeError(error_msg) from e
 
     def run_daemon(self):
         """Legacy method - daemon is now run from web_server.py"""

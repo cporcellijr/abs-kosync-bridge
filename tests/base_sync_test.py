@@ -65,7 +65,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             kosync_doc_id=self.test_mapping.get('kosync_doc_id'),
             transcript_file=self.test_mapping.get('transcript_file'),
             status=self.test_mapping.get('status', 'active'),
-            abs_session_id=self.test_mapping.get('abs_session_id')
+            duration=self.test_mapping.get('duration', 1000.0)  # Default 1000 second test duration
         )
 
         # Create State models from test state data
@@ -208,9 +208,6 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         # Create SyncManager with dependency injection (all mocks)
         manager = SyncManager(
             abs_client=mocks['abs_client'],
-            kosync_client=mocks['kosync_client'],
-            hardcover_client=mocks['hardcover_client'],
-            storyteller_db=mocks['storyteller_db'],
             booklore_client=mocks['booklore_client'],
             transcriber=transcriber,
             ebook_parser=mocks['ebook_parser'],
@@ -222,7 +219,6 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                 "Storyteller": storyteller_sync_client,
                 "BookLore": booklore_sync_client
             },
-            kosync_use_percentage_from_server=False,
             epub_cache_dir=Path(self.temp_dir) / 'epub_cache'
         )
 

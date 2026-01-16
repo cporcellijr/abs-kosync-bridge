@@ -19,6 +19,9 @@ class KoSyncSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return self.kosync_client.is_configured()
 
+    def check_connection(self):
+        return self.kosync_client.check_connection()
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         ko_id = book.kosync_doc_id
         ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)

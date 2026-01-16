@@ -47,6 +47,22 @@ class SyncClient:
 
     def is_configured(self) -> bool:
         ...
+
+    def check_connection(self):
+        """
+        Check if the client can connect to its service.
+        Should raise an exception if connection fails.
+        """
+        ...
+
+    def can_be_leader(self) -> bool:
+        """
+        Determine if this client can be the leader in the sync cycle.
+        Most clients can be leaders, but some (like Hardcover) cannot provide
+        text content and should never lead.
+        """
+        return True
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         ...
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:

@@ -23,6 +23,9 @@ class ABSSyncClient(SyncClient):
         # ABS is always considered configured (it's the primary service)
         return True
 
+    def check_connection(self):
+        return self.abs_client.check_connection()
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         abs_id = book.abs_id
         response = self.abs_client.get_progress(abs_id)
@@ -74,6 +77,15 @@ class ABSSyncClient(SyncClient):
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         book_title = book.abs_title or 'Unknown Book'
+        if request.locator_result.percentage == 0.0:
+            logger.info(f"[{book_title}] Locator percentage is 0.0% - setting ABS progress to start of book.")
+            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, 0.0)
+            updated_state = {
+                'ts': final_ts,
+                'pct': 0.0
+            }
+            return SyncResult(final_ts, result.get("success", False), updated_state)
+
         ts_for_text = self.transcriber.find_time_for_text(book.transcript_file, request.txt,
                                                           hint_percentage=request.locator_result.percentage,
                                                           book_title=book_title)
@@ -89,7 +101,7 @@ class ABSSyncClient(SyncClient):
         logger.warning(f"[{book_title}] Not updating ABS progress - could not find timestamp for provided text.")
         return SyncResult(None, False)
 
-    def _update_abs_progress_with_offset(self, abs_id, ts, prev_abs_ts: float =0):
+    def _update_abs_progress_with_offset(self, abs_id, ts, prev_abs_ts: float = 0):
         """Apply offset to timestamp and update ABS progress.
 
         Args:

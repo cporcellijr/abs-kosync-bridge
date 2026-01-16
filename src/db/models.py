@@ -23,7 +23,7 @@ class Book(Base):
     kosync_doc_id = Column(String(255))
     transcript_file = Column(String(500))
     status = Column(String(50), default='active')
-    abs_session_id = Column(String(255))
+    duration = Column(Float)  # Duration in seconds from AudioBookShelf
 
     # Relationships
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
@@ -32,14 +32,14 @@ class Book(Base):
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
                  kosync_doc_id: str = None, transcript_file: str = None,
-                 status: str = 'active', abs_session_id: str = None):
+                 status: str = 'active', duration: float = None):
         self.abs_id = abs_id
         self.abs_title = abs_title
         self.ebook_filename = ebook_filename
         self.kosync_doc_id = kosync_doc_id
         self.transcript_file = transcript_file
         self.status = status
-        self.abs_session_id = abs_session_id
+        self.duration = duration
 
     def __repr__(self):
         return f"<Book(abs_id='{self.abs_id}', title='{self.abs_title}')>"
@@ -146,8 +146,8 @@ class DatabaseManager:
         self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
         self.SessionLocal = sessionmaker(bind=self.engine)
 
-        # Create all tables
-        Base.metadata.create_all(self.engine)
+        # Note: Schema creation is handled by Alembic migrations
+        # No longer calling Base.metadata.create_all() here
 
     def get_session(self):
         """Get a new database session."""

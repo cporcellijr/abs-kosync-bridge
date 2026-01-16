@@ -128,13 +128,14 @@ class TelegramHandler(logging.Handler):
 
 def setup_telegram_logging():
     """Setup Telegram logging handler if environment variables are set."""
-    logger.info("Setting up telegram logger")
     bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     log_level_name = os.environ.get('TELEGRAM_LOG_LEVEL', 'ERROR').upper()
     log_level = getattr(logging, log_level_name, logging.ERROR)
     if not bot_token or not chat_id:
         return None
+
+    logger.info("Setting up telegram logger")
     handler = TelegramHandler(bot_token, chat_id, min_level=log_level)
     handler.setFormatter(logging.Formatter(
         '<b>[%(asctime)s]</b> <code>%(levelname)s</code> - <b>%(name)s</b>: %(message)s',

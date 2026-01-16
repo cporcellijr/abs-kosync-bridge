@@ -22,7 +22,8 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
             'kosync_doc_id': 'test-kosync-doc',
             'ebook_filename': 'test-book.epub',
             'transcript_file': str(Path(self.temp_dir) / 'test_transcript.json'),
-            'status': 'active'
+            'status': 'active',
+            'duration': 1000.0  # 1000 seconds test duration
         }
 
     def get_test_state_data(self):
@@ -44,6 +45,10 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
             'booklore': {
                 'pct': 0.0,  # 0%
                 'last_updated': 1234567890
+            },
+            'hardcover': {
+                'pct': 1.0,  # 100% - highest progress but should be excluded
+                'last_updated': 1234567890
             }
         }
 
@@ -62,7 +67,8 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
             'abs_in_progress': [{'id': 'test-abs-id-123', 'progress': 0.4, 'duration': 1000}],
             'kosync_progress': (0.2, "/html/body/div[1]/p[5]"),  # 20%
             'storyteller_progress': (0.1, 10.0, "ch1", "frag1"),  # 10%
-            'booklore_progress': (0.0, None)  # 0%
+            'booklore_progress': (0.0, None),  # 0%
+            'hardcover_progress': (1.0, {'status_id': 2, 'page_number': 350, 'total_pages': 350})  # 100% - should be excluded
         }
 
     def test_abs_leads(self):

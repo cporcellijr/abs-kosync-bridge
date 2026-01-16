@@ -8,8 +8,6 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from sqlalchemy.exc import SQLAlchemyError
-
 from .models import DatabaseManager, Book, State, Job, HardcoverDetails
 
 logger = logging.getLogger(__name__)
@@ -27,6 +25,97 @@ class DatabaseService:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_manager = DatabaseManager(str(self.db_path))
+
+        # Run Alembic migrations to ensure schema is up to date
+        self._run_alembic_migrations()
+
+    def _run_alembic_migrations(self):
+        """Run Alembic migrations to ensure database schema is up to date."""
+        try:
+            from alembic.config import Config
+            from alembic import command
+            import io
+
+            # Completely preserve current logging configuration
+            root_logger = logging.getLogger()
+            preserved_handlers = root_logger.handlers.copy()
+            preserved_level = root_logger.level
+            preserved_disabled = root_logger.disabled
+
+            # Preserve all child loggers' settings
+            preserved_loggers = {}
+            for name in logging.Logger.manager.loggerDict:
+                child_logger = logging.getLogger(name)
+                if hasattr(child_logger, 'handlers') and hasattr(child_logger, 'level'):
+                    preserved_loggers[name] = {
+                        'handlers': child_logger.handlers.copy(),
+                        'level': child_logger.level,
+                        'disabled': child_logger.disabled,
+                        'propagate': child_logger.propagate
+                    }
+
+            # Get the project root directory
+            project_root = Path(__file__).parent.parent.parent
+            alembic_cfg_path = project_root / "alembic.ini"
+
+            if alembic_cfg_path.exists():
+                # Create Alembic config
+                alembic_cfg = Config(str(alembic_cfg_path))
+
+                # Set the database URL to our database path
+                alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+                # Minimize Alembic logging noise
+                alembic_loggers = ['alembic', 'alembic.runtime', 'alembic.env', 'sqlalchemy.engine']
+                original_levels = {}
+                for logger_name in alembic_loggers:
+                    alembic_logger = logging.getLogger(logger_name)
+                    original_levels[logger_name] = alembic_logger.level
+                    alembic_logger.setLevel(logging.ERROR)  # Only show errors
+
+                try:
+                    # Run migrations with minimal output
+                    command.upgrade(alembic_cfg, "head")
+                    logger.info("Alembic migrations completed successfully")
+
+                except Exception as migration_error:
+                    logger.error(f"Alembic migration failed: {migration_error}")
+                    # Check if it's just a "no changes" scenario
+                    if "No changes" in str(migration_error) or "already at head" in str(migration_error):
+                        logger.debug("Database is already up to date")
+                    else:
+                        raise
+
+                finally:
+                    # Restore all Alembic logger levels
+                    for logger_name, level in original_levels.items():
+                        logging.getLogger(logger_name).setLevel(level)
+
+                    # Completely restore the original logging configuration
+                    root_logger.handlers.clear()
+                    root_logger.handlers.extend(preserved_handlers)
+                    root_logger.setLevel(preserved_level)
+                    root_logger.disabled = preserved_disabled
+
+                    # Restore all child loggers
+                    for name, settings in preserved_loggers.items():
+                        child_logger = logging.getLogger(name)
+                        if hasattr(child_logger, 'handlers'):
+                            child_logger.handlers.clear()
+                            child_logger.handlers.extend(settings['handlers'])
+                            child_logger.setLevel(settings['level'])
+                            child_logger.disabled = settings['disabled']
+                            child_logger.propagate = settings['propagate']
+
+            else:
+                logger.error(f"Alembic configuration not found at {alembic_cfg_path}")
+                logger.error("Database schema creation will be skipped - tables may not exist!")
+
+        except Exception as e:
+            logger.error(f"Alembic migration failed: {e}")
+            logger.error("Database schema may be incomplete. Please check Alembic setup.")
+            import traceback
+            logger.debug(f"Migration error details: {traceback.format_exc()}")
 
     @contextmanager
     def get_session(self):
@@ -76,7 +165,7 @@ class DatabaseService:
             if existing:
                 # Update existing book
                 for attr in ['abs_title', 'ebook_filename', 'kosync_doc_id',
-                           'transcript_file', 'status', 'abs_session_id']:
+                           'transcript_file', 'status', 'duration']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
@@ -361,7 +450,7 @@ class DatabaseMigrator:
                 kosync_doc_id=mapping.get('kosync_doc_id'),
                 transcript_file=mapping.get('transcript_file'),
                 status=mapping.get('status', 'active'),
-                abs_session_id=mapping.get('abs_session_id')
+                duration=mapping.get('duration')  # Migrate duration if present
             )
             self.db_service.save_book(book)
 

@@ -19,6 +19,9 @@ class ABSEbookSyncClient(SyncClient):
     def is_configured(self) -> bool:
         return os.getenv("SYNC_ABS_EBOOK", "false").lower() == "true"
 
+    def check_connection(self):
+        return self.abs_client.check_connection()
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         abs_id = book.abs_id
         response = self.abs_client.get_progress(abs_id)

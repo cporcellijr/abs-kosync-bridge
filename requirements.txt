@@ -13,3 +13,4 @@ flask
 lxml
 dependency-injector
 sqlalchemy
+alembic

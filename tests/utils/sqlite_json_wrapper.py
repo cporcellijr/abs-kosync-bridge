@@ -166,11 +166,9 @@ class SQLiteJsonDBWrapper:
                 'ebook_filename': book.ebook_filename,
                 'kosync_doc_id': book.kosync_doc_id,
                 'transcript_file': book.transcript_file,
-                'status': book.status
+                'status': book.status,
+                'duration': book.duration
             }
-
-            if book.abs_session_id:
-                mapping['abs_session_id'] = book.abs_session_id
 
             # Add latest job data if it exists
             latest_job = self.db_service.get_latest_job(book.abs_id)
@@ -195,7 +193,7 @@ class SQLiteJsonDBWrapper:
                 kosync_doc_id=mapping.get('kosync_doc_id'),
                 transcript_file=mapping.get('transcript_file'),
                 status=mapping.get('status', 'active'),
-                abs_session_id=mapping.get('abs_session_id')
+                duration=mapping.get('duration')
             )
             self.db_service.save_book(book)
 

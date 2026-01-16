@@ -40,6 +40,18 @@ class HardcoverClient:
     def is_configured(self):
         return bool(self.token)
 
+    def check_connection(self):
+        """Test connection to Hardcover API by trying to get user ID."""
+        if not self.is_configured():
+            raise Exception("Hardcover not configured - HARDCOVER_TOKEN not set")
+
+        user_id = self.get_user_id()
+        if not user_id:
+            raise Exception("Failed to fetch user ID from Hardcover API")
+
+        logger.info(f"✅ Hardcover client connection verified, user id: {user_id}")
+        return True
+
     def query(self, query: str, variables: Dict = None) -> Optional[Dict]:
         if not self.token:
             return None
@@ -340,13 +352,13 @@ class HardcoverClient:
         """
 
         update_args = {
-            "book_id": book_id,
+            "book_id": int(book_id),
             "status_id": status_id,
             "privacy_setting_id": 1
         }
 
         if edition_id:
-            update_args["edition_id"] = edition_id
+            update_args["edition_id"] = int(edition_id)
 
         result = self.query(query, {"object": update_args})
         if result and result.get('insert_user_book'):
@@ -417,7 +429,7 @@ class HardcoverClient:
             result = self.query(query, {
                 "id": read_id,
                 "pages": page,
-                "editionId": edition_id,
+                "editionId": int(edition_id),
                 "startedAt": started_at_val,
                 "finishedAt": finished_at_val
             })
@@ -451,7 +463,7 @@ class HardcoverClient:
             result = self.query(query, {
                 "id": user_book_id,
                 "pages": page,
-                "editionId": edition_id,
+                "editionId": int(edition_id),
                 "startedAt": started_at_val,
                 "finishedAt": finished_at_val
             })
