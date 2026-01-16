@@ -91,12 +91,15 @@ class SmilExtractor:
                         if idx < 3 or idx == len(smil_files) - 1:
                             if segments:
                                 logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
-                else:
+                elif timestamp_mode == 'relative':
                     # Relative timestamps - need to calculate offsets
                     if abs_chapters:
                         transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
                     else:
                         transcript = self._process_relative_sequential(zf, smil_files, audio_offset)
+                else:
+                    # Auto/Smart mode
+                    transcript = self._process_auto_sequence(zf, smil_files)
                 
                 # Sort and deduplicate
                 transcript.sort(key=lambda x: (x['start'], x['end']))
@@ -189,16 +192,46 @@ class SmilExtractor:
                 sequential_count += 1
         
         # If most files don't start near 0 OR ranges are mostly sequential → absolute
-        if files_starting_near_zero <= 2 or sequential_count >= len(sorted_ranges) - 2:
+        # But if multiple files start near 0, assume auto/mixed to be safe.
+        if files_starting_near_zero <= 1 and sequential_count >= len(sorted_ranges) - 2:
             return 'absolute'
         
         # If most files start near 0 → relative
         if files_starting_near_zero >= len(sample_ranges) * 0.7:
             return 'relative'
         
-        # Mixed case - default to absolute (less destructive)
-        logger.debug(f"   Mixed timestamp patterns: {files_starting_near_zero}/{len(sample_ranges)} start near 0")
-        return 'absolute'
+        # Mixed case - use auto/smart sequence
+        logger.info(f"   Mixed timestamp patterns: {files_starting_near_zero}/{len(sample_ranges)} start near 0")
+        return 'auto'
+
+    def _get_raw_info(self, zf: zipfile.ZipFile, smil_path: str) -> Tuple[float, float, Optional[str]]:
+        """Get the min start, max end, and audio src from a SMIL file."""
+        try:
+            smil_content = zf.read(smil_path).decode('utf-8')
+            # Strip namespaces
+            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'epub:', '', smil_content)
+            
+            root = ET.fromstring(smil_content)
+            starts = []
+            ends = []
+            audio_src = None
+            
+            for par in root.iter('par'):
+                audio = par.find('audio')
+                if audio is not None:
+                    if audio_src is None:
+                        audio_src = audio.get('src')
+                    starts.append(self._parse_timestamp(audio.get('clipBegin', '0s')))
+                    ends.append(self._parse_timestamp(audio.get('clipEnd', '0s')))
+            
+            if starts:
+                return min(starts), max(ends), audio_src
+        except Exception as e:
+            logger.warning(f"Error parsing raw info for {smil_path}: {e}")
+            pass
+        return 0.0, 0.0, None
 
     def _process_smil_absolute(self, zf: zipfile.ZipFile, smil_path: str) -> List[Dict]:
         """Process SMIL file using timestamps directly (absolute mode)."""
@@ -289,6 +322,81 @@ class SmilExtractor:
                 if segments:
                     logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments")
         
+        return transcript
+
+    def _process_auto_sequence(self, zf: zipfile.ZipFile, smil_files: List[str]) -> List[Dict]:
+        """
+        Process SMIL files using "Smart Sequence" logic.
+        
+        Strategy:
+        1. Group files by 'Audio Source' (e.g. part1.mp3, part2.mp3).
+        2. Within the same audio source, timestamps are absolute (relative to that file).
+        3. When audio source changes, we Stack/Reset the offset.
+        """
+        transcript = []
+        global_offset = 0.0
+        
+        # State tracking
+        current_audio_src = None
+        part_offset = 0.0  # The offset for the current "Part" (Audio File)
+        part_max_end = 0.0 # The furthest point reached in the current Part
+        
+        # We need to track the cumulative offset of all PREVIOUS parts
+        cumulative_previous_duration = 0.0
+        
+        for idx, smil_path in enumerate(smil_files):
+            # 1. Get structural info
+            start_raw, end_raw, audio_src = self._get_raw_info(zf, smil_path)
+            
+            if audio_src:
+                # Normalize audio src (handle minimal path differences)
+                audio_src = Path(audio_src).name
+            else:
+                # If no audio source (e.g. text-only SMIL), ignore it for stacking logic
+                # We don't want to break continuity of the current audio file
+                pass
+            
+            # 2. Detect Context Switch (New Audio File)
+            # Only trigger switch if we have a valid NEW audio source
+            if audio_src:
+                if idx == 0:
+                    current_audio_src = audio_src
+                elif current_audio_src is None:
+                    current_audio_src = audio_src
+                elif audio_src != current_audio_src:
+                    # NEW PART Detected
+                    logger.info(f"   🔄 Audio source changed at {Path(smil_path).name} ({current_audio_src} -> {audio_src}). Stacking.")
+                    
+                    # Update cumulative duration with the length of the *previous* part
+                    cumulative_previous_duration += part_max_end
+                    
+                    # Reset Part state
+                    current_audio_src = audio_src
+                    part_max_end = 0.0
+            
+            # 3. Calculate Global Offset
+            # Global Offset = (All previous parts) + (0 for current part, since it's absolute within itself)
+            # Wait, what if we have overlapping SMILs in the SAME part?
+            # e.g. SMIL A (0-1000), SMIL B (0-500).
+            # They stay as 0-1000 and 0-500.
+            # We assume smil timestamps are correct relative to the audio file.
+            
+            current_offset = cumulative_previous_duration
+            
+            # 4. Extract Segments
+            segments = self._process_smil_with_offset(zf, smil_path, current_offset)
+            if segments:
+                transcript.extend(segments)
+            
+            # 5. Update Part State
+            # Track the max end timestamp seen IN THIS PART (raw time)
+            if end_raw > part_max_end:
+                part_max_end = end_raw
+            
+            if idx < 3 or idx == len(smil_files) - 1:
+                seg_len = len(segments) if segments else 0
+                logger.debug(f"   ✓ {Path(smil_path).name}: {seg_len} segs (src {audio_src}, raw {start_raw:.1f}-{end_raw:.1f} → abs {start_raw+current_offset:.1f}-{end_raw+current_offset:.1f})")
+                
         return transcript
 
     def _process_smil_with_offset(self, zf: zipfile.ZipFile, smil_path: str, 
