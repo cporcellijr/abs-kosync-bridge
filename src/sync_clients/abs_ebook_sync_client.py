@@ -22,6 +22,9 @@ class ABSEbookSyncClient(SyncClient):
     def check_connection(self):
         return self.abs_client.check_connection()
 
+    def can_be_leader(self) -> bool:
+        return os.getenv("SYNC_ABS_EBOOK_CAN_BE_LEADER", "true").lower() == "true"
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
         abs_id = book.abs_id
         response = self.abs_client.get_progress(abs_id)
@@ -62,6 +65,9 @@ class ABSEbookSyncClient(SyncClient):
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         locator = request.locator_result
+        if locator.percentage == 0:
+            self.abs_client.update_ebook_progress(book.abs_id, 0, "")
+            return SyncResult(0, True, {'pct': 0, 'cfi': ""})
         if locator.cfi is None:
             logger.error("⚠️ Cannot update ABS eBook progress - cfi is not set")
             return SyncResult(0, False)

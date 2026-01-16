@@ -122,7 +122,7 @@ class ABSClient:
             location: Required ebook location (EPUB CFI format)
         """
         # Validate required parameters
-        if not location:
+        if location is None:
             logger.error("Ebook location is required for progress updates")
             return False
 
