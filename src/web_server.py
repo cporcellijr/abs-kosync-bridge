@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 container: Optional[Container] = None
 manager: Optional[SyncManager] = None
 database_service: Optional[DatabaseService] = None
-DATA_DIR: Optional[str] = None
-EBOOK_DIR: Optional[str] = None
+DATA_DIR: Optional[Path] = None
+EBOOK_DIR: Optional[Path] = None
 
 def setup_dependencies(test_container=None):
     """
@@ -349,11 +349,6 @@ def monitor_readaloud_files():
             logger.error(f"Monitor loop error: {e}", exc_info=True)
 
 
-monitor_thread = threading.Thread(target=monitor_readaloud_files, daemon=True)
-monitor_thread.start()
-logger.info("Readaloud monitor started")
-
-
 # ---------------- SYNC MANAGER DAEMON ----------------
 
 def sync_daemon():
@@ -383,12 +378,6 @@ def sync_daemon():
 
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
-
-
-# Start sync daemon in background thread
-sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
-sync_daemon_thread.start()
-logger.info("Sync daemon thread started")
 
 
 # ---------------- ORIGINAL ABS-KOSYNC HELPERS ----------------
@@ -1177,12 +1166,20 @@ def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
 
-
 if __name__ == '__main__':
     # Initialize dependencies for production mode
     setup_dependencies()
 
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
+
+    # Start sync daemon in background thread
+    sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
+    sync_daemon_thread.start()
+    logger.info("Sync daemon thread started")
+
+    monitor_thread = threading.Thread(target=monitor_readaloud_files, daemon=True)
+    monitor_thread.start()
+    logger.info("Readaloud monitor started")
 
     # Check ebook source configuration
     booklore_configured = manager.booklore_client.is_configured()
@@ -1199,8 +1196,6 @@ if __name__ == '__main__':
             "or mount the ebooks directory to /books."
         )
 
-    sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
-    logger.info(f"📅 Sync period: {sync_period} minutes")
     logger.info(f"📁 Book Linker monitoring interval: {MONITOR_INTERVAL} seconds")
     logger.info(f"🌐 Web interface starting on port 5757")
 
