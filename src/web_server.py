@@ -21,6 +21,7 @@ from src.sync_manager import SyncManager
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.di_container import create_container, Container
+from dependency_injector import providers
 from src.db.migration_utils import initialize_database
 from src.utils.config_loader import ConfigLoader
 import sys
