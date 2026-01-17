@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Batch Match - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -22,6 +23,7 @@
         /* Top Navigation Bar */
         .top-nav {
             background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -296,6 +298,7 @@
             line-height: 1.3;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -523,6 +526,18 @@
                 grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                 gap: 12px;
             }
+
+            .hidden {
+                display: none !important;
+            }
+
+            .d-inline {
+                display: inline;
+            }
+
+            .w-100 {
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -531,7 +546,7 @@
     <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/" style="text-decoration: none;">
+            <a href="/">
                 <h1>📚 ABS-KoSync</h1>
             </a>
 
@@ -605,8 +620,8 @@
                             <div class="book-cover-container">
                                 {% if ab.cover_url %}
                                 <img src="{{ ab.cover_url }}" alt="Cover" class="book-cover"
-                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                <div class="book-cover-placeholder" style="display:none;">🎧</div>
+                                    onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                                <div class="book-cover-placeholder hidden">🎧</div>
                                 {% else %}
                                 <div class="book-cover-placeholder">🎧</div>
                                 {% endif %}
@@ -617,7 +632,8 @@
                     </div>
 
                     <h3 class="section-title"><span class="section-number">2</span>Select Ebook</h3>
-                    <select class="ebook-select" id="ebook_select" onchange="selectEbook(this.value)">
+                    <select class="ebook-select" id="ebook_select" onchange="selectEbook(this.value)"
+                        title="Select ebook to match">
                         <option value="">-- Choose Ebook --</option>
                         {% for eb in ebooks %}
                         <option value="{{ eb.name }}">{{ eb.display_name }}</option>
@@ -646,7 +662,7 @@
                         <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
                         <p class="queue-item-ebook" title="{{ item.ebook_filename }}">{{ item.ebook_filename }}</p>
                     </div>
-                    <form method="POST" action="/batch-match" style="display:inline;">
+                    <form method="POST" action="/batch-match" class="d-inline">
                         <input type="hidden" name="action" value="remove_from_queue">
                         <input type="hidden" name="abs_id" value="{{ item.abs_id }}">
                         <button type="submit" class="queue-item-remove">×</button>
@@ -657,14 +673,14 @@
                 <div class="queue-actions">
                     <form method="POST" action="/batch-match">
                         <input type="hidden" name="action" value="process_queue">
-                        <button type="submit" class="btn btn-success" style="width: 100%;">
+                        <button type="submit" class="btn btn-success w-100">
                             ✅ Process All ({{ queue|length }})
                         </button>
                     </form>
 
                     <form method="POST" action="/batch-match">
                         <input type="hidden" name="action" value="clear_queue">
-                        <button type="submit" class="btn btn-danger" style="width: 100%;"
+                        <button type="submit" class="btn btn-danger w-100"
                             onclick="return confirm('Clear entire queue?')">
                             🗑️ Clear Queue
                         </button>

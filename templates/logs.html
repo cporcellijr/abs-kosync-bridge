@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Logs - ABS-KoSync Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -22,6 +23,7 @@
         /* Top Navigation Bar */
         .top-nav {
             background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -383,6 +385,15 @@
                 flex-direction: column;
                 gap: 15px;
             }
+
+            .btn-sm {
+                padding: 6px 12px !important;
+                font-size: 12px !important;
+            }
+
+            .hidden {
+                display: none !important;
+            }
         }
     </style>
 </head>
@@ -391,7 +402,7 @@
     <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/" style="text-decoration: none;">
+            <a href="/">
                 <h1>📚 ABS-KoSync</h1>
             </a>
 
@@ -472,6 +483,11 @@
                 </select>
             </div>
 
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button id="refreshBtn" class="btn btn-primary">Refresh Logs</button>
+            </div>
+
             <div class="control-group auto-refresh">
                 <label for="autoRefresh">Auto-refresh (30s):</label>
                 <input type="checkbox" id="autoRefresh">
@@ -495,9 +511,9 @@
             <div class="log-header">
                 <h3>📜 Log Entries</h3>
                 <div>
-                    <button id="scrollToTop" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">⬆️
+                    <button id="scrollToTop" class="btn btn-secondary btn-sm">⬆️
                         Top</button>
-                    <button id="scrollToBottom" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">⬇️
+                    <button id="scrollToBottom" class="btn btn-secondary btn-sm">⬇️
                         Bottom</button>
                 </div>
             </div>
@@ -507,7 +523,7 @@
                     Loading logs...
                 </div>
             </div>
-            <div id="loadMore" class="load-more" style="display: none;">
+            <div id="loadMore" class="load-more hidden">
                 <button class="btn btn-secondary">Load More Logs</button>
             </div>
         </div>
@@ -653,7 +669,7 @@
                     logLine.innerHTML = `
                         <span class="log-timestamp">${escapeHtml(log.timestamp)}</span>
                         <span class="log-level ${log.level}">${log.level}</span>
-                        <span class="log-module" style="color: rgba(255,255,255,0.6); font-size: 11px; min-width: 80px;">${escapeHtml(log.module || 'unknown')}</span>
+                        <span class="log-module">${escapeHtml(log.module || 'unknown')}</span>
                         <span class="log-message">${escapeHtml(log.message)}</span>
                     `;
 
@@ -937,12 +953,16 @@
         // Initial load
         // Ensure form elements reflect correct initial state (prevent browser caching issues)
         logLevel.value = 'INFO';
-        liveMode.checked = false;
+        liveMode.checked = true;
         autoRefresh.checked = false;
         linesCount.value = '1000';
         searchInput.value = '';
 
-        fetchLogs();
+        if (liveMode.checked) {
+            fetchLiveLogs();
+        } else {
+            fetchLogs();
+        }
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {

@@ -1185,12 +1185,13 @@ def api_logs():
         all_lines = []
 
         # Read current log file
-        if LOG_PATH.exists():
+        # Read current log file
+        if LOG_PATH and LOG_PATH.exists():
             with open(LOG_PATH, 'r', encoding='utf-8') as f:
                 all_lines.extend(f.readlines())
 
         # Read backup files if needed (for more history)
-        if lines_count > len(all_lines):
+        if LOG_PATH and lines_count > len(all_lines):
             for i in range(1, 6):  # Check up to 5 backup files
                 backup_path = Path(str(LOG_PATH) + f'.{i}')
                 if backup_path.exists():

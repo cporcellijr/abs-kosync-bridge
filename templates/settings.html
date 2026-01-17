@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Settings - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -21,6 +22,7 @@
         /* Nav Bar (Matches Index) */
         .top-nav {
             background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -328,6 +330,7 @@
             max-width: 960px;
             margin: 0 auto;
             background: rgba(20, 20, 20, 0.9);
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             padding: 15px;
             border-radius: 12px;
@@ -346,6 +349,30 @@
             display: flex;
             align-items: center;
             gap: 6px;
+
+            .section-header-flat {
+                background: none !important;
+                border: none !important;
+                padding-left: 0 !important;
+                margin-bottom: 20px !important;
+            }
+
+            .section-header-flat h2 {
+                font-size: 28px !important;
+            }
+
+            .section-highlight {
+                border-color: rgba(102, 126, 234, 0.3) !important;
+            }
+
+            .text-primary {
+                color: #667eea !important;
+            }
+
+            .toggle-label {
+                font-size: 13px !important;
+                color: rgba(255, 255, 255, 0.5) !important;
+            }
         }
     </style>
 </head>
@@ -353,7 +380,7 @@
 <body>
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/" style="text-decoration: none;">
+            <a href="/">
                 <h1>📚 ABS-KoSync</h1>
             </a>
 
@@ -404,8 +431,8 @@
         </div>
         {% endif %}
 
-        <div class="section-header" style="background:none; border:none; padding-left:0; margin-bottom:20px;">
-            <h2 style="font-size: 28px;">⚙️ Application Settings</h2>
+        <div class="section-header-flat">
+            <h2>⚙️ Application Settings</h2>
         </div>
 
         <form method="POST" action="/settings" class="settings-form" id="settingsForm">
@@ -431,9 +458,9 @@
                 </div>
             </div>
 
-            <div class="settings-section" style="border-color: rgba(102, 126, 234, 0.3);">
+            <div class="settings-section section-highlight">
                 <div class="section-header">
-                    <h3 style="color: #667eea;">Audiobookshelf (Required)</h3>
+                    <h3 class="text-primary">Audiobookshelf (Required)</h3>
                 </div>
                 <div class="section-body">
                     <div class="form-group full-width">
@@ -467,7 +494,7 @@
                 <div class="section-header">
                     <h3>KOSync Server</h3>
                     <div class="toggle-switch-wrapper">
-                        <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
+                        <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle_kosync"
                                 onchange="toggleSection('kosync_body', this.checked)" {% if kosync_enabled %}checked{%
@@ -512,7 +539,7 @@
                 <div class="section-header">
                     <h3>Storyteller</h3>
                     <div class="toggle-switch-wrapper">
-                        <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
+                        <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle_storyteller"
                                 onchange="toggleSection('storyteller_body', this.checked)" {% if storyteller_enabled
@@ -544,7 +571,7 @@
                 <div class="section-header">
                     <h3>Booklore</h3>
                     <div class="toggle-switch-wrapper">
-                        <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
+                        <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle_booklore"
                                 onchange="toggleSection('booklore_body', this.checked)" {% if booklore_enabled
@@ -579,7 +606,7 @@
                 <div class="section-header">
                     <h3>Hardcover.app</h3>
                     <div class="toggle-switch-wrapper">
-                        <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
+                        <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle_hardcover"
                                 onchange="toggleSection('hardcover_body', this.checked)" {% if hardcover_enabled
@@ -602,7 +629,7 @@
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
                     <div class="toggle-switch-wrapper">
-                        <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
+                        <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle_telegram"
                                 onchange="toggleSection('telegram_body', this.checked)" {% if telegram_enabled

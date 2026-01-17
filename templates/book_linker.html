@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Book Linker - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -22,6 +23,7 @@
         /* Top Navigation Bar */
         .top-nav {
             background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -431,6 +433,26 @@
                 gap: 8px;
                 align-items: flex-start;
             }
+
+            .m-0 {
+                margin: 0 !important;
+            }
+
+            .mt-16 {
+                margin-top: 16px !important;
+            }
+
+            .flex-1 {
+                flex: 1 !important;
+            }
+
+            .cursor-pointer {
+                cursor: pointer !important;
+            }
+
+            .text-muted {
+                color: rgba(255, 255, 255, 0.5) !important;
+            }
         }
     </style>
 </head>
@@ -439,7 +461,7 @@
     <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/" style="text-decoration: none;">
+            <a href="/">
                 <h1>📚 ABS-KoSync</h1>
             </a>
 
@@ -499,7 +521,7 @@
         <!-- Monitor Status -->
         <div class="monitor-status">
             <span>✅ Readaloud Monitor Active - Checking every hour</span>
-            <form method="POST" action="/book-linker/trigger-monitor" style="margin: 0;">
+            <form method="POST" action="/book-linker/trigger-monitor" class="m-0">
                 <button type="submit" class="btn btn-primary">🔍 Check Now</button>
             </form>
         </div>
@@ -509,7 +531,7 @@
             <form method="POST">
                 <input type="text" name="book_name" placeholder="🔍 Enter title or author..." value="{{ book_name }}"
                     class="search-box" autofocus>
-                <button type="submit" class="btn btn-primary" style="margin-top: 16px;">Search</button>
+                <button type="submit" class="btn btn-primary mt-16">Search</button>
             </form>
         </div>
 
@@ -543,8 +565,8 @@
                         {% for m in ebook_matches %}
                         <div class="file-item">
                             <input type="checkbox" name="ebook" value="{{ m.full_path }}" id="ebook-{{ loop.index }}">
-                            <label for="ebook-{{ loop.index }}" style="cursor: pointer; flex: 1;">
-                                <span>{{ m.file_name }} <span style="color: rgba(255,255,255,0.5);">[{{ m.file_size_mb
+                            <label for="ebook-{{ loop.index }}" class="cursor-pointer flex-1">
+                                <span>{{ m.file_name }} <span class="text-muted">[{{ m.file_size_mb
                                         }} MB]</span></span>
                             </label>
                         </div>
@@ -565,8 +587,8 @@
                         {% for m in audiobook_matches %}
                         <div class="file-item">
                             <input type="checkbox" name="audiobook" value="{{ m.id }}" id="audio-{{ loop.index }}">
-                            <label for="audio-{{ loop.index }}" style="cursor: pointer; flex: 1;">
-                                <span>{{ m.title }} by {{ m.author }} <span style="color: rgba(255,255,255,0.5);">[{{
+                            <label for="audio-{{ loop.index }}" class="cursor-pointer flex-1">
+                                <span>{{ m.title }} by {{ m.author }} <span class="text-muted">[{{
                                         m.file_size_mb }} MB, {{ m.num_files }} files]</span></span>
                             </label>
                         </div>

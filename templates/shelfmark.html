@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Shelfmark - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -24,6 +25,7 @@
         /* Top Navigation Bar */
         .top-nav {
             background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -202,7 +204,7 @@
     </div>
 
     <div class="iframe-container">
-        <iframe src="{{ shelfmark_url }}" frameborder="0" allowfullscreen></iframe>
+        <iframe src="{{ shelfmark_url }}" title="Shelfmark Tool" allowfullscreen></iframe>
     </div>
 </body>
 
