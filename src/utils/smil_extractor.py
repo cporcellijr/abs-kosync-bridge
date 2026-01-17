@@ -5,7 +5,7 @@ import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,12 @@ class SmilExtractor:
     """
     Extracts transcript data from EPUB3 media overlays.
     Matches Storyteller/Whisper JSON format.
+    
+    VERSION 4 - Simplified approach:
+    - Detect if SMIL uses absolute or relative timestamps
+    - If absolute: use timestamps directly (most common for professionally produced audiobooks)
+    - If relative: stack chapters sequentially
+    - Don't skip any SMIL files (front/back matter filtering was causing data loss)
     """
     
     def __init__(self):
@@ -41,7 +47,12 @@ class SmilExtractor:
 
     def extract_transcript(self, epub_path: str, abs_chapters: List[Dict] = None, audio_offset: float = 0.0) -> List[Dict]:
         """
-        Extract transcript, syncing SMIL timestamps to ABS Chapter start times.
+        Extract transcript from EPUB SMIL files.
+        
+        Strategy:
+        1. First, detect timestamp mode by sampling SMIL files
+        2. If absolute timestamps: use them directly
+        3. If relative timestamps: calculate offsets from ABS chapters or stack sequentially
         """
         transcript = []
         self._xhtml_cache = {}
@@ -64,95 +75,295 @@ class SmilExtractor:
                     return []
                 
                 logger.info(f"📖 Found {len(smil_files)} SMIL files in EPUB")
-                
-                # --- AUTO ALIGNMENT (NEW FEATURE) ---
-                chapter_map = {}
                 if abs_chapters:
-                    chapter_map = self._align_chapters(zf, smil_files, abs_chapters)
-                # ------------------------------------
-
-                current_offset = audio_offset
+                    logger.info(f"📖 ABS has {len(abs_chapters)} chapters")
                 
-                for idx, smil_path in enumerate(smil_files):
-                    file_offset = current_offset
-
-                    # Apply Intelligent Map
-                    if idx in chapter_map:
-                        mapped_chap = chapter_map[idx]
-                        file_offset = float(mapped_chap.get('start', 0))
-                        # Optional: Log the alignment for the first few chapters to verify
-                        if idx < 3:
-                            logger.debug(f"   Mapping {Path(smil_path).name} -> Chapter {idx+1} (Start: {file_offset:.2f}s)")
-                    
-                    segments = self._process_smil_file(zf, smil_path, file_offset)
-                    transcript.extend(segments)
-                    
-                    # Accumulate offset flow for fallback
-                    if not chapter_map and segments:
-                        max_end = max(s['end'] for s in segments)
-                        current_offset = max(current_offset, max_end)
+                # Detect timestamp mode
+                timestamp_mode = self._detect_timestamp_mode(zf, smil_files)
+                logger.info(f"⚙️ Detected timestamp mode: {timestamp_mode}")
                 
-                transcript.sort(key=lambda x: x['start'])
+                if timestamp_mode == 'absolute':
+                    # Process all SMIL files with absolute timestamps
+                    for idx, smil_path in enumerate(smil_files):
+                        segments = self._process_smil_absolute(zf, smil_path)
+                        transcript.extend(segments)
+                        
+                        if idx < 3 or idx == len(smil_files) - 1:
+                            if segments:
+                                logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
+                else:
+                    # Relative timestamps - need to calculate offsets
+                    if abs_chapters:
+                        transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
+                    else:
+                        transcript = self._process_relative_sequential(zf, smil_files, audio_offset)
+                
+                # Sort and deduplicate
+                transcript.sort(key=lambda x: (x['start'], x['end']))
+                
+                # Remove exact duplicates
+                seen = set()
+                unique_transcript = []
+                for seg in transcript:
+                    key = (seg['start'], seg['end'], seg['text'])
+                    if key not in seen:
+                        seen.add(key)
+                        unique_transcript.append(seg)
+                transcript = unique_transcript
+                
+                # Post-processing: Clamp to audiobook duration if known
+                if abs_chapters:
+                    abs_end = float(abs_chapters[-1].get('end', 0))
+                    if abs_end > 0:
+                        original_count = len(transcript)
+                        transcript = [s for s in transcript if s['start'] < abs_end]
+                        removed = original_count - len(transcript)
+                        if removed > 0:
+                            logger.debug(f"   Removed {removed} segments starting after audiobook end ({abs_end:.0f}s)")
+                        
+                        for s in transcript:
+                            if s['end'] > abs_end:
+                                s['end'] = min(s['end'], abs_end)
+                
                 logger.info(f"✅ Extracted {len(transcript)} segments from SMIL")
+                
+                # Diagnostic: check for gaps
+                if transcript:
+                    self._log_gap_analysis(transcript, abs_chapters)
+                
                 return transcript
                 
         except Exception as e:
             logger.error(f"Error extracting SMIL transcript: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
-    def _align_chapters(self, zf, smil_files, abs_chapters) -> Dict[int, Dict]:
-        """Maps SMIL file indices to ABS Chapters by comparing Durations."""
-        if not abs_chapters or not smil_files: return {}
-
-        smil_durations = []
-        for path in smil_files:
-            dur = 0.0
-            try:
-                content = zf.read(path).decode('utf-8')
-                # Reuse the working parser logic, but simplified for duration check
-                clips = re.findall(r'clipEnd=["\']([^"\']+)["\']', content)
-                if clips:
-                    dur = self._parse_timestamp(clips[-1])
-            except: pass
-            smil_durations.append(dur)
-
-        abs_durations = []
-        for ch in abs_chapters:
-            start = float(ch.get('start', 0))
-            end = float(ch.get('end', 0))
-            abs_durations.append(end - start)
-
-        best_offset = 0
-        min_error = float('inf')
-
-        # Check shifts from 0 to 2
-        for offset in range(0, 3): 
-            error = 0.0
-            matches = 0
-            for smil_idx, smil_dur in enumerate(smil_durations):
-                abs_idx = smil_idx + offset
-                if abs_idx < len(abs_durations):
-                    abs_dur = abs_durations[abs_idx]
-                    diff = abs(smil_dur - abs_dur)
-                    if abs_dur > 0:
-                        error += diff
-                        matches += 1
-            if matches > 0:
-                avg_error = error / matches
-                if avg_error < min_error:
-                    min_error = avg_error
-                    best_offset = offset
-
-        logger.info(f"🧩 Auto-Aligned Chapters: Offset={best_offset} (Avg Error: {min_error:.2f}s)")
+    def _detect_timestamp_mode(self, zf: zipfile.ZipFile, smil_files: List[str]) -> str:
+        """
+        Detect whether SMIL files use absolute or relative timestamps.
         
-        mapping = {}
-        for smil_idx in range(len(smil_files)):
-            abs_idx = smil_idx + best_offset
-            if 0 <= abs_idx < len(abs_chapters):
-                mapping[smil_idx] = abs_chapters[abs_idx]
-        return mapping
+        Absolute: timestamps are positions in the full audiobook
+        Relative: timestamps start near 0 for each chapter/file
+        
+        Strategy: Sample multiple SMIL files and look at their timestamp ranges.
+        If files have non-overlapping, sequential timestamp ranges → absolute
+        If files all start near 0 → relative
+        """
+        sample_ranges = []  # List of (min_ts, max_ts) for each file
+        
+        for smil_path in smil_files[:min(10, len(smil_files))]:  # Sample more files
+            try:
+                smil_content = zf.read(smil_path).decode('utf-8')
+                smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
+                smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
+                smil_content = re.sub(r'epub:', '', smil_content)
+                
+                root = ET.fromstring(smil_content)
+                
+                timestamps = []
+                for par in root.iter('par'):
+                    audio_elem = par.find('audio')
+                    if audio_elem is not None:
+                        clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
+                        clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
+                        timestamps.append(clip_begin)
+                        timestamps.append(clip_end)
+                
+                if timestamps:
+                    sample_ranges.append((min(timestamps), max(timestamps)))
+            except Exception:
+                continue
+        
+        if len(sample_ranges) < 2:
+            return 'absolute'  # Default to absolute (safer - no offset applied)
+        
+        # Check how many files start near 0
+        files_starting_near_zero = sum(1 for min_ts, _ in sample_ranges if min_ts < 30)
+        
+        # Check if timestamp ranges are sequential (non-overlapping)
+        sorted_ranges = sorted(sample_ranges, key=lambda x: x[0])
+        sequential_count = 0
+        for i in range(1, len(sorted_ranges)):
+            if sorted_ranges[i][0] >= sorted_ranges[i-1][1] - 10:  # 10s tolerance
+                sequential_count += 1
+        
+        # If most files don't start near 0 OR ranges are mostly sequential → absolute
+        if files_starting_near_zero <= 2 or sequential_count >= len(sorted_ranges) - 2:
+            return 'absolute'
+        
+        # If most files start near 0 → relative
+        if files_starting_near_zero >= len(sample_ranges) * 0.7:
+            return 'relative'
+        
+        # Mixed case - default to absolute (less destructive)
+        logger.debug(f"   Mixed timestamp patterns: {files_starting_near_zero}/{len(sample_ranges)} start near 0")
+        return 'absolute'
 
-    # --- Original Helpers from your Working File ---
+    def _process_smil_absolute(self, zf: zipfile.ZipFile, smil_path: str) -> List[Dict]:
+        """Process SMIL file using timestamps directly (absolute mode)."""
+        segments = []
+        try:
+            smil_content = zf.read(smil_path).decode('utf-8')
+            smil_dir = str(Path(smil_path).parent)
+            if smil_dir == '.': smil_dir = ''
+            
+            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'epub:', '', smil_content)
+            
+            root = ET.fromstring(smil_content)
+            
+            for par in root.iter('par'):
+                text_elem = par.find('text')
+                audio_elem = par.find('audio')
+                
+                if text_elem is None or audio_elem is None:
+                    continue
+                
+                clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
+                clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
+                
+                text_src = text_elem.get('src', '')
+                text_content = self._get_text_content(zf, smil_dir, text_src)
+                
+                if text_content:
+                    segments.append({
+                        'start': round(clip_begin, 3),
+                        'end': round(clip_end, 3),
+                        'text': text_content
+                    })
+                    
+        except Exception as e:
+            logger.warning(f"Error processing SMIL {smil_path}: {e}")
+        
+        return segments
+
+    def _process_relative_with_chapters(self, zf: zipfile.ZipFile, smil_files: List[str], 
+                                         abs_chapters: List[Dict]) -> List[Dict]:
+        """Process SMIL files with relative timestamps, using ABS chapter starts as offsets."""
+        transcript = []
+        
+        # Simple sequential matching: assign SMIL files to ABS chapters in order
+        # Skip obvious front matter
+        content_smil_files = []
+        for path in smil_files:
+            filename = Path(path).stem.lower()
+            if not self._is_front_matter(filename):
+                content_smil_files.append(path)
+        
+        for idx, smil_path in enumerate(content_smil_files):
+            # Use corresponding ABS chapter offset if available
+            if idx < len(abs_chapters):
+                offset = float(abs_chapters[idx].get('start', 0))
+            else:
+                # If more SMIL than chapters, use last chapter end as base
+                if transcript:
+                    offset = max(s['end'] for s in transcript)
+                else:
+                    offset = 0
+            
+            segments = self._process_smil_with_offset(zf, smil_path, offset)
+            transcript.extend(segments)
+            
+            if idx < 3 or idx == len(content_smil_files) - 1:
+                if segments:
+                    logger.debug(f"   ✓ {Path(smil_path).name}: offset={offset:.1f}s, {len(segments)} segments")
+        
+        return transcript
+
+    def _process_relative_sequential(self, zf: zipfile.ZipFile, smil_files: List[str], 
+                                      initial_offset: float) -> List[Dict]:
+        """Process SMIL files with relative timestamps, stacking sequentially."""
+        transcript = []
+        current_offset = initial_offset
+        
+        for idx, smil_path in enumerate(smil_files):
+            segments = self._process_smil_with_offset(zf, smil_path, current_offset)
+            
+            if segments:
+                transcript.extend(segments)
+                current_offset = max(s['end'] for s in segments)
+            
+            if idx < 3 or idx == len(smil_files) - 1:
+                if segments:
+                    logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments")
+        
+        return transcript
+
+    def _process_smil_with_offset(self, zf: zipfile.ZipFile, smil_path: str, 
+                                   offset: float) -> List[Dict]:
+        """Process SMIL file adding an offset to all timestamps."""
+        segments = []
+        try:
+            smil_content = zf.read(smil_path).decode('utf-8')
+            smil_dir = str(Path(smil_path).parent)
+            if smil_dir == '.': smil_dir = ''
+            
+            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
+            smil_content = re.sub(r'epub:', '', smil_content)
+            
+            root = ET.fromstring(smil_content)
+            
+            for par in root.iter('par'):
+                text_elem = par.find('text')
+                audio_elem = par.find('audio')
+                
+                if text_elem is None or audio_elem is None:
+                    continue
+                
+                clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
+                clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
+                
+                text_src = text_elem.get('src', '')
+                text_content = self._get_text_content(zf, smil_dir, text_src)
+                
+                if text_content:
+                    segments.append({
+                        'start': round(clip_begin + offset, 3),
+                        'end': round(clip_end + offset, 3),
+                        'text': text_content
+                    })
+                    
+        except Exception as e:
+            logger.warning(f"Error processing SMIL {smil_path}: {e}")
+        
+        return segments
+
+    def _log_gap_analysis(self, transcript: List[Dict], abs_chapters: List[Dict] = None):
+        """Log analysis of gaps in the transcript."""
+        if not transcript:
+            return
+        
+        # Find gaps > 100 seconds
+        gaps = []
+        for i in range(1, len(transcript)):
+            gap = transcript[i]['start'] - transcript[i-1]['end']
+            if gap > 100:
+                gaps.append((transcript[i-1]['end'], transcript[i]['start'], gap))
+        
+        if gaps:
+            logger.warning(f"⚠️ Found {len(gaps)} gaps > 100s in transcript")
+            for end_t, start_t, gap in gaps[:5]:  # Show first 5
+                logger.debug(f"   Gap: {end_t:.0f}s - {start_t:.0f}s ({gap:.0f}s)")
+        
+        # Check coverage
+        if abs_chapters:
+            abs_end = float(abs_chapters[-1].get('end', 0))
+            transcript_end = transcript[-1]['end']
+            coverage = (transcript_end / abs_end * 100) if abs_end > 0 else 0
+            
+            if coverage < 90:
+                logger.warning(f"⚠️ Low transcript coverage: {coverage:.1f}% (ends at {transcript_end:.0f}s, audiobook ends at {abs_end:.0f}s)")
+            elif coverage > 105:
+                logger.warning(f"⚠️ Transcript exceeds audiobook: {coverage:.1f}% (ends at {transcript_end:.0f}s, audiobook ends at {abs_end:.0f}s)")
+
+    def _is_front_matter(self, filename: str) -> bool:
+        """Check if filename indicates front matter."""
+        front_patterns = ['contents', 'toc', 'copyright', 'title', 'cover', 'dedication', 
+                         'acknowledgment', 'preface', 'foreword', 'fm0', 'frontmatter']
+        return any(p in filename for p in front_patterns)
 
     def _find_opf_path(self, zf: zipfile.ZipFile) -> Optional[str]:
         try:
@@ -223,60 +434,6 @@ class SmilExtractor:
                 parts.append(part)
         return '/'.join(parts)
     
-    def _process_smil_file(self, zf: zipfile.ZipFile, smil_path: str,
-                           audio_offset: float) -> List[Dict]:
-        segments = []
-        try:
-            smil_content = zf.read(smil_path).decode('utf-8')
-            smil_dir = str(Path(smil_path).parent)
-            if smil_dir == '.': smil_dir = ''
-            
-            # --- USING V1 REGEX (PROVEN TO WORK) ---
-            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'epub:', '', smil_content)
-            
-            root = ET.fromstring(smil_content)
-            
-            for par in root.iter('par'):
-                # Call the method name that actually exists!
-                segment = self._parse_par_element(par, zf, smil_dir, audio_offset)
-                if segment:
-                    segments.append(segment)
-                    
-        except Exception as e:
-            logger.warning(f"Error processing SMIL {smil_path}: {e}")
-        
-        return segments
-    
-    def _parse_par_element(self, par: ET.Element, zf: zipfile.ZipFile,
-                           smil_dir: str, audio_offset: float) -> Optional[Dict]:
-        text_elem = par.find('text')
-        audio_elem = par.find('audio')
-        
-        if text_elem is None or audio_elem is None:
-            return None
-        
-        clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
-        clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
-        
-        start_time = clip_begin + audio_offset
-        end_time = clip_end + audio_offset
-        
-        text_src = text_elem.get('src', '')
-        
-        # KEY FIX: Call _get_text_content, NOT _get_text
-        text_content = self._get_text_content(zf, smil_dir, text_src)
-        
-        if not text_content:
-            return None
-        
-        return {
-            'start': round(start_time, 3),
-            'end': round(end_time, 3),
-            'text': text_content
-        }
-    
     def _parse_timestamp(self, ts_str: str) -> float:
         if not ts_str: return 0.0
         ts_str = ts_str.strip().replace('s', '')
@@ -313,6 +470,7 @@ class SmilExtractor:
         
         return None
 
+
 def extract_transcript_from_epub(epub_path: str, abs_chapters: List[Dict] = None, 
                                output_path: str = None) -> Optional[str]:
     extractor = SmilExtractor()
@@ -329,9 +487,10 @@ def extract_transcript_from_epub(epub_path: str, abs_chapters: List[Dict] = None
     
     return output_path
 
+
 if __name__ == '__main__':
     import sys
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     if len(sys.argv) < 2:
         print("Usage: python smil_extractor.py <epub_file>")
         sys.exit(1)
