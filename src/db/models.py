@@ -53,6 +53,7 @@ class HardcoverDetails(Base):
 
     abs_id = Column(String(255), ForeignKey('books.abs_id', ondelete='CASCADE'), primary_key=True)
     hardcover_book_id = Column(String(255))
+    hardcover_slug = Column(String(255))
     hardcover_edition_id = Column(String(255))
     hardcover_pages = Column(Integer)
     isbn = Column(String(255))
@@ -62,10 +63,12 @@ class HardcoverDetails(Base):
     # Relationship
     book = relationship("Book", back_populates="hardcover_details")
 
-    def __init__(self, abs_id: str, hardcover_book_id: str = None, hardcover_edition_id: str = None,
+    def __init__(self, abs_id: str, hardcover_book_id: str = None, hardcover_slug: str = None,
+                 hardcover_edition_id: str = None,
                  hardcover_pages: int = None, isbn: str = None, asin: str = None, matched_by: str = None):
         self.abs_id = abs_id
         self.hardcover_book_id = hardcover_book_id
+        self.hardcover_slug = hardcover_slug
         self.hardcover_edition_id = hardcover_edition_id
         self.hardcover_pages = hardcover_pages
         self.isbn = isbn

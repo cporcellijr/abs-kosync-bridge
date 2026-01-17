@@ -31,7 +31,8 @@
         {% if mapping.status == 'active' %}
         <div class="progress-details">
             {% if integrations.abs %}
-            <div class="progress-item" title="Audiobookshelf">
+            <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener" class="progress-item"
+                title="Open in Audiobookshelf" style="text-decoration: none; color: inherit;">
                 <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
                 {% if mapping.states.abs is defined %}
                 <span>{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600,
@@ -40,7 +41,7 @@
                 {% else %}
                 <span>0:00:00</span>
                 {% endif %}
-            </div>
+            </a>
             {% endif %}
             {% if integrations.kosync %}
             <div class="progress-item" title="KOReader">
@@ -63,37 +64,43 @@
             </div>
             {% endif %}
             {% if integrations.booklore %}
-            <div class="progress-item" title="Booklore">
-                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+            <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener" class="progress-item"
+                title="{% if mapping.booklore_id %}Open in Booklore{% else %}Not found in Booklore{% endif %}"
+                style="text-decoration: none; color: inherit;{% if not mapping.booklore_id %} pointer-events: none;{% endif %}">
+                <img src="/static/booklore.png" alt="BL"
+                    style="width: 14px; height: 14px;{% if not mapping.booklore_id %} opacity: 0.4; filter: grayscale(100%);{% endif %}">
                 {% if mapping.states.booklore is defined %}
                 <span>{{ '%.1f' | format(mapping.states.booklore.percentage|default(0)) }}%</span>
                 {% else %}
                 <span>0.0%</span>
                 {% endif %}
-            </div>
+            </a>
             {% endif %}
 
             {% if integrations.hardcover %}
-            <div class="progress-item"
-                title="Hardcover:
-                       {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                style="cursor: pointer; position: relative;">
-                <img src="/static/hardcover.png" alt="HC"
-                    style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                    onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+            <div class="progress-item" style="position: relative; display: flex; align-items: center; gap: 2px;">
+                <a href="{{ mapping.hardcover_url|default('https://hardcover.app') }}" target="_blank" rel="noopener"
+                    title="{% if mapping.hardcover_book_id %}Open {{ mapping.hardcover_title }} in Hardcover{% else %}Not linked to Hardcover{% endif %}"
+                    style="text-decoration: none; display: flex; align-items: center;{% if not mapping.hardcover_book_id %} pointer-events: none;{% endif %}">
+                    <img src="/static/hardcover.png" alt="HC"
+                        style="width: 14px; height: 14px;{% if not mapping.hardcover_book_id %} opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                    <span
+                        style="display:none; font-size: 12px;{% if not mapping.hardcover_book_id %} opacity: 0.5;{% endif %}">📚</span>
+                </a>
                 <span
-                    style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                {% if mapping.hardcover_book_id %}
-                {% if mapping.states.hardcover is defined %}
-                <span>{{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%</span>
-                {% else %}
-                <span>0%</span>
-                {% endif %}
-                {% else %}
-                <span style="font-size: 10px; opacity: 0.5;">+</span>
-                {% endif %}
+                    onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                    style="cursor: pointer; color: inherit;" title="Click to edit Hardcover link">
+                    {% if mapping.hardcover_book_id %}
+                    {% if mapping.states.hardcover is defined %}
+                    {{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%
+                    {% else %}
+                    0%
+                    {% endif %}
+                    {% else %}
+                    <span style="font-size: 10px; opacity: 0.5;">+</span>
+                    {% endif %}
+                </span>
             </div>
             {% endif %}
         </div>
@@ -480,6 +487,11 @@
             font-size: 12px;
             width: 14px;
             flex-shrink: 0;
+        }
+
+        a.progress-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
         }
 
         .progress-bar-mini {

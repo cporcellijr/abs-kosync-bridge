@@ -370,7 +370,7 @@ class DatabaseService:
 
             if existing:
                 # Update existing details
-                for attr in ['hardcover_book_id', 'hardcover_edition_id', 'hardcover_pages',
+                for attr in ['hardcover_book_id', 'hardcover_slug', 'hardcover_edition_id', 'hardcover_pages',
                            'isbn', 'asin', 'matched_by']:
                     if hasattr(details, attr):
                         setattr(existing, attr, getattr(details, attr))
@@ -511,6 +511,7 @@ class DatabaseMigrator:
                 hardcover_details = HardcoverDetails(
                     abs_id=mapping['abs_id'],
                     hardcover_book_id=mapping.get('hardcover_book_id'),
+                    hardcover_slug=mapping.get('hardcover_slug'),
                     hardcover_edition_id=mapping.get('hardcover_edition_id'),
                     hardcover_pages=mapping.get('hardcover_pages'),
                     isbn=mapping.get('isbn'),

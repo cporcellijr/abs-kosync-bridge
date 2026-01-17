@@ -131,6 +131,7 @@ class HardcoverClient:
                 book {{
                     id
                     title
+                    slug
                 }}
             }}
         }}
@@ -141,6 +142,7 @@ class HardcoverClient:
             edition = result['editions'][0]
             return {
                 'book_id': edition['book']['id'],
+                'slug': edition['book'].get('slug'),
                 'edition_id': edition['id'],
                 'pages': edition['pages'],
                 'title': edition['book']['title']
@@ -225,6 +227,7 @@ class HardcoverClient:
             
             return {
                 'book_id': best_match['id'],
+                'slug': best_match.get('slug'),
                 'edition_id': edition.get('id') if edition else None,
                 'pages': edition.get('pages') if edition else None,
                 'title': best_match['title']
@@ -291,6 +294,7 @@ class HardcoverClient:
                     books_by_pk(id: $id) {
                         id
                         title
+                        slug
                         default_ebook_edition {
                             id
                             pages
@@ -318,6 +322,7 @@ class HardcoverClient:
                 books(where: { slug: { _eq: $slug }}, limit: 1) {
                     id
                     title
+                    slug
                     default_ebook_edition {
                         id
                         pages
@@ -343,6 +348,7 @@ class HardcoverClient:
 
         return {
             'book_id': book.get('id'),
+            'slug': book.get('slug'),
             'edition_id': edition.get('id') if edition else None,
             'pages': edition.get('pages') if edition else None,
             'title': book.get('title')

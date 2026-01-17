@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -710,6 +711,7 @@ def index():
         if hardcover_details:
             mapping.update({
                 'hardcover_book_id': hardcover_details.hardcover_book_id,
+                'hardcover_slug': hardcover_details.hardcover_slug,
                 'hardcover_edition_id': hardcover_details.hardcover_edition_id,
                 'hardcover_pages': hardcover_details.hardcover_pages,
                 'isbn': hardcover_details.isbn,
@@ -721,6 +723,7 @@ def index():
         else:
             mapping.update({
                 'hardcover_book_id': None,
+                'hardcover_slug': None,
                 'hardcover_edition_id': None,
                 'hardcover_pages': None,
                 'isbn': None,
@@ -729,6 +732,30 @@ def index():
                 'hardcover_linked': False,
                 'hardcover_title': None
             })
+
+        # Platform deep links for dashboard
+        mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
+
+        # Booklore deep link (if configured and book found)
+        if manager.booklore_client.is_configured():
+            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename)
+            if bl_book:
+                mapping['booklore_id'] = bl_book.get('id')
+                mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
+            else:
+                mapping['booklore_id'] = None
+                mapping['booklore_url'] = None
+        else:
+            mapping['booklore_id'] = None
+            mapping['booklore_url'] = None
+
+        # Hardcover deep link (if linked)
+        if mapping.get('hardcover_slug'):
+            mapping['hardcover_url'] = f"https://hardcover.app/books/{mapping['hardcover_slug']}"
+        elif mapping.get('hardcover_book_id'):
+            mapping['hardcover_url'] = f"https://hardcover.app/books/{mapping['hardcover_book_id']}"
+        else:
+            mapping['hardcover_url'] = None
 
         # Set unified progress to the maximum progress across all clients
         mapping['unified_progress'] = min(max_progress, 100.0)
@@ -1034,6 +1061,7 @@ def link_hardcover(abs_id):
         hardcover_details = HardcoverDetails(
             abs_id=abs_id,
             hardcover_book_id=book_data['book_id'],
+            hardcover_slug=book_data.get('slug'),
             hardcover_edition_id=book_data.get('edition_id'),
             hardcover_pages=book_data.get('pages'),
             matched_by='manual'  # Since this was manually linked

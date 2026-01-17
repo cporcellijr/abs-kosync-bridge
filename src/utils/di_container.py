@@ -160,6 +160,7 @@ class Container(containers.DeclarativeContainer):
         SyncManager,
         abs_client=abs_client,
         booklore_client=booklore_client,
+        hardcover_client=hardcover_client,
         storyteller_client=storyteller_client,
         transcriber=transcriber,
         ebook_parser=ebook_parser,

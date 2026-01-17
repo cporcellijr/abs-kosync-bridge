@@ -99,6 +99,7 @@ class HardcoverSyncClient(SyncClient):
             hardcover_details = HardcoverDetails(
                 abs_id=book.abs_id,
                 hardcover_book_id=match.get('book_id'),
+                hardcover_slug=match.get('slug'),
                 hardcover_edition_id=match.get('edition_id'),
                 hardcover_pages=match.get('pages'),
                 isbn=isbn,
@@ -145,6 +146,7 @@ class HardcoverSyncClient(SyncClient):
         details = HardcoverDetails(
             abs_id=book_abs_id,
             hardcover_book_id=match['book_id'],
+            hardcover_slug=match.get('slug'),
             hardcover_edition_id=match.get('edition_id'),
             hardcover_pages=match.get('pages'),
             isbn=isbn,
