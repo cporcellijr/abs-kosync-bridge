@@ -17,14 +17,14 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
+from src.utils.di_container import Container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.di_container import create_container, Container
-from dependency_injector import providers
 from src.db.migration_utils import initialize_database
 from src.utils.config_loader import ConfigLoader
-import sys
+from dependency_injector import providers
 
 # ---------------- APP SETUP ----------------
 
@@ -146,7 +146,7 @@ def search_abs_audiobooks_linker(query: str):
         logger.info(f"🔍 Book Linker searching for: '{query}'")
 
         # Get all audiobooks
-        all_audiobooks = manager.abs_client.get_all_audiobooks()
+        all_audiobooks = container.abs_client().get_all_audiobooks()
         logger.info(f"📚 Got {len(all_audiobooks)} total audiobooks from ABS")
 
         if not query:
@@ -160,7 +160,7 @@ def search_abs_audiobooks_linker(query: str):
             # Use the SAME matching logic as Single/Batch
             if audiobook_matches_search(ab, query_lower):
                 # Get full item details to access audio files
-                item_details = manager.abs_client.get_item_details(ab.get('id'))
+                item_details = container.abs_client().get_item_details(ab.get('id'))
                 if not item_details:
                     continue
 
@@ -414,11 +414,11 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
     falls back to filesystem if needed.
     """
     # Try Booklore API first
-    if booklore_id and manager.booklore_client.is_configured():
+    if booklore_id and container.booklore_client().is_configured():
         try:
-            content = manager.booklore_client.download_book(booklore_id)
+            content = container.booklore_client().download_book(booklore_id)
             if content:
-                kosync_id = manager.ebook_parser.get_kosync_id_from_bytes(ebook_filename, content)
+                kosync_id = container.ebook_parser().get_kosync_id_from_bytes(ebook_filename, content)
                 if kosync_id:
                     logger.debug(f"Computed KOSync ID from Booklore download: {kosync_id}")
                     return kosync_id
@@ -428,10 +428,10 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
     # Fall back to filesystem
     ebook_path = find_ebook_file(ebook_filename)
     if ebook_path:
-        return manager.ebook_parser.get_kosync_id(ebook_path)
+        return container.ebook_parser().get_kosync_id(ebook_path)
 
     # Neither source available - log helpful warning
-    if not manager.booklore_client.is_configured() and not EBOOK_DIR.exists():
+    if not container.booklore_client().is_configured() and not EBOOK_DIR.exists():
         logger.warning(
             f"Cannot compute KOSync ID for '{ebook_filename}': "
             "Neither Booklore integration nor /books volume is configured. "
@@ -479,9 +479,9 @@ def get_searchable_ebooks(search_term):
     Returns list of EbookResult objects for consistent interface."""
 
     # Try Booklore first if configured
-    if manager.booklore_client.is_configured():
+    if container.booklore_client().is_configured():
         try:
-            books = manager.booklore_client.search_books(search_term)
+            books = container.booklore_client().search_books(search_term)
             if books:
                 return [
                     EbookResult(
@@ -498,7 +498,7 @@ def get_searchable_ebooks(search_term):
 
     # Fallback to filesystem
     if not EBOOK_DIR.exists():
-        if not manager.booklore_client.is_configured():
+        if not container.booklore_client().is_configured():
             logger.warning(
                 "No ebooks available: Neither Booklore integration nor /books volume is configured. "
                 "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
@@ -679,51 +679,31 @@ def index():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
-            # Initialize progress values
             'unified_progress': 0,
             'duration': book.duration or 0,
-            'kosync_progress': 0,
-            'storyteller_progress': 0,
-            'booklore_progress': 0,
-            'abs_progress': 0,
-            'hardcover_progress': 0
+            'states': {}
         }
 
         # Populate progress from states
         latest_update_time = 0
         max_progress = 0
 
-        # TODO! Clean this up. Just return the percentage + timestamp per client and let the frontend/index.html figure it out
-        # Process each client state
+        # Process each client state and store both timestamp and percentage
         for client_name, state in state_by_client.items():
             if state.last_updated and state.last_updated > latest_update_time:
                 latest_update_time = state.last_updated
 
-            if client_name == 'kosync':
-                mapping['kosync_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
-                max_progress = max(max_progress, mapping['kosync_progress'])
+            # Store both timestamp and percentage for each client
+            mapping['states'][client_name] = {
+                'timestamp': state.timestamp or 0,
+                'percentage': round(state.percentage * 100, 1) if state.percentage else 0,
+                'last_updated': state.last_updated
+            }
 
-            elif client_name == 'abs':
-                # ABS stores timestamp, convert to progress percentage for display
-                if state.timestamp:
-                    mapping['abs_progress'] = state.timestamp
-                    # Try to get duration from ABS client for percentage calculation
-                    if mapping['duration'] > 0:
-                        abs_pct = min((state.timestamp / mapping['duration']) * 100.0, 100.0)
-                    else:
-                        abs_pct = round(state.percentage * 100, 1) if state.percentage else 0
-                    max_progress = max(max_progress, abs_pct)
-
-            elif client_name == 'storyteller':
-                mapping['storyteller_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
-                max_progress = max(max_progress, mapping['storyteller_progress'])
-
-            elif client_name == 'booklore':
-                mapping['booklore_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
-                max_progress = max(max_progress, mapping['booklore_progress'])
-
-            elif client_name == 'hardcover':
-                mapping['hardcover_progress'] = round(state.percentage * 100, 1) if state.percentage else 0
+            # Calculate max progress for unified_progress (using percentage)
+            if state.percentage:
+                progress_pct = round(state.percentage * 100, 1)
+                max_progress = max(max_progress, progress_pct)
 
         # Add hardcover mapping details
         hardcover_details = database_service.get_hardcover_details(book.abs_id)
@@ -863,14 +843,14 @@ def match():
     if request.method == 'POST':
         abs_id = request.form.get('audiobook_id')
         ebook_filename = request.form.get('ebook_filename')
-        audiobooks = manager.abs_client.get_all_audiobooks()
+        audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
 
         # Get booklore_id if available for API-based hash computation
         booklore_id = None
-        if manager.booklore_client.is_configured():
-            book = manager.booklore_client.find_book_by_filename(ebook_filename)
+        if container.booklore_client().is_configured():
+            book = container.booklore_client().find_book_by_filename(ebook_filename)
             if book:
                 booklore_id = book.get('id')
 
@@ -893,17 +873,17 @@ def match():
         )
 
         database_service.save_book(book)
-        manager.abs_client.add_to_collection(abs_id)
-        manager.booklore_client.add_to_shelf(ebook_filename)
-        manager.storyteller_client.add_to_collection(ebook_filename)
+        container.abs_client().add_to_collection(abs_id)
+        container.booklore_client().add_to_shelf(ebook_filename)
+        container.storyteller_client().add_to_collection(ebook_filename)
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks = [], []
     if search:
-        audiobooks = manager.abs_client.get_all_audiobooks()
+        audiobooks = container.abs_client().get_all_audiobooks()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
-        for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
+        for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
 
         # Use new search method
         ebooks = get_searchable_ebooks(search)
@@ -919,7 +899,7 @@ def batch_match():
             session.setdefault('queue', [])
             abs_id = request.form.get('audiobook_id')
             ebook_filename = request.form.get('ebook_filename')
-            audiobooks = manager.abs_client.get_all_audiobooks()
+            audiobooks = container.abs_client().get_all_audiobooks()
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
             if selected_ab and ebook_filename:
                 if not any(item['abs_id'] == abs_id for item in session['queue']):
@@ -927,7 +907,7 @@ def batch_match():
                                              "abs_title": manager.get_abs_title(selected_ab),
                                              "ebook_filename": ebook_filename,
                                              "duration": manager.get_duration(selected_ab),
-                                             "cover_url": f"{manager.abs_client.base_url}/api/items/{abs_id}/cover?token={manager.abs_client.token}"})
+                                             "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"})
                     session.modified = True
             return redirect(url_for('batch_match', search=request.form.get('search', '')))
         elif action == 'remove_from_queue':
@@ -948,8 +928,8 @@ def batch_match():
 
                 # Get booklore_id if available for API-based hash computation
                 booklore_id = None
-                if manager.booklore_client.is_configured():
-                    book = manager.booklore_client.find_book_by_filename(ebook_filename)
+                if container.booklore_client().is_configured():
+                    book = container.booklore_client().find_book_by_filename(ebook_filename)
                     if book:
                         booklore_id = book.get('id')
 
@@ -971,9 +951,9 @@ def batch_match():
                 )
 
                 database_service.save_book(book)
-                manager.abs_client.add_to_collection(item['abs_id'])
-                manager.booklore_client.add_to_shelf(item['ebook_filename'])
-                manager.storyteller_client.add_to_collection(item['ebook_filename'])
+                container.abs_client().add_to_collection(item['abs_id'])
+                container.booklore_client().add_to_shelf(item['ebook_filename'])
+                container.storyteller_client().add_to_collection(item['ebook_filename'])
 
             session['queue'] = []
             session.modified = True
@@ -982,9 +962,9 @@ def batch_match():
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks = [], []
     if search:
-        audiobooks = manager.abs_client.get_all_audiobooks()
+        audiobooks = container.abs_client().get_all_audiobooks()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
-        for ab in audiobooks: ab['cover_url'] = f"{manager.abs_client.base_url}/api/items/{ab['id']}/cover?token={manager.abs_client.token}"
+        for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
 
         # Use new search method
         ebooks = get_searchable_ebooks(search)
@@ -1041,22 +1021,36 @@ def link_hardcover(abs_id):
     if not url:
         return redirect(url_for('index'))
 
-    # Retrieve the sync client from manager
-    # Note: keys in sync_clients are capitalized (e.g. 'Hardcover')
-    hc_sync_client = manager.sync_clients.get('Hardcover')
-    if not hc_sync_client:
-        flash("❌ Hardcover sync is not enabled/configured.", "error")
+    # Resolve book
+    book_data = manager.hardcover_client.resolve_book_from_input(url)
+    if not book_data:
+        flash(f"❌ Could not find book for: {url}", "error")
         return redirect(url_for('index'))
 
-    # Use the client's manual match method which handles resolution, DB updates, and status setting
-    success = hc_sync_client.set_manual_match(abs_id, url)
+    # Create or update hardcover details using database service
+    from src.db.models import HardcoverDetails
 
-    if success:
-         # Optionally fetch title for the flash message, but set_manual_match doesn't return it.
-         # We can just say "success".
-         flash(f"✅ Linked Hardcover book successfully.", "success")
-    else:
-         flash(f"❌ Could not resolve or link Hardcover book: {url}", "error")
+    try:
+        hardcover_details = HardcoverDetails(
+            abs_id=abs_id,
+            hardcover_book_id=book_data['book_id'],
+            hardcover_edition_id=book_data.get('edition_id'),
+            hardcover_pages=book_data.get('pages'),
+            matched_by='manual'  # Since this was manually linked
+        )
+
+        database_service.save_hardcover_details(hardcover_details)
+
+        # Force status to 'Want to Read' (1)
+        try:
+            manager.hardcover_client.update_status(book_data['book_id'], 1, book_data.get('edition_id'))
+        except Exception as e:
+            logger.warning(f"Failed to set Hardcover status: {e}")
+
+        flash(f"✅ Linked Hardcover: {book_data.get('title')}", "success")
+    except Exception as e:
+        logger.error(f"Failed to save hardcover details: {e}")
+        flash("❌ Database update failed", "error")
 
     return redirect(url_for('index'))
 
@@ -1080,23 +1074,33 @@ def api_status():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
-            'duration': book.duration
+            'duration': book.duration,
+            'states': {}
         }
 
         # Add progress information from states
         for client_name, state in state_by_client.items():
+            # Store in unified states object
+            mapping['states'][client_name] = {
+                'timestamp': state.timestamp or 0,
+                'percentage': state.percentage or 0,
+                'xpath': getattr(state, 'xpath', None),
+                'last_updated': state.last_updated
+            }
+
+            # Maintain backward compatibility with old field names
             if client_name == 'kosync':
                 mapping['kosync_pct'] = state.percentage
-                mapping['kosync_xpath'] = state.xpath
+                mapping['kosync_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'abs':
                 mapping['abs_pct'] = state.percentage
                 mapping['abs_ts'] = state.timestamp
             elif client_name == 'storyteller':
                 mapping['storyteller_pct'] = state.percentage
-                mapping['storyteller_xpath'] = state.xpath
+                mapping['storyteller_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'booklore':
                 mapping['booklore_pct'] = state.percentage
-                mapping['booklore_xpath'] = state.xpath
+                mapping['booklore_xpath'] = getattr(state, 'xpath', None)
 
         mappings.append(mapping)
 
@@ -1314,7 +1318,7 @@ if __name__ == '__main__':
     logger.info("Readaloud monitor started")
 
     # Check ebook source configuration
-    booklore_configured = manager.booklore_client.is_configured()
+    booklore_configured = container.booklore_client().is_configured()
     books_volume_exists = EBOOK_DIR.exists()
 
     if booklore_configured:

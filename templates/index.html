@@ -1,6 +1,128 @@
 <!DOCTYPE html>
 <html>
 
+{# Macro for rendering a book card - used by both currently-reading and all-books grids #}
+{% macro render_book_card(mapping, integrations) %}
+<div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
+    data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
+    <div class="book-cover-container">
+        {% if mapping.cover_url %}
+        <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div class="book-cover-placeholder" style="display:none;">📖</div>
+        {% else %}
+        <div class="book-cover-placeholder">📖</div>
+        {% endif %}
+
+        <div class="status-badge-mini status-{{ mapping.status }}">
+            {{ mapping.status }}
+        </div>
+
+        {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %} <div
+            class="progress-ring reading">
+            {{ '%.0f' | format(mapping.unified_progress) }}%
+    </div>
+    {% endif %}
+
+    <div class="book-overlay">
+        <div class="book-title">{{ mapping.abs_title }}</div>
+        <div class="book-filename">{{ mapping.ebook_filename }}</div>
+
+        {% if mapping.status == 'active' %}
+        <div class="progress-details">
+            {% if integrations.abs %}
+            <div class="progress-item" title="Audiobookshelf">
+                <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
+                {% if mapping.states.abs is defined %}
+                <span>{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600,
+                    ((mapping.states.abs.timestamp|default(0)|int) % 3600) // 60,
+                    (mapping.states.abs.timestamp|default(0)|int) % 60) }}</span>
+                {% else %}
+                <span>0:00:00</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if integrations.kosync %}
+            <div class="progress-item" title="KOReader">
+                <span>📖</span>
+                {% if mapping.states.kosync is defined %}
+                <span>{{ '%.1f' | format(mapping.states.kosync.percentage|default(0)) }}%</span>
+                {% else %}
+                <span>0.0%</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if integrations.storyteller %}
+            <div class="progress-item" title="Storyteller">
+                <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
+                {% if mapping.states.storyteller is defined %}
+                <span>{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0)) }}%</span>
+                {% else %}
+                <span>0.0%</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if integrations.booklore %}
+            <div class="progress-item" title="Booklore">
+                <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                {% if mapping.states.booklore is defined %}
+                <span>{{ '%.1f' | format(mapping.states.booklore.percentage|default(0)) }}%</span>
+                {% else %}
+                <span>0.0%</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if integrations.hardcover %}
+            <div class="progress-item"
+                title="Hardcover:
+                       {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
+                onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                style="cursor: pointer; position: relative;">
+                <img src="/static/hardcover.png" alt="HC"
+                    style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                <span
+                    style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
+
+                {% if mapping.hardcover_book_id %}
+                {% if mapping.states.hardcover is defined %}
+                <span>{{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%</span>
+                {% else %}
+                <span>0%</span>
+                {% endif %}
+                {% else %}
+                <span style="font-size: 10px; opacity: 0.5;">+</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="progress-bar-mini">
+            <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
+        </div>
+
+        <div class="last-sync">Synced {{ mapping.last_sync }}</div>
+        {% endif %}
+
+        <div class="quick-actions">
+            <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
+                <button type="submit" class="action-btn warning"
+                    onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                    🔄 Clear
+                </button>
+            </form>
+            <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
+                <button type="submit" class="action-btn danger" onclick="return confirm('Delete this mapping?')">
+                    🗑️ Delete
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+</div>
+{% endmacro %}
+
 <head>
     <title>ABS-KoSync Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -534,391 +656,194 @@
 
         <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %} <div class="book-card"
-                data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
-                data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
-                <div class="book-cover-container">
-                    {% if mapping.cover_url %}
-                    <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
-                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="book-cover-placeholder" style="display:none;">📖</div>
-                    {% else %}
-                    <div class="book-cover-placeholder">📖</div>
-                    {% endif %}
+            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %} {{ render_book_card(mapping,
+                integrations) }} {% endif %} {% endfor %} </div>
 
-                    <div class="status-badge-mini status-{{ mapping.status }}">
-                        {{ mapping.status }}
-                    </div>
-
-                    {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100
-                        %} <div class="progress-ring reading">
-                        {{ '%.0f' | format(mapping.unified_progress) }}%
+                <div class="section-header" style="margin-top: 80px;">
+                    <h2>All Books</h2>
                 </div>
-                {% endif %}
 
-                <div class="book-overlay">
-                    <div class="book-title">{{ mapping.abs_title }}</div>
-                    <div class="book-filename">{{ mapping.ebook_filename }}</div>
-
-                    {% if mapping.status == 'active' %}
-                    <div class="progress-details">
-                        {% if integrations.abs %}
-                        <div class="progress-item" title="Audiobookshelf">
-                            <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
-                            <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600,
-                                ((mapping.abs_progress|int) % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
-                        </div>
-                        {% endif %}
-                        {% if integrations.kosync %}
-                        <div class="progress-item" title="KOReader">
-                            <span>📖</span>
-                            <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
-                        </div>
-                        {% endif %}
-                        {% if integrations.storyteller %}
-                        <div class="progress-item" title="Storyteller">
-                            <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
-                            <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
-                        </div>
-                        {% endif %}
-                        {% if integrations.booklore %}
-                        <div class="progress-item" title="Booklore">
-                            <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
-                            <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
-                        </div>
-                        {% endif %}
-
-                        {% if integrations.hardcover %}
-                        <div class="progress-item"
-                            title="Hardcover:
-                                   {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                            onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                            style="cursor: pointer; position: relative;">
-                            <img src="/static/hardcover.png" alt="HC"
-                                style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                                onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-                            <span
-                                style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                            {% if mapping.hardcover_book_id %}
-                            <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-                            {% else %}
-                            <span style="font-size: 10px; opacity: 0.5;">+</span>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    </div>
-
-                    <div class="progress-bar-mini">
-                        <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
-                    </div>
-
-                    <div class="last-sync">Synced {{ mapping.last_sync }}</div>
-                    {% endif %}
-
-                    <div class="quick-actions">
-                        <form method="POST" action="/clear-progress/{{ mapping.abs_id }}"
-                            style="flex: 1; margin-right: 6px;">
-                            <button type="submit" class="action-btn warning"
-                                onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
-                                🔄 Clear
-                            </button>
-                        </form>
-                        <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
-                            <button type="submit" class="action-btn danger"
-                                onclick="return confirm('Delete this mapping?')">
-                                🗑️ Delete
-                            </button>
-                        </form>
-                    </div>
+                <div class="book-grid" id="all-books-grid">
+                    {% for mapping in mappings %}
+                    {{ render_book_card(mapping, integrations) }}
+                    {% endfor %}
                 </div>
-        </div>
-    </div>
-    {% endif %}
-    {% endfor %}
-    </div>
 
-    <div class="section-header" style="margin-top: 80px;">
-        <h2>All Books</h2>
-    </div>
 
-    <div class="book-grid" id="all-books-grid">
-        {% for mapping in mappings %}
-        <div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
-            data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
-            <div class="book-cover-container">
-                {% if mapping.cover_url %}
-                <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
-                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                <div class="book-cover-placeholder" style="display:none;">📖</div>
                 {% else %}
-                <div class="book-cover-placeholder">📖</div>
+                <div class="empty-state">
+                    <div class="empty-state-icon">📚</div>
+                    <h2>No books syncing yet</h2>
+                    <p>Start by adding your first audiobook mapping</p>
+                    <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
+                </div>
                 {% endif %}
-
-                <div class="status-badge-mini status-{{ mapping.status }}">
-                    {{ mapping.status }}
-                </div>
-
-                {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-                    <div class="progress-ring reading">
-                    {{ '%.0f' | format(mapping.unified_progress) }}%
-            </div>
-            {% endif %}
-
-            <div class="book-overlay">
-                <div class="book-title">{{ mapping.abs_title }}</div>
-                <div class="book-filename">{{ mapping.ebook_filename }}</div>
-
-                {% if mapping.status == 'active' %}
-                <div class="progress-details">
-                    {% if integrations.abs %}
-                    <div class="progress-item" title="Audiobookshelf">
-                        <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
-                        <span>{{ '%d:%02d:%02d' | format((mapping.abs_progress|int) // 3600, ((mapping.abs_progress|int)
-                            % 3600) // 60, (mapping.abs_progress|int) % 60) }}</span>
-                    </div>
-                    {% endif %}
-                    {% if integrations.kosync %}
-                    <div class="progress-item" title="KOReader">
-                        <span>📖</span>
-                        <span>{{ '%.1f' | format(mapping.kosync_progress) }}%</span>
-                    </div>
-                    {% endif %}
-                    {% if integrations.storyteller %}
-                    <div class="progress-item" title="Storyteller">
-                        <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
-                        <span>{{ '%.1f' | format(mapping.storyteller_progress) }}%</span>
-                    </div>
-                    {% endif %}
-                    {% if integrations.booklore %}
-                    <div class="progress-item" title="Booklore">
-                        <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
-                        <span>{{ '%.1f' | format(mapping.booklore_progress) }}%</span>
-                    </div>
-                    {% endif %}
-
-                    {% if integrations.hardcover %}
-                    <div class="progress-item"
-                        title="Hardcover: {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                        onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                        style="cursor: pointer; position: relative;">
-                        <img src="/static/hardcover.png" alt="HC"
-                            style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                            onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-                        <span
-                            style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                        {% if mapping.hardcover_book_id %}
-                        <span>{{ '%.0f' | format(mapping.hardcover_progress|default(0)) }}%</span>
-                        {% else %}
-                        <span style="font-size: 10px; opacity: 0.5;">+</span>
-                        {% endif %}
-                    </div>
-                    {% endif %}
-                </div>
-
-                <div class="progress-bar-mini">
-                    <div class="progress-bar-fill" style="width: {{ mapping.unified_progress }}%"></div>
-                </div>
-
-                <div class="last-sync">Synced {{ mapping.last_sync }}</div>
-                {% endif %}
-
-                <div class="quick-actions">
-                    <form method="POST" action="/clear-progress/{{ mapping.abs_id }}"
-                        style="flex: 1; margin-right: 6px;">
-                        <button type="submit" class="action-btn warning"
-                            onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
-                            🔄 Clear
-                        </button>
-                    </form>
-                    <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
-                        <button type="submit" class="action-btn danger"
-                            onclick="return confirm('Delete this mapping?')">
-                            🗑️ Delete
-                        </button>
-                    </form>
-                </div>
-            </div>
         </div>
-    </div>
-    {% endfor %}
-    </div>
 
-    {% else %}
-    <div class="empty-state">
-        <div class="empty-state-icon">📚</div>
-        <h2>No books syncing yet</h2>
-        <p>Start by adding your first audiobook mapping</p>
-        <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
-    </div>
-    {% endif %}
-    </div>
+        <script>
+            const currentlyReadingGrid = document.getElementById('currently-reading-grid');
+            const allBooksGrid = document.getElementById('all-books-grid');
+            const sortSelect = document.getElementById('sort-select');
+            const directionBtn = document.getElementById('sort-direction');
 
-    <script>
-        const currentlyReadingGrid = document.getElementById('currently-reading-grid');
-        const allBooksGrid = document.getElementById('all-books-grid');
-        const sortSelect = document.getElementById('sort-select');
-        const directionBtn = document.getElementById('sort-direction');
-
-        function linkHardcover(event, absId, currentTitle) {
-            event.stopPropagation();
-            let promptText = "Enter Hardcover URL or ID:";
-            if (currentTitle) {
-                promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
+            function linkHardcover(event, absId, currentTitle) {
+                event.stopPropagation();
+                let promptText = "Enter Hardcover URL or ID:";
+                if (currentTitle) {
+                    promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
+                }
+                const input = prompt(promptText);
+                if (input) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = `/link-hardcover/${absId}`;
+                    const inputField = document.createElement('input');
+                    inputField.type = 'hidden';
+                    inputField.name = 'hardcover_url';
+                    inputField.value = input;
+                    form.appendChild(inputField);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
             }
-            const input = prompt(promptText);
-            if (input) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = `/link-hardcover/${absId}`;
-                const inputField = document.createElement('input');
-                inputField.type = 'hidden';
-                inputField.name = 'hardcover_url';
-                inputField.value = input;
-                form.appendChild(inputField);
-                document.body.appendChild(form);
-                form.submit();
+
+            // Initial Sort Defaults
+            let sortState = {
+                title: 'asc',      // A-Z default
+                progress: 'desc',  // Highest progress first
+                status: 'asc',
+                last_sync: 'desc'  // Newest sync first
+            };
+
+            // Track last sort to detect toggles.
+            // Important: Start as null to prevent auto-toggling on page load
+            let lastSort = null;
+
+            // Load saved preferences
+            const savedSort = localStorage.getItem('abs_kosync_sort') || 'title';
+            const savedSortState = localStorage.getItem('abs_kosync_sort_state');
+
+            if (savedSort) {
+                sortSelect.value = savedSort;
             }
-        }
 
-        // Initial Sort Defaults
-        let sortState = {
-            title: 'asc',      // A-Z default
-            progress: 'desc',  // Highest progress first
-            status: 'asc',
-            last_sync: 'desc'  // Newest sync first
-        };
-
-        // Track last sort to detect toggles.
-        // Important: Start as null to prevent auto-toggling on page load
-        let lastSort = null;
-
-        // Load saved preferences
-        const savedSort = localStorage.getItem('abs_kosync_sort') || 'title';
-        const savedSortState = localStorage.getItem('abs_kosync_sort_state');
-
-        if (savedSort) {
-            sortSelect.value = savedSort;
-        }
-
-        if (savedSortState) {
-            try {
-                // Merge saved state with defaults
-                sortState = { ...sortState, ...JSON.parse(savedSortState) };
-            } catch (e) {
-                console.error("Error parsing saved sort state", e);
+            if (savedSortState) {
+                try {
+                    // Merge saved state with defaults
+                    sortState = { ...sortState, ...JSON.parse(savedSortState) };
+                } catch (e) {
+                    console.error("Error parsing saved sort state", e);
+                }
             }
-        }
 
-        // Parse "Time Ago" for sorting
-        function parseLastSync(syncText) {
-            if (!syncText || syncText === 'Never' || syncText === 'Error') return -1;
+            // Parse "Time Ago" for sorting
+            function parseLastSync(syncText) {
+                if (!syncText || syncText === 'Never' || syncText === 'Error') return -1;
 
-            const match = syncText.match(/(\d+)([smhd])/);
-            if (!match) return -1;
+                const match = syncText.match(/(\d+)([smhd])/);
+                if (!match) return -1;
 
-            const value = parseInt(match[1]);
-            const unit = match[2];
+                const value = parseInt(match[1]);
+                const unit = match[2];
 
-            if (unit === 's') return value;
-            if (unit === 'm') return value * 60;
-            if (unit === 'h') return value * 3600;
-            if (unit === 'd') return value * 86400;
+                if (unit === 's') return value;
+                if (unit === 'm') return value * 60;
+                if (unit === 'h') return value * 3600;
+                if (unit === 'd') return value * 86400;
 
-            return -1;
-        }
+                return -1;
+            }
 
-        function sortCards(grid, sortBy, direction) {
-            if (!grid) return;
-            const cards = Array.from(grid.children);
+            function sortCards(grid, sortBy, direction) {
+                if (!grid) return;
+                const cards = Array.from(grid.children);
 
-            const sortedCards = cards.sort((a, b) => {
-                let comparison = 0;
+                const sortedCards = cards.sort((a, b) => {
+                    let comparison = 0;
 
-                // Safety checks for missing data attributes
-                const valA = a.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
-                const valB = b.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+                    // Safety checks for missing data attributes
+                    const valA = a.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+                    const valB = b.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
 
-                if (sortBy === 'title') {
-                    comparison = valA.localeCompare(valB);
-                } else if (sortBy === 'progress') {
-                    comparison = (parseFloat(valA) || 0) - (parseFloat(valB) || 0);
-                } else if (sortBy === 'status') {
-                    comparison = valA.localeCompare(valB);
-                } else if (sortBy === 'last_sync') {
-                    comparison = parseLastSync(valA) - parseLastSync(valB);
+                    if (sortBy === 'title') {
+                        comparison = valA.localeCompare(valB);
+                    } else if (sortBy === 'progress') {
+                        comparison = (parseFloat(valA) || 0) - (parseFloat(valB) || 0);
+                    } else if (sortBy === 'status') {
+                        comparison = valA.localeCompare(valB);
+                    } else if (sortBy === 'last_sync') {
+                        comparison = parseLastSync(valA) - parseLastSync(valB);
+                    }
+
+                    // Apply direction
+                    return direction === 'asc' ? comparison : -comparison;
+                });
+
+                // Re-append in new order
+                sortedCards.forEach(card => grid.appendChild(card));
+            }
+
+            function applySorting(sortBy) {
+                let direction;
+
+                // Check if we are selecting the same sort type to toggle direction
+                if (lastSort === sortBy) {
+                    const currentDirection = sortState[sortBy];
+                    direction = currentDirection === 'asc' ? 'desc' : 'asc';
+                    sortState[sortBy] = direction;
+                } else {
+                    // Different selection (or first load) -> Use stored direction
+                    direction = sortState[sortBy];
                 }
 
-                // Apply direction
-                return direction === 'asc' ? comparison : -comparison;
-            });
+                // Update tracker
+                lastSort = sortBy;
 
-            // Re-append in new order
-            sortedCards.forEach(card => grid.appendChild(card));
-        }
+                // Update UI Arrow
+                updateSortIndicator(direction);
 
-        function applySorting(sortBy) {
-            let direction;
+                // Sort Grids
+                sortCards(currentlyReadingGrid, sortBy, direction);
+                sortCards(allBooksGrid, sortBy, direction);
 
-            // Check if we are selecting the same sort type to toggle direction
-            if (lastSort === sortBy) {
-                const currentDirection = sortState[sortBy];
-                direction = currentDirection === 'asc' ? 'desc' : 'asc';
-                sortState[sortBy] = direction;
-            } else {
-                // Different selection (or first load) -> Use stored direction
-                direction = sortState[sortBy];
+                // Save preferences
+                localStorage.setItem('abs_kosync_sort', sortBy);
+                localStorage.setItem('abs_kosync_sort_state', JSON.stringify(sortState));
             }
 
-            // Update tracker
-            lastSort = sortBy;
+            function updateSortIndicator(direction) {
+                if (directionBtn) {
+                    directionBtn.textContent = direction === 'asc' ? '↑' : '↓';
+                }
+            }
 
-            // Update UI Arrow
-            updateSortIndicator(direction);
+            // --- Event Listeners ---
 
-            // Sort Grids
-            sortCards(currentlyReadingGrid, sortBy, direction);
-            sortCards(allBooksGrid, sortBy, direction);
+            if (sortSelect) {
+                sortSelect.addEventListener('change', (e) => {
+                    applySorting(e.target.value);
+                });
+            }
 
-            // Save preferences
-            localStorage.setItem('abs_kosync_sort', sortBy);
-            localStorage.setItem('abs_kosync_sort_state', JSON.stringify(sortState));
-        }
-
-        function updateSortIndicator(direction) {
+            // NEW: Clickable Arrow Logic
             if (directionBtn) {
-                directionBtn.textContent = direction === 'asc' ? '↑' : '↓';
+                directionBtn.addEventListener('click', () => {
+                    // Clicking the arrow re-applies the CURRENT sort value.
+                    // Since 'lastSort' will match, this triggers the toggle logic in applySorting.
+                    applySorting(sortSelect.value);
+                });
             }
-        }
 
-        // --- Event Listeners ---
+            // --- Initialization ---
 
-        if (sortSelect) {
-            sortSelect.addEventListener('change', (e) => {
-                applySorting(e.target.value);
-            });
-        }
+            // Apply initial sort on load (if content exists)
+            if (currentlyReadingGrid || allBooksGrid) {
+                applySorting(savedSort);
+            }
 
-        // NEW: Clickable Arrow Logic
-        if (directionBtn) {
-            directionBtn.addEventListener('click', () => {
-                // Clicking the arrow re-applies the CURRENT sort value.
-                // Since 'lastSort' will match, this triggers the toggle logic in applySorting.
-                applySorting(sortSelect.value);
-            });
-        }
-
-        // --- Initialization ---
-
-        // Apply initial sort on load (if content exists)
-        if (currentlyReadingGrid || allBooksGrid) {
-            applySorting(savedSort);
-        }
-
-        // Auto-refresh every 30 seconds
-        setTimeout(() => location.reload(), 30000);
-    </script>
+            // Auto-refresh every 30 seconds
+            setTimeout(() => location.reload(), 30000);
+        </script>
 </body>
 
 </html>
