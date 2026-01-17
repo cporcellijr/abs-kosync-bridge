@@ -36,25 +36,41 @@
                 {% if integrations.abs %}
                 <div class="progress-item" title="Audiobookshelf">
                     <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
+                    {% if mapping.states.abs is defined %}
                     <span>{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600, ((mapping.states.abs.timestamp|default(0)|int) % 3600) // 60, (mapping.states.abs.timestamp|default(0)|int) % 60) }}</span>
+                    {% else %}
+                    <span>0:00:00</span>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if integrations.kosync %}
                 <div class="progress-item" title="KOReader">
                     <span>📖</span>
+                    {% if mapping.states.kosync is defined %}
                     <span>{{ '%.1f' | format(mapping.states.kosync.percentage|default(0)) }}%</span>
+                    {% else %}
+                    <span>0.0%</span>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if integrations.storyteller %}
                 <div class="progress-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
+                    {% if mapping.states.storyteller is defined %}
                     <span>{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0)) }}%</span>
+                    {% else %}
+                    <span>0.0%</span>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if integrations.booklore %}
                 <div class="progress-item" title="Booklore">
                     <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                    {% if mapping.states.booklore is defined %}
                     <span>{{ '%.1f' | format(mapping.states.booklore.percentage|default(0)) }}%</span>
+                    {% else %}
+                    <span>0.0%</span>
+                    {% endif %}
                 </div>
                 {% endif %}
 
