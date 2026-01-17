@@ -208,11 +208,34 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             # Check progress values based on mock states
             # The unified progress should be the maximum of all client progress values
             self.assertEqual(mapping['unified_progress'], 45.0)  # Max of 45%, 42%, 44%, 40%
-            self.assertEqual(mapping['kosync_progress'], 45.0)   # 45% from mock state
-            self.assertEqual(mapping['storyteller_progress'], 42.0)  # 42% from mock state
-            self.assertEqual(mapping['booklore_progress'], 40.0)  # 40% from mock state
-            self.assertEqual(mapping['abs_progress'], 1584)  # Timestamp from mock state
-            self.assertEqual(mapping['hardcover_progress'], 0)  # Still 0 as no hardcover states
+
+            # Check that states structure is present and contains expected data
+            self.assertIn('states', mapping)
+            states = mapping['states']
+
+            # Verify each client state is stored correctly
+            self.assertIn('kosync', states)
+            self.assertEqual(states['kosync']['percentage'], 45.0)  # 45% from mock state
+            self.assertEqual(states['kosync']['timestamp'], 0)
+            self.assertEqual(states['kosync']['last_updated'], 1642291200)
+
+            self.assertIn('storyteller', states)
+            self.assertEqual(states['storyteller']['percentage'], 42.0)  # 42% from mock state
+            self.assertEqual(states['storyteller']['timestamp'], 0)
+            self.assertEqual(states['storyteller']['last_updated'], 1642291300)
+
+            self.assertIn('booklore', states)
+            self.assertEqual(states['booklore']['percentage'], 40.0)  # 40% from mock state
+            self.assertEqual(states['booklore']['timestamp'], 0)
+            self.assertEqual(states['booklore']['last_updated'], 1642291150)
+
+            self.assertIn('abs', states)
+            self.assertEqual(states['abs']['percentage'], 44.0)  # 44% from mock state
+            self.assertEqual(states['abs']['timestamp'], 1584)  # Timestamp from mock state
+            self.assertEqual(states['abs']['last_updated'], 1642291100)
+
+            # Hardcover should not be present since no hardcover states were provided
+            self.assertNotIn('hardcover', states)
 
             # Check hardcover fields are properly initialized
             self.assertFalse(mapping['hardcover_linked'])
