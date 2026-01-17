@@ -1,149 +1,316 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Settings - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; 
-            background: #0a0a0a; color: #ffffff; min-height: 100vh; 
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-        
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            min-height: 100vh;
+        }
+
         /* Nav Bar (Matches Index) */
         .top-nav {
-            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
-            backdrop-filter: blur(20px); padding: 20px 40px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            display: flex; justify-content: space-between; align-items: center;
-            position: sticky; top: 0; z-index: 100;
+            background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            backdrop-filter: blur(20px);
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
+
         .logo-section h1 {
-            font-size: 24px; font-weight: 700;
+            font-size: 24px;
+            font-weight: 700;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .nav-actions { display: flex; gap: 12px; }
+
+        .nav-actions {
+            display: flex;
+            gap: 12px;
+        }
+
         .btn {
-            padding: 8px 16px; background: rgba(255,255,255,0.05); color: #ccc;
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
-            text-decoration: none; font-size: 14px; transition: all 0.2s; cursor: pointer;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ccc;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.2s;
+            cursor: pointer;
         }
-        .btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-        .btn-primary { 
-            background: rgba(102, 126, 234, 0.2); color: #667eea; border-color: rgba(102, 126, 234, 0.4); 
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
         }
+
+        .btn-primary {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+
         .btn-primary:hover {
-            background: rgba(102, 126, 234, 0.3); border-color: rgba(102, 126, 234, 0.6);
+            background: rgba(102, 126, 234, 0.3);
+            border-color: rgba(102, 126, 234, 0.6);
         }
 
         /* Container */
-        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; padding-bottom: 100px; }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            padding-bottom: 100px;
+        }
 
         /* Settings Form Structure */
-        .settings-form { display: flex; flex-direction: column; gap: 30px; }
-        
-        .settings-section {
-            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 12px; overflow: hidden;
+        .settings-form {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
         }
-        
+
+        .settings-section {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
         .section-header {
-            padding: 20px; background: rgba(255,255,255,0.02);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             /* No cursor pointer here anymore, controlled by switch if present */
             user-select: none;
         }
-        .section-header h3 { font-size: 18px; color: #fff; margin: 0; }
-        
-        .section-body { padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; transition: all 0.3s ease; }
-        .section-body.collapsed { display: none; }
-        .full-width { grid-column: span 2; }
+
+        .section-header h3 {
+            font-size: 18px;
+            color: #fff;
+            margin: 0;
+        }
+
+        .section-body {
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .section-body.collapsed {
+            display: none;
+        }
+
+        .full-width {
+            grid-column: span 2;
+        }
 
         /* Form Inputs */
-        .form-group { display: flex; flex-direction: column; gap: 8px; }
-        .form-group label { font-size: 13px; color: rgba(255,255,255,0.6); font-weight: 600; }
-        .form-group input, .form-group select {
-            padding: 10px; background: rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
-            color: #fff; font-size: 14px; width: 100%;
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
-        .form-group input:focus, .form-group select:focus {
-            outline: none; border-color: #667eea;
+
+        .form-group label {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 600;
         }
-        .help-text { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: -4px; }
+
+        .form-group input,
+        .form-group select {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            width: 100%;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .help-text {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: -4px;
+        }
 
         /* Custom Checkbox */
         .checkbox-wrapper {
-            display: flex; align-items: center; gap: 10px;
-            background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;
-            border: 1px solid rgba(255,255,255,0.05); cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
         }
-        .checkbox-wrapper input { width: 16px; height: 16px; cursor: pointer; accent-color: #667eea; }
-        .checkbox-wrapper label { margin: 0; cursor: pointer; color: #fff; font-size: 14px; }
+
+        .checkbox-wrapper input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #667eea;
+        }
+
+        .checkbox-wrapper label {
+            margin: 0;
+            cursor: pointer;
+            color: #fff;
+            font-size: 14px;
+        }
 
         /* Toggle Switch */
         /* Hides the default checkbox but keeps it accessible/functional */
         .toggle-switch-wrapper {
-            display: flex; align-items: center; gap: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
+
         .toggle-switch {
-            position: relative; width: 44px; height: 24px;
+            position: relative;
+            width: 44px;
+            height: 24px;
         }
-        .toggle-switch input { 
-            opacity: 0; width: 0; height: 0;
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
         }
+
         .slider {
-            position: absolute; cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(255,255,255,0.1);
-            transition: .4s; border-radius: 24px;
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .4s;
+            border-radius: 24px;
         }
+
         .slider:before {
-            position: absolute; content: "";
-            height: 18px; width: 18px;
-            left: 3px; bottom: 3px;
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
             background-color: #ccc;
-            transition: .4s; border-radius: 50%;
+            transition: .4s;
+            border-radius: 50%;
         }
-        input:checked + .slider {
+
+        input:checked+.slider {
             background-color: #667eea;
         }
-        input:checked + .slider:before {
+
+        input:checked+.slider:before {
             transform: translateX(20px);
             background-color: #fff;
         }
-        
+
         /* Flash Messages */
-        .flash { 
-            padding: 15px; border-radius: 8px; margin-bottom: 20px; 
-            border: 1px solid rgba(255,255,255,0.1);
+        .flash {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .flash-success { background: rgba(76, 175, 80, 0.1); border-color: rgba(76, 175, 80, 0.3); color: #81c784; }
-        .flash-error { background: rgba(244, 67, 54, 0.1); border-color: rgba(244, 67, 54, 0.3); color: #e57373; }
+
+        .flash-success {
+            background: rgba(76, 175, 80, 0.1);
+            border-color: rgba(76, 175, 80, 0.3);
+            color: #81c784;
+        }
+
+        .flash-error {
+            background: rgba(244, 67, 54, 0.1);
+            border-color: rgba(244, 67, 54, 0.3);
+            color: #e57373;
+        }
 
         /* Responsive */
         @media (max-width: 768px) {
-            .section-body { grid-template-columns: 1fr; }
-            .full-width { grid-column: span 1; }
+            .section-body {
+                grid-template-columns: 1fr;
+            }
+
+            .full-width {
+                grid-column: span 1;
+            }
         }
-        
+
         .submit-bar {
-            position: fixed; bottom: 20px; right: 20px; left: 20px; z-index: 90;
-            max-width: 960px; margin: 0 auto;
-            background: rgba(20,20,20,0.9); backdrop-filter: blur(10px);
-            padding: 15px; border-radius: 12px; border: 1px solid rgba(102, 126, 234, 0.3);
-            display: flex; justify-content: flex-end; align-items: center; gap: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            left: 20px;
+            z-index: 90;
+            max-width: 960px;
+            margin: 0 auto;
+            background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(10px);
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
         }
-        .restart-warn { color: #FF9800; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+        .restart-warn {
+            color: #FF9800;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
     </style>
 </head>
+
 <body>
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/" style="text-decoration:none;"><h1>📚 ABS-KoSync</h1></a>
+            <a href="/" style="text-decoration:none;">
+                <h1>📚 ABS-KoSync</h1>
+            </a>
         </div>
         <div class="nav-actions">
             <a href="/" class="btn">← Dashboard</a>
@@ -163,7 +330,7 @@
         </div>
 
         <form method="POST" action="/settings" class="settings-form" id="settingsForm">
-            
+
             <div class="settings-section">
                 <div class="section-header">
                     <h3>General Settings</h3>
@@ -177,7 +344,8 @@
                         <label>Log Level</label>
                         <select name="LOG_LEVEL">
                             {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] %}
-                            <option value="{{ level }}" {% if get_val('LOG_LEVEL') == level %}selected{% endif %}>{{ level }}</option>
+                            <option value="{{ level }}" {% if get_val('LOG_LEVEL')==level %}selected{% endif %}>{{ level
+                                }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -207,7 +375,8 @@
                     </div>
                     <div class="form-group">
                         <label>Progress Offset (Seconds)</label>
-                        <input type="number" name="ABS_PROGRESS_OFFSET_SECONDS" value="{{ get_val('ABS_PROGRESS_OFFSET_SECONDS') }}">
+                        <input type="number" name="ABS_PROGRESS_OFFSET_SECONDS"
+                            value="{{ get_val('ABS_PROGRESS_OFFSET_SECONDS') }}">
                         <div class="help-text">Rewind progress sent to ABS (e.g. -60)</div>
                     </div>
                 </div>
@@ -221,7 +390,9 @@
                     <div class="toggle-switch-wrapper">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_kosync" onchange="toggleSection('kosync_body', this.checked)" {% if kosync_enabled %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_kosync"
+                                onchange="toggleSection('kosync_body', this.checked)" {% if kosync_enabled %}checked{%
+                                endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -242,12 +413,15 @@
                     <div class="form-group">
                         <label>Hash Method</label>
                         <select name="KOSYNC_HASH_METHOD">
-                            <option value="content" {% if get_val('KOSYNC_HASH_METHOD') == 'content' %}selected{% endif %}>Content (Slower/Accurate)</option>
-                            <option value="filename" {% if get_val('KOSYNC_HASH_METHOD') == 'filename' %}selected{% endif %}>Filename (Fast)</option>
+                            <option value="content" {% if get_val('KOSYNC_HASH_METHOD')=='content' %}selected{% endif
+                                %}>Content (Slower/Accurate)</option>
+                            <option value="filename" {% if get_val('KOSYNC_HASH_METHOD')=='filename' %}selected{% endif
+                                %}>Filename (Fast)</option>
                         </select>
                     </div>
                     <div class="checkbox-wrapper full-width">
-                        <input type="checkbox" id="kosync_pct" name="KOSYNC_USE_PERCENTAGE_FROM_SERVER" {% if get_bool('KOSYNC_USE_PERCENTAGE_FROM_SERVER') %}checked{% endif %}>
+                        <input type="checkbox" id="kosync_pct" name="KOSYNC_USE_PERCENTAGE_FROM_SERVER" {% if
+                            get_bool('KOSYNC_USE_PERCENTAGE_FROM_SERVER') %}checked{% endif %}>
                         <label for="kosync_pct">Use Percentage from Server (Ignore Text Matching)</label>
                     </div>
                 </div>
@@ -261,7 +435,9 @@
                     <div class="toggle-switch-wrapper">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_storyteller" onchange="toggleSection('storyteller_body', this.checked)" {% if storyteller_enabled %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_storyteller"
+                                onchange="toggleSection('storyteller_body', this.checked)" {% if storyteller_enabled
+                                %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -277,7 +453,8 @@
                     </div>
                     <div class="form-group">
                         <label>Password</label>
-                        <input type="password" name="STORYTELLER_PASSWORD" value="{{ get_val('STORYTELLER_PASSWORD') }}">
+                        <input type="password" name="STORYTELLER_PASSWORD"
+                            value="{{ get_val('STORYTELLER_PASSWORD') }}">
                     </div>
                 </div>
             </div>
@@ -290,7 +467,9 @@
                     <div class="toggle-switch-wrapper">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_booklore" onchange="toggleSection('booklore_body', this.checked)" {% if booklore_enabled %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_booklore"
+                                onchange="toggleSection('booklore_body', this.checked)" {% if booklore_enabled
+                                %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -323,7 +502,9 @@
                     <div class="toggle-switch-wrapper">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_hardcover" onchange="toggleSection('hardcover_body', this.checked)" {% if hardcover_enabled %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_hardcover"
+                                onchange="toggleSection('hardcover_body', this.checked)" {% if hardcover_enabled
+                                %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -336,15 +517,17 @@
                 </div>
             </div>
 
-             <!-- Telegram (Optional) -->
-             <div class="settings-section">
+            <!-- Telegram (Optional) -->
+            <div class="settings-section">
                 {% set telegram_enabled = get_val('TELEGRAM_BOT_TOKEN') != '' %}
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
                     <div class="toggle-switch-wrapper">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.5);">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_telegram" onchange="toggleSection('telegram_body', this.checked)" {% if telegram_enabled %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_telegram"
+                                onchange="toggleSection('telegram_body', this.checked)" {% if telegram_enabled
+                                %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -362,9 +545,25 @@
                         <label>Min Log Level</label>
                         <select name="TELEGRAM_LOG_LEVEL">
                             {% for level in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] %}
-                            <option value="{{ level }}" {% if get_val('TELEGRAM_LOG_LEVEL', 'ERROR') == level %}selected{% endif %}>{{ level }}</option>
+                            <option value="{{ level }}" {% if get_val('TELEGRAM_LOG_LEVEL', 'ERROR' )==level
+                                %}selected{% endif %}>{{ level }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shelfmark (Optional) -->
+            <div class="settings-section">
+                <div class="section-header">
+                    <h3>Shelfmark View</h3>
+                </div>
+                <div class="section-body">
+                    <div class="form-group full-width">
+                        <label>Shelfmark URL</label>
+                        <input type="text" name="SHELFMARK_URL" value="{{ get_val('SHELFMARK_URL') }}">
+                        <div class="help-text">URL to display in the Shelfmark tab (e.g. your Shelfmark instance URL)
+                        </div>
                     </div>
                 </div>
             </div>
@@ -373,7 +572,6 @@
                 <div class="section-header">
                     <h3>Sync Behavior</h3>
                 </div>
-                <!-- Always Visible -->
                 <div class="section-body">
                     <div class="form-group">
                         <label>Sync Period (Minutes)</label>
@@ -381,18 +579,22 @@
                     </div>
                     <div class="form-group">
                         <label>Min ABS Change (Seconds)</label>
-                        <input type="number" name="SYNC_DELTA_ABS_SECONDS" value="{{ get_val('SYNC_DELTA_ABS_SECONDS') }}">
+                        <input type="number" name="SYNC_DELTA_ABS_SECONDS"
+                            value="{{ get_val('SYNC_DELTA_ABS_SECONDS') }}">
                     </div>
                     <div class="form-group">
                         <label>Min Ebook Change (%)</label>
-                        <input type="number" step="0.1" name="SYNC_DELTA_KOSYNC_PERCENT" value="{{ get_val('SYNC_DELTA_KOSYNC_PERCENT') }}">
+                        <input type="number" step="0.1" name="SYNC_DELTA_KOSYNC_PERCENT"
+                            value="{{ get_val('SYNC_DELTA_KOSYNC_PERCENT') }}">
                     </div>
                     <div class="form-group">
                         <label>Client Diff Threshold (%)</label>
-                        <input type="number" step="0.1" name="SYNC_DELTA_BETWEEN_CLIENTS_PERCENT" value="{{ get_val('SYNC_DELTA_BETWEEN_CLIENTS_PERCENT') }}">
+                        <input type="number" step="0.1" name="SYNC_DELTA_BETWEEN_CLIENTS_PERCENT"
+                            value="{{ get_val('SYNC_DELTA_BETWEEN_CLIENTS_PERCENT') }}">
                     </div>
                     <div class="checkbox-wrapper full-width">
-                        <input type="checkbox" id="abs_ebook" name="SYNC_ABS_EBOOK" {% if get_bool('SYNC_ABS_EBOOK') %}checked{% endif %}>
+                        <input type="checkbox" id="abs_ebook" name="SYNC_ABS_EBOOK" {% if get_bool('SYNC_ABS_EBOOK')
+                            %}checked{% endif %}>
                         <label for="abs_ebook">Enable ABS Ebook Sync (Bi-directional)</label>
                     </div>
                 </div>
@@ -418,4 +620,5 @@
         }
     </script>
 </body>
+
 </html>

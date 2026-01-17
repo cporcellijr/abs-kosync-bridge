@@ -118,6 +118,12 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
+SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
+
+# ---------------- CONTEXT PROCESSORS ----------------
+@app.context_processor
+def inject_shelfmark():
+    return dict(shelfmark_url=os.environ.get("SHELFMARK_URL", ""))
 
 # ---------------- BOOK LINKER HELPERS ----------------
 
@@ -554,7 +560,8 @@ def settings():
         'ABS_PROGRESS_OFFSET_SECONDS': '0',
         'EBOOK_CACHE_SIZE': '3',
         'KOSYNC_HASH_METHOD': 'content',
-        'TELEGRAM_LOG_LEVEL': 'ERROR'
+        'TELEGRAM_LOG_LEVEL': 'ERROR',
+        'SHELFMARK_URL': ''
     }
 
     if request.method == 'POST':
@@ -796,6 +803,15 @@ def index():
         overall_progress = 0
 
     return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
+
+
+@app.route('/shelfmark')
+def shelfmark():
+    """Shelfmark view - renders an iframe with SHELFMARK_URL"""
+    url = os.environ.get("SHELFMARK_URL")
+    if not url:
+        return redirect(url_for('index'))
+    return render_template('shelfmark.html', shelfmark_url=url)
 
 
 @app.route('/book-linker', methods=['GET', 'POST'])

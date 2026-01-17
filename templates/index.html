@@ -630,6 +630,9 @@
             <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
+            {% if shelfmark_url %}
+            <a href="/shelfmark" class="btn">🏷️ Shelfmark</a>
+            {% endif %}
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>
         </div>

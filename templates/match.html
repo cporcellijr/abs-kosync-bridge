@@ -1,29 +1,30 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Add Book - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { 
-            box-sizing: border-box; 
+        * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-        
-        body { 
+
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
             background: #0a0a0a;
             color: #ffffff;
             min-height: 100vh;
             padding: 0;
         }
-        
+
         /* Top Navigation Bar */
         .top-nav {
-            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -31,7 +32,7 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .logo-section h1 {
             font-size: 28px;
             font-weight: 700;
@@ -40,13 +41,13 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
+
         .nav-actions {
             display: flex;
             gap: 12px;
             align-items: center;
         }
-        
+
         .btn {
             padding: 10px 20px;
             background: rgba(102, 126, 234, 0.15);
@@ -62,24 +63,24 @@
             align-items: center;
             gap: 8px;
         }
-        
+
         .btn:hover {
             background: rgba(102, 126, 234, 0.25);
             border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-2px);
         }
-        
+
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
         }
-        
+
         .btn-primary:hover {
             background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
             box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
         }
-        
+
         .btn-success {
             background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             color: white;
@@ -87,77 +88,77 @@
             font-size: 16px;
             padding: 14px 32px;
         }
-        
+
         .btn-success:hover {
             background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
             box-shadow: 0 8px 24px rgba(76, 175, 80, 0.4);
         }
-        
+
         /* Main Container */
         .container {
             max-width: 1600px;
             margin: 0 auto;
             padding: 40px;
         }
-        
+
         .page-header {
             margin-bottom: 30px;
         }
-        
+
         .page-header h2 {
             font-size: 32px;
             font-weight: 700;
             margin-bottom: 8px;
         }
-        
+
         .page-header .subtitle {
             font-size: 16px;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.6);
         }
-        
+
         /* Search Section */
         .search-section {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             padding: 24px;
             margin: 30px 0;
         }
-        
+
         .search-box {
             width: 100%;
             max-width: 600px;
             padding: 16px 20px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             color: #ffffff;
             font-size: 16px;
             transition: all 0.3s;
         }
-        
+
         .search-box:focus {
             outline: none;
             border-color: #667eea;
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
         }
-        
+
         .search-box::placeholder {
-            color: rgba(255,255,255,0.4);
+            color: rgba(255, 255, 255, 0.4);
         }
-        
+
         /* Section Styling */
         .section {
             margin: 40px 0;
         }
-        
+
         .section h3 {
             font-size: 24px;
             font-weight: 700;
             margin-bottom: 20px;
             color: #ffffff;
         }
-        
+
         .section-number {
             display: inline-block;
             width: 32px;
@@ -170,7 +171,7 @@
             font-size: 16px;
             font-weight: 700;
         }
-        
+
         /* Audiobook Grid */
         .audiobook-grid {
             display: grid;
@@ -178,42 +179,42 @@
             gap: 24px;
             margin: 20px 0;
         }
-        
+
         .audiobook-option {
             cursor: pointer;
-            border: 2px solid rgba(255,255,255,0.1);
+            border: 2px solid rgba(255, 255, 255, 0.1);
             border-radius: 12px;
             padding: 0;
             transition: all 0.3s;
-            background: rgba(255,255,255,0.03);
+            background: rgba(255, 255, 255, 0.03);
             overflow: hidden;
         }
-        
+
         .audiobook-option:hover {
             border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-4px);
             box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
         }
-        
+
         .audiobook-option.selected {
             border-color: #667eea;
             background: rgba(102, 126, 234, 0.15);
             box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
         }
-        
+
         .audiobook-cover-container {
             width: 100%;
             aspect-ratio: 2/3;
             overflow: hidden;
             position: relative;
         }
-        
+
         .audiobook-cover {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-        
+
         .audiobook-cover-placeholder {
             width: 100%;
             height: 100%;
@@ -224,11 +225,11 @@
             color: white;
             font-size: 56px;
         }
-        
+
         .audiobook-info {
             padding: 12px;
         }
-        
+
         .audiobook-title {
             font-size: 14px;
             font-weight: 600;
@@ -239,94 +240,94 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
-        
+
         input[type="radio"] {
             display: none;
         }
-        
+
         /* Ebook Dropdown */
         select {
             width: 100%;
             padding: 16px 20px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             color: #ffffff;
             font-size: 16px;
             cursor: pointer;
             transition: all 0.3s;
         }
-        
+
         select option {
             background: #1a1a1a;
             color: #ffffff;
             padding: 12px;
         }
-        
+
         select:hover {
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
             border-color: rgba(102, 126, 234, 0.3);
         }
-        
+
         select:focus {
             outline: none;
             border-color: #667eea;
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
         }
-        
+
         /* Submit Button Container */
         .submit-container {
             text-align: center;
             margin: 40px 0 20px 0;
         }
-        
+
         /* Empty State */
         .empty-state {
             text-align: center;
             padding: 80px 40px;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.5);
         }
-        
+
         .empty-state-icon {
             font-size: 72px;
             margin-bottom: 20px;
             opacity: 0.3;
         }
-        
+
         .empty-state h3 {
             font-size: 24px;
-            color: rgba(255,255,255,0.7);
+            color: rgba(255, 255, 255, 0.7);
             margin-bottom: 12px;
         }
-        
+
         .empty-state p {
             font-size: 16px;
         }
-        
+
         /* Responsive */
         @media (max-width: 1200px) {
             .audiobook-grid {
                 grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             }
         }
-        
+
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
             }
-            
+
             .top-nav {
                 padding: 16px 20px;
             }
-            
+
             .nav-actions {
                 flex-wrap: wrap;
             }
-            
+
             .page-header h2 {
                 font-size: 24px;
             }
-            
+
             .audiobook-grid {
                 grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
                 gap: 16px;
@@ -334,13 +335,14 @@
         }
     </style>
 </head>
+
 <body>
     <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo-section">
             <h1>➕ Add Book</h1>
         </div>
-        
+
         <div class="nav-actions">
             <a href="/" class="btn">← Dashboard</a>
             <a href="/logs" class="btn">📊 Logs</a>
@@ -348,29 +350,23 @@
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
         </div>
     </div>
-    
+
     <!-- Main Container -->
     <div class="container">
         <div class="page-header">
             <h2>Create New Mapping</h2>
             <p class="subtitle">Link an audiobook with its matching ebook for synchronized reading</p>
         </div>
-        
+
         <!-- Search Section -->
         <div class="search-section">
             <form method="GET" action="/match">
-                <input 
-                    type="text" 
-                    name="search" 
-                    placeholder="🔍 Search by title, author, or filename..."
-                    class="search-box" 
-                    value="{{ search }}"
-                    autofocus
-                >
+                <input type="text" name="search" placeholder="🔍 Search by title, author, or filename..."
+                    class="search-box" value="{{ search }}" autofocus>
                 <button type="submit" class="btn btn-primary" style="margin-top: 16px;">Search</button>
             </form>
         </div>
-        
+
         <form method="POST" action="/match" id="mappingForm">
             <!-- Audiobook Selection -->
             <div class="section">
@@ -382,8 +378,8 @@
                         <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
                         <div class="audiobook-cover-container">
                             {% if ab.cover_url %}
-                            <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover" 
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                             <div class="audiobook-cover-placeholder" style="display:none;">🎧</div>
                             {% else %}
                             <div class="audiobook-cover-placeholder">🎧</div>
@@ -403,7 +399,7 @@
                 </div>
                 {% endif %}
             </div>
-            
+
             <!-- Ebook Selection -->
             <div class="section">
                 <h3><span class="section-number">2</span>Select Ebook</h3>
@@ -422,7 +418,7 @@
                 </div>
                 {% endif %}
             </div>
-            
+
             <!-- Submit Button -->
             {% if audiobooks and ebooks %}
             <div class="submit-container">
@@ -433,7 +429,7 @@
             {% endif %}
         </form>
     </div>
-    
+
     <script>
         function selectAudiobook(element, id) {
             // Remove selected class from all options
@@ -447,4 +443,5 @@
         }
     </script>
 </body>
+
 </html>
