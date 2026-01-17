@@ -23,6 +23,7 @@ class MockContainer:
         self.mock_booklore_client = Mock()
         self.mock_storyteller_client = Mock()
         self.mock_database_service = Mock()
+        self.mock_ebook_parser = Mock()
 
         # Configure the sync manager to return our mock clients
         self.mock_sync_manager.abs_client = self.mock_abs_client
@@ -34,6 +35,18 @@ class MockContainer:
 
     def sync_manager(self):
         return self.mock_sync_manager
+
+    def abs_client(self):
+        return self.mock_abs_client
+
+    def booklore_client(self):
+        return self.mock_booklore_client
+
+    def storyteller_client(self):
+        return self.mock_storyteller_client
+
+    def ebook_parser(self):
+        return self.mock_ebook_parser
 
     def data_dir(self):
         return Path(tempfile.gettempdir()) / 'test_data'

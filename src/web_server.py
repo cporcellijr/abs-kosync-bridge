@@ -1076,7 +1076,7 @@ def link_hardcover(abs_id):
         return redirect(url_for('index'))
 
     # Resolve book
-    book_data = manager.hardcover_client.resolve_book_from_input(url)
+    book_data = container.hardcover_client().resolve_book_from_input(url)
     if not book_data:
         flash(f"❌ Could not find book for: {url}", "error")
         return redirect(url_for('index'))
@@ -1098,7 +1098,7 @@ def link_hardcover(abs_id):
 
         # Force status to 'Want to Read' (1)
         try:
-            manager.hardcover_client.update_status(book_data['book_id'], 1, book_data.get('edition_id'))
+            container.hardcover_client().update_status(book_data['book_id'], 1, book_data.get('edition_id'))
         except Exception as e:
             logger.warning(f"Failed to set Hardcover status: {e}")
 
