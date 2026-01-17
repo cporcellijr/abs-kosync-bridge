@@ -53,10 +53,11 @@ class AudioTranscriber:
         # [UPDATED] Use the injected instance
         self.smil_extractor = smil_extractor
 
-    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list) -> Optional[Path]:
+    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list, progress_callback=None) -> Optional[Path]:
         """
         Attempts to extract a transcript directly from the EPUB's SMIL overlay data.
         """
+        if progress_callback: progress_callback(0.0)
         output_file = self.transcripts_dir / f"{abs_id}.json"
         
         if not self.smil_extractor.has_media_overlays(str(epub_path)):
@@ -208,7 +209,7 @@ class AudioTranscriber:
         return new_files if new_files else [file_path]
 
     @time_execution
-    def process_audio(self, abs_id, audio_urls):
+    def process_audio(self, abs_id, audio_urls, progress_callback=None):
         output_file = self.transcripts_dir / f"{abs_id}.json"
         if output_file.exists():
             logger.info(f"Transcript already exists for {abs_id}")
@@ -342,6 +343,10 @@ class AudioTranscriber:
                         'cumulative_duration': cumulative_duration,
                         'transcript': full_transcript
                     }, f)
+
+                if progress_callback:
+                    # Report progress for this phase (handled by SyncManager logic)
+                    progress_callback(chunks_completed / total_chunks)
 
                 gc.collect()
 

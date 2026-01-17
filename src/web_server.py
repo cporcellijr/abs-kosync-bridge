@@ -696,6 +696,13 @@ def index():
             'states': {}
         }
 
+        if book.status == 'processing':
+            job = database_service.get_latest_job(book.abs_id)
+            if job:
+                mapping['job_progress'] = round((job.progress or 0.0) * 100, 1)
+            else:
+                mapping['job_progress'] = 0.0
+
         # Populate progress from states
         latest_update_time = 0
         max_progress = 0

@@ -123,16 +123,18 @@ class Job(Base):
     last_attempt = Column(Float)
     retry_count = Column(Integer, default=0)
     last_error = Column(Text)
+    progress = Column(Float, default=0.0)
 
     # Relationship
     book = relationship("Book", back_populates="jobs")
 
     def __init__(self, abs_id: str, last_attempt: float = None,
-                 retry_count: int = 0, last_error: str = None):
+                 retry_count: int = 0, last_error: str = None, progress: float = 0.0):
         self.abs_id = abs_id
         self.last_attempt = last_attempt
         self.retry_count = retry_count
         self.last_error = last_error
+        self.progress = progress
 
     def __repr__(self):
         return f"<Job(abs_id='{self.abs_id}', retries={self.retry_count})>"

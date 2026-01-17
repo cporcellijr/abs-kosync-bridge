@@ -153,13 +153,14 @@ class HardcoverClient:
         """Search by title and author, returning the best fuzzy match."""
         # Clean the input title for better matching comparison
         clean_input_title = clean_book_title(title)
+        clean_input_author = author.lower().strip() if author else ""
         
         # Construct search query
         search_query = f"{clean_input_title} {author or ''}".strip()
 
         query = """
         query ($query: String!) {
-            search(query: $query, per_page: 5, page: 1, query_type: "Book") {
+            search(query: $query, per_page: 10, page: 1, query_type: "Book") {
                 ids
             }
         }
@@ -173,16 +174,21 @@ class HardcoverClient:
         if not book_ids:
             return None
 
-        # Fetch details for up to 5 books to compare
+        # Fetch details for up to 10 books to compare
         book_query = """
         query ($ids: [Int!]) {
             books(where: { id: { _in: $ids }}) {
                 id
                 title
                 slug
-                users_count_status_1  # Want to Read count (popularity signal)
-                users_count_status_2  # Reading count
-                users_count_status_3  # Read count
+                contributions {
+                    author {
+                        name
+                    }
+                }
+                users_count_status_1  # Want to Read
+                users_count_status_2  # Reading
+                users_count_status_3  # Read
             }
         }
         """
@@ -197,32 +203,50 @@ class HardcoverClient:
         
         for book in candidates:
             # Score match
-            # We compare the input title with the book title
             candidate_title = clean_book_title(book['title'])
             title_score = calculate_similarity(clean_input_title, candidate_title)
             
-            # If we simply search "Title Author", exact title matches should win.
-            # But the search API might return "Title: Subtitle"
+            # Author Score
+            author_score = 0.0
+            if clean_input_author:
+                # Get all authors for this book
+                authors = [c['author']['name'].lower().strip() for c in book.get('contributions', []) if c.get('author')]
+                if authors:
+                    # Find best similarity among all authors
+                    author_score = max(calculate_similarity(clean_input_author, a) for a in authors)
+                else:
+                    # If book has no authors and we provided one, penalize? 
+                    # For now, let's keep it 0.0
+                    author_score = 0.0
+            else:
+                # If no author provided, author matching shouldn't hurt or help disproportionally
+                author_score = 1.0
+
+            # Combined Score logic:
+            # Title is primary, but author acts as a strong multiplier/filter.
+            # If author matches well (>0.8), we trust the match more.
+            # If author is way off (<0.4), it's likely a different book with same title.
             
-            # Simple heuristic: Title score is most important
-            # We could also factor in popularity to break ties?
+            if clean_input_author:
+                # Weights: 60% Title, 40% Author
+                score = (title_score * 0.6) + (author_score * 0.4)
+                
+                # Boost if author is an excellent match
+                if author_score > 0.9:
+                    score += 0.1
+            else:
+                score = title_score
             
-            # Let's trust title similarity primarily
-            score = title_score
-            
-            logger.debug(f"Matches for '{title}': '{book['title']}' (Score: {score:.2f})")
+            logger.debug(f"Matches for '{title}' by '{author}': '{book['title']}' (Score: {score:.2f}, Title: {title_score:.2f}, Author: {author_score:.2f})")
             
             if score > best_score:
                 best_score = score
                 best_match = book
 
-        # Threshold? If best match is really bad, return None?
-        # Let's say we need at least 0.4 confidence, otherwise it's probably junk.
-        if best_match and best_score > 0.4:
+        # Threshold check
+        if best_match and best_score > 0.5:
             logger.info(f"Selected best match: '{best_match['title']}' (Score: {best_score:.2f})")
             
-            # Now fetch the full details (editions etc) for the winner
-            # Creating a lightweight object compatible with previous return
             edition = self.get_default_edition(best_match['id'])
             
             return {
