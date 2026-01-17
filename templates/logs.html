@@ -351,6 +351,12 @@
         </div>
         <div class="nav-actions">
             <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+            {% if abs_server %}
+            <a href="{{ abs_server }}" class="btn btn-secondary" target="_blank">🎧 ABS</a>
+            {% endif %}
+            {% if booklore_server %}
+            <a href="{{ booklore_server }}" class="btn btn-secondary" target="_blank">📚 Ebooks</a>
+            {% endif %}
             <button id="refreshBtn" class="btn btn-primary">🔄 Refresh</button>
         </div>
     </div>

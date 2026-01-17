@@ -315,6 +315,12 @@
         <div class="nav-actions">
             <a href="/" class="btn">← Dashboard</a>
             <a href="/logs" class="btn">Logs</a>
+            {% if abs_server %}
+            <a href="{{ abs_server }}" class="btn" target="_blank">🎧 ABS</a>
+            {% endif %}
+            {% if booklore_server %}
+            <a href="{{ booklore_server }}" class="btn" target="_blank">📚 Ebooks</a>
+            {% endif %}
         </div>
     </div>
 

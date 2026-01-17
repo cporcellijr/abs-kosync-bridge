@@ -122,8 +122,12 @@ SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
 # ---------------- CONTEXT PROCESSORS ----------------
 @app.context_processor
-def inject_shelfmark():
-    return dict(shelfmark_url=os.environ.get("SHELFMARK_URL", ""))
+def inject_global_vars():
+    return dict(
+        shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
+        abs_server=os.environ.get("ABS_SERVER", ""),
+        booklore_server=os.environ.get("BOOKLORE_SERVER", "")
+    )
 
 # ---------------- BOOK LINKER HELPERS ----------------
 

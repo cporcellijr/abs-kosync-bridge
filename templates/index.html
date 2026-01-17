@@ -633,6 +633,14 @@
             {% if shelfmark_url %}
             <a href="/shelfmark" class="btn">🏷️ Shelfmark</a>
             {% endif %}
+
+            {% if abs_server %}
+            <a href="{{ abs_server }}" class="btn" target="_blank">🎧 ABS</a>
+            {% endif %}
+            {% if booklore_server %}
+            <a href="{{ booklore_server }}" class="btn" target="_blank">📚 Ebooks</a>
+            {% endif %}
+
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>
         </div>
