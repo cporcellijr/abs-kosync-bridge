@@ -59,15 +59,21 @@ class ABSClient:
             libraries = r.json().get('libraries', [])
             all_audiobooks = []
             for lib in libraries:
-                items_url = f"{self.base_url}/api/libraries/{lib['id']}/items"
-                params = {"mediaType": "audiobook"}
-                r_items = requests.get(items_url, headers=self.headers, params=params)
-                if r_items.status_code == 200:
-                    all_audiobooks.extend(r_items.json().get('results', []))
+                r_items = self.get_audiobooks_for_lib(lib['id'])
+                all_audiobooks.extend(r_items)
             return all_audiobooks
         except Exception as e:
             logger.error(f"Exception fetching audiobooks: {e}")
             return []
+
+    def get_audiobooks_for_lib(self, lib: str):
+        items_url = f"{self.base_url}/api/libraries/{lib}/items"
+        params = {"mediaType": "audiobook"}
+        r_items = requests.get(items_url, headers=self.headers, params=params)
+        if r_items.status_code == 200:
+            return r_items.json().get('results', [])
+        logger.warning("⚠️ ABS - Failed to fetch audiobooks for library " + lib)
+        return []
 
     def get_audio_files(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"

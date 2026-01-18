@@ -119,6 +119,19 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
+# ---------------- HELPER FUNCTIONS ----------------
+def get_audiobooks_conditionally():
+    """Get audiobooks either from specific library or all libraries based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting."""
+    abs_only_search_in_library = os.environ.get("ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID", "false").lower() == "true"
+    abs_library_id = os.environ.get("ABS_LIBRARY_ID")
+
+    if abs_only_search_in_library and abs_library_id:
+        # Fetch audiobooks only from the specified library
+        return container.abs_client().get_audiobooks_for_lib(abs_library_id)
+    else:
+        # Fetch all audiobooks from all libraries
+        return container.abs_client().get_all_audiobooks()
+
 # ---------------- CONTEXT PROCESSORS ----------------
 @app.context_processor
 def inject_global_vars():
@@ -155,8 +168,8 @@ def search_abs_audiobooks_linker(query: str):
     try:
         logger.info(f"🔍 Book Linker searching for: '{query}'")
 
-        # Get all audiobooks
-        all_audiobooks = container.abs_client().get_all_audiobooks()
+        # Get audiobooks conditionally based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting
+        all_audiobooks = get_audiobooks_conditionally()
         logger.info(f"📚 Got {len(all_audiobooks)} total audiobooks from ABS")
 
         if not query:
@@ -927,14 +940,17 @@ def match():
 
         database_service.save_book(book)
         container.abs_client().add_to_collection(abs_id)
-        container.booklore_client().add_to_shelf(ebook_filename)
-        container.storyteller_client().add_to_collection(ebook_filename)
+        if container.booklore_client().is_configured():
+            container.booklore_client().add_to_shelf(ebook_filename)
+        if container.storyteller_client().is_configured():
+            container.storyteller_client().add_to_collection(ebook_filename)
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks = [], []
     if search:
-        audiobooks = container.abs_client().get_all_audiobooks()
+        # Fetch audiobooks conditionally based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting
+        audiobooks = get_audiobooks_conditionally()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
 
@@ -1005,8 +1021,10 @@ def batch_match():
 
                 database_service.save_book(book)
                 container.abs_client().add_to_collection(item['abs_id'])
-                container.booklore_client().add_to_shelf(item['ebook_filename'])
-                container.storyteller_client().add_to_collection(item['ebook_filename'])
+                if container.booklore_client().is_configured():
+                    container.booklore_client().add_to_shelf(ebook_filename)
+                if container.storyteller_client().is_configured():
+                    container.storyteller_client().add_to_collection(ebook_filename)
 
             session['queue'] = []
             session.modified = True
@@ -1015,7 +1033,7 @@ def batch_match():
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks = [], []
     if search:
-        audiobooks = container.abs_client().get_all_audiobooks()
+        audiobooks = get_audiobooks_conditionally()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
         for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
 
