@@ -51,7 +51,7 @@ class HardcoverSyncClient(SyncClient):
         Match a book with Hardcover using various search strategies.
         Moved from sync_manager.py to make hardcover a proper sync client.
         """
-        if not self.hardcover_client.is_configured() or not self.abs_client or not self.database_service:
+        if not self.hardcover_client.is_configured():
             return
 
         # Check if we already have hardcover details for this book
@@ -77,22 +77,38 @@ class HardcoverSyncClient(SyncClient):
         if isbn:
             match = self.hardcover_client.search_by_isbn(isbn)
             if match:
-                matched_by = 'isbn'
+                if match.get('pages', 0) <= 0:
+                    logger.info(f"[{book.abs_title}] could not find valid page count using ISBN match")
+                    match = None
+                else:
+                    matched_by = 'isbn'
 
         if not match and asin:
             match = self.hardcover_client.search_by_isbn(asin)
             if match:
-                matched_by = 'asin'
+                if match.get('pages', 0) <= 0:
+                    logger.info(f"[{book.abs_title}] could not find valid page count using ASIN match")
+                    match = None
+                else:
+                    matched_by = 'asin'
 
         if not match and title and author:
             match = self.hardcover_client.search_by_title_author(title, author)
             if match:
-                matched_by = 'title_author'
+                if match.get('pages', 0) <= 0:
+                    logger.info(f"[{book.abs_title}] could not find valid page count using Title+Author match")
+                    match = None
+                else:
+                    matched_by = 'title_author'
 
         if not match and title:
             match = self.hardcover_client.search_by_title_author(title, "")
             if match:
-                matched_by = 'title'
+                if match.get('pages', 0) <= 0:
+                    logger.info(f"[{book.abs_title}] could not find valid page count using Title match")
+                    match = None
+                else:
+                    matched_by = 'title'
 
         if match:
             # Create HardcoverDetails model
@@ -112,6 +128,8 @@ class HardcoverSyncClient(SyncClient):
             # Set initial status to "Want to Read" (status 1)
             self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
             logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
+        else:
+            logger.warning(f"📚 Hardcover: No match found for '{sanitize_log_data(meta.get('title'))}'")
 
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         """

@@ -152,7 +152,12 @@ class HardcoverClient:
 
         query = """
         query ($query: String!) {
-            search(query: $query, per_page: 5, page: 1, query_type: "Book") {
+            search(
+                query: $query, 
+                per_page: 5, 
+                page: 1, 
+                query_type: "Book"
+            ) {
                 ids
             }
         }
