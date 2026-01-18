@@ -14,18 +14,16 @@ from urllib.parse import urljoin
 
 import requests
 import schedule
+from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
+from src.utils.config_loader import ConfigLoader
 from src.utils.di_container import Container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
-from src.utils.di_container import create_container, Container
-from src.db.migration_utils import initialize_database
-from src.utils.config_loader import ConfigLoader
-from dependency_injector import providers
 
 # ---------------- APP SETUP ----------------
 
@@ -59,12 +57,11 @@ def setup_dependencies(test_container=None):
 
     # 1. Initialize Database Service FIRST (needed to load settings)
     # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
-    # If the user changed DATA_DIR in settings, we might need a two-stage init, but 
-    # for now we assume the DB location itself doesn't move dynamically based on DB settings 
+    # If the user changed DATA_DIR in settings, we might need a two-stage init, but
+    # for now we assume the DB location itself doesn't move dynamically based on DB settings
     # (chicken and egg).
-    initial_data_dir = Path(os.environ.get("DATA_DIR", "/data"))
     from src.db.migration_utils import initialize_database
-    database_service = initialize_database(initial_data_dir)
+    database_service = initialize_database(os.environ.get("DATA_DIR", "/data"))
 
     # 2. LOAD SETTINGS FROM DB (Priority Level 1)
     # This updates os.environ with values from the database
@@ -80,10 +77,12 @@ def setup_dependencies(test_container=None):
         # The container providers (Factories) will now read the updated os.environ values
         from src.utils.di_container import create_container
         container = create_container()
-    
+
     # 4. Override the container's database_service with our already-initialized instance
     # This ensures consistency and prevents re-initialization
-    container.database_service.override(providers.Object(database_service))
+    # Only do this for production containers that support dependency injection
+    if test_container is None:
+        container.database_service.override(providers.Object(database_service))
 
     # Initialize manager and services
     manager = container.sync_manager()
@@ -570,14 +569,14 @@ def settings():
 
     if request.method == 'POST':
         bool_keys = [
-            'KOSYNC_USE_PERCENTAGE_FROM_SERVER', 
-            'SYNC_ABS_EBOOK', 
+            'KOSYNC_USE_PERCENTAGE_FROM_SERVER',
+            'SYNC_ABS_EBOOK',
             'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
         ]
-        
+
         # Current settings in DB
         current_settings = database_service.get_all_settings()
-        
+
         # 1. Handle Boolean Toggles (Checkbox logic)
         # Checkboxes are NOT sent if unchecked, so we must check every known bool key
         for key in bool_keys:
@@ -589,16 +588,16 @@ def settings():
         # Iterate over form to find other keys
         for key, value in request.form.items():
             if key in bool_keys: continue
-            
+
             clean_value = value.strip()
-            
+
             # Special handling: If empty, deciding whether to delete or save empty
-            # Strategy: If it was previously set, allow clearing it? 
-            # Or just save empty string? 
-            # User snippet logic: Only save non-empty. Let's stick to that for now, 
+            # Strategy: If it was previously set, allow clearing it?
+            # Or just save empty string?
+            # User snippet logic: Only save non-empty. Let's stick to that for now,
             # BUT if it's in DB and now empty, we probably want to update it to empty/delete?
             # Let's save standard string representation.
-            
+
             if clean_value:
                 database_service.set_setting(key, clean_value)
             elif key in current_settings:
@@ -609,34 +608,34 @@ def settings():
         try:
             # Trigger Auto-Restart in a separate thread so this request finishes
             threading.Thread(target=restart_server).start()
-                
+
             session['message'] = "Settings saved. Application is restarting..."
             session['is_error'] = False
         except Exception as e:
             session['message'] = f"Error saving settings: {e}"
             session['is_error'] = True
             logger.error(f"Error saving settings: {e}")
-            
+
         return redirect(url_for('settings'))
 
     # GET Request
     message = session.pop('message', None)
     is_error = session.pop('is_error', False)
-    
+
     # helper to get value from Env (which is loaded from DB) > Defaults
     def get_val(key, default_val=None):
         if key in os.environ: return os.environ[key]
         if key in DEFAULTS: return DEFAULTS[key]
         return default_val if default_val is not None else ''
-        
+
     def get_bool(key):
         val = os.environ.get(key, 'false')
         return val.lower() in ('true', '1', 'yes', 'on')
 
-    return render_template('settings.html', 
-                         get_val=get_val, 
-                         get_bool=get_bool, 
-                         message=message, 
+    return render_template('settings.html',
+                         get_val=get_val,
+                         get_bool=get_bool,
+                         message=message,
                          is_error=is_error)
 
 def get_abs_author(ab):
@@ -1358,7 +1357,7 @@ if __name__ == '__main__':
             for handler in logging.getLogger().handlers:
                 handler.flush()
         sys.exit(0)
-    
+
     signal.signal(signal.SIGTERM, handle_exit_signal)
     signal.signal(signal.SIGINT, handle_exit_signal)
 

@@ -48,6 +48,9 @@ class MockContainer:
     def ebook_parser(self):
         return self.mock_ebook_parser
 
+    def database_service(self):
+        return self.mock_database_service
+
     def data_dir(self):
         return Path(tempfile.gettempdir()) / 'test_data'
 
