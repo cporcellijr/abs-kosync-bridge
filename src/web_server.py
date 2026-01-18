@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -13,10 +14,12 @@ from urllib.parse import urljoin
 
 import requests
 import schedule
+from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
+from src.utils.config_loader import ConfigLoader
 from src.utils.di_container import Container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
@@ -52,26 +55,43 @@ def setup_dependencies(test_container=None):
     """
     global container, manager, database_service, DATA_DIR, EBOOK_DIR
 
+    # 1. Initialize Database Service FIRST (needed to load settings)
+    # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
+    # If the user changed DATA_DIR in settings, we might need a two-stage init, but
+    # for now we assume the DB location itself doesn't move dynamically based on DB settings
+    # (chicken and egg).
+    from src.db.migration_utils import initialize_database
+    database_service = initialize_database(os.environ.get("DATA_DIR", "/data"))
+
+    # 2. LOAD SETTINGS FROM DB (Priority Level 1)
+    # This updates os.environ with values from the database
+    if database_service:
+        ConfigLoader.load_settings(database_service)
+        logger.info("✅ Settings loaded into environment variables")
+
     if test_container is not None:
         # Use injected test container
         container = test_container
     else:
-        # Create production container
+        # 3. Create production container AFTER loading settings
+        # The container providers (Factories) will now read the updated os.environ values
         from src.utils.di_container import create_container
         container = create_container()
+
+    # 4. Override the container's database_service with our already-initialized instance
+    # This ensures consistency and prevents re-initialization
+    # Only do this for production containers that support dependency injection
+    if test_container is None:
+        container.database_service.override(providers.Object(database_service))
 
     # Initialize manager and services
     manager = container.sync_manager()
 
-    # Initialize data directories
+    # Get data directories (now using updated env vars)
     DATA_DIR = container.data_dir()
     EBOOK_DIR = container.books_dir()
 
-    # Initialize database service
-    from src.db.migration_utils import initialize_database
-    database_service = initialize_database(DATA_DIR)
-
-    logger.info("Web server dependencies initialized")
+    logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
 # Book Linker - source ebooks for Storyteller workflow
 LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
@@ -97,6 +117,16 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
+SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
+
+# ---------------- CONTEXT PROCESSORS ----------------
+@app.context_processor
+def inject_global_vars():
+    return dict(
+        shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
+        abs_server=os.environ.get("ABS_SERVER", ""),
+        booklore_server=os.environ.get("BOOKLORE_SERVER", "")
+    )
 
 # ---------------- BOOK LINKER HELPERS ----------------
 
@@ -369,6 +399,7 @@ def sync_daemon():
         # Main daemon loop
         while True:
             try:
+                # logger.debug("Running pending schedule jobs...")
                 schedule.run_pending()
                 time.sleep(30)  # Check every 30 seconds
             except Exception as e:
@@ -496,7 +527,119 @@ def get_searchable_ebooks(search_term):
     ]
 
 
+
+def restart_server():
+    """Restarts the current Python process to reload settings."""
+    logger.info("♻️  Restarting application to apply new settings...")
+    time.sleep(1.5)  # Give Flask time to send the redirect response
+    # Re-execute the current script with the same arguments
+    # This replaces the current process, so the PID stays the same
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    # Priority Level 3: Application Defaults
+    DEFAULTS = {
+        'TZ': 'America/New_York',
+        'LOG_LEVEL': 'INFO',
+        'DATA_DIR': '/data',
+        'BOOKS_DIR': '/books',
+        'ABS_COLLECTION_NAME': 'Synced with KOReader',
+        'BOOKLORE_SHELF_NAME': 'Kobo',
+        'SYNC_PERIOD_MINS': '5',
+        'SYNC_DELTA_ABS_SECONDS': '60',
+        'SYNC_DELTA_KOSYNC_PERCENT': '0.5',
+        'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
+        'SYNC_DELTA_KOSYNC_WORDS': '400',
+        'FUZZY_MATCH_THRESHOLD': '80',
+        'WHISPER_MODEL': 'tiny',
+        'JOB_MAX_RETRIES': '5',
+        'JOB_RETRY_DELAY_MINS': '15',
+        'MONITOR_INTERVAL': '3600',
+        'LINKER_BOOKS_DIR': '/linker_books',
+        'PROCESSING_DIR': '/processing',
+        'STORYTELLER_INGEST_DIR': '/linker_books',
+        'AUDIOBOOKS_DIR': '/audiobooks',
+        'ABS_PROGRESS_OFFSET_SECONDS': '0',
+        'EBOOK_CACHE_SIZE': '3',
+        'KOSYNC_HASH_METHOD': 'content',
+        'TELEGRAM_LOG_LEVEL': 'ERROR',
+        'SHELFMARK_URL': ''
+    }
+
+    if request.method == 'POST':
+        bool_keys = [
+            'KOSYNC_USE_PERCENTAGE_FROM_SERVER',
+            'SYNC_ABS_EBOOK',
+            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
+        ]
+
+        # Current settings in DB
+        current_settings = database_service.get_all_settings()
+
+        # 1. Handle Boolean Toggles (Checkbox logic)
+        # Checkboxes are NOT sent if unchecked, so we must check every known bool key
+        for key in bool_keys:
+            is_checked = (key in request.form)
+            # Save "true" or "false"
+            database_service.set_setting(key, str(is_checked).lower())
+
+        # 2. Handle Text Inputs
+        # Iterate over form to find other keys
+        for key, value in request.form.items():
+            if key in bool_keys: continue
+
+            clean_value = value.strip()
+
+            # Special handling: If empty, deciding whether to delete or save empty
+            # Strategy: If it was previously set, allow clearing it?
+            # Or just save empty string?
+            # User snippet logic: Only save non-empty. Let's stick to that for now,
+            # BUT if it's in DB and now empty, we probably want to update it to empty/delete?
+            # Let's save standard string representation.
+
+            if clean_value:
+                database_service.set_setting(key, clean_value)
+            elif key in current_settings:
+                # If key exists in DB but user cleared it, set to empty (or delete?)
+                # Setting to empty string is safer than deleting if defaults exist
+                database_service.set_setting(key, "")
+
+        try:
+            # Trigger Auto-Restart in a separate thread so this request finishes
+            threading.Thread(target=restart_server).start()
+
+            session['message'] = "Settings saved. Application is restarting..."
+            session['is_error'] = False
+        except Exception as e:
+            session['message'] = f"Error saving settings: {e}"
+            session['is_error'] = True
+            logger.error(f"Error saving settings: {e}")
+
+        return redirect(url_for('settings'))
+
+    # GET Request
+    message = session.pop('message', None)
+    is_error = session.pop('is_error', False)
+
+    # helper to get value from Env (which is loaded from DB) > Defaults
+    def get_val(key, default_val=None):
+        if key in os.environ: return os.environ[key]
+        if key in DEFAULTS: return DEFAULTS[key]
+        return default_val if default_val is not None else ''
+
+    def get_bool(key):
+        val = os.environ.get(key, 'false')
+        return val.lower() in ('true', '1', 'yes', 'on')
+
+    return render_template('settings.html',
+                         get_val=get_val,
+                         get_bool=get_bool,
+                         message=message,
+                         is_error=is_error)
+
 def get_abs_author(ab):
+
     """Extract author from ABS audiobook metadata."""
     media = ab.get('media', {})
     metadata = media.get('metadata', {})
@@ -552,6 +695,13 @@ def index():
             'states': {}
         }
 
+        if book.status == 'processing':
+            job = database_service.get_latest_job(book.abs_id)
+            if job:
+                mapping['job_progress'] = round((job.progress or 0.0) * 100, 1)
+            else:
+                mapping['job_progress'] = 0.0
+
         # Populate progress from states
         latest_update_time = 0
         max_progress = 0
@@ -578,6 +728,7 @@ def index():
         if hardcover_details:
             mapping.update({
                 'hardcover_book_id': hardcover_details.hardcover_book_id,
+                'hardcover_slug': hardcover_details.hardcover_slug,
                 'hardcover_edition_id': hardcover_details.hardcover_edition_id,
                 'hardcover_pages': hardcover_details.hardcover_pages,
                 'isbn': hardcover_details.isbn,
@@ -589,6 +740,7 @@ def index():
         else:
             mapping.update({
                 'hardcover_book_id': None,
+                'hardcover_slug': None,
                 'hardcover_edition_id': None,
                 'hardcover_pages': None,
                 'isbn': None,
@@ -597,6 +749,30 @@ def index():
                 'hardcover_linked': False,
                 'hardcover_title': None
             })
+
+        # Platform deep links for dashboard
+        mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
+
+        # Booklore deep link (if configured and book found)
+        if manager.booklore_client.is_configured():
+            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename)
+            if bl_book:
+                mapping['booklore_id'] = bl_book.get('id')
+                mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
+            else:
+                mapping['booklore_id'] = None
+                mapping['booklore_url'] = None
+        else:
+            mapping['booklore_id'] = None
+            mapping['booklore_url'] = None
+
+        # Hardcover deep link (if linked)
+        if mapping.get('hardcover_slug'):
+            mapping['hardcover_url'] = f"https://hardcover.app/books/{mapping['hardcover_slug']}"
+        elif mapping.get('hardcover_book_id'):
+            mapping['hardcover_url'] = f"https://hardcover.app/books/{mapping['hardcover_book_id']}"
+        else:
+            mapping['hardcover_url'] = None
 
         # Set unified progress to the maximum progress across all clients
         mapping['unified_progress'] = min(max_progress, 100.0)
@@ -637,6 +813,15 @@ def index():
         overall_progress = 0
 
     return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
+
+
+@app.route('/shelfmark')
+def shelfmark():
+    """Shelfmark view - renders an iframe with SHELFMARK_URL"""
+    url = os.environ.get("SHELFMARK_URL")
+    if not url:
+        return redirect(url_for('index'))
+    return render_template('shelfmark.html', shelfmark_url=url)
 
 
 @app.route('/book-linker', methods=['GET', 'POST'])
@@ -902,6 +1087,7 @@ def link_hardcover(abs_id):
         hardcover_details = HardcoverDetails(
             abs_id=abs_id,
             hardcover_book_id=book_data['book_id'],
+            hardcover_slug=book_data.get('slug'),
             hardcover_edition_id=book_data.get('edition_id'),
             hardcover_pages=book_data.get('pages'),
             matched_by='manual'  # Since this was manually linked
@@ -998,12 +1184,13 @@ def api_logs():
         all_lines = []
 
         # Read current log file
-        if LOG_PATH.exists():
+        # Read current log file
+        if LOG_PATH and LOG_PATH.exists():
             with open(LOG_PATH, 'r', encoding='utf-8') as f:
                 all_lines.extend(f.readlines())
 
         # Read backup files if needed (for more history)
-        if lines_count > len(all_lines):
+        if LOG_PATH and lines_count > len(all_lines):
             for i in range(1, 6):  # Check up to 5 backup files
                 backup_path = Path(str(LOG_PATH) + f'.{i}')
                 if backup_path.exists():
@@ -1158,6 +1345,21 @@ def view_log():
 if __name__ == '__main__':
     # Initialize dependencies for production mode
     setup_dependencies()
+
+    # Setup signal handlers to catch unexpected kills
+    import signal
+    def handle_exit_signal(signum, frame):
+        logger.warning(f"⚠️ Received signal {signum} - Shutting down...")
+        # Flush logs immediately
+        for handler in logger.handlers:
+            handler.flush()
+        if hasattr(logging.getLogger(), 'handlers'):
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_exit_signal)
+    signal.signal(signal.SIGINT, handle_exit_signal)
 
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 

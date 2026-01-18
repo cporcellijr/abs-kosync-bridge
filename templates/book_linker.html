@@ -1,29 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
+    <meta charset="UTF-8">
     <title>Book Linker - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { 
-            box-sizing: border-box; 
+        * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-        
-        body { 
+
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
             background: #0a0a0a;
             color: #ffffff;
             min-height: 100vh;
             padding: 0;
         }
-        
+
         /* Top Navigation Bar */
         .top-nav {
-            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
+            background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             padding: 20px 40px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -31,7 +34,17 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .logo-section a {
+            text-decoration: none;
+        }
+
         .logo-section h1 {
             font-size: 28px;
             font-weight: 700;
@@ -40,13 +53,47 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
+
+        .library-links {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-left: 20px;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .nav-icon-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(255, 255, 255, 0.03);
+            text-decoration: none;
+        }
+
+        .nav-icon-link:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .nav-icon-link svg {
+            width: 20px;
+            height: 20px;
+            stroke-width: 2;
+        }
+
         .nav-actions {
             display: flex;
             gap: 12px;
             align-items: center;
         }
-        
+
         .btn {
             padding: 10px 20px;
             background: rgba(102, 126, 234, 0.15);
@@ -62,24 +109,24 @@
             align-items: center;
             gap: 8px;
         }
-        
+
         .btn:hover {
             background: rgba(102, 126, 234, 0.25);
             border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-2px);
         }
-        
+
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
         }
-        
+
         .btn-primary:hover {
             background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
             box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
         }
-        
+
         .btn-success {
             background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             color: white;
@@ -87,34 +134,34 @@
             font-size: 18px;
             padding: 16px 40px;
         }
-        
+
         .btn-success:hover {
             background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
             box-shadow: 0 8px 24px rgba(76, 175, 80, 0.4);
         }
-        
+
         /* Main Container */
         .container {
             max-width: 1600px;
             margin: 0 auto;
             padding: 40px;
         }
-        
+
         .page-header {
             margin-bottom: 30px;
         }
-        
+
         .page-header h2 {
             font-size: 32px;
             font-weight: 700;
             margin-bottom: 8px;
         }
-        
+
         .page-header .subtitle {
             font-size: 16px;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.6);
         }
-        
+
         /* Monitor Status */
         .monitor-status {
             background: rgba(76, 175, 80, 0.1);
@@ -127,12 +174,12 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .monitor-status span {
             font-weight: 600;
             color: #4CAF50;
         }
-        
+
         /* Messages */
         .message {
             padding: 16px 20px;
@@ -141,50 +188,50 @@
             font-weight: 600;
             border-left: 4px solid;
         }
-        
+
         .message.success {
             background: rgba(76, 175, 80, 0.1);
             border-color: #4CAF50;
             color: #4CAF50;
         }
-        
+
         .message.error {
             background: rgba(244, 67, 54, 0.1);
             border-color: #f44336;
             color: #f44336;
         }
-        
+
         /* Search Section */
         .search-section {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             padding: 24px;
             margin: 30px 0;
         }
-        
+
         .search-box {
             width: 100%;
             max-width: 600px;
             padding: 16px 20px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             color: #ffffff;
             font-size: 16px;
             transition: all 0.3s;
         }
-        
+
         .search-box:focus {
             outline: none;
             border-color: #667eea;
-            background: rgba(255,255,255,0.08);
+            background: rgba(255, 255, 255, 0.08);
         }
-        
+
         .search-box::placeholder {
-            color: rgba(255,255,255,0.4);
+            color: rgba(255, 255, 255, 0.4);
         }
-        
+
         /* Stats & Info Boxes */
         .stats-box {
             background: rgba(52, 152, 219, 0.1);
@@ -198,7 +245,7 @@
             align-items: center;
             font-weight: 600;
         }
-        
+
         .destination-box {
             background: rgba(255, 193, 7, 0.1);
             border: 1px solid rgba(255, 193, 7, 0.3);
@@ -208,7 +255,7 @@
             font-weight: 600;
             color: #ffc107;
         }
-        
+
         /* File Lists */
         .file-list-group {
             display: grid;
@@ -216,34 +263,34 @@
             gap: 24px;
             margin: 30px 0;
         }
-        
+
         .file-list-column {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             padding: 20px;
             max-height: 500px;
             overflow-y: auto;
         }
-        
+
         .file-list-column::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         .file-list-column::-webkit-scrollbar-track {
-            background: rgba(255,255,255,0.05);
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 4px;
         }
-        
+
         .file-list-column::-webkit-scrollbar-thumb {
             background: rgba(102, 126, 234, 0.3);
             border-radius: 4px;
         }
-        
+
         .file-list-column::-webkit-scrollbar-thumb:hover {
             background: rgba(102, 126, 234, 0.5);
         }
-        
+
         .file-list-title {
             font-size: 18px;
             font-weight: 700;
@@ -251,22 +298,22 @@
             padding-bottom: 12px;
             border-bottom: 2px solid;
         }
-        
+
         .ebook-list-title {
             color: #3498db;
             border-color: rgba(52, 152, 219, 0.3);
         }
-        
+
         .audiobook-list-title {
             color: #9b59b6;
             border-color: rgba(155, 89, 182, 0.3);
         }
-        
+
         .check-links {
             margin-bottom: 16px;
             font-size: 13px;
         }
-        
+
         .check-links a {
             color: #667eea;
             cursor: pointer;
@@ -274,27 +321,27 @@
             margin-right: 16px;
             transition: color 0.3s;
         }
-        
+
         .check-links a:hover {
             color: #764ba2;
         }
-        
+
         .file-item {
             padding: 12px 8px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             display: flex;
             align-items: center;
             transition: background 0.3s;
         }
-        
+
         .file-item:hover {
-            background: rgba(255,255,255,0.03);
+            background: rgba(255, 255, 255, 0.03);
         }
-        
+
         .file-item:last-child {
             border-bottom: none;
         }
-        
+
         input[type="checkbox"] {
             margin-right: 12px;
             width: 18px;
@@ -302,19 +349,19 @@
             cursor: pointer;
             accent-color: #667eea;
         }
-        
+
         .file-item span {
             font-size: 14px;
-            color: rgba(255,255,255,0.9);
+            color: rgba(255, 255, 255, 0.9);
         }
-        
+
         .empty-list {
             padding: 40px 20px;
             text-align: center;
-            color: rgba(255,255,255,0.4);
+            color: rgba(255, 255, 255, 0.4);
             font-style: italic;
         }
-        
+
         /* Info Section */
         .info-section {
             background: rgba(23, 162, 184, 0.1);
@@ -324,127 +371,176 @@
             border-radius: 8px;
             margin-top: 40px;
         }
-        
+
         .info-section h3 {
             color: #17a2b8;
             font-size: 20px;
             margin-bottom: 16px;
         }
-        
+
         .info-section ol {
             line-height: 1.8;
             padding-left: 24px;
-            color: rgba(255,255,255,0.8);
+            color: rgba(255, 255, 255, 0.8);
         }
-        
+
         .info-section code {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255, 255, 255, 0.1);
             padding: 2px 6px;
             border-radius: 4px;
             font-family: 'Courier New', monospace;
             color: #17a2b8;
         }
-        
+
         /* Process Button Container */
         .process-button-container {
             text-align: center;
             margin: 40px 0 30px 0;
         }
-        
+
         /* Responsive */
         @media (max-width: 1024px) {
             .file-list-group {
                 grid-template-columns: 1fr;
             }
         }
-        
+
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
             }
-            
+
             .top-nav {
                 padding: 16px 20px;
             }
-            
+
             .nav-actions {
                 flex-wrap: wrap;
             }
-            
+
             .page-header h2 {
                 font-size: 24px;
             }
-            
+
             .monitor-status {
                 flex-direction: column;
                 gap: 12px;
                 align-items: flex-start;
             }
-            
+
             .stats-box {
                 flex-direction: column;
                 gap: 8px;
                 align-items: flex-start;
             }
+
+            .m-0 {
+                margin: 0 !important;
+            }
+
+            .mt-16 {
+                margin-top: 16px !important;
+            }
+
+            .flex-1 {
+                flex: 1 !important;
+            }
+
+            .cursor-pointer {
+                cursor: pointer !important;
+            }
+
+            .text-muted {
+                color: rgba(255, 255, 255, 0.5) !important;
+            }
         }
     </style>
 </head>
+
 <body>
     <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo-section">
-            <h1>🔗 Book Linker</h1>
+            <a href="/">
+                <h1>📚 ABS-KoSync</h1>
+            </a>
+
+            <div class="library-links">
+                {% if abs_server %}
+                <a href="{{ abs_server }}" class="nav-icon-link" target="_blank" title="Audiobookshelf">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    </svg>
+                </a>
+                {% endif %}
+
+                {% if booklore_server %}
+                <a href="{{ booklore_server }}" class="nav-icon-link" target="_blank" title="Ebook Library">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                </a>
+                {% endif %}
+
+                {% if shelfmark_url %}
+                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                </a>
+                {% endif %}
+            </div>
         </div>
-        
+
         <div class="nav-actions">
             <a href="/" class="btn">← Dashboard</a>
-            <a href="/match" class="btn">Single Match</a>
-            <a href="/batch-match" class="btn">Batch Match</a>
             <a href="/logs" class="btn">📊 Logs</a>
+            <a href="/settings" class="btn">⚙️ Settings</a>
         </div>
     </div>
-    
+
     <!-- Main Container -->
     <div class="container">
         <div class="page-header">
             <h2>Book Linker</h2>
             <p class="subtitle">Link ebooks with audiobooks for Storyteller processing</p>
         </div>
-        
+
         {% if message %}
         <div class="message {% if is_error %}error{% else %}success{% endif %}">
             {{ message }}
         </div>
         {% endif %}
-        
+
         <!-- Monitor Status -->
         <div class="monitor-status">
             <span>✅ Readaloud Monitor Active - Checking every hour</span>
-            <form method="POST" action="/book-linker/trigger-monitor" style="margin: 0;">
+            <form method="POST" action="/book-linker/trigger-monitor" class="m-0">
                 <button type="submit" class="btn btn-primary">🔍 Check Now</button>
             </form>
         </div>
-        
+
         <!-- Search Section -->
         <div class="search-section">
             <form method="POST">
-                <input 
-                    type="text" 
-                    name="book_name" 
-                    placeholder="🔍 Enter title or author..." 
-                    value="{{ book_name }}" 
-                    class="search-box" 
-                    autofocus
-                >
-                <button type="submit" class="btn btn-primary" style="margin-top: 16px;">Search</button>
+                <input type="text" name="book_name" placeholder="🔍 Enter title or author..." value="{{ book_name }}"
+                    class="search-box" autofocus>
+                <button type="submit" class="btn btn-primary mt-16">Search</button>
             </form>
         </div>
-        
+
         {% if ebook_matches or audiobook_matches %}
         <div>
             <!-- Stats -->
             <div class="stats-box">
-                <div><strong>{{ stats.ebook_count }}</strong> Ebooks • <strong>{{ stats.audio_count }}</strong> Audiobooks</div>
+                <div><strong>{{ stats.ebook_count }}</strong> Ebooks • <strong>{{ stats.audio_count }}</strong>
+                    Audiobooks</div>
                 <div>Total: <strong>{{ stats.total_size_mb }} MB</strong></div>
             </div>
 
@@ -466,16 +562,17 @@
                             <a onclick="checkAllEbooks(false)">[Deselect All]</a>
                         </div>
                         {% if ebook_matches %}
-                            {% for m in ebook_matches %}
-                            <div class="file-item">
-                                <input type="checkbox" name="ebook" value="{{ m.full_path }}" id="ebook-{{ loop.index }}">
-                                <label for="ebook-{{ loop.index }}" style="cursor: pointer; flex: 1;">
-                                    <span>{{ m.file_name }} <span style="color: rgba(255,255,255,0.5);">[{{ m.file_size_mb }} MB]</span></span>
-                                </label>
-                            </div>
-                            {% endfor %}
+                        {% for m in ebook_matches %}
+                        <div class="file-item">
+                            <input type="checkbox" name="ebook" value="{{ m.full_path }}" id="ebook-{{ loop.index }}">
+                            <label for="ebook-{{ loop.index }}" class="cursor-pointer flex-1">
+                                <span>{{ m.file_name }} <span class="text-muted">[{{ m.file_size_mb
+                                        }} MB]</span></span>
+                            </label>
+                        </div>
+                        {% endfor %}
                         {% else %}
-                            <div class="empty-list">No ebooks found</div>
+                        <div class="empty-list">No ebooks found</div>
                         {% endif %}
                     </div>
 
@@ -487,16 +584,17 @@
                             <a onclick="checkAllAudiobooks(false)">[Deselect All]</a>
                         </div>
                         {% if audiobook_matches %}
-                            {% for m in audiobook_matches %}
-                            <div class="file-item">
-                                <input type="checkbox" name="audiobook" value="{{ m.id }}" id="audio-{{ loop.index }}">
-                                <label for="audio-{{ loop.index }}" style="cursor: pointer; flex: 1;">
-                                    <span>{{ m.title }} by {{ m.author }} <span style="color: rgba(255,255,255,0.5);">[{{ m.file_size_mb }} MB, {{ m.num_files }} files]</span></span>
-                                </label>
-                            </div>
-                            {% endfor %}
+                        {% for m in audiobook_matches %}
+                        <div class="file-item">
+                            <input type="checkbox" name="audiobook" value="{{ m.id }}" id="audio-{{ loop.index }}">
+                            <label for="audio-{{ loop.index }}" class="cursor-pointer flex-1">
+                                <span>{{ m.title }} by {{ m.author }} <span class="text-muted">[{{
+                                        m.file_size_mb }} MB, {{ m.num_files }} files]</span></span>
+                            </label>
+                        </div>
+                        {% endfor %}
                         {% else %}
-                            <div class="empty-list">No audiobooks found</div>
+                        <div class="empty-list">No audiobooks found</div>
                         {% endif %}
                     </div>
                 </div>
@@ -510,16 +608,20 @@
             </form>
         </div>
         {% endif %}
-        
+
         <!-- Info Section -->
         <div class="info-section">
             <h3>ℹ️ How It Works</h3>
             <ol>
                 <li>Search for books in <code>{{ linker_books_dir or 'your ebook folder' }}</code></li>
-                <li>Select EPUB + audiobooks to create a folder in <code>{{ processing_dir or 'processing folder' }}</code></li>
+                <li>Select EPUB + audiobooks to create a folder in
+                    <code>{{ processing_dir or 'processing folder' }}</code>
+                </li>
                 <li>Storyteller processes the EPUB and creates <code>(readaloud).epub</code></li>
                 <li>Monitor automatically detects the completed file (checks hourly)</li>
-                <li>Moves <code>(readaloud).epub</code> to <code>{{ storyteller_ingest or 'Storyteller library' }}</code></li>
+                <li>Moves <code>(readaloud).epub</code> to
+                    <code>{{ storyteller_ingest or 'Storyteller library' }}</code>
+                </li>
                 <li>Deletes the temporary folder from <code>{{ processing_dir or 'processing folder' }}</code></li>
             </ol>
         </div>
@@ -529,10 +631,11 @@
         function checkAllEbooks(checked) {
             document.querySelectorAll('input[name="ebook"]').forEach(c => c.checked = checked);
         }
-        
+
         function checkAllAudiobooks(checked) {
             document.querySelectorAll('input[name="audiobook"]').forEach(c => c.checked = checked);
         }
     </script>
 </body>
+
 </html>

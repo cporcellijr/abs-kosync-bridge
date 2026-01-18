@@ -1,29 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
-{# Macro for rendering a book card - used by both currently-reading and all-books grids #}
-{% macro render_book_card(mapping, integrations) %}
-<div class="book-card"
-     data-progress="{{ mapping.unified_progress }}"
-     data-last-sync="{{ mapping.last_sync }}"
-     data-status="{{ mapping.status }}"
-     data-title="{{ mapping.abs_title }}">
-    <div class="book-cover-container">
-        {% if mapping.cover_url %}
-        <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
-             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-        <div class="book-cover-placeholder" style="display:none;">📖</div>
-        {% else %}
-        <div class="book-cover-placeholder">📖</div>
-        {% endif %}
+<head>
+    <meta charset="UTF-8">
 
-        <div class="status-badge-mini status-{{ mapping.status }}">
-            {{ mapping.status }}
-        </div>
+    {# Macro for rendering a book card - used by both currently-reading and all-books grids #}
+    {% macro render_book_card(mapping, integrations) %}
+    <div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
+        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
+        <div class="book-cover-container">
+            {% if mapping.cover_url %}
+            <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
+                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+            <div class="book-cover-placeholder hidden">📖</div>
+            {% else %}
+            <div class="book-cover-placeholder">📖</div>
+            {% endif %}
 
-        {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-        <div class="progress-ring reading">
-            {{ '%.0f' | format(mapping.unified_progress) }}%
+            <div class="status-badge-mini status-{{ mapping.status }}">
+                {% if mapping.status == 'processing' and mapping.job_progress is defined %}
+                {{ mapping.job_progress }}%
+                {% else %}
+                {{ mapping.status }}
+                {% endif %}
+            </div>
+
+            {% if mapping.status == 'active' and mapping.unified_progress > 0 and mapping.unified_progress < 100 %} <div
+                class="progress-ring reading">
+                {{ '%.0f' | format(mapping.unified_progress) }}%
         </div>
         {% endif %}
 
@@ -34,14 +38,17 @@
             {% if mapping.status == 'active' %}
             <div class="progress-details">
                 {% if integrations.abs %}
-                <div class="progress-item" title="Audiobookshelf">
-                    <img src="/static/audiobookshelf.png" alt="ABS" style="width: 14px; height: 14px;">
+                <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener"
+                    class="progress-item text-inherit-no-deco" title="Open in Audiobookshelf">
+                    <img src="/static/audiobookshelf.png" alt="ABS" class="icon-14">
                     {% if mapping.states.abs is defined %}
-                    <span>{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600, ((mapping.states.abs.timestamp|default(0)|int) % 3600) // 60, (mapping.states.abs.timestamp|default(0)|int) % 60) }}</span>
+                    <span>{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600,
+                        ((mapping.states.abs.timestamp|default(0)|int) % 3600) // 60,
+                        (mapping.states.abs.timestamp|default(0)|int) % 60) }}</span>
                     {% else %}
                     <span>0:00:00</span>
                     {% endif %}
-                </div>
+                </a>
                 {% endif %}
                 {% if integrations.kosync %}
                 <div class="progress-item" title="KOReader">
@@ -55,7 +62,7 @@
                 {% endif %}
                 {% if integrations.storyteller %}
                 <div class="progress-item" title="Storyteller">
-                    <img src="/static/storyteller.png" alt="ST" style="width: 14px; height: 14px;">
+                    <img src="/static/storyteller.png" alt="ST" class="icon-14">
                     {% if mapping.states.storyteller is defined %}
                     <span>{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0)) }}%</span>
                     {% else %}
@@ -64,36 +71,43 @@
                 </div>
                 {% endif %}
                 {% if integrations.booklore %}
-                <div class="progress-item" title="Booklore">
-                    <img src="/static/booklore.png" alt="BL" style="width: 14px; height: 14px;">
+                <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener"
+                    class="progress-item text-inherit-no-deco {% if not mapping.booklore_id %}pe-none{% endif %}"
+                    title="{% if mapping.booklore_id %}Open in Booklore{% else %}Not found in Booklore{% endif %}">
+                    <img src="/static/booklore.png" alt="BL"
+                        class="icon-14 {% if not mapping.booklore_id %}grayscale-muted{% endif %}">
                     {% if mapping.states.booklore is defined %}
                     <span>{{ '%.1f' | format(mapping.states.booklore.percentage|default(0)) }}%</span>
                     {% else %}
                     <span>0.0%</span>
                     {% endif %}
-                </div>
+                </a>
                 {% endif %}
 
                 {% if integrations.hardcover %}
-                <div class="progress-item"
-                     title="Hardcover:
-                       {% if mapping.hardcover_title %}{{ mapping.hardcover_title }}{% else %}Not Linked{% endif %} (Click to Edit)"
-                     onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                     style="cursor: pointer; position: relative;">
-                  <img src="/static/hardcover.png" alt="HC"
-                       style="width: 14px; height: 14px; {% if not mapping.hardcover_book_id %}opacity: 0.4; filter: grayscale(100%);{% endif %}"
-                       onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-                  <span style="display:none; font-size: 12px; {% if not mapping.hardcover_book_id %}opacity: 0.5;{% endif %}">📚</span>
-
-                  {% if mapping.hardcover_book_id %}
-                    {% if mapping.states.hardcover is defined %}
-                    <span>{{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%</span>
-                    {% else %}
-                    <span>0%</span>
-                    {% endif %}
-                  {% else %}
-                    <span style="font-size: 10px; opacity: 0.5;">+</span>
-                  {% endif %}
+                <div class="progress-item progress-item-hc">
+                    <a href="{{ mapping.hardcover_url|default('https://hardcover.app') }}" target="_blank"
+                        rel="noopener"
+                        title="{% if mapping.hardcover_book_id %}Open {{ mapping.hardcover_title }} in Hardcover{% else %}Not linked to Hardcover{% endif %}"
+                        class="hc-link {% if not mapping.hardcover_book_id %}pe-none{% endif %}">
+                        <img src="/static/hardcover.png" alt="HC"
+                            class="icon-14 {% if not mapping.hardcover_book_id %}grayscale-muted{% endif %}"
+                            onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                        <span class="hidden fs-12 {% if not mapping.hardcover_book_id %}opacity-50{% endif %}">📚</span>
+                    </a>
+                    <span
+                        onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
+                        class="cursor-pointer color-inherit" title="Click to edit Hardcover link">
+                        {% if mapping.hardcover_book_id %}
+                        {% if mapping.states.hardcover is defined %}
+                        {{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%
+                        {% else %}
+                        0%
+                        {% endif %}
+                        {% else %}
+                        <span class="fs-10 opacity-50">+</span>
+                        {% endif %}
+                    </span>
                 </div>
                 {% endif %}
             </div>
@@ -106,503 +120,693 @@
             {% endif %}
 
             <div class="quick-actions">
-                 <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" style="flex: 1; margin-right: 6px;">
+                <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" class="flex-1-mr-6">
                     <button type="submit" class="action-btn warning"
-                            onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
+                        onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
                         🔄 Clear
                     </button>
                 </form>
-                <form method="POST" action="/delete/{{ mapping.abs_id }}" style="flex: 1;">
-                    <button type="submit" class="action-btn danger"
-                            onclick="return confirm('Delete this mapping?')">
+                <form method="POST" action="/delete/{{ mapping.abs_id }}" class="flex-1">
+                    <button type="submit" class="action-btn danger" onclick="return confirm('Delete this mapping?')">
                         🗑️ Delete
                     </button>
                 </form>
             </div>
         </div>
     </div>
-</div>
-{% endmacro %}
+    </div>
+    {% endmacro %}
 
-<head>
-    <title>ABS-KoSync Manager</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-            background: #0a0a0a;
-            color: #ffffff;
-            min-height: 100vh;
-            padding: 0;
-        }
-
-        /* Top Navigation Bar */
-        .top-nav {
-            background: linear-gradient(180deg, rgba(20,20,20,0.98) 0%, rgba(20,20,20,0.95) 100%);
-            backdrop-filter: blur(20px);
-            padding: 20px 40px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo-section h1 {
-            font-size: 28px;
-            font-weight: 700;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .nav-actions {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            background: rgba(102, 126, 234, 0.15);
-            color: #667eea;
-            border: 1px solid rgba(102, 126, 234, 0.3);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: all 0.3s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn:hover {
-            background: rgba(102, 126, 234, 0.25);
-            border-color: rgba(102, 126, 234, 0.5);
-            transform: translateY(-2px);
-        }
-
-        .btn-primary {
-            background: rgba(102, 126, 234, 0.2);
-            color: #667eea;
-            border: 1px solid rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-primary:hover {
-            background: rgba(102, 126, 234, 0.3);
-            border-color: rgba(102, 126, 234, 0.6);
-        }
-
-        /* Main Container */
-        .container {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 40px;
-        }
-
-        /* Section Headers */
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 40px 0 24px 0;
-        }
-
-        .section-header h2 {
-            font-size: 32px;
-            font-weight: 700;
-            color: #ffffff;
-        }
-
-        .section-link {
-            color: #667eea;
-            font-size: 16px;
-            font-weight: 600;
-            text-decoration: none;
-            transition: color 0.3s;
-        }
-
-        .section-link:hover {
-            color: #764ba2;
-        }
-
-        /* Controls */
-        .controls-bar {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            margin-bottom: 30px;
-            padding: 16px 24px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .control-group label {
-            font-size: 14px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.7);
-        }
-
-        /* UPDATED: Clickable Arrow Styles */
-        .sort-direction {
-            font-size: 20px;
-            margin-left: 8px;
-            color: #667eea;
-            cursor: pointer;
-            user-select: none;
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: all 0.2s;
-            background: rgba(255,255,255,0.05);
-        }
-
-        .sort-direction:hover {
-            background: rgba(102, 126, 234, 0.2);
-            color: #ffffff;
-            transform: scale(1.1);
-        }
-
-        select {
-            padding: 8px 16px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            color: #ffffff;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        select option {
-            background: #1a1a1a;
-            color: #ffffff;
-            padding: 8px;
-        }
-
-        select:hover {
-            background: rgba(255,255,255,0.08);
-            border-color: rgba(102, 126, 234, 0.3);
-        }
-
-        select:focus {
-            outline: none;
-            border-color: #667eea;
-            background: rgba(255,255,255,0.08);
-        }
-
-        /* Book Grid - COMPACT DYNAMIC SCALING */
-        .book-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 24px;
-            margin-bottom: 60px;
-        }
-
-        /* Book Card */
-        .book-card {
-            position: relative;
-            cursor: pointer;
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            border-radius: 12px;
-        }
-
-        .book-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            z-index: 10;
-        }
-
-        .book-card:hover .book-cover-container {
-            box-shadow: 0 24px 48px rgba(102, 126, 234, 0.3);
-        }
-
-        .book-card:hover .book-overlay {
-            opacity: 1;
-        }
-
-        .book-cover-container {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 1/1;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-            transition: all 0.4s;
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
-        }
-
-        .book-cover {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .book-cover-placeholder {
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 48px;
-        }
-
-        /* Progress Ring Overlay */
-        .progress-ring {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            font-weight: 700;
-            color: #fff;
-            border: 2px solid transparent;
-            transition: all 0.3s;
-        }
-
-        .progress-ring.reading {
-            border-color: #4CAF50;
-            box-shadow: 0 0 16px rgba(76, 175, 80, 0.6);
-        }
-
-        /* Status Badge */
-        .status-badge-mini {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 9px;
-            font-weight: 700;
-            text-transform: uppercase;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-        }
-
-        .status-active { color: #4CAF50; border: 1px solid rgba(76, 175, 80, 0.3); }
-        .status-pending { color: #FF9800; border: 1px solid rgba(255, 152, 0, 0.3); }
-        .status-processing { color: #2196F3; border: 1px solid rgba(33, 150, 243, 0.3); }
-        .status-failed, .status-crashed, .status-failed_retry_later {
-            color: #f44336;
-            border: 1px solid rgba(244, 67, 54, 0.3);
-        }
-
-        /* Book Info Overlay */
-        .book-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.95) 60%);
-            padding: 40px 12px 12px 12px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            border-radius: 0 0 12px 12px;
-        }
-
-        .book-title {
-            font-size: 14px;
-            font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 4px;
-            line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        .book-filename {
-            font-size: 11px;
-            color: rgba(255,255,255,0.6);
-            margin-bottom: 8px;
-            display: -webkit-box;
-            -webkit-line-clamp: 1;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        /* Progress Details */
-        .progress-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 4px 12px;
-            margin-bottom: 8px;
-            font-size: 11px;
-        }
-
-        .progress-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: rgba(255,255,255,0.8);
-        }
-
-        .progress-item img,
-        .progress-item span:first-child {
-            font-size: 12px;
-            width: 14px;
-            flex-shrink: 0;
-        }
-
-        .progress-bar-mini {
-            height: 3px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 2px;
-            overflow: hidden;
-            margin-bottom: 6px;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            transition: width 0.5s ease;
-        }
-
-        .last-sync {
-            font-size: 9px;
-            color: rgba(255,255,255,0.5);
-        }
-
-        /* Quick Actions */
-        .quick-actions {
-            display: flex;
-            gap: 6px;
-            margin-top: 10px;
-        }
-
-        .action-btn {
-            flex: 1;
-            padding: 6px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 4px;
-            color: white;
-            font-size: 10px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .action-btn:hover {
-            background: rgba(255,255,255,0.2);
-            border-color: rgba(255,255,255,0.4);
-        }
-
-        .action-btn.danger {
-            background: rgba(244, 67, 54, 0.2);
-            border-color: rgba(244, 67, 54, 0.4);
-        }
-
-        .action-btn.danger:hover {
-            background: rgba(244, 67, 54, 0.3);
-        }
-
-        /* Added Warning Button Style from your code */
-        .action-btn.warning {
-            background: rgba(255, 152, 0, 0.2);
-            border-color: rgba(255, 152, 0, 0.4);
-            color: #FF9800;
-        }
-
-        .action-btn.warning:hover {
-            background: rgba(255, 152, 0, 0.3);
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 120px 40px;
-            color: rgba(255,255,255,0.5);
-        }
-
-        .empty-state-icon {
-            font-size: 96px;
-            margin-bottom: 24px;
-            opacity: 0.3;
-        }
-
-        .empty-state h2 {
-            font-size: 28px;
-            color: rgba(255,255,255,0.7);
-            margin-bottom: 12px;
-        }
-
-        .empty-state p {
-            font-size: 16px;
-            margin-bottom: 32px;
-        }
-
-        /* Responsive */
-        @media (max-width: 1400px) {
-            .book-grid {
-                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-                gap: 20px;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 20px;
+    <head>
+        <title>ABS-KoSync Manager</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
             }
 
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                background: #0a0a0a;
+                color: #ffffff;
+                min-height: 100vh;
+                padding: 0;
+            }
+
+            /* Top Navigation Bar */
             .top-nav {
-                padding: 16px 20px;
+                background: linear-gradient(180deg, rgba(20, 20, 20, 0.98) 0%, rgba(20, 20, 20, 0.95) 100%);
+                -webkit-backdrop-filter: blur(20px);
+                backdrop-filter: blur(20px);
+                padding: 20px 40px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                position: sticky;
+                top: 0;
+                z-index: 100;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .logo-section {
+                display: flex;
+                align-items: center;
+                gap: 24px;
+            }
+
+            .logo-section h1 {
+                font-size: 28px;
+                font-weight: 700;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+
+            .library-links {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding-left: 20px;
+                border-left: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .nav-icon-link {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 38px;
+                height: 38px;
+                border-radius: 10px;
+                color: rgba(255, 255, 255, 0.6);
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                background: rgba(255, 255, 255, 0.03);
+                text-decoration: none;
+            }
+
+            .nav-icon-link:hover {
+                color: #ffffff;
+                background: rgba(255, 255, 255, 0.1);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }
+
+            .nav-icon-link svg {
+                width: 20px;
+                height: 20px;
+                stroke-width: 2;
             }
 
             .nav-actions {
-                flex-wrap: wrap;
+                display: flex;
+                gap: 12px;
+                align-items: center;
+            }
+
+            .btn {
+                padding: 10px 20px;
+                background: rgba(102, 126, 234, 0.15);
+                color: #667eea;
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .btn:hover {
+                background: rgba(102, 126, 234, 0.25);
+                border-color: rgba(102, 126, 234, 0.5);
+                transform: translateY(-2px);
+            }
+
+            .btn-primary {
+                background: rgba(102, 126, 234, 0.2);
+                color: #667eea;
+                border: 1px solid rgba(102, 126, 234, 0.4);
+            }
+
+            .btn-primary:hover {
+                background: rgba(102, 126, 234, 0.3);
+                border-color: rgba(102, 126, 234, 0.6);
+            }
+
+            /* Main Container */
+            .container {
+                max-width: 1800px;
+                margin: 0 auto;
+                padding: 40px;
+            }
+
+            /* Section Headers */
+            .section-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin: 40px 0 24px 0;
             }
 
             .section-header h2 {
-                font-size: 24px;
+                font-size: 32px;
+                font-weight: 700;
+                color: #ffffff;
             }
 
-            .book-grid {
-                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            .section-link {
+                color: #667eea;
+                font-size: 16px;
+                font-weight: 600;
+                text-decoration: none;
+                transition: color 0.3s;
+            }
+
+            .section-link:hover {
+                color: #764ba2;
+            }
+
+            /* Controls */
+            .controls-bar {
+                display: flex;
+                gap: 20px;
+                align-items: center;
+                margin-bottom: 30px;
+                padding: 16px 24px;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+            }
+
+            .control-group {
+                display: flex;
+                align-items: center;
                 gap: 12px;
             }
 
-            .controls-bar {
-                flex-direction: column;
-                align-items: stretch;
+            .control-group label {
+                font-size: 14px;
+                font-weight: 600;
+                color: rgba(255, 255, 255, 0.7);
             }
-        }
-    </style>
-</head>
+
+            /* UPDATED: Clickable Arrow Styles */
+            .sort-direction {
+                font-size: 20px;
+                margin-left: 8px;
+                color: #667eea;
+                cursor: pointer;
+                -webkit-user-select: none;
+                user-select: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+                transition: all 0.2s;
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+            .sort-direction:hover {
+                background: rgba(102, 126, 234, 0.2);
+                color: #ffffff;
+                transform: scale(1.1);
+            }
+
+            select {
+                padding: 8px 16px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 14px;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
+
+            select option {
+                background: #1a1a1a;
+                color: #ffffff;
+                padding: 8px;
+            }
+
+            select:hover {
+                background: rgba(255, 255, 255, 0.08);
+                border-color: rgba(102, 126, 234, 0.3);
+            }
+
+            select:focus {
+                outline: none;
+                border-color: #667eea;
+                background: rgba(255, 255, 255, 0.08);
+            }
+
+            /* Book Grid - COMPACT DYNAMIC SCALING */
+            .book-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                gap: 24px;
+                margin-bottom: 60px;
+            }
+
+            /* Book Card */
+            .book-card {
+                position: relative;
+                cursor: pointer;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                border-radius: 12px;
+            }
+
+            .book-card:hover {
+                transform: translateY(-8px) scale(1.02);
+                z-index: 10;
+            }
+
+            .book-card:hover .book-cover-container {
+                box-shadow: 0 24px 48px rgba(102, 126, 234, 0.3);
+            }
+
+            .book-card:hover .book-overlay {
+                opacity: 1;
+            }
+
+            .book-cover-container {
+                position: relative;
+                width: 100%;
+                aspect-ratio: 1/1;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+                transition: all 0.4s;
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+            }
+
+            .book-cover {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+
+            .book-cover-placeholder {
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 48px;
+            }
+
+            /* Progress Ring Overlay */
+            .progress-ring {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                background: rgba(0, 0, 0, 0.7);
+                -webkit-backdrop-filter: blur(10px);
+                backdrop-filter: blur(10px);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                font-weight: 700;
+                color: #fff;
+                border: 2px solid transparent;
+                transition: all 0.3s;
+            }
+
+            .progress-ring.reading {
+                border-color: #4CAF50;
+                box-shadow: 0 0 16px rgba(76, 175, 80, 0.6);
+            }
+
+            /* Status Badge */
+            .status-badge-mini {
+                position: absolute;
+                top: 8px;
+                left: 8px;
+                padding: 4px 8px;
+                border-radius: 6px;
+                font-size: 9px;
+                font-weight: 700;
+                text-transform: uppercase;
+                background: rgba(0, 0, 0, 0.7);
+                -webkit-backdrop-filter: blur(10px);
+                backdrop-filter: blur(10px);
+            }
+
+            .status-active {
+                color: #4CAF50;
+                border: 1px solid rgba(76, 175, 80, 0.3);
+            }
+
+            .status-pending {
+                color: #FF9800;
+                border: 1px solid rgba(255, 152, 0, 0.3);
+            }
+
+            .status-processing {
+                color: #2196F3;
+                border: 1px solid rgba(33, 150, 243, 0.3);
+            }
+
+            .status-failed,
+            .status-crashed,
+            .status-failed_retry_later {
+                color: #f44336;
+                border: 1px solid rgba(244, 67, 54, 0.3);
+            }
+
+            /* Book Info Overlay */
+            .book-overlay {
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.95) 60%);
+                padding: 40px 12px 12px 12px;
+                opacity: 0;
+                transition: opacity 0.3s;
+                border-radius: 0 0 12px 12px;
+            }
+
+            .book-title {
+                font-size: 14px;
+                font-weight: 700;
+                color: #ffffff;
+                margin-bottom: 4px;
+                line-height: 1.3;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            .book-filename {
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.6);
+                margin-bottom: 8px;
+                display: -webkit-box;
+                -webkit-line-clamp: 1;
+                line-clamp: 1;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            /* Progress Details */
+            .progress-details {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 4px 12px;
+                margin-bottom: 8px;
+                font-size: 11px;
+            }
+
+            .progress-item {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            .progress-item img,
+            .progress-item span:first-child {
+                font-size: 12px;
+                width: 14px;
+                flex-shrink: 0;
+            }
+
+            a.progress-item:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+
+            .progress-bar-mini {
+                height: 3px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 2px;
+                overflow: hidden;
+                margin-bottom: 6px;
+            }
+
+            .progress-bar-fill {
+                height: 100%;
+                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                transition: width 0.5s ease;
+            }
+
+            .last-sync {
+                font-size: 9px;
+                color: rgba(255, 255, 255, 0.5);
+            }
+
+            /* Quick Actions */
+            .quick-actions {
+                display: flex;
+                gap: 6px;
+                margin-top: 10px;
+            }
+
+            .action-btn {
+                flex: 1;
+                padding: 6px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                color: white;
+                font-size: 10px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
+
+            .action-btn:hover {
+                background: rgba(255, 255, 255, 0.2);
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+
+            .action-btn.danger {
+                background: rgba(244, 67, 54, 0.2);
+                border-color: rgba(244, 67, 54, 0.4);
+            }
+
+            .action-btn.danger:hover {
+                background: rgba(244, 67, 54, 0.3);
+            }
+
+            /* Added Warning Button Style from your code */
+            .action-btn.warning {
+                background: rgba(255, 152, 0, 0.2);
+                border-color: rgba(255, 152, 0, 0.4);
+                color: #FF9800;
+            }
+
+            .action-btn.warning:hover {
+                background: rgba(255, 152, 0, 0.3);
+            }
+
+            /* Empty State */
+            .empty-state {
+                text-align: center;
+                padding: 120px 40px;
+                color: rgba(255, 255, 255, 0.5);
+            }
+
+            .empty-state-icon {
+                font-size: 96px;
+                margin-bottom: 24px;
+                opacity: 0.3;
+            }
+
+            .empty-state h2 {
+                font-size: 28px;
+                color: rgba(255, 255, 255, 0.7);
+                margin-bottom: 12px;
+            }
+
+            .empty-state p {
+                font-size: 16px;
+                margin-bottom: 32px;
+            }
+
+            /* Responsive */
+            @media (max-width: 1400px) {
+                .book-grid {
+                    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                    gap: 20px;
+                }
+            }
+
+            @media (max-width: 768px) {
+                .container {
+                    padding: 20px;
+                }
+
+                .top-nav {
+                    padding: 16px 20px;
+                }
+
+                .nav-actions {
+                    flex-wrap: wrap;
+                }
+
+                .section-header h2 {
+                    font-size: 24px;
+                }
+
+                .book-grid {
+                    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                    gap: 12px;
+                }
+
+                .controls-bar {
+                    flex-direction: column;
+                    align-items: stretch;
+                }
+
+                .mt-80 {
+                    margin-top: 80px !important;
+                }
+            }
+
+            .hidden {
+                display: none !important;
+            }
+
+            .text-inherit-no-deco {
+                text-decoration: none !important;
+                color: inherit !important;
+            }
+
+            .icon-14 {
+                width: 14px !important;
+                height: 14px !important;
+            }
+
+            .pe-none {
+                pointer-events: none !important;
+            }
+
+            .grayscale-muted {
+                opacity: 0.4 !important;
+                filter: grayscale(100%) !important;
+            }
+
+            .icon-14 {
+                width: 14px;
+                height: 14px;
+            }
+
+            .progress-item-hc {
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 2px;
+            }
+
+            .hc-link {
+                text-decoration: none !important;
+                display: flex !important;
+                align-items: center !important;
+            }
+
+            .fs-12 {
+                font-size: 12px !important;
+            }
+
+            .opacity-50 {
+                opacity: 0.5 !important;
+            }
+
+            .cursor-pointer {
+                cursor: pointer !important;
+            }
+
+            .color-inherit {
+                color: inherit !important;
+            }
+
+            .fs-10 {
+                font-size: 10px !important;
+            }
+
+            .flex-1-mr-6 {
+                flex: 1 !important;
+                margin-right: 6px !important;
+            }
+
+            .flex-1 {
+                flex: 1 !important;
+            }
+
+            .mb-16 {
+                margin-bottom: 16px !important;
+            }
+
+            .flash-msg-container {
+                padding: 12px !important;
+                border-radius: 8px !important;
+                background: rgba(0, 0, 0, 0.5) !important;
+                border: 1px solid rgba(255, 255, 255, 0.04) !important;
+            }
+
+            .mt-80 {
+                margin-top: 80px !important;
+            }
+        </style>
+    </head>
+
 <body>
     <div class="top-nav">
         <div class="logo-section">
-            <h1>📚 ABS-KoSync</h1>
+            <a href="/">
+                <h1>📚 ABS-KoSync</h1>
+            </a>
+
+            <div class="library-links">
+                {% if abs_server %}
+                <a href="{{ abs_server }}" class="nav-icon-link" target="_blank" title="Audiobookshelf">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    </svg>
+                </a>
+                {% endif %}
+
+                {% if booklore_server %}
+                <a href="{{ booklore_server }}" class="nav-icon-link" target="_blank" title="Ebook Library">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                </a>
+                {% endif %}
+
+                {% if shelfmark_url %}
+                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                </a>
+                {% endif %}
+            </div>
         </div>
 
         <div class="nav-actions">
+            <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
+
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>
         </div>
@@ -610,15 +814,15 @@
 
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <div class="flash-messages" style="margin-bottom:16px;">
-              {% for category, msg in messages %}
-                <div class="flash flash-{{ category }}" style="padding:12px;border-radius:8px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.04);">
-                  {{ msg }}
-                </div>
-              {% endfor %}
+        {% if messages %}
+        <div class="flash-messages mb-16">
+            {% for category, msg in messages %}
+            <div class="flash flash-{{ category }} flash-msg-container">
+                {{ msg }}
             </div>
-          {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
         {% endwith %}
         {% if mappings %}
         <div class="controls-bar">
@@ -640,195 +844,194 @@
 
         <div class="book-grid" id="currently-reading-grid">
             {% for mapping in mappings %}
-            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %}
-            {{ render_book_card(mapping, integrations) }}
-            {% endif %}
-            {% endfor %}
+            {% if mapping.unified_progress > 0 and mapping.unified_progress < 100 %} {{ render_book_card(mapping,
+                integrations) }} {% endif %} {% endfor %} </div>
+
+                <div class="section-header mt-80">
+                    <h2>All Books</h2>
+                </div>
+
+                <div class="book-grid" id="all-books-grid">
+                    {% for mapping in mappings %}
+                    {{ render_book_card(mapping, integrations) }}
+                    {% endfor %}
+                </div>
+
+
+                {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">📚</div>
+                    <h2>No books syncing yet</h2>
+                    <p>Start by adding your first audiobook mapping</p>
+                    <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
+                </div>
+                {% endif %}
         </div>
 
-        <div class="section-header" style="margin-top: 80px;">
-            <h2>All Books</h2>
-        </div>
+        <script>
+            const currentlyReadingGrid = document.getElementById('currently-reading-grid');
+            const allBooksGrid = document.getElementById('all-books-grid');
+            const sortSelect = document.getElementById('sort-select');
+            const directionBtn = document.getElementById('sort-direction');
 
-        <div class="book-grid" id="all-books-grid">
-            {% for mapping in mappings %}
-            {{ render_book_card(mapping, integrations) }}
-            {% endfor %}
-        </div>
-
-        {% else %}
-        <div class="empty-state">
-            <div class="empty-state-icon">📚</div>
-            <h2>No books syncing yet</h2>
-            <p>Start by adding your first audiobook mapping</p>
-            <a href="/match" class="btn btn-primary">➕ Add Your First Book</a>
-        </div>
-        {% endif %}
-    </div>
-
-    <script>
-        const currentlyReadingGrid = document.getElementById('currently-reading-grid');
-        const allBooksGrid = document.getElementById('all-books-grid');
-        const sortSelect = document.getElementById('sort-select');
-        const directionBtn = document.getElementById('sort-direction');
-
-        function linkHardcover(event, absId, currentTitle) {
-            event.stopPropagation();
-            let promptText = "Enter Hardcover URL or ID:";
-            if (currentTitle) {
-                promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
+            function linkHardcover(event, absId, currentTitle) {
+                event.stopPropagation();
+                let promptText = "Enter Hardcover URL or ID:";
+                if (currentTitle) {
+                    promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
+                }
+                const input = prompt(promptText);
+                if (input) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = `/link-hardcover/${absId}`;
+                    const inputField = document.createElement('input');
+                    inputField.type = 'hidden';
+                    inputField.name = 'hardcover_url';
+                    inputField.value = input;
+                    form.appendChild(inputField);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
             }
-            const input = prompt(promptText);
-            if (input) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = `/link-hardcover/${absId}`;
-                const inputField = document.createElement('input');
-                inputField.type = 'hidden';
-                inputField.name = 'hardcover_url';
-                inputField.value = input;
-                form.appendChild(inputField);
-                document.body.appendChild(form);
-                form.submit();
+
+            // Initial Sort Defaults
+            let sortState = {
+                title: 'asc',      // A-Z default
+                progress: 'desc',  // Highest progress first
+                status: 'asc',
+                last_sync: 'desc'  // Newest sync first
+            };
+
+            // Track last sort to detect toggles.
+            // Important: Start as null to prevent auto-toggling on page load
+            let lastSort = null;
+
+            // Load saved preferences
+            const savedSort = localStorage.getItem('abs_kosync_sort') || 'title';
+            const savedSortState = localStorage.getItem('abs_kosync_sort_state');
+
+            if (savedSort) {
+                sortSelect.value = savedSort;
             }
-        }
 
-        // Initial Sort Defaults
-        let sortState = {
-            title: 'asc',      // A-Z default
-            progress: 'desc',  // Highest progress first
-            status: 'asc',
-            last_sync: 'desc'  // Newest sync first
-        };
-
-        // Track last sort to detect toggles.
-        // Important: Start as null to prevent auto-toggling on page load
-        let lastSort = null;
-
-        // Load saved preferences
-        const savedSort = localStorage.getItem('abs_kosync_sort') || 'title';
-        const savedSortState = localStorage.getItem('abs_kosync_sort_state');
-
-        if (savedSort) {
-            sortSelect.value = savedSort;
-        }
-
-        if (savedSortState) {
-            try {
-                // Merge saved state with defaults
-                sortState = { ...sortState, ...JSON.parse(savedSortState) };
-            } catch (e) {
-                console.error("Error parsing saved sort state", e);
+            if (savedSortState) {
+                try {
+                    // Merge saved state with defaults
+                    sortState = { ...sortState, ...JSON.parse(savedSortState) };
+                } catch (e) {
+                    console.error("Error parsing saved sort state", e);
+                }
             }
-        }
 
-        // Parse "Time Ago" for sorting
-        function parseLastSync(syncText) {
-            if (!syncText || syncText === 'Never' || syncText === 'Error') return -1;
+            // Parse "Time Ago" for sorting
+            function parseLastSync(syncText) {
+                if (!syncText || syncText === 'Never' || syncText === 'Error') return -1;
 
-            const match = syncText.match(/(\d+)([smhd])/);
-            if (!match) return -1;
+                const match = syncText.match(/(\d+)([smhd])/);
+                if (!match) return -1;
 
-            const value = parseInt(match[1]);
-            const unit = match[2];
+                const value = parseInt(match[1]);
+                const unit = match[2];
 
-            if (unit === 's') return value;
-            if (unit === 'm') return value * 60;
-            if (unit === 'h') return value * 3600;
-            if (unit === 'd') return value * 86400;
+                if (unit === 's') return value;
+                if (unit === 'm') return value * 60;
+                if (unit === 'h') return value * 3600;
+                if (unit === 'd') return value * 86400;
 
-            return -1;
-        }
+                return -1;
+            }
 
-        function sortCards(grid, sortBy, direction) {
-            if (!grid) return;
-            const cards = Array.from(grid.children);
+            function sortCards(grid, sortBy, direction) {
+                if (!grid) return;
+                const cards = Array.from(grid.children);
 
-            const sortedCards = cards.sort((a, b) => {
-                let comparison = 0;
+                const sortedCards = cards.sort((a, b) => {
+                    let comparison = 0;
 
-                // Safety checks for missing data attributes
-                const valA = a.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
-                const valB = b.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+                    // Safety checks for missing data attributes
+                    const valA = a.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
+                    const valB = b.dataset[sortBy === 'last_sync' ? 'lastSync' : sortBy] || '';
 
-                if (sortBy === 'title') {
-                    comparison = valA.localeCompare(valB);
-                } else if (sortBy === 'progress') {
-                    comparison = (parseFloat(valA) || 0) - (parseFloat(valB) || 0);
-                } else if (sortBy === 'status') {
-                    comparison = valA.localeCompare(valB);
-                } else if (sortBy === 'last_sync') {
-                    comparison = parseLastSync(valA) - parseLastSync(valB);
+                    if (sortBy === 'title') {
+                        comparison = valA.localeCompare(valB);
+                    } else if (sortBy === 'progress') {
+                        comparison = (parseFloat(valA) || 0) - (parseFloat(valB) || 0);
+                    } else if (sortBy === 'status') {
+                        comparison = valA.localeCompare(valB);
+                    } else if (sortBy === 'last_sync') {
+                        comparison = parseLastSync(valA) - parseLastSync(valB);
+                    }
+
+                    // Apply direction
+                    return direction === 'asc' ? comparison : -comparison;
+                });
+
+                // Re-append in new order
+                sortedCards.forEach(card => grid.appendChild(card));
+            }
+
+            function applySorting(sortBy) {
+                let direction;
+
+                // Check if we are selecting the same sort type to toggle direction
+                if (lastSort === sortBy) {
+                    const currentDirection = sortState[sortBy];
+                    direction = currentDirection === 'asc' ? 'desc' : 'asc';
+                    sortState[sortBy] = direction;
+                } else {
+                    // Different selection (or first load) -> Use stored direction
+                    direction = sortState[sortBy];
                 }
 
-                // Apply direction
-                return direction === 'asc' ? comparison : -comparison;
-            });
+                // Update tracker
+                lastSort = sortBy;
 
-            // Re-append in new order
-            sortedCards.forEach(card => grid.appendChild(card));
-        }
+                // Update UI Arrow
+                updateSortIndicator(direction);
 
-        function applySorting(sortBy) {
-            let direction;
+                // Sort Grids
+                sortCards(currentlyReadingGrid, sortBy, direction);
+                sortCards(allBooksGrid, sortBy, direction);
 
-            // Check if we are selecting the same sort type to toggle direction
-            if (lastSort === sortBy) {
-                const currentDirection = sortState[sortBy];
-                direction = currentDirection === 'asc' ? 'desc' : 'asc';
-                sortState[sortBy] = direction;
-            } else {
-                // Different selection (or first load) -> Use stored direction
-                direction = sortState[sortBy];
+                // Save preferences
+                localStorage.setItem('abs_kosync_sort', sortBy);
+                localStorage.setItem('abs_kosync_sort_state', JSON.stringify(sortState));
             }
 
-            // Update tracker
-            lastSort = sortBy;
+            function updateSortIndicator(direction) {
+                if (directionBtn) {
+                    directionBtn.textContent = direction === 'asc' ? '↑' : '↓';
+                }
+            }
 
-            // Update UI Arrow
-            updateSortIndicator(direction);
+            // --- Event Listeners ---
 
-            // Sort Grids
-            sortCards(currentlyReadingGrid, sortBy, direction);
-            sortCards(allBooksGrid, sortBy, direction);
+            if (sortSelect) {
+                sortSelect.addEventListener('change', (e) => {
+                    applySorting(e.target.value);
+                });
+            }
 
-            // Save preferences
-            localStorage.setItem('abs_kosync_sort', sortBy);
-            localStorage.setItem('abs_kosync_sort_state', JSON.stringify(sortState));
-        }
-
-        function updateSortIndicator(direction) {
+            // NEW: Clickable Arrow Logic
             if (directionBtn) {
-                directionBtn.textContent = direction === 'asc' ? '↑' : '↓';
+                directionBtn.addEventListener('click', () => {
+                    // Clicking the arrow re-applies the CURRENT sort value.
+                    // Since 'lastSort' will match, this triggers the toggle logic in applySorting.
+                    applySorting(sortSelect.value);
+                });
             }
-        }
 
-        // --- Event Listeners ---
+            // --- Initialization ---
 
-        if (sortSelect) {
-            sortSelect.addEventListener('change', (e) => {
-                applySorting(e.target.value);
-            });
-        }
+            // Apply initial sort on load (if content exists)
+            if (currentlyReadingGrid || allBooksGrid) {
+                applySorting(savedSort);
+            }
 
-        // NEW: Clickable Arrow Logic
-        if (directionBtn) {
-            directionBtn.addEventListener('click', () => {
-                // Clicking the arrow re-applies the CURRENT sort value.
-                // Since 'lastSort' will match, this triggers the toggle logic in applySorting.
-                applySorting(sortSelect.value);
-            });
-        }
-
-        // --- Initialization ---
-
-        // Apply initial sort on load (if content exists)
-        if (currentlyReadingGrid || allBooksGrid) {
-            applySorting(savedSort);
-        }
-
-        // Auto-refresh every 30 seconds
-        setTimeout(() => location.reload(), 30000);
-    </script>
+            // Auto-refresh every 30 seconds
+            setTimeout(() => location.reload(), 30000);
+        </script>
 </body>
+
 </html>

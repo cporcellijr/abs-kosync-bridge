@@ -32,6 +32,7 @@ class SyncManager:
     def __init__(self,
                  abs_client=None,
                  booklore_client=None,
+                 hardcover_client=None,
                  transcriber=None,
                  ebook_parser=None,
                  database_service=None,
@@ -45,6 +46,7 @@ class SyncManager:
         # Use dependency injection
         self.abs_client = abs_client
         self.booklore_client = booklore_client
+        self.hardcover_client = hardcover_client
         self.transcriber = transcriber
         self.ebook_parser = ebook_parser
         self.database_service = database_service
@@ -214,7 +216,8 @@ class SyncManager:
             abs_id=target_book.abs_id,
             last_attempt=time.time(),
             retry_count=0,  # Will be updated on failure
-            last_error=None
+            last_error=None,
+            progress=0.0
         )
         self.database_service.save_job(job)
 
@@ -239,9 +242,29 @@ class SyncManager:
         logger.info(f"[JOB {job_idx}/{job_total}] Processing '{sanitize_log_data(abs_title)}'...")
 
         try:
+            def update_progress(local_pct, phase):
+                """
+                Map local phase progress to global 0-100% progress.
+                Phase 1: 0-10%
+                Phase 2: 10-90%
+                Phase 3: 90-100%
+                """
+                global_pct = 0.0
+                if phase == 1:
+                    global_pct = 0.0 + (local_pct * 0.1)
+                elif phase == 2:
+                    global_pct = 0.1 + (local_pct * 0.8)
+                elif phase == 3:
+                    global_pct = 0.9 + (local_pct * 0.1)
+                
+                # Save to DB every time for now (or throttle if too frequent)
+                self.database_service.update_latest_job(abs_id, progress=global_pct)
+
             # --- Heavy Lifting (Blocks this thread, but not the Main thread) ---
             # Step 1: Get EPUB file
+            update_progress(0.0, 1)
             epub_path = self._get_local_epub(ebook_filename)
+            update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
 
@@ -254,16 +277,28 @@ class SyncManager:
 
             # Attempt SMIL extraction
             if hasattr(self.transcriber, 'transcribe_from_smil'):
-                 transcript_path = self.transcriber.transcribe_from_smil(abs_id, epub_path, chapters)
+                 transcript_path = self.transcriber.transcribe_from_smil(
+                     abs_id, epub_path, chapters, 
+                     progress_callback=lambda p: update_progress(p, 2)
+                 )
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
             if not transcript_path:
                 logger.info("ℹ️ SMIL data not found or failed, falling back to Whisper transcription.")
                 audio_files = self.abs_client.get_audio_files(abs_id)
-                transcript_path = self.transcriber.process_audio(abs_id, audio_files)
+                transcript_path = self.transcriber.process_audio(
+                    abs_id, audio_files, 
+                    progress_callback=lambda p: update_progress(p, 2)
+                )
+            else:
+                # If SMIL worked, it's already done with transcribing phase
+                update_progress(1.0, 2)
 
             # Step 4: Parse EPUB
-            self.ebook_parser.extract_text_and_map(epub_path)
+            self.ebook_parser.extract_text_and_map(
+                epub_path, 
+                progress_callback=lambda p: update_progress(p, 3)
+            )
 
             # --- Success Update using database service ---
             # Update book with transcript path and set to active
@@ -271,11 +306,12 @@ class SyncManager:
             book.status = 'active'
             self.database_service.save_book(book)
 
-            # Update job record to reset retry count
+            # Update job record to reset retry count and mark 100%
             job = self.database_service.get_latest_job(abs_id)
             if job:
                 job.retry_count = 0
                 job.last_error = None
+                job.progress = 1.0
                 self.database_service.save_job(job)
 
 
@@ -296,7 +332,8 @@ class SyncManager:
                 abs_id=abs_id,
                 last_attempt=time.time(),
                 retry_count=new_retry_count,
-                last_error=str(e)
+                last_error=str(e),
+                progress=job.progress if job else 0.0
             )
             self.database_service.save_job(updated_job)
 
@@ -474,10 +511,19 @@ class SyncManager:
                         self.database_service.save_state(client_state_model)
 
                 logger.info(f"💾 [{title_snip}] States saved to database")
+                
+                # Debugging crash: Flush logs to ensure we see this before any potential hard crash
+                for handler in logger.handlers:
+                    handler.flush()
+                if hasattr(root_logger, 'handlers'):
+                    for handler in root_logger.handlers:
+                        handler.flush()
 
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"Sync error: {e}", e)
+        
+        logger.debug(f"End of sync cycle for active books")
 
     def clear_progress(self, abs_id):
         """

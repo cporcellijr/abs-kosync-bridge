@@ -28,10 +28,8 @@ import re
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
 # We keep the import for type hinting, but we don't instantiate it directly anymore
-from src.utils.smil_extractor import SmilExtractor 
 
 logger = logging.getLogger(__name__)
-
 
 class AudioTranscriber:
     # [UPDATED] Accepted smil_extractor as an argument
@@ -49,34 +47,35 @@ class AudioTranscriber:
 
         # Unified threshold logic
         self.match_threshold = int(os.environ.get("TRANSCRIPT_MATCH_THRESHOLD", os.environ.get("FUZZY_MATCH_THRESHOLD", 80)))
-        
+
         # [UPDATED] Use the injected instance
         self.smil_extractor = smil_extractor
 
-    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list) -> Optional[Path]:
+    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list, progress_callback=None) -> Optional[Path]:
         """
         Attempts to extract a transcript directly from the EPUB's SMIL overlay data.
         """
+        if progress_callback: progress_callback(0.0)
         output_file = self.transcripts_dir / f"{abs_id}.json"
-        
+
         if not self.smil_extractor.has_media_overlays(str(epub_path)):
             return None
-            
+
         logger.info(f"⚡ Fast-Path: Extracting transcript from SMIL for {abs_id}...")
-        
+
         try:
             transcript = self.smil_extractor.extract_transcript(str(epub_path), abs_chapters)
             if not transcript:
                 return None
-                
+
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(transcript, f, ensure_ascii=False)
-                
+
             logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments saved.")
             return output_file
         except Exception as e:
             logger.error(f"Failed to extract SMIL transcript: {e}")
-            return None    
+            return None
 
     def _get_cached_transcript(self, path):
         """Load transcript with LRU caching."""
@@ -116,7 +115,7 @@ class AudioTranscriber:
             logger.error(f"Could not determine duration for {file_path}: {e}")
             return 0.0
 
-    def normalize_audio_to_wav(self, input_path: Path) -> Path:
+    def normalize_audio_to_wav(self, input_path: Path) -> Optional[Path]:
         """
         Convert any audio file to a standardized WAV format that faster-whisper can reliably decode.
 
@@ -149,7 +148,7 @@ class AudioTranscriber:
         ]
 
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
 
             # Remove original if different from output to save space
             if input_path != output_path and input_path.exists():
@@ -208,7 +207,7 @@ class AudioTranscriber:
         return new_files if new_files else [file_path]
 
     @time_execution
-    def process_audio(self, abs_id, audio_urls):
+    def process_audio(self, abs_id, audio_urls, progress_callback=None):
         output_file = self.transcripts_dir / f"{abs_id}.json"
         if output_file.exists():
             logger.info(f"Transcript already exists for {abs_id}")
@@ -342,6 +341,10 @@ class AudioTranscriber:
                         'cumulative_duration': cumulative_duration,
                         'transcript': full_transcript
                     }, f)
+
+                if progress_callback:
+                    # Report progress for this phase (handled by SyncManager logic)
+                    progress_callback(chunks_completed / total_chunks)
 
                 gc.collect()
 

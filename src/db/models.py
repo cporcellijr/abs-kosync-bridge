@@ -53,6 +53,7 @@ class HardcoverDetails(Base):
 
     abs_id = Column(String(255), ForeignKey('books.abs_id', ondelete='CASCADE'), primary_key=True)
     hardcover_book_id = Column(String(255))
+    hardcover_slug = Column(String(255))
     hardcover_edition_id = Column(String(255))
     hardcover_pages = Column(Integer)
     isbn = Column(String(255))
@@ -62,10 +63,12 @@ class HardcoverDetails(Base):
     # Relationship
     book = relationship("Book", back_populates="hardcover_details")
 
-    def __init__(self, abs_id: str, hardcover_book_id: str = None, hardcover_edition_id: str = None,
+    def __init__(self, abs_id: str, hardcover_book_id: str = None, hardcover_slug: str = None,
+                 hardcover_edition_id: str = None,
                  hardcover_pages: int = None, isbn: str = None, asin: str = None, matched_by: str = None):
         self.abs_id = abs_id
         self.hardcover_book_id = hardcover_book_id
+        self.hardcover_slug = hardcover_slug
         self.hardcover_edition_id = hardcover_edition_id
         self.hardcover_pages = hardcover_pages
         self.isbn = isbn
@@ -120,19 +123,39 @@ class Job(Base):
     last_attempt = Column(Float)
     retry_count = Column(Integer, default=0)
     last_error = Column(Text)
+    progress = Column(Float, default=0.0)
 
     # Relationship
     book = relationship("Book", back_populates="jobs")
 
     def __init__(self, abs_id: str, last_attempt: float = None,
-                 retry_count: int = 0, last_error: str = None):
+                 retry_count: int = 0, last_error: str = None, progress: float = 0.0):
         self.abs_id = abs_id
         self.last_attempt = last_attempt
         self.retry_count = retry_count
         self.last_error = last_error
+        self.progress = progress
 
     def __repr__(self):
         return f"<Job(abs_id='{self.abs_id}', retries={self.retry_count})>"
+
+
+
+class Setting(Base):
+    """
+    Setting model storing application configuration.
+    """
+    __tablename__ = 'settings'
+
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=True)
+
+    def __init__(self, key: str, value: str = None):
+        self.key = key
+        self.value = value
+
+    def __repr__(self):
+        return f"<Setting(key='{self.key}', value='{self.value}')>"
 
 
 # Database configuration

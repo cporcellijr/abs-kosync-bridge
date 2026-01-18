@@ -114,7 +114,7 @@ class EbookParser:
             return hashlib.md5(filename.encode('utf-8')).hexdigest()
         return self._compute_koreader_hash_from_bytes(content)
 
-    def extract_text_and_map(self, filepath):
+    def extract_text_and_map(self, filepath, progress_callback=None):
         """
         Used for fuzzy matching and general content extraction.
         Uses BeautifulSoup (Engine A).
@@ -126,6 +126,7 @@ class EbookParser:
 
         cached = self.cache.get(str_path)
         if cached:
+            if progress_callback: progress_callback(1.0)
             return cached['text'], cached['map']
 
         logger.info(f"Parsing EPUB: {filepath.name}")
@@ -135,8 +136,13 @@ class EbookParser:
             full_text_parts = []
             spine_map = []
             current_idx = 0
+            
+            total_spine = len(book.spine)
 
             for i, item_ref in enumerate(book.spine):
+                if progress_callback:
+                    progress_callback(i / total_spine)
+                
                 item = book.get_item_with_id(item_ref[0])
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')

@@ -35,9 +35,15 @@ class Container(containers.DeclarativeContainer):
     # Configuration
     config = providers.Configuration()
 
-    # Configuration values from environment
-    data_dir = providers.Object(Path(os.environ.get("DATA_DIR", "/data")))
-    books_dir = providers.Object(Path(os.environ.get("BOOKS_DIR", "/books")))
+    # Configuration values from environment (Lazy evaluation)
+    data_dir = providers.Factory(
+        lambda: Path(os.environ.get("DATA_DIR", "/data"))
+    )
+    
+    books_dir = providers.Factory(
+        lambda: Path(os.environ.get("BOOKS_DIR", "/books"))
+    )
+    
     db_file = providers.Factory(
         lambda data_dir: data_dir / "mapping_db.json",
         data_dir=data_dir
@@ -50,9 +56,11 @@ class Container(containers.DeclarativeContainer):
         lambda data_dir: data_dir / "epub_cache",
         data_dir=data_dir
     )
-    delta_abs_thresh = providers.Object(float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60)))
-    delta_kosync_thresh = providers.Object(float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0)
-    kosync_use_percentage_from_server = providers.Object(os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true")
+    
+    # Lazy load specific config values
+    delta_abs_thresh = providers.Factory(lambda: float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60)))
+    delta_kosync_thresh = providers.Factory(lambda: float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0)
+    kosync_use_percentage_from_server = providers.Factory(lambda: os.getenv("KOSYNC_USE_PERCENTAGE_FROM_SERVER", "false").lower() == "true")
 
     # API Clients
     abs_client = providers.Singleton(ABSClient)
@@ -152,6 +160,7 @@ class Container(containers.DeclarativeContainer):
         SyncManager,
         abs_client=abs_client,
         booklore_client=booklore_client,
+        hardcover_client=hardcover_client,
         storyteller_client=storyteller_client,
         transcriber=transcriber,
         ebook_parser=ebook_parser,
