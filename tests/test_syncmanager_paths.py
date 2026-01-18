@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""
+Quick test to verify SyncManager gets paths from DI container instead of hardcoded values.
+"""
+
+import sys
+import os
+import tempfile
+import shutil
+
+# Add project root to path
+project_root = os.path.join(os.path.dirname(__file__), '..')
+sys.path.insert(0, project_root)
+
+def test_syncmanager_di_paths():
+    print("🔬 Testing SyncManager paths from DI container...")
+
+    # Create temporary directories for testing
+    temp_base_dir = tempfile.mkdtemp(prefix="abs_kosync_test_")
+    temp_data_dir = os.path.join(temp_base_dir, "data")
+    temp_books_dir = os.path.join(temp_base_dir, "books")
+
+    # Create the directories
+    os.makedirs(temp_data_dir, exist_ok=True)
+    os.makedirs(temp_books_dir, exist_ok=True)
+
+    print(f"📁 Created temp data dir: {temp_data_dir}")
+    print(f"📚 Created temp books dir: {temp_books_dir}")
+
+    # Set test environment variables to use temp directories
+    os.environ['DATA_DIR'] = temp_data_dir
+    os.environ['BOOKS_DIR'] = temp_books_dir
+
+    try:
+        # Test container creation
+        print("\n📦 Creating DI container...")
+        from src.utils.di_container import create_container
+        container = create_container()
+        print("✅ Container created successfully")
+
+        # Test SyncManager creation
+        print("\n🎯 Testing SyncManager with DI paths...")
+        sync_manager = container.sync_manager()
+        print(f"✅ SyncManager created: {type(sync_manager).__name__}")
+
+        # Verify paths are correctly injected
+        print("\n🔍 Verifying injected paths...")
+        print(f"📁 Data dir: {sync_manager.data_dir}")
+        print(f"📚 Books dir: {sync_manager.books_dir}")
+        print(f"📝 EPUB cache dir: {sync_manager.epub_cache_dir}")
+
+        # Verify they match our environment variables (normalize paths for comparison)
+        from pathlib import Path
+        expected_data_dir = Path(temp_data_dir).resolve()
+        expected_books_dir = Path(temp_books_dir).resolve()
+        actual_data_dir = Path(sync_manager.data_dir).resolve()
+        actual_books_dir = Path(sync_manager.books_dir).resolve()
+
+        if actual_data_dir == expected_data_dir:
+            print("✅ Data dir correctly injected from DI container")
+        else:
+            print(f"❌ Data dir mismatch: expected {expected_data_dir}, got {actual_data_dir}")
+            return False
+
+        if actual_books_dir == expected_books_dir:
+            print("✅ Books dir correctly injected from DI container")
+        else:
+            print(f"❌ Books dir mismatch: expected {expected_books_dir}, got {actual_books_dir}")
+            return False
+
+        # Check that epub_cache_dir is based on data_dir
+        expected_cache_dir = expected_data_dir / "epub_cache"
+        actual_cache_dir = Path(sync_manager.epub_cache_dir).resolve()
+        if actual_cache_dir == expected_cache_dir:
+            print("✅ EPUB cache dir correctly derived from data dir")
+        else:
+            print(f"❌ EPUB cache dir mismatch: expected {expected_cache_dir}, got {actual_cache_dir}")
+            return False
+
+        print("\n🎉 All SyncManager DI path tests passed!")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    finally:
+        # Clean up temporary directories
+        if os.path.exists(temp_base_dir):
+            shutil.rmtree(temp_base_dir)
+            print(f"🧹 Cleaned up temp directory: {temp_base_dir}")
+
+if __name__ == "__main__":
+    success = test_syncmanager_di_paths()
+    sys.exit(0 if success else 1)

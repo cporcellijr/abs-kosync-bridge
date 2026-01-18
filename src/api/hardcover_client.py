@@ -15,10 +15,9 @@ Key features:
 import os
 import requests
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from datetime import date
-
-from logging_utils import sanitize_log_data
+from src.utils.string_utils import calculate_similarity, clean_book_title
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +27,36 @@ class HardcoverClient:
         self.api_url = "https://api.hardcover.app/v1/graphql"
         self.token = os.environ.get("HARDCOVER_TOKEN")
         self.user_id = None
-        
+
         if not self.token:
             logger.info("HARDCOVER_TOKEN not set")
             return
-        
+
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}",
             "User-Agent": "ABS-KoSync-Enhanced/5.9"
         }
-    
+
     def is_configured(self):
         return bool(self.token)
-    
+
+    def check_connection(self):
+        """Test connection to Hardcover API by trying to get user ID."""
+        if not self.is_configured():
+            raise Exception("Hardcover not configured - HARDCOVER_TOKEN not set")
+
+        user_id = self.get_user_id()
+        if not user_id:
+            raise Exception("Failed to fetch user ID from Hardcover API")
+
+        logger.info(f"✅ Hardcover client connection verified, user id: {user_id}")
+        return True
+
     def query(self, query: str, variables: Dict = None) -> Optional[Dict]:
         if not self.token:
             return None
-        
+
         try:
             r = requests.post(
                 self.api_url,
@@ -53,7 +64,7 @@ class HardcoverClient:
                 headers=self.headers,
                 timeout=10
             )
-            
+
             if r.status_code == 200:
                 data = r.json()
                 if data.get('data'):
@@ -64,13 +75,13 @@ class HardcoverClient:
                 logger.error(f"HTTP {r.status_code}: {r.text}")
         except Exception as e:
             logger.error(f"Hardcover query failed: {e}")
-        
+
         return None
-    
+
     def get_user_id(self) -> Optional[int]:
         if self.user_id:
             return self.user_id
-        
+
         result = self.query("{ me { id } }")
         if result and result.get('me'):
             self.user_id = result['me'][0]['id']
@@ -111,7 +122,7 @@ class HardcoverClient:
     def search_by_isbn(self, isbn: str) -> Optional[Dict]:
         """Search by ISBN-13 or ISBN-10."""
         isbn_key = 'isbn_13' if len(str(isbn)) == 13 else 'isbn_10'
-        
+
         query = f"""
         query ($isbn: String!) {{
             editions(where: {{ {isbn_key}: {{ _eq: $isbn }} }}) {{
@@ -120,65 +131,139 @@ class HardcoverClient:
                 book {{
                     id
                     title
+                    slug
                 }}
             }}
         }}
         """
-        
+
         result = self.query(query, {"isbn": str(isbn)})
         if result and result.get('editions') and len(result['editions']) > 0:
             edition = result['editions'][0]
             return {
                 'book_id': edition['book']['id'],
+                'slug': edition['book'].get('slug'),
                 'edition_id': edition['id'],
                 'pages': edition['pages'],
                 'title': edition['book']['title']
             }
         return None
-    
+
     def search_by_title_author(self, title: str, author: str = None) -> Optional[Dict]:
-        """Search by title and author."""
-        search_query = f"{title} {author or ''}".strip()
-        
+        """Search by title and author, returning the best fuzzy match."""
+        # Clean the input title for better matching comparison
+        clean_input_title = clean_book_title(title)
+        clean_input_author = author.lower().strip() if author else ""
+
+        # Construct search query
+        search_query = f"{clean_input_title} {author or ''}".strip()
+
         query = """
         query ($query: String!) {
-            search(query: $query, per_page: 5, page: 1, query_type: "Book") {
+            search(
+                query: $query, 
+                per_page: 10, 
+                page: 1, 
+                query_type: "Book"
+            ) {
                 ids
             }
         }
         """
-        
+
         result = self.query(query, {"query": search_query})
         if not result or not result.get('search') or not result['search'].get('ids'):
             return None
-        
+
         book_ids = result['search']['ids']
         if not book_ids:
             return None
-        
+
+        # Fetch details for up to 10 books to compare
         book_query = """
-        query ($id: Int!) {
-            books(where: { id: { _eq: $id }}) {
+        query ($ids: [Int!]) {
+            books(where: { id: { _in: $ids }}) {
                 id
                 title
+                slug
+                contributions {
+                    author {
+                        name
+                    }
+                }
+                users_count_status_1  # Want to Read
+                users_count_status_2  # Reading
+                users_count_status_3  # Read
             }
         }
         """
-        
-        book_result = self.query(book_query, {"id": book_ids[0]})
-        if book_result and book_result.get('books') and len(book_result['books']) > 0:
-            book = book_result['books'][0]
-            edition = self.get_default_edition(book['id'])
-            
+
+        book_result = self.query(book_query, {"ids": book_ids})
+        if not book_result or not book_result.get('books'):
+            return None
+
+        candidates = book_result['books']
+        best_match = None
+        best_score = 0.0
+
+        for book in candidates:
+            # Score match
+            candidate_title = clean_book_title(book['title'])
+            title_score = calculate_similarity(clean_input_title, candidate_title)
+
+            # Author Score
+            author_score = 0.0
+            if clean_input_author:
+                # Get all authors for this book
+                authors = [c['author']['name'].lower().strip() for c in book.get('contributions', []) if c.get('author')]
+                if authors:
+                    # Find best similarity among all authors
+                    author_score = max(calculate_similarity(clean_input_author, a) for a in authors)
+                else:
+                    # If book has no authors and we provided one, penalize?
+                    # For now, let's keep it 0.0
+                    author_score = 0.0
+            else:
+                # If no author provided, author matching shouldn't hurt or help disproportionally
+                author_score = 1.0
+
+            # Combined Score logic:
+            # Title is primary, but author acts as a strong multiplier/filter.
+            # If author matches well (>0.8), we trust the match more.
+            # If author is way off (<0.4), it's likely a different book with same title.
+
+            if clean_input_author:
+                # Weights: 60% Title, 40% Author
+                score = (title_score * 0.6) + (author_score * 0.4)
+
+                # Boost if author is an excellent match
+                if author_score > 0.9:
+                    score += 0.1
+            else:
+                score = title_score
+
+            logger.debug(f"Matches for '{title}' by '{author}': '{book['title']}' (Score: {score:.2f}, Title: {title_score:.2f}, Author: {author_score:.2f})")
+
+            if score > best_score:
+                best_score = score
+                best_match = book
+
+        # Threshold check
+        if best_match and best_score > 0.5:
+            logger.info(f"Selected best match: '{best_match['title']}' (Score: {best_score:.2f})")
+
+            edition = self.get_default_edition(best_match['id'])
+
             return {
-                'book_id': book['id'],
+                'book_id': best_match['id'],
+                'slug': best_match.get('slug'),
                 'edition_id': edition.get('id') if edition else None,
                 'pages': edition.get('pages') if edition else None,
-                'title': book['title']
+                'title': best_match['title']
             }
-        
+
         return None
-    
+
     def get_default_edition(self, book_id: int) -> Optional[Dict]:
         """Get default edition for a book."""
         query = """
@@ -195,16 +280,16 @@ class HardcoverClient:
             }
         }
         """
-        
+
         result = self.query(query, {"bookId": book_id})
         if result and result.get('books_by_pk'):
             if result['books_by_pk'].get('default_ebook_edition'):
                 return result['books_by_pk']['default_ebook_edition']
             elif result['books_by_pk'].get('default_physical_edition'):
                 return result['books_by_pk']['default_physical_edition']
-        
+
         return None
-    
+
     def resolve_book_from_input(self, input_str: str) -> Optional[Dict]:
         """
         Resolve a Hardcover book from a URL, numeric ID, or slug.
@@ -238,6 +323,7 @@ class HardcoverClient:
                     books_by_pk(id: $id) {
                         id
                         title
+                        slug
                         default_ebook_edition {
                             id
                             pages
@@ -265,6 +351,7 @@ class HardcoverClient:
                 books(where: { slug: { _eq: $slug }}, limit: 1) {
                     id
                     title
+                    slug
                     default_ebook_edition {
                         id
                         pages
@@ -290,6 +377,7 @@ class HardcoverClient:
 
         return {
             'book_id': book.get('id'),
+            'slug': book.get('slug'),
             'edition_id': edition.get('id') if edition else None,
             'pages': edition.get('pages') if edition else None,
             'title': book.get('title')
@@ -312,19 +400,19 @@ class HardcoverClient:
             }
         }
         """
-        
+
         result = self.query(query, {"bookId": book_id, "userId": self.get_user_id()})
         if result and result.get('user_books') and len(result['user_books']) > 0:
             return result['user_books'][0]
         return None
-    
+
     def update_status(self, book_id: int, status_id: int, edition_id: int = None) -> Optional[Dict]:
         """
         Create/update user_book status.
-        
+
         Status IDs:
         - 1: Want to Read
-        - 2: Currently Reading  
+        - 2: Currently Reading
         - 3: Read (Finished)
         - 4: Did Not Finish
         """
@@ -340,16 +428,16 @@ class HardcoverClient:
             }
         }
         """
-        
+
         update_args = {
-            "book_id": book_id,
+            "book_id": int(book_id),
             "status_id": status_id,
             "privacy_setting_id": 1
         }
-        
+
         if edition_id:
-            update_args["edition_id"] = edition_id
-        
+            update_args["edition_id"] = int(edition_id)
+
         result = self.query(query, {"object": update_args})
         if result and result.get('insert_user_book'):
             error = result['insert_user_book'].get('error')
@@ -357,11 +445,11 @@ class HardcoverClient:
                 logger.error(f"Hardcover update_status error: {error}")
             return result['insert_user_book'].get('user_book')
         return None
-    
+
     def _get_today_date(self) -> str:
         """Get today's date in YYYY-MM-DD format for Hardcover API."""
         return date.today().isoformat()
-    
+
     def update_progress(self, user_book_id: int, page: int, edition_id: int = None, is_finished: bool = False, current_percentage: float = 0.0) -> bool:
         """
         Update reading progress.
@@ -377,10 +465,10 @@ class HardcoverClient:
             }
         }
         """
-        
+
         read_result = self.query(read_query, {"userBookId": user_book_id})
         today = self._get_today_date()
-        
+
         # LOGIC: Only set started date if we are past 2%
         should_start = current_percentage > 0.02
 
@@ -388,20 +476,20 @@ class HardcoverClient:
             # --- UPDATE EXISTING READ ---
             existing_read = read_result['user_book_reads'][0]
             read_id = existing_read['id']
-            
+
             # Preserve existing dates
             started_at_val = existing_read.get('started_at')
             finished_at_val = existing_read.get('finished_at')
-            
+
             # If no start date exists, and we passed 2%, set it to today
             if not started_at_val and should_start:
                 started_at_val = today
                 logger.info(f"Hardcover: Setting started_at to {today} (Progress: {current_percentage:.1%})")
-            
+
             if is_finished and not finished_at_val:
                 finished_at_val = today
                 logger.info(f"Hardcover: Setting finished_at to {today}")
-            
+
             query = """
             mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                 update_user_book_read(id: $id, object: {
@@ -415,15 +503,15 @@ class HardcoverClient:
                 }
             }
             """
-            
+
             result = self.query(query, {
-                "id": read_id, 
-                "pages": page, 
-                "editionId": edition_id,
+                "id": read_id,
+                "pages": page,
+                "editionId": int(edition_id),
                 "startedAt": started_at_val,
                 "finishedAt": finished_at_val
             })
-            
+
             if result and result.get('update_user_book_read'):
                 if result['update_user_book_read'].get('error'):
                     return False
@@ -445,19 +533,19 @@ class HardcoverClient:
                 }
             }
             """
-            
+
             # Apply logic to new reads too
             started_at_val = today if should_start else None
             finished_at_val = today if is_finished else None
-            
+
             result = self.query(query, {
-                "id": user_book_id, 
-                "pages": page, 
-                "editionId": edition_id,
-                "startedAt": started_at_val, 
+                "id": user_book_id,
+                "pages": page,
+                "editionId": int(edition_id),
+                "startedAt": started_at_val,
                 "finishedAt": finished_at_val
             })
-            
+
             if result and result.get('insert_user_book_read'):
                 if result['insert_user_book_read'].get('error'):
                     return False

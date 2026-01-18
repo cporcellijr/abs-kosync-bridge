@@ -8,6 +8,7 @@ ULTIMATE HYBRID VERSION:
 - Robustness: Prefers ID anchors when available, falls back to positional indexing.
 - Complete Storyteller/Readium locator support with href + #id resolution.
 """
+from typing import Optional
 
 import ebooklib
 from ebooklib import epub
@@ -21,9 +22,12 @@ import glob
 import rapidfuzz
 from pathlib import Path
 from collections import OrderedDict
+from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
+# Import epubcfi library for accurate CFI parsing
+import epubcfi
 
 class LRUCache:
     def __init__(self, capacity: int = 3):
@@ -51,22 +55,22 @@ class EbookParser:
     def __init__(self, books_dir, epub_cache_dir=None):
         self.books_dir = Path(books_dir)
         self.epub_cache_dir = Path(epub_cache_dir) if epub_cache_dir else Path("/data/epub_cache")
-        
+
         cache_size = int(os.getenv("EBOOK_CACHE_SIZE", 3))
         self.cache = LRUCache(capacity=cache_size)
         self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
         self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
-        
+
         logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
-    def _resolve_book_path(self, filename):
+    def resolve_book_path(self, filename):
         try:
             safe_name = glob.escape(filename)
             return next(self.books_dir.glob(f"**/{safe_name}"))
         except StopIteration:
             pass
-        
+
         for f in self.books_dir.rglob("*"):
             if f.name == filename:
                 return f
@@ -75,7 +79,7 @@ class EbookParser:
             cached_path = self.epub_cache_dir / filename
             if cached_path.exists():
                 return cached_path
-    
+
         raise FileNotFoundError(f"Could not locate {filename}")
 
     def get_kosync_id(self, filepath):
@@ -96,7 +100,7 @@ class EbookParser:
             for i in range(-1, 11):
                 offset = 0 if i == -1 else 1024 * (4 ** i)
                 if offset >= file_size: break
-            
+
                 chunk = content[offset:offset + 1024]
                 if not chunk: break
                 md5.update(chunk)
@@ -110,18 +114,19 @@ class EbookParser:
             return hashlib.md5(filename.encode('utf-8')).hexdigest()
         return self._compute_koreader_hash_from_bytes(content)
 
-    def extract_text_and_map(self, filepath):
+    def extract_text_and_map(self, filepath, progress_callback=None):
         """
         Used for fuzzy matching and general content extraction.
         Uses BeautifulSoup (Engine A).
         """
         filepath = Path(filepath)
         if not filepath.exists():
-            filepath = self._resolve_book_path(filepath.name)
+            filepath = self.resolve_book_path(filepath.name)
         str_path = str(filepath)
 
         cached = self.cache.get(str_path)
         if cached:
+            if progress_callback: progress_callback(1.0)
             return cached['text'], cached['map']
 
         logger.info(f"Parsing EPUB: {filepath.name}")
@@ -131,8 +136,13 @@ class EbookParser:
             full_text_parts = []
             spine_map = []
             current_idx = 0
+            
+            total_spine = len(book.spine)
 
             for i, item_ref in enumerate(book.spine):
+                if progress_callback:
+                    progress_callback(i / total_spine)
+                
                 item = book.get_item_with_id(item_ref[0])
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
@@ -164,17 +174,17 @@ class EbookParser:
     def get_text_at_percentage(self, filename, percentage):
         """Get text snippet at a given percentage through the book."""
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
-            
+
             if not full_text:
                 return None
-            
+
             target_pos = int(len(full_text) * percentage)
             # Grab a window of text around the calculated character position
             start = max(0, target_pos - 400)
             end = min(len(full_text), target_pos + 400)
-            
+
             return full_text[start:end]
         except Exception as e:
             logger.error(f"Error getting text at percentage: {e}")
@@ -183,7 +193,7 @@ class EbookParser:
     def get_character_delta(self, filename, percentage_prev, percentage_new):
         """Calculate character difference between two percentages."""
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, _ = self.extract_text_and_map(book_path)
             if not full_text:
                 return None
@@ -204,7 +214,7 @@ class EbookParser:
         Useful for syncing from Storyteller or any Readium-based reader that uses DOM IDs.
         """
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             target_item = None
@@ -224,7 +234,7 @@ class EbookParser:
             current_offset = 0
             found_offset = -1
             all_strings = soup.find_all(string=True)
-            
+
             for s in all_strings:
                 if s.parent == element or element in s.parents:
                     found_offset = current_offset
@@ -239,7 +249,7 @@ class EbookParser:
                 elem_text = element.get_text(separator=' ', strip=True)
                 chapter_text = soup.get_text(separator=' ', strip=True)
                 found_offset = chapter_text.find(elem_text)
-            
+
             if found_offset == -1: return None
 
             global_offset = target_item['start'] + found_offset
@@ -356,22 +366,22 @@ class EbookParser:
         xpath = "//" + "/".join(reversed(path_segments)) if found_anchor else "/" + "/".join(reversed(path_segments))
         return xpath, target_tag, found_anchor
 
-    def find_text_location(self, filename, search_phrase, hint_percentage=None):
+    def find_text_location(self, filename, search_phrase, hint_percentage=None) -> Optional[LocatorResult]:
         """
         Uses BS4 Engine. Good for fuzzy matching phrases from external apps.
-        Returns: (percentage, rich_locator_dict) or (None, None)
+        Returns: LocatorResult or None
         """
         try:
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
-            if not full_text: return None, None
+            if not full_text:
+                return None
             total_len = len(full_text)
-            match_index = -1
 
             # 1. Exact match
             match_index = full_text.find(search_phrase)
-            
+
             # 2. Normalized match
             if match_index == -1:
                 norm_content = self._normalize(full_text)
@@ -402,7 +412,7 @@ class EbookParser:
                 for item in spine_map:
                     if item['start'] <= match_index < item['end']:
                         local_index = match_index - item['start']
-                        
+
                         # Use BS4 generator here for Rich Locators
                         xpath_str, target_tag, is_anchored = self._generate_xpath_bs4(item['content'], local_index)
                         css_selector = self._generate_css_selector(target_tag)
@@ -411,25 +421,25 @@ class EbookParser:
                         # FIX: Handle double slashes gracefully
                         doc_frag_prefix = f"/body/DocFragment[{item['spine_index']}]"
                         if xpath_str.startswith('//'):
-                             final_xpath = doc_frag_prefix + xpath_str[1:] # //id -> /DocFragment/id (or keep // if valid)
+                            final_xpath = doc_frag_prefix + xpath_str[1:] # //id -> /DocFragment/id (or keep // if valid)
                         elif xpath_str.startswith('/'):
-                             final_xpath = doc_frag_prefix + xpath_str
+                            final_xpath = doc_frag_prefix + xpath_str
                         else:
-                             final_xpath = f"{doc_frag_prefix}/{xpath_str}"
+                            final_xpath = f"{doc_frag_prefix}/{xpath_str}"
+                        return LocatorResult(
+                            percentage=percentage,
+                            xpath=final_xpath,
+                            match_index=match_index,
+                            cfi=cfi,
+                            href=item['href'],
+                            fragment=None,
+                            css_selector=css_selector
+                        )
 
-                        rich_locator = {
-                            "href": item['href'],
-                            "cssSelector": css_selector,
-                            "xpath": final_xpath,
-                            "cfi": cfi,
-                            "match_index": match_index
-                        }
-                        return percentage, rich_locator
-
-            return None, None
+            return None
         except Exception as e:
             logger.error(f"Error finding text in {filename}: {e}")
-            return None, None
+            return None
 
     def _normalize(self, text):
         return re.sub(r'[^a-z0-9]', '', text.lower())
@@ -440,132 +450,126 @@ class EbookParser:
     # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
     # =========================================================================
 
-    def get_xpath_and_percentage(self, filename, position=0):
+    def get_perfect_ko_xpath(self, filename, position=0) -> Optional[str]:
         """
-        NEW: For KOReader Sync.
-        Uses LXML for precision handling of /text().OFFSET.
-        Includes WHITESPACE STRIPPING to match extract_text_and_map's counting logic.
+        Generate KOReader XPath for a specific character position in the book.
+        Simplified and focused approach that finds actual text elements.
         """
         try:
-            # 1. Get Text & Map
-            book_path = self._resolve_book_path(filename)
+            # Get full text and spine mapping
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
-            total_length = len(full_text)
-            
-            if total_length == 0:
-                return None, 0.0
 
-            current_pos = min(max(0, position), total_length)
-            percentage = current_pos / total_length
+            if not full_text or not spine_map:
+                return None
 
-            # Find which spine item this falls into
-            target_item = None
-            local_pos = 0
-            
-            for item in spine_map:
-                if item['start'] <= current_pos < item['end']:
-                    target_item = item
-                    local_pos = current_pos - item['start']
-                    break
-            
-            if not target_item:
-                if spine_map: 
-                    target_item = spine_map[-1]
-                    local_pos = len(target_item['content'])
-                else:
-                    return None, 1.0
+            # Clamp position to valid range
+            position = max(0, min(position, len(full_text) - 1))
 
-            # 2. Use LXML to generate the hybrid XPath
+            # Find which spine item contains this position
+            target_item = next((item for item in spine_map
+                              if item['start'] <= position < item['end']), spine_map[-1])
+
+            local_pos = position - target_item['start']
+
+            # Parse HTML content
             tree = html.fromstring(target_item['content'])
-            
-            # Find the specific node at 'local_pos' (WHITESPACE AWARE)
+
+            # Find all elements that contain text, in document order
+            text_elements = []
             current_count = 0
-            target_node = None
+
+            for element in tree.iter():
+                if element.text and element.text.strip():
+                    text_len = len(element.text.strip())
+                    text_elements.append({
+                        'element': element,
+                        'start_pos': current_count,
+                        'end_pos': current_count + text_len,
+                        'text_len': text_len
+                    })
+                    current_count += text_len
+
+                if element.tail and element.tail.strip():
+                    tail_len = len(element.tail.strip())
+                    text_elements.append({
+                        'element': element,
+                        'start_pos': current_count,
+                        'end_pos': current_count + tail_len,
+                        'text_len': tail_len,
+                        'is_tail': True
+                    })
+                    current_count += tail_len
+
+            # Find the element that contains our target position
+            target_element = None
             target_offset = 0
 
-            for node in tree.iter():
-                # Process Text
-                if node.text:
-                    # FIX: Strip whitespace to match how we counted 'total_length'
-                    clean_text = node.text.strip()
-                    clean_len = len(clean_text)
-                    
-                    if clean_len > 0:
-                        if current_count + clean_len >= local_pos:
-                            target_node = node
-                            # Calculate remainder within the CLEAN text
-                            clean_remainder = local_pos - current_count
-                            # Find start of clean text in raw text
-                            raw_start = node.text.find(clean_text)
-                            if raw_start == -1: raw_start = 0
-                            # Final offset is raw_start + remainder
-                            target_offset = raw_start + clean_remainder
+            for elem_info in text_elements:
+                if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
+                    target_element = elem_info['element']
+                    target_offset = local_pos - elem_info['start_pos']
+                    break
+
+            if target_element is None:
+                # Fallback: use the first text-containing element
+                if text_elements:
+                    target_element = text_elements[0]['element']
+                    target_offset = 0
+                else:
+                    # Last resort: find any element with text
+                    for elem in tree.xpath('.//p | .//span | .//em | .//strong | .//st | .//div'):
+                        if elem.text and elem.text.strip():
+                            target_element = elem
+                            target_offset = 0
                             break
-                        current_count += clean_len
 
-                # Process Tail
-                if node.tail:
-                    clean_tail = node.tail.strip()
-                    tail_len = len(clean_tail)
-                    
-                    if tail_len > 0:
-                        if current_count + tail_len >= local_pos:
-                            target_node = node # Target the element owning the tail
-                            clean_remainder = local_pos - current_count
-                            raw_start = node.tail.find(clean_tail)
-                            if raw_start == -1: raw_start = 0
-                            target_offset = raw_start + clean_remainder
-                            break
-                        current_count += tail_len
+            if target_element is None:
+                logger.warning(f"No text elements found in spine {target_item['spine_index']}")
+                return None
 
-            if target_node is None:
-                raw_xpath = "/body/html"
-                target_offset = 0
-            else:
-                raw_xpath = self._generate_hybrid_xpath_lxml(target_node)
-
-            # Ensure proper path joining
-            if not raw_xpath.startswith('/'):
-                raw_xpath = '/' + raw_xpath
-
-            # KOReader format: /body/DocFragment[X]/.../text().Y
-            doc_frag = f"/body/DocFragment[{target_item['spine_index']}]"
-            
-            final_xpath = f"{doc_frag}{raw_xpath}/text().{target_offset}"
-            
-            return final_xpath, percentage
+            # Build xpath for the target element
+            xpath = self._build_xpath(target_element)
+            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
-            logger.error(f"Error in get_xpath_and_percentage: {e}")
-            return None, 0.0
+            logger.error(f"Error generating KOReader XPath: {e}")
+            return None
 
-    def _generate_hybrid_xpath_lxml(self, node):
-        """
-        Internal LXML helper: STRICT POSITIONAL ONLY.
-        """
-        path = []
-        current = node
-        while current is not None:
+    def _has_text_content(self, element):
+        """Check if element directly contains text (not just in children)."""
+        return element.text and element.text.strip() and len(element.text.strip()) > 0
+
+    def _build_xpath(self, element):
+        """Build XPath for an element, ensuring proper KOReader format."""
+        parts = []
+        current = element
+
+        while current is not None and current.tag not in ['html', 'document']:
+            # Get siblings of same tag to determine index
             parent = current.getparent()
-            if parent is None:
-                path.insert(0, current.tag)
-                break
-                
-            siblings = list(parent)
-            matching_siblings = [s for s in siblings if s.tag == current.tag]
-            
-            if len(matching_siblings) > 1:
-                index = matching_siblings.index(current) + 1
-                path.insert(0, f"{current.tag}[{index}]")
+            if parent is not None:
+                siblings = [s for s in parent if s.tag == current.tag]
+                if len(siblings) > 1:
+                    index = siblings.index(current) + 1
+                    parts.insert(0, f"{current.tag}[{index}]")
+                else:
+                    parts.insert(0, current.tag)
             else:
-                path.insert(0, current.tag)
-            
+                parts.insert(0, current.tag)
             current = parent
 
-        if path and path[0] == 'html':
-            path.pop(0)
+        # Clean up the path
+        if parts and parts[0] == 'html':
+            parts.pop(0)
+        if not parts or parts[0] != 'body':
+            parts.insert(0, 'body')
 
-        return "/".join(path)
+        # If we have no meaningful path, create a default
+        if len(parts) <= 1:  # Just 'body' or empty
+            parts = ['body', 'p[1]']
+
+        return '/'.join(parts)
 
     def resolve_xpath(self, filename, xpath_str):
         """
@@ -575,61 +579,61 @@ class EbookParser:
         """
         try:
             logger.debug(f"🔍 Resolving XPath (Hybrid): {xpath_str}")
-            
-            match = re.search(r'DocFragment\[(\d+)\]', xpath_str)
+
+            match = re.search(r'DocFragment\[(\d+)]', xpath_str)
             if not match:
                 return None
             spine_index = int(match.group(1))
 
-            book_path = self._resolve_book_path(filename)
+            book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
-            
+
             target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
             if not target_item:
                 return None
 
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
-            
+
             offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
             target_offset = int(offset_match.group(1)) if offset_match else 0
             clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
-            
+
             if clean_xpath.startswith('/'):
                 clean_xpath = '.' + clean_xpath
-            
+
             tree = html.fromstring(target_item['content'])
-            
+
             elements = []
             try:
                 elements = tree.xpath(clean_xpath)
             except Exception as e:
                 logger.debug(f"XPath query failed: {e}")
-            
+
             if not elements and clean_xpath.startswith('./'):
                 try: elements = tree.xpath(clean_xpath[2:])
                 except: pass
-            
+
             if not elements:
                 id_match = re.search(r"@id='([^']+)'", clean_xpath)
                 if id_match:
                     try: elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
                     except: pass
-            
+
             if not elements:
-                simple_path = re.sub(r'\[\d+\]', '', clean_xpath)
+                simple_path = re.sub(r'\[\d+]', '', clean_xpath)
                 try: elements = tree.xpath(simple_path)
                 except: pass
-            
+
             if not elements:
                 logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
                 return None
-            
+
             target_node = elements[0]
-            
+
             # Calculate position by counting CLEAN text length
             preceding_len = 0
             found_target = False
-            
+
             for node in tree.iter():
                 if node == target_node:
                     found_target = True
@@ -643,19 +647,19 @@ class EbookParser:
                         # Fallback for tail targeting or weird state
                         preceding_len += target_offset # Best guess
                     break
-                
+
                 if node.text:
                     preceding_len += len(node.text.strip())
                 if node.tail:
                     preceding_len += len(node.tail.strip())
-            
+
             if not found_target:
                 logger.warning(f"❌ Target node not found in iteration")
                 return None
-            
+
             local_pos = preceding_len
             global_offset = target_item['start'] + local_pos
-            
+
             start = max(0, global_offset)
             end = min(len(full_text), global_offset + 500)
             return full_text[start:end]
@@ -663,4 +667,142 @@ class EbookParser:
         except Exception as e:
             logger.error(f"Error resolving XPath {xpath_str}: {e}")
             return None
-# [END FILE]
+
+    def get_text_around_cfi(self, filename, cfi, context=50):
+        """
+        Returns a text fragment of length 2*context centered on the position indicated by the CFI.
+        Uses the epubcfi library for precise parsing.
+
+        Example supported CFI: epubcfi(/6/16[chapter_6]!/4/2[book-columns]/2[book-inner]/268/4/2[kobo.134.3]/1:11)
+        """
+        try:
+            # Parse CFI using the epubcfi library
+            parsed_cfi = epubcfi.parse(cfi)
+
+            # Extract spine information and element steps
+            spine_step = None
+            element_steps = []
+
+            for step in parsed_cfi.steps:
+                if hasattr(step, 'index'):
+                    if step.index == 6:  # Skip spine reference marker
+                        continue
+                    elif not spine_step and step.index > 6:  # First step after /6/ is spine
+                        spine_step = step.index
+                    elif isinstance(step, epubcfi.cfi.Step):
+                        element_steps.append(step)
+                # Skip Redirect objects (!)
+
+            char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
+
+            if not spine_step:
+                logger.error(f"Could not extract spine step from CFI: {cfi}")
+                return None
+
+            # Load the EPUB and find the spine item
+            book_path = self.resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+
+            # Calculate spine index (CFI spine steps are 2x the actual index)
+            spine_index = (spine_step // 2) - 1
+            if not (0 <= spine_index < len(spine_map)):
+                logger.error(f"Spine index {spine_index} out of range for CFI {cfi}")
+                return None
+
+            item = spine_map[spine_index]
+
+            # Parse the HTML content with lxml for precise navigation
+            tree = html.fromstring(item['content'])
+
+            # Follow the CFI path precisely through the DOM
+            current_element = tree
+            text_count = 0
+
+            logger.debug(f"Following CFI path with {len(element_steps)} steps")
+
+            for i, step in enumerate(element_steps):
+                if not hasattr(step, 'index'):
+                    continue
+
+                step_index = step.index
+                step_assertion = step.assertion
+
+                logger.debug(f"Step {i}: index={step_index}, assertion={step_assertion}")
+
+                if step_assertion:
+                    # Look for element with specific ID or class
+                    candidates = current_element.xpath(f".//*[contains(@id, '{step_assertion}') or contains(@class, '{step_assertion}')]")
+                    if candidates:
+                        current_element = candidates[0]
+                        logger.debug(f"Found element with assertion: {step_assertion}")
+                        continue
+
+                # CFI uses 1-based indexing, even numbers for elements
+                if step_index % 2 == 0:  # Even number = element
+                    element_index = (step_index // 2) - 1
+                    children = [child for child in current_element if hasattr(child, 'tag')]
+
+                    if 0 <= element_index < len(children):
+                        current_element = children[element_index]
+                        logger.debug(f"Navigated to child element {element_index}: {current_element.tag}")
+                    else:
+                        logger.warning(f"Element index {element_index} out of range (have {len(children)} children)")
+                        break
+                else:  # Odd number = text node
+                    text_index = (step_index // 2)
+                    # For text nodes, we need to count text content
+                    text_nodes = []
+                    for child in current_element:
+                        if child.text and child.text.strip():
+                            text_nodes.append(child.text.strip())
+                        if child.tail and child.tail.strip():
+                            text_nodes.append(child.tail.strip())
+
+                    if 0 <= text_index < len(text_nodes):
+                        # Calculate position up to this text node
+                        text_count += sum(len(text) for text in text_nodes[:text_index])
+                        logger.debug(f"Text node {text_index}, accumulated count: {text_count}")
+                    break
+
+            # Calculate text position within the current element
+            if current_element is not None:
+                # Get all text content up to the current element's position in the document
+                soup = BeautifulSoup(item['content'], 'html.parser')
+                chapter_text = soup.get_text(separator=' ', strip=True)
+
+                # Find the current element's text in the chapter
+                element_text = ""
+                if hasattr(current_element, 'text_content'):
+                    element_text = current_element.text_content()
+
+                if element_text and len(element_text.strip()) > 5:
+                    # Find where this element's content appears in the chapter
+                    element_start = chapter_text.find(element_text.strip()[:50])
+                    if element_start != -1:
+                        local_offset = element_start + char_offset
+                    else:
+                        # Fallback: use text_count + char_offset
+                        local_offset = text_count + char_offset
+                else:
+                    local_offset = text_count + char_offset
+            else:
+                local_offset = text_count + char_offset
+
+            # Clamp to chapter bounds
+            chapter_text = BeautifulSoup(item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            local_offset = min(max(0, local_offset), len(chapter_text))
+
+            # Calculate global position
+            global_offset = item['start'] + local_offset
+
+            # Extract context
+            start_pos = max(0, global_offset - context)
+            end_pos = min(len(full_text), global_offset + context)
+
+            snippet = full_text[start_pos:end_pos]
+            logger.debug(f"epubcfi CFI resolved: spine_index={spine_index}, local_offset={local_offset}, global_offset={global_offset}")
+            return snippet
+
+        except Exception as e:
+            logger.error(f"Error using epubcfi library for {cfi}: {e}")
+            return None

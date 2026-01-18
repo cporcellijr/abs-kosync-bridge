@@ -3,10 +3,11 @@ import os
 import time
 import logging
 import requests
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Tuple
 from pathlib import Path
 
-from logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data
+from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class StorytellerAPIClient:
 
         return None, None, None, None
 
-    def update_position(self, book_uuid: str, percentage: float, rich_locator: dict = None) -> bool:
+    def update_position(self, book_uuid: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         new_ts = int(time.time() * 1000)
         payload = {
             "timestamp": new_ts,
@@ -153,11 +154,11 @@ class StorytellerAPIClient:
                 }
             }
         }
-        if rich_locator and rich_locator.get('href'):
-            payload['locator']['href'] = rich_locator['href']
+        if rich_locator and rich_locator.href is not None:
+            payload['locator']['href'] = rich_locator.href
             payload['locator']['type'] = "application/xhtml+xml"
-            if rich_locator.get('cssSelector'):
-                payload['locator']['locations']['cssSelector'] = rich_locator['cssSelector']
+            if rich_locator.css_selector is not None:
+                payload['locator']['locations']['cssSelector'] = rich_locator.css_selector
         else:
             # Fallback to preserve existing href if we are just sending a % update
             try:
@@ -179,7 +180,7 @@ class StorytellerAPIClient:
         if not book: return None, None, None, None
         return self.get_position_details(book['uuid'])
 
-    def update_progress_by_filename(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
+    def update_progress_by_filename(self, ebook_filename: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         book = self.find_book_by_title(ebook_filename)
         if not book: return False
         return self.update_position(book['uuid'], percentage, rich_locator)
@@ -262,7 +263,7 @@ class StorytellerDBWithAPI:
             return self.db_fallback.get_progress_with_fragment(ebook_filename)
         return None, None, None, None
 
-    def update_progress(self, ebook_filename: str, percentage: float, rich_locator: dict = None) -> bool:
+    def update_progress(self, ebook_filename: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         if self.api_client: return self.api_client.update_progress_by_filename(ebook_filename, percentage, rich_locator)
         elif self.db_fallback: return self.db_fallback.update_progress(ebook_filename, percentage, rich_locator)
         return False

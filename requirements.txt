@@ -2,6 +2,7 @@ requests
 schedule
 faster-whisper
 ebooklib
+epubcfi
 beautifulsoup4
 rapidfuzz
 fuzzysearch
@@ -10,3 +11,6 @@ gTTs
 ffmpeg
 flask
 lxml
+dependency-injector
+sqlalchemy
+alembic

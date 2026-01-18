@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""
+Unit test for the KoSync leading scenario using unittest.TestCase.
+"""
+
+import unittest
+import sys
+from pathlib import Path
+# Add the project root to the path to resolve module imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from tests.base_sync_test import BaseSyncCycleTestCase
+
+
+class TestKoSyncLeadsSync(BaseSyncCycleTestCase):
+    """Test case for KoSync leading sync_cycle scenario."""
+
+    def get_test_mapping(self):
+        """Return KoSync test mapping configuration."""
+        return {
+            'abs_id': 'test-abs-id-kosync',
+            'abs_title': 'KoSync Leader Test Book',
+            'kosync_doc_id': 'test-kosync-doc-leader',
+            'ebook_filename': 'test-book.epub',
+            'transcript_file': str(Path(self.temp_dir) / 'test_transcript.json'),
+            'status': 'active'
+        }
+
+    def get_test_state_data(self):
+        """Return KoSync test state data."""
+        return {
+            'abs': {
+                'pct': 0.1,  # 10%
+                'ts': 100.0,  # timestamp
+                'last_updated': 1234567890
+            },
+            'kosync': {
+                'pct': 0.2,  # 20%
+                'last_updated': 1234567890
+            },
+            'storyteller': {
+                'pct': 0.1,  # 10%
+                'last_updated': 1234567890
+            },
+            'booklore': {
+                'pct': 0.0,  # 0%
+                'last_updated': 1234567890
+            }
+        }
+
+    def get_expected_leader(self):
+        """Return expected leader service name."""
+        return "KoSync"
+
+    def get_expected_final_percentage(self):
+        """Return expected final percentage."""
+        return 0.45  # 45%
+
+    def get_progress_mock_returns(self):
+        """Return progress mock return values for KoSync leading scenario."""
+        return {
+            'abs_progress': {'ebookProgress': 0.2, 'currentTime': 200.0, 'ebookLocation': 'epubcfi(/6/4[chapter2]!/4/2[content]/6/1:0)'},  # 20%
+            'abs_in_progress': [{'id': 'test-abs-id-kosync', 'progress': 0.2, 'duration': 1000}],
+            'kosync_progress': (0.45, "/html/body/div[1]/p[15]"),  # 45% - LEADER
+            'storyteller_progress': (0.15, 15.0, "ch1", "frag1"),  # 15%
+            'booklore_progress': (0.1, None)  # 10%
+        }
+
+    def test_kosync_leads(self):
+        super().run_test(20, 45)
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

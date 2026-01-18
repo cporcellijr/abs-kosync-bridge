@@ -84,8 +84,14 @@ services:
       - SYNC_DELTA_KOSYNC_PERCENT=0.5
       # Minimum word count change to trigger sync
       - SYNC_DELTA_KOSYNC_WORDS=400
+      # Minimum progress difference between clients to trigger sync (percentage, 0-100)
+      - SYNC_DELTA_BETWEEN_CLIENTS_PERCENT=0.5
       # Fuzzy text matching threshold (0-100, higher = stricter)
       - FUZZY_MATCH_THRESHOLD=88
+      # Enable ABS ebook sync (for EPUB progress synchronization). Still work in progress.
+      - SYNC_ABS_EBOOK=false
+      # Allow ABS ebook to be the leader for the sync cycle
+      - SYNC_ABS_EBOOK_CAN_BE_LEADER=true
 
       # ============================================
       # Book Linker Settings (OPTIONAL)

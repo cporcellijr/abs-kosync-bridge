@@ -5,7 +5,7 @@ import logging
 import time
 import hashlib
 
-from logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +106,47 @@ class ABSClient:
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
             r = requests.get(url, headers=self.headers)
-            if r.status_code == 200: return r.json().get('currentTime', 0)
-        except:
+            if r.status_code == 200: return r.json()
+        except Exception:
+            logger.exception(f"Error fetching ABS progress for item {item_id}")
             pass
-        return 0.0
+        return None
 
-    def update_progress(self, abs_id, timestamp, time_listened=None):
+    def update_ebook_progress(self, item_id, progress, location):
+        """
+        Update ebook progress for an item.
+
+        Args:
+            item_id: The item ID to update
+            progress: The ebook progress as a float (0.0 to 1.0)
+            location: Required ebook location (EPUB CFI format)
+        """
+        # Validate required parameters
+        if location is None:
+            logger.error("Ebook location is required for progress updates")
+            return False
+
+        # Ensure we use a float for the progress
+        progress = float(progress)
+        url = f"{self.base_url}/api/me/progress/{item_id}"
+        payload = {
+            "ebookProgress": progress,
+            "ebookLocation": location
+        }
+
+        try:
+            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            if r.status_code in (200, 204):
+                logger.debug(f"ABS ebook progress updated: {item_id} -> {progress} at location: {location[:50]}...")
+                return True
+            else:
+                logger.error(f"ABS ebook update failed: {r.status_code} - {r.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to update ABS ebook progress: {e}")
+            return False
+
+    def update_progress(self, abs_id, timestamp, time_listened):
         """
         Update progress using session-based sync.
         Creates a session, syncs progress, then closes the session.
@@ -125,35 +160,34 @@ class ABSClient:
             time_listened = 0.0
         time_listened = float(time_listened)
 
+        payload = {
+            "currentTime": timestamp,
+            "timeListened": time_listened
+        }
+        return self.update_progress_using_payload(abs_id, payload)
+
+    def update_progress_using_payload(self, abs_id, payload: dict):
         session_id = self.create_session(abs_id)
         if not session_id:
             logger.error(f"Failed to create ABS session for item {abs_id}")
-            return False
+            return {"success": False, "code": None, "reason": f"Failed to create ABS session for item {abs_id}"}
 
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
-            payload = {
-                "currentTime": timestamp,
-                "timeListened": time_listened
-            }
             r = requests.post(url, headers=self.headers, json=payload, timeout=10)
-
             if r.status_code in (200, 204):
-                logger.debug(f"ABS progress updated via session: {abs_id} -> {timestamp}s")
-                success = True
+                logger.debug(f"ABS progress updated via session: {abs_id}, payload: {payload}")
+                self.close_session(session_id)
+                return {"success": True, "code": r.status_code, "response": r.text}
             elif r.status_code == 404:
                 logger.warning(f"ABS session not found (404): {session_id}")
-                success = False
+                return {"success": False, "code": 404, "response": r.text}
             else:
                 logger.error(f"ABS session sync failed: {r.status_code} - {r.text}")
-                success = False
+                return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
             logger.error(f"Failed to sync ABS session progress: {e}")
-            success = False
-
-        self.close_session(session_id)
-
-        return success
+            return {"success": False, "code": None, "reason": str(e)}
 
     def get_in_progress(self, min_progress=0.01):
         url = f"{self.base_url}/api/me/progress"
@@ -232,6 +266,46 @@ class ABSClient:
         except Exception as e:
             logger.warning(f"⚠️ Failed to close session for ABS: {e}")
 
+    def add_to_collection(self, item_id, collection_name="abs-kosync"):
+        """Add an audiobook to a collection, creating the collection if it doesn't exist."""
+        try:
+            collections_url = f"{self.base_url}/api/collections"
+            r = requests.get(collections_url, headers=self.headers)
+            if r.status_code != 200:
+                return False
+
+            collections = r.json().get('collections', [])
+            target_collection = next((c for c in collections if c.get('name') == collection_name), None)
+
+            if not target_collection:
+                lib_url = f"{self.base_url}/api/libraries"
+                r_lib = requests.get(lib_url, headers=self.headers)
+                if r_lib.status_code == 200:
+                    libraries = r_lib.json().get('libraries', [])
+                    if libraries:
+                        r_create = requests.post(collections_url, headers=self.headers,
+                                                 json={"libraryId": libraries[0]['id'], "name": collection_name})
+                        if r_create.status_code in [200, 201]:
+                            target_collection = r_create.json()
+
+            if not target_collection:
+                return False
+
+            add_url = f"{self.base_url}/api/collections/{target_collection['id']}/book"
+            r_add = requests.post(add_url, headers=self.headers, json={"id": item_id})
+            if r_add.status_code in [200, 201, 204]:
+                try:
+                    details = self.get_item_details(item_id)
+                    title = details.get('media', {}).get('metadata', {}).get('title') if details else None
+                except Exception:
+                    title = None
+                logger.info(f"🏷️ Added '{sanitize_log_data(title or str(item_id))}' to ABS Collection: {collection_name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error adding item to ABS collection: {e}")
+            return False
+
 class KoSyncClient:
     def __init__(self):
         self.base_url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
@@ -305,11 +379,12 @@ class KoSyncClient:
                 xpath = data.get('progress')
                 return pct, xpath
         except:
+            logger.error(f"Error fetching KoSync progress for doc {doc_id}")
             pass
-        return 0.0, None
+        return None, None
 
     def update_progress(self, doc_id, percentage, xpath=None):
-        if not self.is_configured(): return
+        if not self.is_configured(): return False
 
         headers = {
             "x-auth-user": self.user,
