@@ -393,7 +393,7 @@ class SyncManager:
                 if all(round(cfg.delta, 2) == 0 for cfg in config.values()):
                     continue
 
-                # check for sync delta threshold between clients. This is to prevent small differences causing constant hops between who is the leader
+                # check for sync delta threshold between clients. This is to prevent small differences causing constant hopping
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
                 if len(progress_values) > 1:
                     max_progress = max(progress_values)
@@ -408,7 +408,12 @@ class SyncManager:
                 for key, cfg in config.items():
                     delta = cfg.delta
                     threshold = cfg.threshold
-                    if 0 < delta < threshold:
+                    
+                    # Debug logging for potential None values
+                    if delta is None or threshold is None:
+                         logger.debug(f"[{title_snip}] {key} delta={delta}, threshold={threshold}")
+
+                    if delta is not None and threshold is not None and 0 < delta < threshold:
                         label, fmt = cfg.display
                         delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
                         small_changes.append(f"✋ [{title_snip}] {label} delta {delta_str} (Below threshold): {title_snip}")
@@ -472,9 +477,13 @@ class SyncManager:
                 for client_name, client in self.sync_clients.items():
                     if client_name == leader:
                         continue
-                    request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
-                    result = client.update_progress(book, request)
-                    results[client_name] = result
+                    try:
+                        request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
+                        result = client.update_progress(book, request)
+                        results[client_name] = result
+                    except Exception as e:
+                        logger.error(f"⚠️ Failed to update {client_name}: {e}")
+                        results[client_name] = SyncResult(None, False)
 
                 # Save states directly to database service using State models
                 current_time = time.time()
@@ -521,7 +530,7 @@ class SyncManager:
 
             except Exception as e:
                 logger.error(traceback.format_exc())
-                logger.error(f"Sync error: {e}", e)
+                logger.error(f"Sync error: {e}")
         
         logger.debug(f"End of sync cycle for active books")
 

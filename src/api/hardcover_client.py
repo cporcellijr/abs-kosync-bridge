@@ -191,9 +191,6 @@ class HardcoverClient:
                         name
                     }
                 }
-                users_count_status_1  # Want to Read
-                users_count_status_2  # Reading
-                users_count_status_3  # Read
             }
         }
         """

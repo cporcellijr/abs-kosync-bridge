@@ -30,6 +30,7 @@ class ConfigLoader:
                 if value is not None and str(value).strip() != "":
                     # Update environment variable
                     os.environ[key] = str(value)
+                    logger.debug(f"Loaded setting from DB: {key}={value if 'KEY' not in key and 'PASSWORD' not in key and 'TOKEN' not in key else '******'}")
                     count += 1
             
             logger.info(f"⚙️  Loaded {count} settings from database")

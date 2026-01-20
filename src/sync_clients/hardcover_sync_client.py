@@ -77,7 +77,8 @@ class HardcoverSyncClient(SyncClient):
         if isbn:
             match = self.hardcover_client.search_by_isbn(isbn)
             if match:
-                if match.get('pages', 0) <= 0:
+                pages = match.get('pages')
+                if not pages or pages <= 0:
                     logger.info(f"[{book.abs_title}] could not find valid page count using ISBN match")
                     match = None
                 else:
@@ -86,7 +87,8 @@ class HardcoverSyncClient(SyncClient):
         if not match and asin:
             match = self.hardcover_client.search_by_isbn(asin)
             if match:
-                if match.get('pages', 0) <= 0:
+                pages = match.get('pages')
+                if not pages or pages <= 0:
                     logger.info(f"[{book.abs_title}] could not find valid page count using ASIN match")
                     match = None
                 else:
@@ -95,7 +97,8 @@ class HardcoverSyncClient(SyncClient):
         if not match and title and author:
             match = self.hardcover_client.search_by_title_author(title, author)
             if match:
-                if match.get('pages', 0) <= 0:
+                pages = match.get('pages')
+                if not pages or pages <= 0:
                     logger.info(f"[{book.abs_title}] could not find valid page count using Title+Author match")
                     match = None
                 else:
@@ -104,7 +107,8 @@ class HardcoverSyncClient(SyncClient):
         if not match and title:
             match = self.hardcover_client.search_by_title_author(title, "")
             if match:
-                if match.get('pages', 0) <= 0:
+                pages = match.get('pages')
+                if not pages or pages <= 0:
                     logger.info(f"[{book.abs_title}] could not find valid page count using Title match")
                     match = None
                 else:

@@ -3,6 +3,7 @@ import html
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -68,6 +69,32 @@ def setup_dependencies(test_container=None):
     if database_service:
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
+
+    # RELOAD GLOBALS from updated os.environ
+
+    global LINKER_BOOKS_DIR, DEST_BASE, STORYTELLER_INGEST, ABS_AUDIO_ROOT
+    global ABS_API_URL, ABS_API_TOKEN, ABS_LIBRARY_ID
+    global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL, SHELFMARK_URL
+
+    LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
+    DEST_BASE = Path(os.environ.get("PROCESSING_DIR", "/processing"))
+    STORYTELLER_INGEST = Path(os.environ.get("STORYTELLER_INGEST_DIR", os.environ.get("LINKER_BOOKS_DIR", "/linker_books")))
+    ABS_AUDIO_ROOT = Path(os.environ.get("AUDIOBOOKS_DIR", "/audiobooks"))
+
+    ABS_API_URL = os.environ.get("ABS_SERVER")
+    ABS_API_TOKEN = os.environ.get("ABS_KEY")
+    ABS_LIBRARY_ID = os.environ.get("ABS_LIBRARY_ID")
+    
+    ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
+    BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
+    MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
+    SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
+
+    logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
+    
+    # DEBUG: Log all critical env vars to debug priority issues
+    logger.debug(f"DEBUG ENV VARS: ABS_SERVER={os.environ.get('ABS_SERVER')}, ABS_KEY={'*' * 5 if os.environ.get('ABS_KEY') else 'None'}")
+
 
     if test_container is not None:
         # Use injected test container
@@ -529,12 +556,16 @@ def get_searchable_ebooks(search_term):
 
 
 def restart_server():
-    """Restarts the current Python process to reload settings."""
-    logger.info("♻️  Restarting application to apply new settings...")
-    time.sleep(1.5)  # Give Flask time to send the redirect response
-    # Re-execute the current script with the same arguments
-    # This replaces the current process, so the PID stays the same
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    """
+    Triggers a graceful restart by sending SIGTERM to the current process.
+    The start.sh supervisor loop will catch the exit and restart the application.
+    """
+    logger.info("♻️  Stopping application (Supervisor will restart it)...")
+    time.sleep(1.0)  # Give Flask time to send the redirect response
+    
+    # Exit with 0 so start.sh loop restarts the process
+    logger.info("👋 Exiting process to trigger restart...")
+    sys.exit(0)
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
@@ -926,6 +957,12 @@ def match():
         )
 
         database_service.save_book(book)
+
+        # Trigger Hardcover Automatch
+        hardcover_sync_client = container.sync_clients().get('Hardcover')
+        if hardcover_sync_client and hardcover_sync_client.is_configured():
+            hardcover_sync_client._automatch_hardcover(book)
+
         container.abs_client().add_to_collection(abs_id)
         container.booklore_client().add_to_shelf(ebook_filename)
         container.storyteller_client().add_to_collection(ebook_filename)
@@ -1004,6 +1041,12 @@ def batch_match():
                 )
 
                 database_service.save_book(book)
+
+                # Trigger Hardcover Automatch
+                hardcover_sync_client = container.sync_clients().get('Hardcover')
+                if hardcover_sync_client and hardcover_sync_client.is_configured():
+                    hardcover_sync_client._automatch_hardcover(book)
+
                 container.abs_client().add_to_collection(item['abs_id'])
                 container.booklore_client().add_to_shelf(item['ebook_filename'])
                 container.storyteller_client().add_to_collection(item['ebook_filename'])
