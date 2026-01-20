@@ -31,6 +31,8 @@ services:
       - ABS_COLLECTION_NAME=Synced with KOReader
       # Optionally, adjust progress offset in seconds, like -60 for 1 minute back
       # - ABS_PROGRESS_OFFSET_SECONDS=-60
+      # Search only within the specified library ID above only (recommended)
+      #- ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID=false
 
       # ============================================
       # KOSync Configuration (REQUIRED)
