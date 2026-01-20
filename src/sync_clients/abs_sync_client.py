@@ -90,6 +90,15 @@ class ABSSyncClient(SyncClient):
                                                           hint_percentage=request.locator_result.percentage,
                                                           book_title=book_title)
         if ts_for_text is not None:
+            response = self.abs_client.get_progress(book.abs_id)
+            abs_ts = response.get('currentTime') if response is not None else None
+            if abs_ts is not None and ts_for_text < abs_ts:
+                logger.info(f"[{book_title}] Not updating ABS progress - target timestamp {ts_for_text:.2f}s is before current ABS position {abs_ts:.2f}s.")
+                return SyncResult(abs_ts, True, {
+                    'ts': abs_ts,
+                    'pct': self._abs_to_percentage(abs_ts, book.transcript_file) or 0
+                })
+
             result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, request.previous_location)
             # Calculate percentage from timestamp for state
             pct = self._abs_to_percentage(final_ts, book.transcript_file)
