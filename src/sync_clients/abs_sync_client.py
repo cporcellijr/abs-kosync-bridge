@@ -39,7 +39,7 @@ class ABSSyncClient(SyncClient):
         abs_pct = self._abs_to_percentage(abs_ts, book.transcript_file)
         if abs_ts > 0 and abs_pct is None:
             # Invalid transcript
-            logger.warning("⚠️ Unable to convert ABS timestamp to percentage - invalid transcript?")
+            logger.debug("⚠️ Unable to convert ABS timestamp to percentage - invalid transcript?")
             return None
 
         # Get previous ABS state values

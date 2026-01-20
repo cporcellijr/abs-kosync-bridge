@@ -367,10 +367,48 @@ class AudioTranscriber:
             # Don't delete cache dir - allows resume on retry
             raise e
 
+    def _is_low_quality_text(self, text: str, min_word_count: int = 3) -> bool:
+        """
+        Check if transcript segment text is low-quality for sync purposes.
+        
+        Low quality includes:
+        - Very short segments (< min_word_count words)
+        - Audio markers like [Music], [Applause], etc.
+        - Empty or whitespace-only text
+        - Single-word utterances (often "um", "uh", chapter numbers)
+        
+        Returns:
+            True if the text is considered low quality
+        """
+        if not text:
+            return True
+        
+        cleaned = text.strip()
+        if not cleaned:
+            return True
+        
+        # Check for common audio markers (case-insensitive)
+        markers = ['[music]', '[applause]', '[laughter]', '[silence]', '[sound]', 
+                   '[inaudible]', '[noise]', '[background]', '♪', '🎵']
+        lower_text = cleaned.lower()
+        for marker in markers:
+            if marker in lower_text:
+                return True
+        
+        # Check word count
+        words = cleaned.split()
+        if len(words) < min_word_count:
+            return True
+        
+        return False
+
     def get_text_at_time(self, transcript_path, timestamp):
         """
         Get text context around a specific timestamp.
         Returns ~800 characters of context for better matching.
+        
+        Uses look-ahead/look-behind when the exact timestamp falls on
+        low-quality content (pauses, music, short utterances).
         """
         try:
             data = self._get_cached_transcript(transcript_path)
@@ -395,6 +433,21 @@ class AudioTranscriber:
 
             if target_idx == -1:
                 return None
+
+            # Look-ahead/look-behind: If current segment has low-quality text,
+            # search nearby segments for better content
+            original_idx = target_idx
+            if self._is_low_quality_text(data[target_idx]['text']):
+                # Prefer forward (look-ahead) slightly, but also check behind
+                # Offsets in segments: try +1, +2, -1, +3, -2, +4, -3, etc.
+                offsets = [1, 2, -1, 3, -2, 4, -3, 5]
+                for offset in offsets:
+                    alt_idx = target_idx + offset
+                    if 0 <= alt_idx < len(data):
+                        if not self._is_low_quality_text(data[alt_idx]['text']):
+                            logger.debug(f"🔍 Look-ahead: Skipped low-quality segment at {data[original_idx]['start']:.1f}s, using segment at {data[alt_idx]['start']:.1f}s instead")
+                            target_idx = alt_idx
+                            break
 
             # Gather surrounding context (~800 chars)
             segments_indices = [target_idx]

@@ -26,7 +26,7 @@ class StorytellerSyncClient(SyncClient):
         st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
 
         if st_pct is None:
-            logger.warning("⚠️ Storyteller percentage is None - returning None for service state")
+            logger.debug("⚠️ Storyteller percentage is None - returning None for service state")
             return None
 
         # Get previous Storyteller state

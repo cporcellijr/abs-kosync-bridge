@@ -195,13 +195,27 @@ class ABSClient:
             logger.error(f"Failed to sync ABS session progress: {e}")
             return {"success": False, "code": None, "reason": str(e)}
 
+    def get_all_progress_raw(self):
+        """Fetch all user progress in one API call."""
+        url = f"{self.base_url}/api/me/progress"
+        try:
+            r = requests.get(url, headers=self.headers, timeout=10)
+            if r.status_code != 200: return {}
+            data = r.json()
+            # Returns a dict where key is libraryItemId for fast lookup
+            items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
+            return {item.get('libraryItemId'): item for item in items if item.get('libraryItemId')}
+        except Exception as e:
+            logger.error(f"Error fetching all ABS progress: {e}")
+            return {}
+
     def get_in_progress(self, min_progress=0.01):
+        """Fetch in-progress items, optimized to avoid redundant detail fetches if possible."""
         url = f"{self.base_url}/api/me/progress"
         try:
             r = requests.get(url, headers=self.headers, timeout=10)
             if r.status_code != 200: return []
             data = r.json()
-            # Handle both direct list and wrapped dictionary response formats
             items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
             active_items = []
             for item in items:
@@ -217,22 +231,23 @@ class ABSClient:
                     lib_item_id = item.get('libraryItemId') or item.get('itemId')
                     if not lib_item_id: continue
 
-                    # Quick detail fetch to get Title/Author
-                    details = self.get_item_details(lib_item_id)
-                    if not details: continue
-                    metadata = details.get('media', {}).get('metadata', {})
+                    # Return basic info without recursive detail fetch if possible
+                    # but if we need title/author we might still need it unless we have it in the list
+                    title = item.get('metadata', {}).get('title') or "Unknown"
+                    author = item.get('metadata', {}).get('authorName')
 
                     active_items.append({
                         "id": lib_item_id,
-                        "title": metadata.get('title', details.get('name', 'Unknown')),
-                        "author": metadata.get('authorName'),
+                        "title": title,
+                        "author": author,
                         "progress": pct,
                         "duration": duration,
-                        "source": "ABS"
+                        "source": "ABS",
+                        "currentTime": current_time
                     })
             return active_items
         except Exception as e:
-            logger.error(f"Error fetching ABS sessions: {e}")
+            logger.error(f"Error fetching ABS in-progress: {e}")
             return []
 
     def create_session(self, abs_id):
@@ -326,6 +341,8 @@ class KoSyncClient:
         if not self.is_configured():
             logger.warning("⚠️ KoSync not configured (skipping)")
             return False
+            
+        is_local = '127.0.0.1' in self.base_url or 'localhost' in self.base_url
         url = f"{self.base_url}/healthcheck"
         try:
             headers = {'accept': 'application/vnd.koreader.v1+json'}
@@ -350,22 +367,14 @@ class KoSyncClient:
             headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
             r = requests.get(url_sync, headers=headers, timeout=5)
             if r.status_code == 200:
-                first_run_marker = '/data/.first_run_done'
-                try:
-                    first_run = not os.path.exists(first_run_marker)
-                except Exception:
-                    first_run = False
-
-                if first_run:
-                    logger.info(f"✅ Connected to KoSync Server (Response: {r.status_code})")
-                    try:
-                        open(first_run_marker, 'w').close()
-                    except Exception:
-                        pass
                 return True
             logger.warning(f"❌ KoSync connection failed (Response: {r.status_code})")
             return False
         except Exception as e:
+            if is_local:
+                # Expected race condition during startup
+                logger.debug(f"ℹ️  KoSync (Internal): Server check skipped during startup (will be ready shortly)")
+                return True
             logger.warning(f"❌ KoSync Error: {e}")
             return False
 

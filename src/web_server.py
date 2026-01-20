@@ -10,8 +10,10 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from urllib.parse import urljoin
+from functools import wraps
+import hashlib
 
 import requests
 import schedule
@@ -423,28 +425,37 @@ def monitor_readaloud_files():
 def sync_daemon():
     """Background sync daemon running in a separate thread."""
     try:
-        # Setup schedule for sync operations
-        sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
-        schedule.every(sync_period).minutes.do(manager.sync_cycle)
-        schedule.every(1).minutes.do(manager.check_pending_jobs)
-
-        logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
-
-        # Run initial sync cycle
-        try:
-            manager.sync_cycle()
-        except Exception as e:
-            logger.error(f"Initial sync cycle failed: {e}")
+        # Sub-minute polling requires abandoning the 'schedule' library for the main loop
+        last_sync = 0
+        
+        logger.info(f"🔄 Sync daemon started")
 
         # Main daemon loop
         while True:
             try:
-                # logger.debug("Running pending schedule jobs...")
-                schedule.run_pending()
-                time.sleep(30)  # Check every 30 seconds
+                # Reload interval dynamically (allows hot-swap)
+                try:
+                    sync_period_mins = float(os.environ.get("SYNC_PERIOD_MINS", "5"))
+                except ValueError:
+                    sync_period_mins = 5.0
+                    
+                # Calculate sleep time
+                interval_seconds = sync_period_mins * 60
+                
+                now = time.time()
+                if now - last_sync >= interval_seconds:
+                    manager.sync_cycle()
+                    last_sync = time.time()
+                
+                # Still check pending jobs (transcriptions etc) frequently
+                manager.check_pending_jobs()
+                
+                # Shorter sleep to be responsive
+                time.sleep(5) 
+                
             except Exception as e:
                 logger.error(f"Sync daemon error: {e}")
-                time.sleep(60)  # Wait longer on error
+                time.sleep(30)  # Wait longer on error
 
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
@@ -1402,6 +1413,168 @@ def api_logs_live():
 def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
+
+# ---------------- KOSYNC API (Integrated Server) ----------------
+
+def kosync_auth_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # KOReader sends x-auth-user and x-auth-key
+        user = request.headers.get('x-auth-user')
+        key = request.headers.get('x-auth-key')
+        
+        expected_user = os.environ.get("KOSYNC_USER")
+        expected_password = os.environ.get("KOSYNC_KEY")
+        
+        if not expected_user or not expected_password:
+            logger.error("KOSync Integrated Server: Credentials not configured in settings")
+            return jsonify({"error": "Server not configured"}), 500
+            
+        # KOReader expectation: key = md5(password)
+        # We also support literal key matching if the user already stored the hash
+        expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
+        
+        if user and expected_user and user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
+            return f(*args, **kwargs)
+            
+        logger.warning(f"KOSync Integrated Server: Unauthorized access attempt from {request.remote_addr} (user: {user})")
+        return jsonify({"error": "Unauthorized"}), 401
+    return decorated_function
+
+@app.after_request
+def log_request_info(response):
+    # Filter out health check noise (root path 200 OK)
+    if request.path == '/' and response.status_code == 200:
+        return response
+        
+    # Filter out expected 404s for KOSync progress (books not yet in KOSync)
+    if 'syncs/progress' in request.path and response.status_code == 404:
+        return response
+
+    # Filter out log viewing noise
+    if request.path.startswith('/logs') or request.path.startswith('/api/logs'):
+        return response
+
+    # Filter out static assets (favicons, images) to keep logs clean
+    if request.path.startswith('/static/'):
+        return response
+
+    # Filter out settings page access noise if desired (optional, but requested implicitly by "clean up")
+    if request.path.startswith('/settings') and response.status_code < 400:
+        return response
+
+    # Move successful KOSync progress checks to DEBUG (too noisy at INFO during reading)
+    if 'syncs/progress' in request.path and response.status_code == 200:
+        logger.debug(f"🌍 HTTP {request.method} {request.path} - {response.status_code}")
+        return response
+
+    logger.info(f"🌍 HTTP {request.method} {request.path} - {response.status_code}")
+    return response
+
+@app.route('/healthcheck')
+@app.route('/koreader/healthcheck')
+def kosync_healthcheck():
+    """KOSync connectivity check"""
+    return "OK", 200
+
+@app.route('/users/auth', methods=['GET'])
+@app.route('/koreader/users/auth', methods=['GET'])
+def kosync_users_auth():
+    """Stub for KOReader auth check (some versions use this)"""
+    return jsonify({"authorized": True}), 200
+
+@app.route('/users/create', methods=['POST'])
+@app.route('/koreader/users/create', methods=['POST'])
+def kosync_users_create():
+    """Stub for KOReader user registration check"""
+    # Simply accept any "create user" request as valid
+    return jsonify({"username": os.environ.get("KOSYNC_USER", "user")}), 201
+
+@app.route('/users/login', methods=['POST'])
+@app.route('/koreader/users/login', methods=['POST'])
+def kosync_users_login():
+    """Stub for KOReader login check"""
+    # Accept login and return the key as the token
+    # KOReader might send creds here, but we just confirm "Yes, you are logged in"
+    # We trust the client will send x-auth-user/key in subsequent requests
+    return jsonify({
+        "username": os.environ.get("KOSYNC_USER", "user"),
+        "active": True,
+        "token": os.environ.get("KOSYNC_KEY", "") # Some clients might want a token
+    }), 200
+
+@app.route('/syncs/progress/<doc_id>', methods=['GET'])
+@app.route('/koreader/syncs/progress/<doc_id>', methods=['GET'])
+@kosync_auth_required
+def kosync_get_progress(doc_id):
+    """Fetch progress for a specific document (KOReader format)"""
+    with database_service.get_session() as session:
+        from src.db.models import Book, State
+        # Find book by kosync_doc_id
+        book = session.query(Book).filter(Book.kosync_doc_id == doc_id).first()
+        if not book:
+            return jsonify({}), 404
+            
+        # Get latest state (preference for 'kosync' or most recent)
+        states = session.query(State).filter(State.abs_id == book.abs_id).all()
+        if not states:
+            return jsonify({}), 404
+            
+        # Find the most recent update across all clients for this book
+        # to provide the most unified experience
+        latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
+        
+        return jsonify({
+            "document": doc_id,
+            "percentage": latest_state.percentage or 0,
+            "progress": latest_state.xpath or "",
+            "timestamp": int(latest_state.last_updated or time.time()),
+            "device": "abs-kosync-bridge",
+            "device_id": "abs-kosync-bridge"
+        })
+
+@app.route('/syncs/progress', methods=['PUT'])
+@app.route('/koreader/syncs/progress', methods=['PUT'])
+@kosync_auth_required
+def kosync_put_progress():
+    """Receive progress update from KOReader"""
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data"}), 400
+        
+    doc_id = data.get('document')
+    percentage = data.get('percentage')
+    xpath = data.get('progress') # KOReader calls the detail string 'progress'
+    
+    if not doc_id:
+        return jsonify({"error": "Missing document ID"}), 400
+        
+    # Find book mapping
+    book = database_service.get_book_by_kosync_id(doc_id)
+    if not book:
+        # We don't error out here because KOReader might sync books we don't track
+        # just return 204 No Content or 200
+        return jsonify({"status": "ignored"}), 200
+        
+    # Update state in DB
+    from src.db.models import State
+    new_state = State(
+        abs_id=book.abs_id,
+        client_name='kosync',
+        last_updated=time.time(),
+        percentage=percentage,
+        xpath=xpath
+    )
+    database_service.save_state(new_state)
+    
+    logger.info(f"📥 Received KOSync push for '{sanitize_log_data(book.abs_title)}' ({percentage}%) from {data.get('device_id')}")
+    
+    # Trigger IMMEDIATE sync cycle for this book
+    # Only if it came from an external device (KOReader), not ourselves (abs-sync-bot)
+    if data.get('device_id') != 'abs-sync-bot':
+        threading.Thread(target=manager.sync_cycle, kwargs={"target_abs_id": book.abs_id}, daemon=True).start()
+    
+    return "", 204
 
 if __name__ == '__main__':
     # Initialize dependencies for production mode

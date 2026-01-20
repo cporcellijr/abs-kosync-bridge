@@ -489,10 +489,10 @@
             </div>
 
             <!-- KOSync Server (Optional) -->
-            <div class="settings-section">
+            <div class="settings-section section-highlight" style="border-color: rgba(102, 126, 234, 0.3);">
                 {% set kosync_enabled = get_val('KOSYNC_SERVER') != '' %}
                 <div class="section-header">
-                    <h3>KOSync Server</h3>
+                    <h3 class="text-primary">KOSync Integration</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -504,17 +504,57 @@
                     </div>
                 </div>
                 <div id="kosync_body" class="section-body {% if not kosync_enabled %}collapsed{% endif %}">
+
+                    <!-- Integrated Server Info -->
+                    <!-- Integrated Server Info -->
+                    <div class="full-width"
+                        style="background: rgba(102, 126, 234, 0.1); padding: 15px; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); margin-bottom: 5px;">
+                        <h4 style="margin-bottom: 12px; color: #fff; font-size: 14px;">🚀 Built-in KOSync Server
+                            Configuration</h4>
+
+                        <div style="margin-bottom: 15px;">
+                            <label style="display:block; font-size: 12px; color: #aaa; margin-bottom: 4px;">1. Public
+                                URL (Put this in KOReader on your device)</label>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="public_kosync_url" readonly value="" onclick="this.select()"
+                                    style="cursor: pointer; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.4);">
+                                <button type="button" class="btn" onclick="copyPublicUrl()"
+                                    title="Copy to clipboard">📋</button>
+                            </div>
+                            <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Detected from
+                                your browser. Append path (e.g. /koreader) if using a proxy.</div>
+                        </div>
+
+                        <div>
+                            <label style="display:block; font-size: 12px; color: #aaa; margin-bottom: 4px;">2. Internal
+                                Bridge Connection (Set this below)</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <code
+                                    style="font-family: monospace; color: #fff; background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 4px;">http://127.0.0.1:5757</code>
+                                <button type="button" class="btn btn-sm" onclick="useIntegratedServer()"
+                                    style="white-space: nowrap; font-size: 12px; padding: 4px 10px;">Set to
+                                    Localhost</button>
+                            </div>
+                            <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">The bridge
+                                connects to itself locally to read progress.</div>
+                        </div>
+                    </div>
+
                     <div class="form-group full-width">
-                        <label>Server URL</label>
-                        <input type="text" name="KOSYNC_SERVER" value="{{ get_val('KOSYNC_SERVER') }}">
+                        <label>Internal Target URL (For Bridge)</label>
+                        <input type="text" name="KOSYNC_SERVER" id="kosync_server_input"
+                            value="{{ get_val('KOSYNC_SERVER') }}">
+                        <div class="help-text">Keep as 127.0.0.1 if using built-in server. Only change if using an
+                            external KOSync provider.</div>
                     </div>
                     <div class="form-group">
                         <label>Username</label>
                         <input type="text" name="KOSYNC_USER" value="{{ get_val('KOSYNC_USER') }}">
                     </div>
                     <div class="form-group">
-                        <label>Password (or existing hash)</label>
+                        <label>Password</label>
                         <input type="password" name="KOSYNC_KEY" value="{{ get_val('KOSYNC_KEY') }}">
+                        <div class="help-text">This will be your KOSync password in KOReader.</div>
                     </div>
                     <div class="form-group">
                         <label>Hash Method</label>
@@ -724,6 +764,37 @@
                 // For now, we prefer keeping values in UI so user doesn't lose config by accidental toggle
             }
         }
+
+        function useIntegratedServer() {
+            const input = document.getElementById('kosync_server_input');
+            input.value = "http://127.0.0.1:5757";
+            // Highlight to show change
+            input.style.borderColor = "#667eea";
+            setTimeout(() => input.style.borderColor = "", 1000);
+        }
+
+        function copyPublicUrl() {
+            const copyText = document.getElementById("public_kosync_url");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(copyText.value);
+            // Visual feedback
+            const originalBg = copyText.style.backgroundColor;
+            copyText.style.backgroundColor = "rgba(102, 126, 234, 0.3)";
+            setTimeout(() => copyText.style.backgroundColor = originalBg, 200);
+        }
+
+        // Auto-calculate public URL on load
+        document.addEventListener('DOMContentLoaded', function () {
+            const protocol = window.location.protocol;
+            const host = window.location.host; // includes port if present
+            // We strip /settings if present, or just use origin
+            // But window.location.origin is safest base
+            let baseUrl = window.location.origin;
+
+            // Try to be smart mostly for display
+            document.getElementById('public_kosync_url').value = baseUrl + "/";
+        });
     </script>
 </body>
 

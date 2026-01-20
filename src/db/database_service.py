@@ -182,6 +182,14 @@ class DatabaseService:
                 session.expunge(book)  # Detach from session
             return book
 
+    def get_book_by_kosync_id(self, kosync_id: str) -> Optional[Book]:
+        """Get a book by its KoSync document ID."""
+        with self.get_session() as session:
+            book = session.query(Book).filter(Book.kosync_doc_id == kosync_id).first()
+            if book:
+                session.expunge(book)
+            return book
+
     def get_all_books(self) -> List[Book]:
         """Get all books as model objects."""
         with self.get_session() as session:

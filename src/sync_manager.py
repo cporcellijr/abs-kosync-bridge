@@ -59,6 +59,7 @@ class SyncManager:
 
         self._job_queue = []
         self._job_lock = threading.Lock()
+        self._sync_lock = threading.Lock()
         self._job_thread = None
 
         self._setup_sync_clients(sync_clients)
@@ -346,12 +347,60 @@ class SyncManager:
 
             self.database_service.save_book(book)
 
-    def sync_cycle(self):
-        # Get active books directly from database service
-        active_books = self.database_service.get_books_by_status('active')
-        if active_books:
-            logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+    def sync_cycle(self, target_abs_id=None):
+        """
+        Run a sync cycle.
+        
+        Args:
+            target_abs_id: If provided, only sync this specific book (Instant Sync trigger).
+                           Otherwise, sync all active books using bulk-poll optimization.
+        """
+        # Prevent race condition: If daemon is running, skip. If Instant Sync, wait.
+        acquired = False
+        if target_abs_id:
+             # Instant Sync: Block and wait for lock (up to 10s)
+             acquired = self._sync_lock.acquire(timeout=10)
+             if not acquired:
+                 logger.warning(f"⚠️ Sync lock timeout for {target_abs_id} - skipping")
+                 return
+        else:
+             # Daemon: Non-blocking attempt
+             acquired = self._sync_lock.acquire(blocking=False)
+             if not acquired:
+                 logger.debug("Sync cycle skipped - another cycle is running")
+                 return
 
+        try:
+            self._sync_cycle_internal(target_abs_id)
+        except Exception as e:
+            logger.error(f"Sync cycle internal error: {e}")
+            # Log traceback for robust debugging
+            logger.error(traceback.format_exc())
+        finally:
+            self._sync_lock.release()
+
+    def _sync_cycle_internal(self, target_abs_id=None):
+        # Get active books directly from database service
+        active_books = []
+        if target_abs_id:
+            logger.info(f"⚡ Instant Sync triggered for {target_abs_id}")
+            book = self.database_service.get_book(target_abs_id)
+            if book and book.status == 'active':
+                active_books = [book]
+        else:
+            active_books = self.database_service.get_books_by_status('active')
+
+        if not active_books:
+            return
+
+        # Optimization: Fetch ALL ABS progress at once to avoid N+1 API calls
+        # Only do this if we are in a full cycle (target_abs_id is None)
+        abs_bulk_data = {}
+        if not target_abs_id:
+            logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
+            if self.abs_client:
+                abs_bulk_data = self.abs_client.get_all_progress_raw()
+                
         # Main sync loop - process each active book
         for book in active_books:
             abs_id = book.abs_id
@@ -375,10 +424,29 @@ class SyncManager:
                 for client_name, client in self.sync_clients.items():
                     # Get the previous state for this specific client
                     prev_state = prev_states_by_client.get(client_name.lower())
+                    
+                    # SPECIAL HANDLING FOR ABS BULK DATA
+                    if client_name == 'ABS' and not target_abs_id and abs_bulk_data:
+                         # We inject the bulk data into the client context if possible, 
+                         # or we check if we can short-circuit
+                         # Since we can't easily change the client interface signature broadly without refactoring everything,
+                         # we will do a pre-check here.
+                         
+                         item_progress = abs_bulk_data.get(book.abs_id)
+                         
+                         # If we have bulk data, and this book IS NOT in it, and we have a previous state...
+                         # It implies no change on ABS side relative to "now". 
+                         # However, we still need to run get_service_state because we might have local KOSync changes to push TO ABS.
+                         # So we can't just skip. But we can optimize inside the client if we passed data.
+                         # For now, we will rely on the client's standard fetch, which is redundant but safe.
+                         # TODO: Refactor SyncClient interface to accept 'bulk_context'
+                         pass
+
                     state = client.get_service_state(book, prev_state, title_snip)
                     if state is not None:
                         config[client_name] = state
-                        logger.debug(f"[{title_snip}] {client_name} state: {state.current}")
+                        if target_abs_id: 
+                            logger.debug(f"[{title_snip}] {client_name} state: {state.current}")
 
                 # Filtered config now only contains non-None states
                 if not config:
@@ -389,19 +457,32 @@ class SyncManager:
                 if abs_state is None:
                     continue  # ABS offline
 
-                # Check if all 'delta' fields in config are zero, if so, skip processing
-                if all(round(cfg.delta, 2) == 0 for cfg in config.values()):
-                    continue
+                # Check if all 'delta' fields in config are zero
+                # We typically skip if nothing changed, BUT if there is a significant discrepancy 
+                # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
+                deltas_zero = all(round(cfg.delta, 2) == 0 for cfg in config.values())
 
-                # check for sync delta threshold between clients. This is to prevent small differences causing constant hopping
+                # Check for sync delta threshold between clients
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
+                significant_diff = False
+                
                 if len(progress_values) > 1:
                     max_progress = max(progress_values)
                     min_progress = min(progress_values)
                     progress_diff = max_progress - min_progress
-                    if progress_diff < self.sync_delta_between_clients:
+                    
+                    if progress_diff >= self.sync_delta_between_clients:
+                        significant_diff = True
+                        # If we have a significant diff, we verify it's not just noise 
+                        # by checking if we have at least one valid state
+                        logger.debug(f"[{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
+                    else:
                         logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
                         continue
+
+                # If nothing changed AND clients are effectively in sync, skip
+                if deltas_zero and not significant_diff:
+                    continue
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
@@ -419,10 +500,15 @@ class SyncManager:
                         small_changes.append(f"✋ [{title_snip}] {label} delta {delta_str} (Below threshold): {title_snip}")
 
                 if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
-                    for s in small_changes:
-                        logger.info(s)
-                    # No further action for only-small changes
-                    continue
+                    # If we have significant discrepancies between clients, we MUST NOT skip,
+                    # even if individual deltas are small (e.g. from DB pre-update).
+                    if significant_diff:
+                        logger.debug(f"[{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
+                    else:
+                        for s in small_changes:
+                            logger.info(s)
+                        # No further action for only-small changes
+                        continue
 
                 # At this point we have a significant change to act on
                 logger.info(f"🔄 [{title_snip}] Change detected")

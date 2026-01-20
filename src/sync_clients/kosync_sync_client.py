@@ -29,7 +29,7 @@ class KoSyncSyncClient(SyncClient):
             logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 
         if ko_pct is None:
-            logger.warning("⚠️ KoSync percentage is None - returning None for service state")
+            logger.debug("⚠️ KoSync percentage is None - returning None for service state")
             return None
 
         # Get previous KoSync state
