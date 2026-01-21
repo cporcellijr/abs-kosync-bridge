@@ -22,6 +22,7 @@ from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
 
 from src.db.database_service import DatabaseService
+from src.db.models import State, Book
 from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
 from src.utils.di_container import Container
