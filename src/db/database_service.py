@@ -8,7 +8,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -450,6 +451,104 @@ class DatabaseService:
 
             return stats
 
+    def get_kosync_document(self, document_hash: str) -> Optional[KosyncDocument]:
+        """Get a KOSync document by its hash."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+    def save_kosync_document(self, doc: KosyncDocument) -> KosyncDocument:
+        """Save or update a KOSync document."""
+        with self.get_session() as session:
+            doc.last_updated = datetime.utcnow()
+            merged = session.merge(doc)
+            session.commit()
+            session.refresh(merged)
+            session.expunge(merged)
+            return merged
+
+    def get_all_kosync_documents(self) -> List[KosyncDocument]:
+        """Get all KOSync documents."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).order_by(
+                KosyncDocument.last_updated.desc()
+            ).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def get_unlinked_kosync_documents(self) -> List[KosyncDocument]:
+        """Get KOSync documents not linked to any ABS book."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id.is_(None)
+            ).order_by(KosyncDocument.last_updated.desc()).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def get_linked_kosync_documents(self) -> List[KosyncDocument]:
+        """Get KOSync documents that are linked to an ABS book."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id.isnot(None)
+            ).order_by(KosyncDocument.last_updated.desc()).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def link_kosync_document(self, document_hash: str, abs_id: str) -> bool:
+        """Link a KOSync document to an ABS book."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                doc.linked_abs_id = abs_id
+                doc.last_updated = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    def unlink_kosync_document(self, document_hash: str) -> bool:
+        """Remove the ABS book link from a KOSync document."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                doc.linked_abs_id = None
+                doc.last_updated = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    def delete_kosync_document(self, document_hash: str) -> bool:
+        """Delete a KOSync document."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                session.delete(doc)
+                session.commit()
+                return True
+            return False
+
+    def get_kosync_document_by_linked_book(self, abs_id: str) -> Optional[KosyncDocument]:
+        """Get a KOSync document linked to a specific ABS book."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id == abs_id
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
 
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
@@ -598,4 +697,4 @@ class DatabaseMigrator:
             return False  # Already have data, no migration needed
 
         # Check if JSON files exist
-        return (self.json_db_path.exists() or self.json_state_path.exists())
+

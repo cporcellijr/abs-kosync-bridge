@@ -20,6 +20,7 @@ import schedule
 from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
+from src.db.models import Book, State, KosyncDocument
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
@@ -982,6 +983,13 @@ def match():
 
         database_service.save_book(book)
 
+        # Link any existing KosyncDocument to this book
+        if book.kosync_doc_id:
+            existing_doc = database_service.get_kosync_document(book.kosync_doc_id)
+            if existing_doc and not existing_doc.linked_abs_id:
+                database_service.link_kosync_document(book.kosync_doc_id, book.abs_id)
+                logger.info(f"Linked existing KosyncDocument to book '{book.abs_title}'")
+
         # Trigger Hardcover Automatch
         hardcover_sync_client = container.sync_clients().get('Hardcover')
         if hardcover_sync_client and hardcover_sync_client.is_configured():
@@ -1068,6 +1076,13 @@ def batch_match():
                 )
 
                 database_service.save_book(book)
+
+                # Link any existing KosyncDocument to this book
+                if book.kosync_doc_id:
+                    existing_doc = database_service.get_kosync_document(book.kosync_doc_id)
+                    if existing_doc and not existing_doc.linked_abs_id:
+                        database_service.link_kosync_document(book.kosync_doc_id, book.abs_id)
+                        logger.info(f"Linked existing KosyncDocument to book '{book.abs_title}'")
 
                 # Trigger Hardcover Automatch
                 hardcover_sync_client = container.sync_clients().get('Hardcover')
@@ -1507,74 +1522,211 @@ def kosync_users_login():
 @app.route('/koreader/syncs/progress/<doc_id>', methods=['GET'])
 @kosync_auth_required
 def kosync_get_progress(doc_id):
-    """Fetch progress for a specific document (KOReader format)"""
-    with database_service.get_session() as session:
-        from src.db.models import Book, State
-        # Find book by kosync_doc_id
-        book = session.query(Book).filter(Book.kosync_doc_id == doc_id).first()
-        if not book:
-            return jsonify({}), 404
-            
-        # Get latest state (preference for 'kosync' or most recent)
-        states = session.query(State).filter(State.abs_id == book.abs_id).all()
-        if not states:
-            return jsonify({}), 404
-            
-        # Find the most recent update across all clients for this book
-        # to provide the most unified experience
-        latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
-        
+    """
+    Fetch progress for a specific document.
+    Returns 502 (not 404) if document not found, per kosync-dotnet spec.
+    """
+    # First check the kosync_documents table (primary source)
+    kosync_doc = database_service.get_kosync_document(doc_id)
+    
+    if kosync_doc:
+        # Return full response matching kosync-dotnet format
         return jsonify({
-            "document": doc_id,
-            "percentage": latest_state.percentage or 0,
-            "progress": latest_state.xpath or "",
-            "timestamp": int(latest_state.last_updated or time.time()),
-            "device": "abs-kosync-bridge",
-            "device_id": "abs-kosync-bridge"
-        })
+            "device": kosync_doc.device or "",
+            "device_id": kosync_doc.device_id or "",
+            "document": kosync_doc.document_hash,
+            "percentage": float(kosync_doc.percentage) if kosync_doc.percentage else 0,
+            "progress": kosync_doc.progress or "",
+            "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else 0
+        }), 200
+    
+    # Fallback: Check if there's a mapped book with State data
+    # (for backwards compatibility with existing mappings)
+    book = database_service.get_book_by_kosync_id(doc_id)
+    if book:
+        states = database_service.get_states_for_book(book.abs_id)
+        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
+        if kosync_state:
+            return jsonify({
+                "device": "abs-kosync-bridge",
+                "device_id": "abs-kosync-bridge",
+                "document": doc_id,
+                "percentage": float(kosync_state.percentage) if kosync_state.percentage else 0,
+                "progress": kosync_state.xpath or "",
+                "timestamp": int(kosync_state.last_updated) if kosync_state.last_updated else 0
+            }), 200
+    
+    # Document not found - return 502 per kosync-dotnet spec (NOT 404!)
+    logger.debug(f"KOSync: Document not found: {doc_id[:8]}...")
+    return jsonify({"message": "Document not found on server"}), 502
 
 @app.route('/syncs/progress', methods=['PUT'])
 @app.route('/koreader/syncs/progress', methods=['PUT'])
 @kosync_auth_required
 def kosync_put_progress():
-    """Receive progress update from KOReader"""
+    """
+    Receive progress update from KOReader.
+    Stores ALL documents, whether mapped to ABS or not.
+    Mirrors kosync-dotnet SyncController.SyncProgress behavior.
+    """
     data = request.json
     if not data:
         return jsonify({"error": "No data"}), 400
-        
-    doc_id = data.get('document')
-    percentage = data.get('percentage')
-    xpath = data.get('progress') # KOReader calls the detail string 'progress'
     
-    if not doc_id:
+    doc_hash = data.get('document')
+    if not doc_hash:
         return jsonify({"error": "Missing document ID"}), 400
+    
+    percentage = data.get('percentage', 0)
+    progress = data.get('progress', '')  # XPath string
+    device = data.get('device', '')
+    device_id = data.get('device_id', '')
+    
+    now = datetime.utcnow()
+    
+    # Get existing document or create new one
+    kosync_doc = database_service.get_kosync_document(doc_hash)
+    
+    # Implement "furthest progress wins" if enabled
+    furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
+    if furthest_wins and kosync_doc and kosync_doc.percentage:
+        if float(percentage) < float(kosync_doc.percentage):
+            # Reject backwards progress - return current state
+            logger.debug(f"KOSync: Rejecting backwards progress {percentage:.4f} < {float(kosync_doc.percentage):.4f} for {doc_hash[:8]}")
+            return jsonify({
+                "document": doc_hash,
+                "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(time.time())
+            }), 200
+    
+    if kosync_doc is None:
+        # Create new document (auto-create like kosync-dotnet)
+        kosync_doc = KosyncDocument(
+            document_hash=doc_hash,
+            progress=progress,
+            percentage=percentage,
+            device=device,
+            device_id=device_id,
+            timestamp=now
+        )
+        logger.info(f"KOSync: New document tracked: {doc_hash[:8]}... from device '{device}'")
+    else:
+        # Update existing document
+        kosync_doc.progress = progress
+        kosync_doc.percentage = percentage
+        kosync_doc.device = device
+        kosync_doc.device_id = device_id
+        kosync_doc.timestamp = now
+        logger.debug(f"KOSync: Syncing document: {doc_hash[:8]}... ({percentage:.2f}%) from device '{device}'")
+    
+    # Save the kosync document
+    database_service.save_kosync_document(kosync_doc)
+    
+    # Also update State table if this document is linked to an ABS book
+    linked_book = None
+    if kosync_doc.linked_abs_id:
+        linked_book = database_service.get_book(kosync_doc.linked_abs_id)
+    else:
+        # Check if there's a book with this kosync_doc_id
+        linked_book = database_service.get_book_by_kosync_id(doc_hash)
+        # If found, link the document for future reference
+        if linked_book:
+            database_service.link_kosync_document(doc_hash, linked_book.abs_id)
+    
+    if linked_book:
+        # Update the State table for bridge sync functionality
+        state = State(
+            abs_id=linked_book.abs_id,
+            client_name='kosync',
+            last_updated=time.time(),
+            percentage=float(percentage),
+            xpath=progress
+        )
+        database_service.save_state(state)
+        logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
+    
+    # Response format matches kosync-dotnet exactly
+    return jsonify({
+        "document": doc_hash,
+        "timestamp": int(now.timestamp())
+    }), 200
+# ============== KOSync Document Management API ==============
+
+@app.route('/api/kosync-documents', methods=['GET'])
+def api_get_kosync_documents():
+    """Get all KOSync documents with their link status."""
+    docs = database_service.get_all_kosync_documents()
+    result = []
+    for doc in docs:
+        linked_book = None
+        if doc.linked_abs_id:
+            linked_book = database_service.get_book(doc.linked_abs_id)
         
-    # Find book mapping
-    book = database_service.get_book_by_kosync_id(doc_id)
+        result.append({
+            'document_hash': doc.document_hash,
+            'progress': doc.progress,
+            'percentage': float(doc.percentage) if doc.percentage else 0,
+            'device': doc.device,
+            'device_id': doc.device_id,
+            'timestamp': doc.timestamp.isoformat() if doc.timestamp else None,
+            'first_seen': doc.first_seen.isoformat() if doc.first_seen else None,
+            'last_updated': doc.last_updated.isoformat() if doc.last_updated else None,
+            'linked_abs_id': doc.linked_abs_id,
+            'linked_book_title': linked_book.abs_title if linked_book else None
+        })
+    
+    return jsonify({
+        'documents': result,
+        'total': len(result),
+        'linked': sum(1 for d in result if d['linked_abs_id']),
+        'unlinked': sum(1 for d in result if not d['linked_abs_id'])
+    })
+
+@app.route('/api/kosync-documents/<doc_hash>/link', methods=['POST'])
+def api_link_kosync_document(doc_hash):
+    """Link a KOSync document to an ABS book."""
+    data = request.json
+    if not data or 'abs_id' not in data:
+        return jsonify({'error': 'Missing abs_id'}), 400
+    
+    abs_id = data['abs_id']
+    
+    # Verify the book exists
+    book = database_service.get_book(abs_id)
     if not book:
-        # We don't error out here because KOReader might sync books we don't track
-        # just return 204 No Content or 200
-        return jsonify({"status": "ignored"}), 200
+        return jsonify({'error': 'Book not found'}), 404
+    
+    # Verify the document exists
+    doc = database_service.get_kosync_document(doc_hash)
+    if not doc:
+        return jsonify({'error': 'KOSync document not found'}), 404
+    
+    success = database_service.link_kosync_document(doc_hash, abs_id)
+    if success:
+        # Also update the book's kosync_doc_id if not set
+        if not book.kosync_doc_id:
+            book.kosync_doc_id = doc_hash
+            database_service.save_book(book)
         
-    # Update state in DB
-    from src.db.models import State
-    new_state = State(
-        abs_id=book.abs_id,
-        client_name='kosync',
-        last_updated=time.time(),
-        percentage=percentage,
-        xpath=xpath
-    )
-    database_service.save_state(new_state)
+        return jsonify({'success': True, 'message': f'Linked to {book.abs_title}'})
     
-    logger.info(f"📥 Received KOSync push for '{sanitize_log_data(book.abs_title)}' ({percentage}%) from {data.get('device_id')}")
-    
-    # Trigger IMMEDIATE sync cycle for this book
-    # Only if it came from an external device (KOReader), not ourselves (abs-sync-bot)
-    if data.get('device_id') != 'abs-sync-bot':
-        threading.Thread(target=manager.sync_cycle, kwargs={"target_abs_id": book.abs_id}, daemon=True).start()
-    
-    return "", 204
+    return jsonify({'error': 'Failed to link document'}), 500
+
+@app.route('/api/kosync-documents/<doc_hash>/unlink', methods=['POST'])
+def api_unlink_kosync_document(doc_hash):
+    """Remove the ABS book link from a KOSync document."""
+    success = database_service.unlink_kosync_document(doc_hash)
+    if success:
+        return jsonify({'success': True, 'message': 'Document unlinked'})
+    return jsonify({'error': 'Document not found'}), 404
+
+@app.route('/api/kosync-documents/<doc_hash>', methods=['DELETE'])
+def api_delete_kosync_document(doc_hash):
+    """Delete a KOSync document."""
+    success = database_service.delete_kosync_document(doc_hash)
+    if success:
+        return jsonify({'success': True, 'message': 'Document deleted'})
+    return jsonify({'error': 'Document not found'}), 404
+
 
 if __name__ == '__main__':
     # Initialize dependencies for production mode

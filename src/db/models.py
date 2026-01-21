@@ -2,13 +2,52 @@
 SQLAlchemy ORM models for abs-kosync-bridge database.
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from typing import Optional
 
 Base = declarative_base()
+
+
+class KosyncDocument(Base):
+    """
+    Model for raw KOSync documents (mirroring the official server's schema).
+    This allows syncing unlinked documents between devices.
+    """
+    __tablename__ = 'kosync_documents'
+
+    document_hash = Column(String(32), primary_key=True)  # MD5 Hash from KOReader
+    progress = Column(String(512), nullable=True)         # XPath / CFI
+    percentage = Column(Numeric(10, 6), default=0)        # Decimal precision
+    device = Column(String(128), nullable=True)
+    device_id = Column(String(64), nullable=True)
+    timestamp = Column(DateTime, nullable=True)
+    
+    # Bridge specific fields
+    linked_abs_id = Column(String(255), ForeignKey('books.abs_id'), nullable=True, index=True)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship to Book (optional)
+    linked_book = relationship("Book", backref="kosync_documents")
+
+    def __init__(self, document_hash: str, progress: str = None, percentage: float = 0,
+                 device: str = None, device_id: str = None, timestamp: datetime = None,
+                 linked_abs_id: str = None):
+        self.document_hash = document_hash
+        self.progress = progress
+        self.percentage = percentage
+        self.device = device
+        self.device_id = device_id
+        self.timestamp = timestamp
+        self.linked_abs_id = linked_abs_id
+        self.first_seen = datetime.utcnow()
+        self.last_updated = datetime.utcnow()
+
+    def __repr__(self):
+        return f"<KosyncDocument(hash='{self.document_hash}', pct={self.percentage})>"
 
 
 class Book(Base):
