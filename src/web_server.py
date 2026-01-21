@@ -82,6 +82,7 @@ def setup_dependencies(test_container=None):
     global LINKER_BOOKS_DIR, DEST_BASE, STORYTELLER_INGEST, ABS_AUDIO_ROOT
     global ABS_API_URL, ABS_API_TOKEN, ABS_LIBRARY_ID
     global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL, SHELFMARK_URL
+    global SYNC_PERIOD_MINS, SYNC_DELTA_ABS_SECONDS, SYNC_DELTA_KOSYNC_PERCENT, FUZZY_MATCH_THRESHOLD
 
     LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
     DEST_BASE = Path(os.environ.get("PROCESSING_DIR", "/processing"))
@@ -91,14 +92,26 @@ def setup_dependencies(test_container=None):
     ABS_API_URL = os.environ.get("ABS_SERVER")
     ABS_API_TOKEN = os.environ.get("ABS_KEY")
     ABS_LIBRARY_ID = os.environ.get("ABS_LIBRARY_ID")
-    
+
+    def _get_float_env(key, default):
+        try:
+            return float(os.environ.get(key, str(default)))
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid {key} value, defaulting to {default}")
+            return float(default)
+
+    SYNC_PERIOD_MINS = _get_float_env("SYNC_PERIOD_MINS", 5)
+    SYNC_DELTA_ABS_SECONDS = _get_float_env("SYNC_DELTA_ABS_SECONDS", 30)
+    SYNC_DELTA_KOSYNC_PERCENT = _get_float_env("SYNC_DELTA_KOSYNC_PERCENT", 0.005)
+    FUZZY_MATCH_THRESHOLD = _get_float_env("FUZZY_MATCH_THRESHOLD", 0.8)
+
     ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
     BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
     MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
     SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
-    
+
     # DEBUG: Log all critical env vars to debug priority issues
     logger.debug(f"DEBUG ENV VARS: ABS_SERVER={os.environ.get('ABS_SERVER')}, ABS_KEY={'*' * 5 if os.environ.get('ABS_KEY') else 'None'}")
 
@@ -124,12 +137,12 @@ def setup_dependencies(test_container=None):
     # Get data directories (now using updated env vars)
     DATA_DIR = container.data_dir()
     EBOOK_DIR = container.books_dir()
-    
+
     # Initialize covers directory
     COVERS_DIR = DATA_DIR / "covers"
     if not COVERS_DIR.exists():
         COVERS_DIR.mkdir(parents=True, exist_ok=True)
-        
+
     # Initialize hash cache
     hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
 
@@ -440,11 +453,11 @@ def sync_daemon():
     """Background sync daemon running in a separate thread."""
     try:
         # Setup schedule for sync operations
-        sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
-        schedule.every(sync_period).minutes.do(manager.sync_cycle)
+        # Use the global SYNC_PERIOD_MINS which is validated
+        schedule.every(SYNC_PERIOD_MINS).minutes.do(manager.sync_cycle)
         schedule.every(1).minutes.do(manager.check_pending_jobs)
 
-        logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
+        logger.info(f"🔄 Sync daemon started (period: {SYNC_PERIOD_MINS} minutes)")
 
         # Run initial sync cycle
         try:
@@ -591,7 +604,7 @@ def restart_server():
     """
     logger.info("♻️  Stopping application (Supervisor will restart it)...")
     time.sleep(1.0)  # Give Flask time to send the redirect response
-    
+
     # Exit with 0 so start.sh loop restarts the process
     logger.info("👋 Exiting process to trigger restart...")
     sys.exit(0)
@@ -1116,6 +1129,11 @@ def delete_mapping(abs_id):
                 Path(book.transcript_file).unlink()
             except:
                 pass
+        
+        # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
+        if book.sync_mode == 'ebook_only' and book.kosync_doc_id:
+            logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
+            database_service.delete_kosync_document(book.kosync_doc_id)
 
     # Delete book and all associated data (states, jobs, hardcover details) via database service
     database_service.delete_book(abs_id)
@@ -1661,16 +1679,23 @@ def kosync_get_progress(doc_id):
     book = database_service.get_book_by_kosync_id(doc_id)
     if book:
         states = database_service.get_states_for_book(book.abs_id)
-        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
+        if not states:
+            return jsonify({"message": "Document not found on server"}), 502
+            
+        kosync_state = next((s for s in states if s.client_name.lower() == 'kosync'), None)
         if kosync_state:
-            return jsonify({
-                "device": "abs-kosync-bridge",
-                "device_id": "abs-kosync-bridge",
-                "document": doc_id,
-                "percentage": float(kosync_state.percentage) if kosync_state.percentage else 0,
-                "progress": kosync_state.xpath or "",
-                "timestamp": int(kosync_state.last_updated) if kosync_state.last_updated else 0
-            }), 200
+            latest_state = kosync_state
+        else:
+            latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
+            
+        return jsonify({
+            "device": "abs-kosync-bridge",
+            "device_id": "abs-kosync-bridge",
+            "document": doc_id,
+            "percentage": float(latest_state.percentage) if latest_state.percentage else 0,
+            "progress": (latest_state.xpath or latest_state.cfi) if hasattr(latest_state, 'xpath') else "",
+            "timestamp": int(latest_state.last_updated) if latest_state.last_updated else 0
+        }), 200
     
     # Document not found - return 502 per kosync-dotnet spec (NOT 404!)
     logger.debug(f"KOSync: Document not found: {doc_id[:8]}...")

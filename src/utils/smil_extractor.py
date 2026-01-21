@@ -88,9 +88,10 @@ class SmilExtractor:
                         segments = self._process_smil_absolute(zf, smil_path)
                         transcript.extend(segments)
                         
-                        if idx < 3 or idx == len(smil_files) - 1:
-                            if segments:
-                                logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            if idx < 3 or idx == len(smil_files) - 1:
+                                if segments:
+                                    logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
                 elif timestamp_mode == 'relative':
                     # Relative timestamps - need to calculate offsets
                     if abs_chapters:
@@ -128,7 +129,8 @@ class SmilExtractor:
                             if s['end'] > abs_end:
                                 s['end'] = min(s['end'], abs_end)
                 
-                logger.info(f"✅ Extracted {len(transcript)} segments from SMIL")
+                total_segments = len(transcript)
+                logger.info(f"📖 SMIL extraction complete: {total_segments} segments from {len(smil_files)} files")
                 
                 # Diagnostic: check for gaps
                 if transcript:
