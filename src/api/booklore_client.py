@@ -29,7 +29,8 @@ class BookloreClient:
             return self._token
         if not all([self.base_url, self.username, self.password]): return None
         try:
-            response = requests.post(
+            # Use session for login to handle cookies if needed
+            response = self.session.post(
                 f"{self.base_url}/api/v1/auth/login",
                 json={"username": self.username, "password": self.password},
                 timeout=10
@@ -40,7 +41,7 @@ class BookloreClient:
                 self._token_timestamp = time.time()
                 return self._token
             else:
-                logger.error(f"Booklore login failed: {response.status_code}")
+                logger.error(f"Booklore login failed: {response.status_code} - {response.text}")
         except Exception as e:
             logger.error(f"Booklore login error: {e}")
         return None

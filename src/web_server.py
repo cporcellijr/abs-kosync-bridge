@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import json
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -1748,41 +1749,58 @@ def kosync_put_progress():
     
     # AUTO-DISCOVERY: If no linked book found, try to automatically create ebook-only mapping
     # AUTO-DISCOVERY: If no linked book found, try to automatically create ebook-only mapping
+    # KOSync Document Sync Logic ...
+
+    # AUTO-DISCOVERY: If no linked book found, try to automatically create ebook-only mapping
     if not linked_book:
         auto_create = os.environ.get('AUTO_CREATE_EBOOK_MAPPING', 'true').lower() == 'true'
         
         if auto_create:
-            # Run auto-discovery in background to avoid blocking the sync request
-            def run_auto_discovery(doc_hash_val):
-                with app.app_context():
-                    try:
-                        logger.info(f"🔍 KOSync: Scheduled auto-discovery for unmapped document {doc_hash_val[:8]}...")
-                        epub_filename = _try_find_epub_by_hash(doc_hash_val, database_service, container)
-                        
-                        if epub_filename:
-                            book_id = f"ebook-{doc_hash_val[:16]}"
-                            book = Book(
-                                abs_id=book_id,
-                                abs_title=Path(epub_filename).stem,
-                                ebook_filename=epub_filename,
-                                kosync_doc_id=doc_hash_val,
-                                transcript_file=None,
-                                status='active',
-                                duration=None,
-                                sync_mode='ebook_only'
-                            )
-                            database_service.save_book(book)
-                            database_service.link_kosync_document(doc_hash_val, book_id)
-                            logger.info(f"✅ Auto-created ebook-only mapping: {book_id} -> {epub_filename}")
+            # Prevent duplicate scans for the same document
+            global active_scans
+            if 'active_scans' not in globals():
+                active_scans = set()
+                
+            if doc_hash in active_scans:
+                logger.debug(f"⚠️ Auto-discovery already running for {doc_hash[:8]}... Skipping duplicate request.")
+            else:
+                active_scans.add(doc_hash)
+            
+                # Run auto-discovery in background
+                def run_auto_discovery(doc_hash_val):
+                    with app.app_context():
+                        try:
+                            logger.info(f"🔍 KOSync: Scheduled auto-discovery for unmapped document {doc_hash_val[:8]}...")
+                            epub_filename = _try_find_epub_by_hash(doc_hash_val, database_service, container)
                             
-                            # Trigger initial sync for this new book
-                            manager.sync_cycle(target_abs_id=book_id)
-                        else:
-                            logger.debug(f"⚠️ Could not auto-match EPUB for KOSync document {doc_hash_val[:8]}...")
-                    except Exception as e:
-                        logger.error(f"Error in auto-discovery background task: {e}")
+                            if epub_filename:
+                                book_id = f"ebook-{doc_hash_val[:16]}"
+                                book = Book(
+                                    abs_id=book_id,
+                                    abs_title=Path(epub_filename).stem,
+                                    ebook_filename=epub_filename,
+                                    kosync_doc_id=doc_hash_val,
+                                    transcript_file=None,
+                                    status='active',
+                                    duration=None,
+                                    sync_mode='ebook_only'
+                                )
+                                database_service.save_book(book)
+                                database_service.link_kosync_document(doc_hash_val, book_id)
+                                logger.info(f"✅ Auto-created ebook-only mapping: {book_id} -> {epub_filename}")
+                                
+                                # Trigger initial sync for this new book
+                                manager.sync_cycle(target_abs_id=book_id)
+                            else:
+                                logger.debug(f"⚠️ Could not auto-match EPUB for KOSync document {doc_hash_val[:8]}...")
+                        except Exception as e:
+                            logger.error(f"Error in auto-discovery background task: {e}")
+                        finally:
+                            # Cleanup lock
+                            if 'active_scans' in globals() and doc_hash_val in active_scans:
+                                active_scans.remove(doc_hash_val)
 
-            threading.Thread(target=run_auto_discovery, args=(doc_hash,), daemon=True).start()
+                threading.Thread(target=run_auto_discovery, args=(doc_hash,), daemon=True).start()
     
     if linked_book:
         # Update the State table for bridge sync functionality
@@ -1818,7 +1836,12 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
     try:
         # 1. Check Filesystem first (much faster)
         if EBOOK_DIR and EBOOK_DIR.exists():
+            logger.info(f"🔎 Starting filesystem search in {EBOOK_DIR} for hash {doc_hash[:8]}...")
+            count = 0
             for epub_path in EBOOK_DIR.rglob("*.epub"):
+                count += 1
+                if count % 100 == 0:
+                    logger.debug(f"Checked {count} local EPUBs...")
                 try:
                     computed_hash = container.ebook_parser().get_kosync_id(epub_path)
                     if computed_hash == doc_hash:
@@ -1826,32 +1849,94 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
                         return epub_path.name
                 except Exception as e:
                     logger.debug(f"Error checking file {epub_path.name}: {e}")
+            logger.info(f"❌ Filesystem search finished. Checked {count} files. No match.")
 
         # 2. Fallback to Booklore (slower, requires download)
         if container.booklore_client().is_configured():
+            logger.info("🔎 Starting Booklore API search...")
+            
+            # Load Hash Cache
+            cache_file = DATA_DIR / "booklore_hash_cache.json"
+            hash_cache = {}
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        hash_cache = json.load(f)
+                    logger.info(f"✅ Loaded {len(hash_cache)} cached hashes.")
+                except Exception as e:
+                    logger.warning(f"Failed to load hash cache: {e}")
+
             try:
                 books = container.booklore_client().get_all_books()
+                logger.info(f"Fetched {len(books)} books from Booklore. Scanning...")
+                bk_count = 0
+                cache_updates = 0
+                
                 for book in books:
                     filename = book.get('fileName', '')
+                    book_id = book.get('id')
+                    
                     if not filename.lower().endswith('.epub'):
                         continue
+                        
+                    # CHECK CACHE
+                    if book_id in hash_cache:
+                        if hash_cache[book_id] == doc_hash:
+                            logger.info(f"📚 Matched EPUB via Hash Cache: {filename}")
+                            return filename
+                        continue # Skip download if cached and mismatch
                     
-                    # Download and compute hash
+                    # Not in cache, proceed to download
+                    logging_interval = 5
+                    if bk_count % logging_interval == 0:
+                        logger.info(f"Checking Booklore book {bk_count}/{len(books)}: {filename}")
+                    
                     try:
-                        content = container.booklore_client().download_book(book['id'])
+                        content = container.booklore_client().download_book(book_id)
+                        bk_count += 1
+
                         if content:
                             computed_hash = container.ebook_parser().get_kosync_id_from_bytes(filename, content)
+                            
+                            # Update Cache
+                            hash_cache[book_id] = computed_hash
+                            cache_updates += 1
+                            
                             if computed_hash == doc_hash:
-                                logger.info(f"📚 Matched EPUB via Booklore: {filename}")
+                                logger.info(f"📚 Matched EPUB via Booklore (Download): {filename}")
+                                # Save cache immediately on match
+                                try:
+                                    with open(cache_file, 'w', encoding='utf-8') as f:
+                                        json.dump(hash_cache, f)
+                                except: pass
                                 return filename
+                                
+                            # Incremental Save (every 10 updates)
+                            if cache_updates % 10 == 0:
+                                try:
+                                    with open(cache_file, 'w', encoding='utf-8') as f:
+                                        json.dump(hash_cache, f)
+                                except Exception as e:
+                                    logger.warning(f"Failed to save hash cache: {e}")
+                                    
                     except Exception as e:
                         logger.debug(f"Error checking Booklore book {filename}: {e}")
+                
+                # Final save
+                if cache_updates > 0:
+                    try:
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(hash_cache, f)
+                        logger.info(f"💾 Saved {cache_updates} new hashes to cache.")
+                    except: pass
+                    
             except Exception as e:
                 logger.debug(f"Error querying Booklore for EPUB matching: {e}")
         
     except Exception as e:
         logger.error(f"Error in EPUB auto-discovery: {e}")
     
+    logger.info("❌ Auto-discovery finished. No match found.")
     return None
 
 
