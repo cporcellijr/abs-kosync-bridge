@@ -29,6 +29,7 @@ from src.utils.di_container import Container
 # Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
+from src.utils.hash_cache import HashCache
 
 # ---------------- APP SETUP ----------------
 
@@ -50,6 +51,7 @@ database_service: Optional[DatabaseService] = None
 DATA_DIR: Optional[Path] = None
 EBOOK_DIR: Optional[Path] = None
 COVERS_DIR: Optional[Path] = None
+hash_cache: Optional[HashCache] = None
 
 def setup_dependencies(test_container=None):
     """
@@ -59,7 +61,7 @@ def setup_dependencies(test_container=None):
         test_container: Optional test container for dependency injection during testing.
                        If None, creates production container from environment.
     """
-    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR
+    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR, hash_cache
 
     # 1. Initialize Database Service FIRST (needed to load settings)
     # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
@@ -127,6 +129,9 @@ def setup_dependencies(test_container=None):
     COVERS_DIR = DATA_DIR / "covers"
     if not COVERS_DIR.exists():
         COVERS_DIR.mkdir(parents=True, exist_ok=True)
+        
+    # Initialize hash cache
+    hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
 
     logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
@@ -1825,7 +1830,14 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
         EPUB filename if found, None otherwise
     """
     try:
-        # 1. Check Filesystem first (much faster)
+        # 0. Check global hash cache first (instant lookup)
+        if hash_cache:
+            cached_filename = hash_cache.lookup_by_hash(doc_hash)
+            if cached_filename:
+                logger.info(f"📚 Matched EPUB via hash cache: {cached_filename}")
+                return cached_filename
+
+        # 1. Check Filesystem (much faster)
         if EBOOK_DIR and EBOOK_DIR.exists():
             logger.info(f"🔎 Starting filesystem search in {EBOOK_DIR} for hash {doc_hash[:8]}...")
             count = 0
@@ -1833,8 +1845,29 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
                 count += 1
                 if count % 100 == 0:
                     logger.debug(f"Checked {count} local EPUBs...")
+                
+                # Check file-level cache first
+                if hash_cache:
+                    cached_hash = hash_cache.lookup_by_filepath(epub_path)
+                    if cached_hash:
+                        if cached_hash == doc_hash:
+                            logger.info(f"📚 Matched EPUB via filepath cache: {epub_path.name}")
+                            return epub_path.name
+                        continue  # Hash doesn't match, skip to next file
+                
                 try:
+                    # Not in cache or invalid, compute hash
                     computed_hash = container.ebook_parser().get_kosync_id(epub_path)
+                    
+                    # Store in cache
+                    if hash_cache:
+                        hash_cache.store_hash(
+                            computed_hash, 
+                            epub_path.name, 
+                            source='filesystem',
+                            filepath=epub_path
+                        )
+                    
                     if computed_hash == doc_hash:
                         logger.info(f"📚 Matched EPUB via filesystem: {epub_path.name}")
                         return epub_path.name
@@ -1846,17 +1879,6 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
         if container.booklore_client().is_configured():
             logger.info("🔎 Starting Booklore API search...")
             
-            # Load Hash Cache
-            cache_file = DATA_DIR / "booklore_hash_cache.json"
-            hash_cache = {}
-            if cache_file.exists():
-                try:
-                    with open(cache_file, 'r', encoding='utf-8') as f:
-                        hash_cache = json.load(f)
-                    logger.info(f"✅ Loaded {len(hash_cache)} cached hashes.")
-                except Exception as e:
-                    logger.warning(f"Failed to load hash cache: {e}")
-
             try:
                 books = container.booklore_client().get_all_books()
                 logger.info(f"Fetched {len(books)} books from Booklore. Scanning...")
@@ -1864,63 +1886,50 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
                 cache_updates = 0
                 
                 for book in books:
-                    filename = book.get('fileName', '')
-                    book_id = book.get('id')
+                    bk_count += 1
+                    book_id = str(book['id'])
                     
-                    if not filename.lower().endswith('.epub'):
-                        continue
-                        
-                    # CHECK CACHE
-                    if book_id in hash_cache:
-                        if hash_cache[book_id] == doc_hash:
-                            logger.info(f"📚 Matched EPUB via Hash Cache: {filename}")
-                            return filename
-                        continue # Skip download if cached and mismatch
-                    
-                    # Not in cache, proceed to download
-                    logging_interval = 5
-                    if bk_count % logging_interval == 0:
-                        logger.info(f"Checking Booklore book {bk_count}/{len(books)}: {filename}")
-                    
-                    try:
-                        content = container.booklore_client().download_book(book_id)
-                        bk_count += 1
+                    # Check cache for this book ID
+                    if hash_cache:
+                        cached_hash = hash_cache.lookup_by_booklore_id(book_id)
+                        if cached_hash:
+                            if cached_hash == doc_hash:
+                                # We assume filename matches title for Booklore provided books? 
+                                # Actually Booklore client downloads by ID, but we need a filename to satisfy return type
+                                # Using title + extension as virtual filename
+                                safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
+                                logger.info(f"📚 Matched EPUB via Booklore ID cache: {safe_title}")
+                                return safe_title
+                            continue
 
-                        if content:
-                            computed_hash = container.ebook_parser().get_kosync_id_from_bytes(filename, content)
+                    # Not in cache, download and hash
+                    try:
+                        temp_path = container.booklore_client().download_book(book_id)
+                        if temp_path:
+                            computed_hash = container.ebook_parser().get_kosync_id(temp_path)
                             
-                            # Update Cache
-                            hash_cache[book_id] = computed_hash
-                            cache_updates += 1
+                            # Cache the result
+                            if hash_cache:
+                                safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
+                                hash_cache.store_hash(
+                                    computed_hash, 
+                                    safe_title, 
+                                    source='booklore',
+                                    booklore_id=book_id
+                                )
+                                cache_updates += 1
+                            
+                            # Clean up temp file
+                            Path(temp_path).unlink(missing_ok=True)
                             
                             if computed_hash == doc_hash:
-                                logger.info(f"📚 Matched EPUB via Booklore (Download): {filename}")
-                                # Save cache immediately on match
-                                try:
-                                    with open(cache_file, 'w', encoding='utf-8') as f:
-                                        json.dump(hash_cache, f)
-                                except: pass
-                                return filename
-                                
-                            # Incremental Save (every 10 updates)
-                            if cache_updates % 10 == 0:
-                                try:
-                                    with open(cache_file, 'w', encoding='utf-8') as f:
-                                        json.dump(hash_cache, f)
-                                except Exception as e:
-                                    logger.warning(f"Failed to save hash cache: {e}")
-                                    
+                                logger.info(f"📚 Matched EPUB via Booklore download: {book['title']}")
+                                return f"{book['title']}.epub"
                     except Exception as e:
-                        logger.debug(f"Error checking Booklore book {filename}: {e}")
+                        logger.warning(f"Failed to check Booklore book {book['title']}: {e}")
+                        
+                logger.info(f"❌ Booklore search finished. Checked {bk_count} books. No match.")
                 
-                # Final save
-                if cache_updates > 0:
-                    try:
-                        with open(cache_file, 'w', encoding='utf-8') as f:
-                            json.dump(hash_cache, f)
-                        logger.info(f"💾 Saved {cache_updates} new hashes to cache.")
-                    except: pass
-                    
             except Exception as e:
                 logger.debug(f"Error querying Booklore for EPUB matching: {e}")
         

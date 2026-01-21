@@ -608,6 +608,10 @@ class SyncManager:
                 for client_name, client in self.sync_clients.items():
                     if client_name == leader:
                         continue
+                    
+                    # Skip ABS update if in ebook-only mode
+                    if client_name == 'ABS' and hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
+                        continue
                     try:
                         request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
                         result = client.update_progress(book, request)
