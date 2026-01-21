@@ -190,6 +190,9 @@ class TestKosyncEndpoints(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data['document'], 'g' * 32)
         self.assertIn('timestamp', data)
+        # PUT response timestamp should be ISO 8601 string (kosync-dotnet behavior)
+        self.assertIsInstance(data['timestamp'], str)
+        self.assertIn('T', data['timestamp'])  # ISO format contains 'T'
     
     def test_get_progress_returns_502_for_missing(self):
         """Test that GET returns 502 (not 404) for missing document."""

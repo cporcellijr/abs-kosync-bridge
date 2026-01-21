@@ -1804,9 +1804,11 @@ def kosync_put_progress():
         logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
     
     # Response format matches kosync-dotnet exactly
+    # Note: kosync-dotnet returns DateTime as ISO 8601 string for PUT response
+    # but returns Unix timestamp (ToUnixTimeSeconds) for GET response
     return jsonify({
         "document": doc_hash,
-        "timestamp": int(now.timestamp())
+        "timestamp": now.isoformat() + "Z"  # ISO 8601 format like "2023-05-23T11:43:00.225000Z"
     }), 200
 
 # ============== Helper Functions for Auto-Discovery ==============
