@@ -51,7 +51,10 @@
                 </a>
                 {% endif %}
                 {% if integrations.kosync %}
-                <div class="progress-item" title="KOReader">
+                <div class="progress-item cursor-pointer"
+                    title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
+                    data-abs-id="{{ mapping.abs_id }}" data-title="{{ mapping.abs_title|escape }}"
+                    data-hash="{{ mapping.kosync_doc_id }}" onclick="updateKoSyncHash(event)">
                     <span>📖</span>
                     {% if mapping.states.kosync is defined %}
                     <span>{{ '%.1f' | format(mapping.states.kosync.percentage|default(0)) }}%</span>
@@ -95,9 +98,9 @@
                             onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
                         <span class="hidden fs-12 {% if not mapping.hardcover_book_id %}opacity-50{% endif %}">📚</span>
                     </a>
-                    <span
-                        onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                        class="cursor-pointer color-inherit" title="Click to edit Hardcover link">
+                    <span class="cursor-pointer color-inherit" title="Click to edit Hardcover link"
+                        data-abs-id="{{ mapping.abs_id }}" data-title="{{ mapping.hardcover_title|default('')|escape }}"
+                        onclick="linkHardcover(event)">
                         {% if mapping.hardcover_book_id %}
                         {% if mapping.states.hardcover is defined %}
                         {{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%
@@ -120,21 +123,12 @@
             {% endif %}
 
             <div class="quick-actions">
-                {% if mapping.status in ['failed_retry_later', 'crashed'] %}
-                <form method="POST" action="/retry-job/{{ mapping.abs_id }}" class="flex-1-mr-6">
-                    <button type="submit" class="action-btn warning"
-                        style="background: rgba(255, 152, 0, 0.2); border-color: rgba(255, 152, 0, 0.4);">
-                        🔄 Retry Now
-                    </button>
-                </form>
-                {% else %}
                 <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" class="flex-1-mr-6">
                     <button type="submit" class="action-btn warning"
                         onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
                         🔄 Clear
                     </button>
                 </form>
-                {% endif %}
                 <form method="POST" action="/delete/{{ mapping.abs_id }}" class="flex-1">
                     <button type="submit" class="action-btn danger" onclick="return confirm('Delete this mapping?')">
                         🗑️ Delete
@@ -551,9 +545,11 @@
                 flex-shrink: 0;
             }
 
+            .progress-item.cursor-pointer:hover,
             a.progress-item:hover {
                 background: rgba(255, 255, 255, 0.1);
                 border-radius: 4px;
+                color: #ffffff;
             }
 
             .progress-bar-mini {
@@ -883,8 +879,12 @@
             const sortSelect = document.getElementById('sort-select');
             const directionBtn = document.getElementById('sort-direction');
 
-            function linkHardcover(event, absId, currentTitle) {
+            function linkHardcover(event) {
                 event.stopPropagation();
+                const item = event.currentTarget;
+                const absId = item.dataset.absId;
+                const currentTitle = item.dataset.title;
+
                 let promptText = "Enter Hardcover URL or ID:";
                 if (currentTitle) {
                     promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
@@ -898,6 +898,32 @@
                     inputField.type = 'hidden';
                     inputField.name = 'hardcover_url';
                     inputField.value = input;
+                    form.appendChild(inputField);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            }
+
+            function updateKoSyncHash(event) {
+                event.stopPropagation();
+                const item = event.currentTarget;
+                const absId = item.dataset.absId;
+                const title = item.dataset.title;
+                const currentHash = item.dataset.hash;
+
+                const msg = `Enter new KoSync MD5 Hash for '${title}'\n\nCurrent: ${currentHash}\n\n(Leave empty to automatically recalculate from the ebook file)`;
+                const input = prompt(msg);
+
+                if (input !== null) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = `/update-hash/${absId}`;
+
+                    const inputField = document.createElement('input');
+                    inputField.type = 'hidden';
+                    inputField.name = 'new_hash';
+                    inputField.value = input.trim();
+
                     form.appendChild(inputField);
                     document.body.appendChild(form);
                     form.submit();
@@ -1038,32 +1064,8 @@
                 applySorting(savedSort);
             }
 
-            // Auto-refresh via AJAX every 30 seconds
-            setInterval(function () {
-                fetch(window.location.href)
-                    .then(response => response.text())
-                    .then(html => {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html, 'text/html');
-
-                        // Update grids if they exist
-                        ['currently-reading-grid', 'all-books-grid'].forEach(id => {
-                            const newGrid = doc.getElementById(id);
-                            const oldGrid = document.getElementById(id);
-                            if (newGrid && oldGrid) {
-                                oldGrid.innerHTML = newGrid.innerHTML;
-                            }
-                        });
-
-                        // Re-apply sorting to maintain user preference
-                        const sortBy = sortSelect ? sortSelect.value : 'title';
-                        const direction = sortState[sortBy] || 'asc';
-
-                        if (currentlyReadingGrid) sortCards(currentlyReadingGrid, sortBy, direction);
-                        if (allBooksGrid) sortCards(allBooksGrid, sortBy, direction);
-                    })
-                    .catch(err => console.error("Auto-refresh failed", err));
-            }, 30000);
+            // Auto-refresh every 30 seconds
+            setTimeout(() => location.reload(), 30000);
         </script>
 </body>
 

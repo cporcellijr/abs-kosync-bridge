@@ -10,17 +10,14 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 from urllib.parse import urljoin
-from functools import wraps
-import hashlib
 
 import requests
 import schedule
 from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 
-from src.db.models import Book, State, KosyncDocument
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
@@ -90,10 +87,7 @@ def setup_dependencies(test_container=None):
     
     ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
     BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
-    try:
-        MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
-    except (ValueError, TypeError):
-        MONITOR_INTERVAL = 3600
+    MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
     SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
@@ -149,10 +143,7 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 # Booklore shelf name for auto-adding matched books
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
-try:
-    MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
-except (ValueError, TypeError):
-    MONITOR_INTERVAL = 3600
+MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
 # ---------------- HELPER FUNCTIONS ----------------
@@ -432,37 +423,28 @@ def monitor_readaloud_files():
 def sync_daemon():
     """Background sync daemon running in a separate thread."""
     try:
-        # Sub-minute polling requires abandoning the 'schedule' library for the main loop
-        last_sync = 0
-        
-        logger.info(f"🔄 Sync daemon started")
+        # Setup schedule for sync operations
+        sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
+        schedule.every(sync_period).minutes.do(manager.sync_cycle)
+        schedule.every(1).minutes.do(manager.check_pending_jobs)
+
+        logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
+
+        # Run initial sync cycle
+        try:
+            manager.sync_cycle()
+        except Exception as e:
+            logger.error(f"Initial sync cycle failed: {e}")
 
         # Main daemon loop
         while True:
             try:
-                # Reload interval dynamically (allows hot-swap)
-                try:
-                    sync_period_mins = float(os.environ.get("SYNC_PERIOD_MINS", "5"))
-                except ValueError:
-                    sync_period_mins = 5.0
-                    
-                # Calculate sleep time
-                interval_seconds = sync_period_mins * 60
-                
-                now = time.time()
-                if now - last_sync >= interval_seconds:
-                    manager.sync_cycle()
-                    last_sync = time.time()
-                
-                # Still check pending jobs (transcriptions etc) frequently
-                manager.check_pending_jobs()
-                
-                # Shorter sleep to be responsive
-                time.sleep(5) 
-                
+                # logger.debug("Running pending schedule jobs...")
+                schedule.run_pending()
+                time.sleep(30)  # Check every 30 seconds
             except Exception as e:
                 logger.error(f"Sync daemon error: {e}")
-                time.sleep(30)  # Wait longer on error
+                time.sleep(60)  # Wait longer on error
 
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
@@ -587,8 +569,6 @@ def get_searchable_ebooks(search_term):
 
 
 def restart_server():
-    import time
-    time.sleep(0.5)  # Allow response to be sent to browser
     """
     Triggers a graceful restart by sending SIGTERM to the current process.
     The start.sh supervisor loop will catch the exit and restart the application.
@@ -991,13 +971,6 @@ def match():
 
         database_service.save_book(book)
 
-        # Link any existing KosyncDocument to this book
-        if book.kosync_doc_id:
-            existing_doc = database_service.get_kosync_document(book.kosync_doc_id)
-            if existing_doc and not existing_doc.linked_abs_id:
-                database_service.link_kosync_document(book.kosync_doc_id, book.abs_id)
-                logger.info(f"Linked existing KosyncDocument to book '{book.abs_title}'")
-
         # Trigger Hardcover Automatch
         hardcover_sync_client = container.sync_clients().get('Hardcover')
         if hardcover_sync_client and hardcover_sync_client.is_configured():
@@ -1085,13 +1058,6 @@ def batch_match():
 
                 database_service.save_book(book)
 
-                # Link any existing KosyncDocument to this book
-                if book.kosync_doc_id:
-                    existing_doc = database_service.get_kosync_document(book.kosync_doc_id)
-                    if existing_doc and not existing_doc.linked_abs_id:
-                        database_service.link_kosync_document(book.kosync_doc_id, book.abs_id)
-                        logger.info(f"Linked existing KosyncDocument to book '{book.abs_title}'")
-
                 # Trigger Hardcover Automatch
                 hardcover_sync_client = container.sync_clients().get('Hardcover')
                 if hardcover_sync_client and hardcover_sync_client.is_configured():
@@ -1147,7 +1113,7 @@ def clear_progress(abs_id):
     book = database_service.get_book(abs_id)
 
     if not book:
-        logger.warning(f"Cannot clear progress: Book {abs_id} not found")
+        logger.warning(f"Cannot clear progress: book not found for {abs_id}")
         return redirect(url_for('index'))
 
     try:
@@ -1158,45 +1124,6 @@ def clear_progress(abs_id):
 
     except Exception as e:
         logger.error(f"Failed to clear progress for {abs_id}: {e}")
-
-    return redirect(url_for('index'))
-
-
-@app.route('/retry-job/<abs_id>', methods=['POST'])
-def retry_job(abs_id):
-    """Manually retry a failed job by resetting status to pending"""
-    book = database_service.get_book(abs_id)
-    if not book:
-        logger.warning(f"Cannot retry job: Book {abs_id} not found")
-        return redirect(url_for('index'))
-
-    try:
-        if book.status in ['failed_retry_later', 'crashed']:
-            logger.info(f"Manual retry triggered for {sanitize_log_data(book.abs_title or abs_id)}")
-            
-            # Reset status to pending so the job scheduler picks it up immediately
-            book.status = 'pending'
-            database_service.save_book(book)
-            
-            # Reset job retries
-            job = database_service.get_latest_job(abs_id)
-            if job:
-                job.retry_count = 0
-                job.last_error = 'Manual retry'
-                database_service.save_job(job)
-                
-            # Trigger check immediately
-            manager.check_pending_jobs()
-            
-            from flask import flash
-            flash(f"✅ Retry scheduled for {book.abs_title}", "success")
-        else:
-            logger.warning(f"Retry ignored: Book {abs_id} is in state {book.status}")
-            
-    except Exception as e:
-        logger.error(f"Failed to retry job for {abs_id}: {e}")
-        from flask import flash
-        flash(f"❌ Retry failed: {str(e)}", "error")
 
     return redirect(url_for('index'))
 
@@ -1240,6 +1167,62 @@ def link_hardcover(abs_id):
         logger.error(f"Failed to save hardcover details: {e}")
         flash("❌ Database update failed", "error")
 
+    return redirect(url_for('index'))
+
+
+@app.route('/update-hash/<abs_id>', methods=['POST'])
+def update_hash(abs_id):
+    from flask import flash
+    new_hash = request.form.get('new_hash', '').strip()
+    book = database_service.get_book(abs_id)
+
+    if not book:
+        flash("❌ Book not found", "error")
+        return redirect(url_for('index'))
+
+    old_hash = book.kosync_doc_id
+    updated = False
+
+    if new_hash:
+        book.kosync_doc_id = new_hash
+        database_service.save_book(book)
+        logger.info(f"Updated KoSync hash for '{sanitize_log_data(book.abs_title)}' to manual input: {new_hash}")
+        updated = True
+    else:
+        # Auto-regenerate
+        booklore_id = None
+        if container.booklore_client().is_configured():
+            bl_book = container.booklore_client().find_book_by_filename(book.ebook_filename)
+            if bl_book:
+                booklore_id = bl_book.get('id')
+
+        recalc_hash = get_kosync_id_for_ebook(book.ebook_filename, booklore_id)
+        if recalc_hash:
+            book.kosync_doc_id = recalc_hash
+            database_service.save_book(book)
+            logger.info(f"Auto-regenerated KoSync hash for '{sanitize_log_data(book.abs_title)}': {recalc_hash}")
+            updated = True
+        else:
+            flash("❌ Could not recalculate hash (file not found?)", "error")
+            return redirect(url_for('index'))
+
+    # Migration: Push current progress to the NEW hash if it changed
+    if updated and book.kosync_doc_id != old_hash:
+        states = database_service.get_states_for_book(abs_id)
+        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
+
+        if kosync_state and kosync_state.percentage is not None:
+            kosync_client = container.sync_clients().get('KoSync')
+            if kosync_client and kosync_client.is_configured():
+                success = kosync_client.kosync_client.update_progress(
+                    book.kosync_doc_id,
+                    kosync_state.percentage,
+                    kosync_state.xpath
+                )
+                if success:
+                    logger.info(f"Migrated progress for '{sanitize_log_data(book.abs_title)}' to new hash {book.kosync_doc_id}")
+
+    flash(f"✅ Updated KoSync Hash for {book.abs_title}", "success")
     return redirect(url_for('index'))
 
 
@@ -1475,338 +1458,6 @@ def api_logs_live():
 def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
-
-# ---------------- KOSYNC API (Integrated Server) ----------------
-
-def kosync_auth_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # KOReader sends x-auth-user and x-auth-key
-        user = request.headers.get('x-auth-user')
-        key = request.headers.get('x-auth-key')
-        
-        expected_user = os.environ.get("KOSYNC_USER")
-        expected_password = os.environ.get("KOSYNC_KEY")
-        
-        if not expected_user or not expected_password:
-            logger.error("KOSync Integrated Server: Credentials not configured in settings")
-            return jsonify({"error": "Server not configured"}), 500
-            
-        # KOReader expectation: key = md5(password)
-        # We also support literal key matching if the user already stored the hash
-        expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
-        
-        if user and expected_user and user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
-            return f(*args, **kwargs)
-            
-        logger.warning(f"KOSync Integrated Server: Unauthorized access attempt from {request.remote_addr} (user: {user})")
-        return jsonify({"error": "Unauthorized"}), 401
-    return decorated_function
-
-@app.after_request
-def log_request_info(response):
-    # Filter out health check noise (root path 200 OK)
-    if request.path == '/' and response.status_code == 200:
-        return response
-        
-    # Filter out expected 404s for KOSync progress (books not yet in KOSync)
-    if 'syncs/progress' in request.path and response.status_code == 404:
-        return response
-
-    # Filter out log viewing noise
-    if request.path.startswith('/logs') or request.path.startswith('/api/logs'):
-        return response
-
-    # Filter out static assets (favicons, images) to keep logs clean
-    if request.path.startswith('/static/'):
-        return response
-
-    # Filter out settings page access noise if desired (optional, but requested implicitly by "clean up")
-    if request.path.startswith('/settings') and response.status_code < 400:
-        return response
-
-    # Move successful KOSync progress checks to DEBUG (too noisy at INFO during reading)
-    if 'syncs/progress' in request.path and response.status_code == 200:
-        logger.debug(f"🌍 HTTP {request.method} {request.path} - {response.status_code}")
-        return response
-
-    logger.info(f"🌍 HTTP {request.method} {request.path} - {response.status_code}")
-    return response
-
-@app.route('/healthcheck')
-@app.route('/koreader/healthcheck')
-def kosync_healthcheck():
-    """KOSync connectivity check"""
-    return "OK", 200
-
-@app.route('/users/auth', methods=['GET'])
-@app.route('/koreader/users/auth', methods=['GET'])
-def kosync_users_auth():
-    """KOReader auth check - validates credentials per kosync-dotnet spec"""
-    user = request.headers.get('x-auth-user')
-    key = request.headers.get('x-auth-key')
-    
-    expected_user = os.environ.get("KOSYNC_USER")
-    expected_password = os.environ.get("KOSYNC_KEY")
-    
-    if not user or not key:
-        logger.warning(f"KOSync Auth: Missing credentials from {request.remote_addr}")
-        return jsonify({"message": "Invalid credentials"}), 401
-    
-    if not expected_user or not expected_password:
-        logger.error("KOSync Auth: Server credentials not configured")
-        return jsonify({"message": "Server not configured"}), 500
-    
-    # KOReader sends key = md5(password)
-    expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
-    
-    if user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
-        logger.debug(f"KOSync Auth: User '{user}' authenticated successfully")
-        return jsonify({"username": user}), 200
-    
-    logger.warning(f"KOSync Auth: Failed auth attempt for user '{user}' from {request.remote_addr}")
-    return jsonify({"message": "Unauthorized"}), 401
-
-@app.route('/users/create', methods=['POST'])
-@app.route('/koreader/users/create', methods=['POST'])
-def kosync_users_create():
-    """Stub for KOReader user registration check"""
-    # Simply accept any "create user" request as valid
-    return jsonify({
-        "id": 1,
-        "username": os.environ.get("KOSYNC_USER", "user")
-    }), 201
-
-@app.route('/users/login', methods=['POST'])
-@app.route('/koreader/users/login', methods=['POST'])
-def kosync_users_login():
-    """Stub for KOReader login check"""
-    # Accept login and return the key as the token
-    # KOReader might send creds here, but we just confirm "Yes, you are logged in"
-    # We trust the client will send x-auth-user/key in subsequent requests
-    return jsonify({
-        "id": 1,
-        "username": os.environ.get("KOSYNC_USER", "user"),
-        "active": True,
-        "token": os.environ.get("KOSYNC_KEY", "") 
-    }), 200
-
-@app.route('/syncs/progress/<doc_id>', methods=['GET'])
-@app.route('/koreader/syncs/progress/<doc_id>', methods=['GET'])
-@kosync_auth_required
-def kosync_get_progress(doc_id):
-    """
-    Fetch progress for a specific document.
-    Returns 502 (not 404) if document not found, per kosync-dotnet spec.
-    """
-    # First check the kosync_documents table (primary source)
-    kosync_doc = database_service.get_kosync_document(doc_id)
-    
-    if kosync_doc:
-        # Return full response matching kosync-dotnet format
-        return jsonify({
-            "device": kosync_doc.device or "",
-            "device_id": kosync_doc.device_id or "",
-            "document": kosync_doc.document_hash,
-            "percentage": float(kosync_doc.percentage) if kosync_doc.percentage else 0,
-            "progress": kosync_doc.progress or "",
-            "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else 0
-        }), 200
-    
-    # Fallback: Check if there's a mapped book with State data
-    # (for backwards compatibility with existing mappings)
-    book = database_service.get_book_by_kosync_id(doc_id)
-    if book:
-        states = database_service.get_states_for_book(book.abs_id)
-        
-        # Prefer KOSync state, but fall back to latest if available
-        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
-        latest_state = kosync_state
-        
-        if not latest_state and states:
-             latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
-
-        if latest_state:
-            return jsonify({
-                "device": "abs-kosync-bridge",
-                "device_id": "abs-kosync-bridge",
-                "document": doc_id,
-                "percentage": float(latest_state.percentage) if latest_state.percentage else 0,
-                "progress": latest_state.xpath or "",
-                "timestamp": int(latest_state.last_updated) if latest_state.last_updated else 0
-            }), 200
-    
-    # Document not found - return 502 per kosync-dotnet spec (NOT 404!)
-    logger.debug(f"KOSync: Document not found: {doc_id[:8]}...")
-    return jsonify({"message": "Document not found on server"}), 502
-
-@app.route('/syncs/progress', methods=['PUT'])
-@app.route('/koreader/syncs/progress', methods=['PUT'])
-@kosync_auth_required
-def kosync_put_progress():
-    """
-    Receive progress update from KOReader.
-    Stores ALL documents, whether mapped to ABS or not.
-    Mirrors kosync-dotnet SyncController.SyncProgress behavior.
-    """
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data"}), 400
-    
-    doc_hash = data.get('document')
-    if not doc_hash:
-        return jsonify({"error": "Missing document ID"}), 400
-    
-    percentage = data.get('percentage', 0)
-    progress = data.get('progress', '')  # XPath string
-    device = data.get('device', '')
-    device_id = data.get('device_id', '')
-    
-    now = datetime.utcnow()
-    
-    # Get existing document or create new one
-    kosync_doc = database_service.get_kosync_document(doc_hash)
-    
-    # Implement "furthest progress wins" if enabled
-    furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
-    if furthest_wins and kosync_doc and kosync_doc.percentage:
-        if float(percentage) < float(kosync_doc.percentage):
-            # Reject backwards progress - return current state
-            logger.debug(f"KOSync: Rejecting backwards progress {percentage:.4f} < {float(kosync_doc.percentage):.4f} for {doc_hash[:8]}")
-            return jsonify({
-                "document": doc_hash,
-                "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(time.time())
-            }), 200
-    
-    if kosync_doc is None:
-        # Create new document (auto-create like kosync-dotnet)
-        kosync_doc = KosyncDocument(
-            document_hash=doc_hash,
-            progress=progress,
-            percentage=percentage,
-            device=device,
-            device_id=device_id,
-            timestamp=now
-        )
-        logger.info(f"KOSync: New document tracked: {doc_hash[:8]}... from device '{device}'")
-    else:
-        # Update existing document
-        kosync_doc.progress = progress
-        kosync_doc.percentage = percentage
-        kosync_doc.device = device
-        kosync_doc.device_id = device_id
-        kosync_doc.timestamp = now
-        logger.debug(f"KOSync: Syncing document: {doc_hash[:8]}... ({percentage:.2f}%) from device '{device}'")
-    
-    # Save the kosync document
-    database_service.save_kosync_document(kosync_doc)
-    
-    # Also update State table if this document is linked to an ABS book
-    linked_book = None
-    if kosync_doc.linked_abs_id:
-        linked_book = database_service.get_book(kosync_doc.linked_abs_id)
-    else:
-        # Check if there's a book with this kosync_doc_id
-        linked_book = database_service.get_book_by_kosync_id(doc_hash)
-        # If found, link the document for future reference
-        if linked_book:
-            database_service.link_kosync_document(doc_hash, linked_book.abs_id)
-    
-    if linked_book:
-        # Update the State table for bridge sync functionality
-        state = State(
-            abs_id=linked_book.abs_id,
-            client_name='kosync',
-            last_updated=time.time(),
-            percentage=float(percentage),
-            xpath=progress
-        )
-        database_service.save_state(state)
-        logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
-    
-    # Response format matches kosync-dotnet exactly
-    return jsonify({
-        "document": doc_hash,
-        "timestamp": int(now.timestamp())
-    }), 200
-# ============== KOSync Document Management API ==============
-
-@app.route('/api/kosync-documents', methods=['GET'])
-def api_get_kosync_documents():
-    """Get all KOSync documents with their link status."""
-    docs = database_service.get_all_kosync_documents()
-    result = []
-    for doc in docs:
-        linked_book = None
-        if doc.linked_abs_id:
-            linked_book = database_service.get_book(doc.linked_abs_id)
-        
-        result.append({
-            'document_hash': doc.document_hash,
-            'progress': doc.progress,
-            'percentage': float(doc.percentage) if doc.percentage else 0,
-            'device': doc.device,
-            'device_id': doc.device_id,
-            'timestamp': doc.timestamp.isoformat() if doc.timestamp else None,
-            'first_seen': doc.first_seen.isoformat() if doc.first_seen else None,
-            'last_updated': doc.last_updated.isoformat() if doc.last_updated else None,
-            'linked_abs_id': doc.linked_abs_id,
-            'linked_book_title': linked_book.abs_title if linked_book else None
-        })
-    
-    return jsonify({
-        'documents': result,
-        'total': len(result),
-        'linked': sum(1 for d in result if d['linked_abs_id']),
-        'unlinked': sum(1 for d in result if not d['linked_abs_id'])
-    })
-
-@app.route('/api/kosync-documents/<doc_hash>/link', methods=['POST'])
-def api_link_kosync_document(doc_hash):
-    """Link a KOSync document to an ABS book."""
-    data = request.json
-    if not data or 'abs_id' not in data:
-        return jsonify({'error': 'Missing abs_id'}), 400
-    
-    abs_id = data['abs_id']
-    
-    # Verify the book exists
-    book = database_service.get_book(abs_id)
-    if not book:
-        return jsonify({'error': 'Book not found'}), 404
-    
-    # Verify the document exists
-    doc = database_service.get_kosync_document(doc_hash)
-    if not doc:
-        return jsonify({'error': 'KOSync document not found'}), 404
-    
-    success = database_service.link_kosync_document(doc_hash, abs_id)
-    if success:
-        # Also update the book's kosync_doc_id if not set
-        if not book.kosync_doc_id:
-            book.kosync_doc_id = doc_hash
-            database_service.save_book(book)
-        
-        return jsonify({'success': True, 'message': f'Linked to {book.abs_title}'})
-    
-    return jsonify({'error': 'Failed to link document'}), 500
-
-@app.route('/api/kosync-documents/<doc_hash>/unlink', methods=['POST'])
-def api_unlink_kosync_document(doc_hash):
-    """Remove the ABS book link from a KOSync document."""
-    success = database_service.unlink_kosync_document(doc_hash)
-    if success:
-        return jsonify({'success': True, 'message': 'Document unlinked'})
-    return jsonify({'error': 'Document not found'}), 404
-
-@app.route('/api/kosync-documents/<doc_hash>', methods=['DELETE'])
-def api_delete_kosync_document(doc_hash):
-    """Delete a KOSync document."""
-    success = database_service.delete_kosync_document(doc_hash)
-    if success:
-        return jsonify({'success': True, 'message': 'Document deleted'})
-    return jsonify({'error': 'Document not found'}), 404
-
 
 if __name__ == '__main__':
     # Initialize dependencies for production mode
