@@ -1162,6 +1162,45 @@ def clear_progress(abs_id):
     return redirect(url_for('index'))
 
 
+@app.route('/retry-job/<abs_id>', methods=['POST'])
+def retry_job(abs_id):
+    """Manually retry a failed job by resetting status to pending"""
+    book = database_service.get_book(abs_id)
+    if not book:
+        logger.warning(f"Cannot retry job: Book {abs_id} not found")
+        return redirect(url_for('index'))
+
+    try:
+        if book.status in ['failed_retry_later', 'crashed']:
+            logger.info(f"Manual retry triggered for {sanitize_log_data(book.abs_title or abs_id)}")
+            
+            # Reset status to pending so the job scheduler picks it up immediately
+            book.status = 'pending'
+            database_service.save_book(book)
+            
+            # Reset job retries
+            job = database_service.get_latest_job(abs_id)
+            if job:
+                job.retry_count = 0
+                job.last_error = 'Manual retry'
+                database_service.save_job(job)
+                
+            # Trigger check immediately
+            manager.check_pending_jobs()
+            
+            from flask import flash
+            flash(f"✅ Retry scheduled for {book.abs_title}", "success")
+        else:
+            logger.warning(f"Retry ignored: Book {abs_id} is in state {book.status}")
+            
+    except Exception as e:
+        logger.error(f"Failed to retry job for {abs_id}: {e}")
+        from flask import flash
+        flash(f"❌ Retry failed: {str(e)}", "error")
+
+    return redirect(url_for('index'))
+
+
 @app.route('/link-hardcover/<abs_id>', methods=['POST'])
 def link_hardcover(abs_id):
     from flask import flash

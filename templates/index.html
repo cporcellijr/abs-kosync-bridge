@@ -120,12 +120,21 @@
             {% endif %}
 
             <div class="quick-actions">
+                {% if mapping.status in ['failed_retry_later', 'crashed'] %}
+                <form method="POST" action="/retry-job/{{ mapping.abs_id }}" class="flex-1-mr-6">
+                    <button type="submit" class="action-btn warning"
+                        style="background: rgba(255, 152, 0, 0.2); border-color: rgba(255, 152, 0, 0.4);">
+                        🔄 Retry Now
+                    </button>
+                </form>
+                {% else %}
                 <form method="POST" action="/clear-progress/{{ mapping.abs_id }}" class="flex-1-mr-6">
                     <button type="submit" class="action-btn warning"
                         onclick="return confirm('Clear all progress for this book? This will set progress to 0% on all systems.')">
                         🔄 Clear
                     </button>
                 </form>
+                {% endif %}
                 <form method="POST" action="/delete/{{ mapping.abs_id }}" class="flex-1">
                     <button type="submit" class="action-btn danger" onclick="return confirm('Delete this mapping?')">
                         🗑️ Delete
@@ -1030,13 +1039,13 @@
             }
 
             // Auto-refresh via AJAX every 30 seconds
-            setInterval(function() {
+            setInterval(function () {
                 fetch(window.location.href)
                     .then(response => response.text())
                     .then(html => {
                         const parser = new DOMParser();
                         const doc = parser.parseFromString(html, 'text/html');
-                        
+
                         // Update grids if they exist
                         ['currently-reading-grid', 'all-books-grid'].forEach(id => {
                             const newGrid = doc.getElementById(id);
@@ -1045,11 +1054,11 @@
                                 oldGrid.innerHTML = newGrid.innerHTML;
                             }
                         });
-                        
+
                         // Re-apply sorting to maintain user preference
                         const sortBy = sortSelect ? sortSelect.value : 'title';
                         const direction = sortState[sortBy] || 'asc';
-                        
+
                         if (currentlyReadingGrid) sortCards(currentlyReadingGrid, sortBy, direction);
                         if (allBooksGrid) sortCards(allBooksGrid, sortBy, direction);
                     })
