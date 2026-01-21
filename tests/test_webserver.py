@@ -24,6 +24,7 @@ class MockContainer:
         self.mock_storyteller_client = Mock()
         self.mock_database_service = Mock()
         self.mock_ebook_parser = Mock()
+        self.mock_sync_clients = Mock()
 
         # Configure the sync manager to return our mock clients
         self.mock_sync_manager.abs_client = self.mock_abs_client
@@ -56,6 +57,9 @@ class MockContainer:
 
     def books_dir(self):
         return Path(tempfile.gettempdir()) / 'test_books'
+
+    def sync_clients(self):
+        return self.mock_sync_clients
 
 
 class CleanFlaskIntegrationTest(unittest.TestCase):
@@ -171,13 +175,12 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.mock_database_service.get_hardcover_details.return_value = None
 
         # Mock the sync_clients call for integrations
-        def mock_sync_clients():
-            return {
+        # Mock the sync_clients call for integrations
+        self.mock_container.mock_sync_clients.return_value = {
                 'ABS': Mock(is_configured=Mock(return_value=True)),
                 'KoSync': Mock(is_configured=Mock(return_value=True)),
                 'Storyteller': Mock(is_configured=Mock(return_value=False))
             }
-        self.mock_container.sync_clients = mock_sync_clients
 
         # Mock render_template to capture arguments
         import src.web_server

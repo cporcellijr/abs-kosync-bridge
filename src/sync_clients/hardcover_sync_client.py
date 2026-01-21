@@ -37,7 +37,7 @@ class HardcoverSyncClient(SyncClient):
         """
         return False
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         """
         Since Hardcover can never be the leader, its service state is not used for
         leader selection or text extraction. Return None to indicate no state needed.
@@ -217,7 +217,11 @@ class HardcoverSyncClient(SyncClient):
         total_pages = hardcover_details.hardcover_pages or 0
 
         # Safety check: If total_pages is zero we cannot compute a valid page number
-        if total_pages == 0:
+        if total_pages <= 0:
+            if total_pages == -1:
+                # Already verified no valid edition exists
+                return SyncResult(None, False)
+            
             # Attempt to refresh page count if it is zero (maybe the edition was updated or we matched a bad edition)
             logger.info(f"Hardcover: Pages are 0 for {sanitize_log_data(book.abs_title)}, attempting to refresh details...")
             refreshed_edition = self.hardcover_client.get_default_edition(hardcover_details.hardcover_book_id)
@@ -230,6 +234,8 @@ class HardcoverSyncClient(SyncClient):
                 logger.info(f"Hardcover: Updated page count to {total_pages}")
             else:
                 logger.info(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} still has 0 pages after refresh.")
+                hardcover_details.hardcover_pages = -1  # Sentinel for "no valid edition"
+                self.database_service.save_hardcover_details(hardcover_details)
                 return SyncResult(None, False)
 
         page_num = int(total_pages * percentage)

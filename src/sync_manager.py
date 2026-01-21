@@ -6,6 +6,7 @@ import time
 import traceback
 from pathlib import Path
 import schedule
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.models import Job
@@ -54,7 +55,12 @@ class SyncManager:
         self.data_dir = data_dir
         self.books_dir = books_dir
 
-        self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
+        try:
+            val = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1))
+        except (ValueError, TypeError):
+            logger.warning("Invalid SYNC_DELTA_BETWEEN_CLIENTS_PERCENT value, defaulting to 1")
+            val = 1.0
+        self.sync_delta_between_clients = val / 100.0
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
         self._job_queue = []
@@ -116,6 +122,38 @@ class SyncManager:
         """Extract duration from audiobook media data."""
         media = ab.get('media', {})
         return media.get('duration', 0)
+
+    def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, abs_bulk_data=None, st_bulk_data=None):
+        """Fetch states from all clients in parallel."""
+        config = {}
+        
+        with ThreadPoolExecutor(max_workers=len(self.sync_clients)) as executor:
+            futures = {}
+            for client_name, client in self.sync_clients.items():
+                prev_state = prev_states_by_client.get(client_name.lower())
+                
+                # Determine bulk context for this client
+                bulk_ctx = None
+                if client_name == 'ABS':
+                    bulk_ctx = abs_bulk_data
+                elif client_name == 'Storyteller':
+                    bulk_ctx = st_bulk_data
+                
+                future = executor.submit(
+                    client.get_service_state, book, prev_state, title_snip, bulk_ctx
+                )
+                futures[future] = client_name
+            
+            for future in as_completed(futures, timeout=15):
+                client_name = futures[future]
+                try:
+                    state = future.result()
+                    if state is not None:
+                        config[client_name] = state
+                except Exception as e:
+                    logger.warning(f"⚠️ {client_name} state fetch failed: {e}")
+        
+        return config
 
     def _get_local_epub(self, ebook_filename):
         """
@@ -380,6 +418,12 @@ class SyncManager:
             self._sync_lock.release()
 
     def _sync_cycle_internal(self, target_abs_id=None):
+        # Clear caches at start of cycle
+        storyteller_client = self.sync_clients.get('Storyteller')
+        if storyteller_client and hasattr(storyteller_client, 'storyteller_client'):
+            if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
+                storyteller_client.storyteller_client.clear_cache()
+    
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
@@ -396,10 +440,16 @@ class SyncManager:
         # Optimization: Fetch ALL ABS progress at once to avoid N+1 API calls
         # Only do this if we are in a full cycle (target_abs_id is None)
         abs_bulk_data = {}
+        st_bulk_data = {}
+        
         if not target_abs_id:
             logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
             if self.abs_client:
                 abs_bulk_data = self.abs_client.get_all_progress_raw()
+            
+            # Storyteller Bulk Fetch
+            if storyteller_client and hasattr(storyteller_client.storyteller_client, 'get_all_positions_bulk'):
+                st_bulk_data = storyteller_client.storyteller_client.get_all_positions_bulk()
                 
         # Main sync loop - process each active book
         for book in active_books:
@@ -419,34 +469,8 @@ class SyncManager:
                     if state.last_updated and state.last_updated > last_updated:
                         last_updated = state.last_updated
 
-                # Build config using sync_clients - each client fetches its own state
-                config: dict[str, ServiceState] = {}
-                for client_name, client in self.sync_clients.items():
-                    # Get the previous state for this specific client
-                    prev_state = prev_states_by_client.get(client_name.lower())
-                    
-                    # SPECIAL HANDLING FOR ABS BULK DATA
-                    if client_name == 'ABS' and not target_abs_id and abs_bulk_data:
-                         # We inject the bulk data into the client context if possible, 
-                         # or we check if we can short-circuit
-                         # Since we can't easily change the client interface signature broadly without refactoring everything,
-                         # we will do a pre-check here.
-                         
-                         item_progress = abs_bulk_data.get(book.abs_id)
-                         
-                         # If we have bulk data, and this book IS NOT in it, and we have a previous state...
-                         # It implies no change on ABS side relative to "now". 
-                         # However, we still need to run get_service_state because we might have local KOSync changes to push TO ABS.
-                         # So we can't just skip. But we can optimize inside the client if we passed data.
-                         # For now, we will rely on the client's standard fetch, which is redundant but safe.
-                         # TODO: Refactor SyncClient interface to accept 'bulk_context'
-                         pass
-
-                    state = client.get_service_state(book, prev_state, title_snip)
-                    if state is not None:
-                        config[client_name] = state
-                        if target_abs_id: 
-                            logger.debug(f"[{title_snip}] {client_name} state: {state.current}")
+                # Build config using sync_clients - parallel fetch
+                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, abs_bulk_data, st_bulk_data)
 
                 # Filtered config now only contains non-None states
                 if not config:
@@ -466,7 +490,7 @@ class SyncManager:
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
                 significant_diff = False
                 
-                if len(progress_values) > 1:
+                if len(progress_values) >= 2:
                     max_progress = max(progress_values)
                     min_progress = min(progress_values)
                     progress_diff = max_progress - min_progress
@@ -476,13 +500,23 @@ class SyncManager:
                         # If we have a significant diff, we verify it's not just noise 
                         # by checking if we have at least one valid state
                         logger.debug(f"[{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
+                        logger.debug(f"[{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
                     else:
                         logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
-                        continue
+                        # Do not continue here, let the consolidated check handle it
+
+                # Check if all 'delta' fields in config are zero
+                # We typically skip if nothing changed, BUT if there is a significant discrepancy 
+                # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
+                deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
 
                 # If nothing changed AND clients are effectively in sync, skip
                 if deltas_zero and not significant_diff:
+                    logger.debug(f"[{title_snip}] No changes and clients in sync, skipping")
                     continue
+                
+                if significant_diff:
+                    logger.debug(f"[{title_snip}] Proceeding due to client discrepancy")
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []

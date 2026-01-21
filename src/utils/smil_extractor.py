@@ -71,7 +71,7 @@ class SmilExtractor:
                 smil_files = self._get_smil_files_in_order(opf_content, opf_dir, zf)
                 
                 if not smil_files:
-                    logger.warning(f"No SMIL files found in EPUB: {epub_path}")
+                    logger.debug(f"No SMIL files found in EPUB: {epub_path}")
                     return []
                 
                 logger.info(f"📖 Found {len(smil_files)} SMIL files in EPUB")

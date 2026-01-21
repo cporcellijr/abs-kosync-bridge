@@ -146,6 +146,10 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         storyteller_db.update_progress.return_value = True
         booklore_client.update_progress.return_value = True
         abs_client.create_session.return_value = f"test-session-{self.expected_leader.lower()}"
+        
+        # Configure bulk data mocks (return empty to force individual fetch fallback)
+        abs_client.get_all_progress_raw.return_value = {}
+        storyteller_db.get_all_positions_bulk.return_value = {}
 
         # Configure database service mock
         database_service = Mock()

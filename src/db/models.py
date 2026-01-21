@@ -59,7 +59,7 @@ class Book(Base):
     abs_id = Column(String(255), primary_key=True)
     abs_title = Column(String(500))
     ebook_filename = Column(String(500))
-    kosync_doc_id = Column(String(255))
+    kosync_doc_id = Column(String(255), index=True)
     transcript_file = Column(String(500))
     status = Column(String(50), default='active')
     duration = Column(Float)  # Duration in seconds from AudioBookShelf

@@ -21,9 +21,33 @@ class StorytellerSyncClient(SyncClient):
     def check_connection(self):
         return self.storyteller_client.check_connection()
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         epub = book.ebook_filename
-        st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
+        st_pct, st_ts, st_href, st_frag = None, None, None, None
+
+        # Try to use bulk context if available
+        used_bulk = False
+        if bulk_context:
+            try:
+                # We need to resolve the filename to a book title/ID to look it up in bulk data
+                # We access the underlying API client if available
+                api = getattr(self.storyteller_client, 'api_client', None)
+                if api:
+                    book_info = api.find_book_by_title(epub)
+                    if book_info:
+                        title_key = book_info.get('title', '').lower()
+                        if title_key in bulk_context:
+                            data = bulk_context[title_key]
+                            st_pct = data.get('pct')
+                            st_ts = data.get('ts')
+                            st_href = data.get('href')
+                            st_frag = data.get('frag')
+                            used_bulk = True
+            except Exception as e:
+                logger.debug(f"[{title_snip}] Failed to use Storyteller bulk context: {e}")
+
+        if not used_bulk:
+            st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
 
         if st_pct is None:
             logger.debug("⚠️ Storyteller percentage is None - returning None for service state")

@@ -15,6 +15,8 @@ class ABSClient:
         self.base_url = os.environ.get("ABS_SERVER", "").rstrip('/')
         self.token = os.environ.get("ABS_KEY")
         self.headers = {"Authorization": f"Bearer {self.token}"}
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
 
     def check_connection(self):
         # Verify configuration first
@@ -24,7 +26,7 @@ class ABSClient:
 
         url = f"{self.base_url}/api/me"
         try:
-            r = requests.get(url, headers=self.headers, timeout=5)
+            r = self.session.get(url, timeout=5)
             if r.status_code == 200:
                 # If this is the first container start, show INFO for visibility; otherwise use DEBUG
                 first_run_marker = '/data/.first_run_done'
@@ -54,7 +56,7 @@ class ABSClient:
     def get_all_audiobooks(self):
         lib_url = f"{self.base_url}/api/libraries"
         try:
-            r = requests.get(lib_url, headers=self.headers)
+            r = self.session.get(lib_url)
             if r.status_code != 200: return []
             libraries = r.json().get('libraries', [])
             all_audiobooks = []
@@ -69,7 +71,7 @@ class ABSClient:
     def get_audiobooks_for_lib(self, lib: str):
         items_url = f"{self.base_url}/api/libraries/{lib}/items"
         params = {"mediaType": "audiobook"}
-        r_items = requests.get(items_url, headers=self.headers, params=params)
+        r_items = self.session.get(items_url, params=params)
         if r_items.status_code == 200:
             return r_items.json().get('results', [])
         logger.warning("⚠️ ABS - Failed to fetch audiobooks for library " + lib)
@@ -78,7 +80,7 @@ class ABSClient:
     def get_audio_files(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:
-            r = requests.get(url, headers=self.headers)
+            r = self.session.get(url)
             if r.status_code == 200:
                 data = r.json()
                 files = []
@@ -102,16 +104,16 @@ class ABSClient:
     def get_item_details(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:
-            r = requests.get(url, headers=self.headers)
+            r = self.session.get(url)
             if r.status_code == 200: return r.json()
-        except:
+        except Exception:
             pass
         return None
 
     def get_progress(self, item_id):
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
-            r = requests.get(url, headers=self.headers)
+            r = self.session.get(url)
             if r.status_code == 200: return r.json()
         except Exception:
             logger.exception(f"Error fetching ABS progress for item {item_id}")
@@ -141,7 +143,7 @@ class ABSClient:
         }
 
         try:
-            r = requests.patch(url, headers=self.headers, json=payload, timeout=10)
+            r = self.session.patch(url, json=payload, timeout=10)
             if r.status_code in (200, 204):
                 logger.debug(f"ABS ebook progress updated: {item_id} -> {progress} at location: {location[:50]}...")
                 return True
@@ -180,7 +182,7 @@ class ABSClient:
 
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
-            r = requests.post(url, headers=self.headers, json=payload, timeout=10)
+            r = self.session.post(url, json=payload, timeout=10)
             if r.status_code in (200, 204):
                 logger.debug(f"ABS progress updated via session: {abs_id}, payload: {payload}")
                 self.close_session(session_id)
@@ -199,7 +201,7 @@ class ABSClient:
         """Fetch all user progress in one API call."""
         url = f"{self.base_url}/api/me/progress"
         try:
-            r = requests.get(url, headers=self.headers, timeout=10)
+            r = self.session.get(url, timeout=10)
             if r.status_code != 200: return {}
             data = r.json()
             # Returns a dict where key is libraryItemId for fast lookup
@@ -213,7 +215,7 @@ class ABSClient:
         """Fetch in-progress items, optimized to avoid redundant detail fetches if possible."""
         url = f"{self.base_url}/api/me/progress"
         try:
-            r = requests.get(url, headers=self.headers, timeout=10)
+            r = self.session.get(url, timeout=10)
             if r.status_code != 200: return []
             data = r.json()
             items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
@@ -269,7 +271,7 @@ class ABSClient:
             "forceTranscode": False
         }
         try:
-            r = requests.post(play_url, headers=self.headers, json=play_payload, timeout=10)
+            r = self.session.post(play_url, json=play_payload, timeout=10)
             if r.status_code == 200:
                 id = r.json().get('id')
                 logger.debug(f"Created new ABS session for item {abs_id}, id: {id}")
@@ -283,7 +285,7 @@ class ABSClient:
     def close_session(self, session_id):
         try:
             close_url = f"{self.base_url}/api/session/{session_id}/close"
-            requests.post(close_url, headers=self.headers, timeout=5)
+            self.session.post(close_url, timeout=5)
         except Exception as e:
             logger.warning(f"⚠️ Failed to close session for ABS: {e}")
 
@@ -291,7 +293,7 @@ class ABSClient:
         """Add an audiobook to a collection, creating the collection if it doesn't exist."""
         try:
             collections_url = f"{self.base_url}/api/collections"
-            r = requests.get(collections_url, headers=self.headers)
+            r = self.session.get(collections_url)
             if r.status_code != 200:
                 return False
 
@@ -300,11 +302,11 @@ class ABSClient:
 
             if not target_collection:
                 lib_url = f"{self.base_url}/api/libraries"
-                r_lib = requests.get(lib_url, headers=self.headers)
+                r_lib = self.session.get(lib_url)
                 if r_lib.status_code == 200:
                     libraries = r_lib.json().get('libraries', [])
                     if libraries:
-                        r_create = requests.post(collections_url, headers=self.headers,
+                        r_create = self.session.post(collections_url,
                                                  json={"libraryId": libraries[0]['id'], "name": collection_name})
                         if r_create.status_code in [200, 201]:
                             target_collection = r_create.json()
@@ -313,7 +315,7 @@ class ABSClient:
                 return False
 
             add_url = f"{self.base_url}/api/collections/{target_collection['id']}/book"
-            r_add = requests.post(add_url, headers=self.headers, json={"id": item_id})
+            r_add = self.session.post(add_url, json={"id": item_id})
             if r_add.status_code in [200, 201, 204]:
                 try:
                     details = self.get_item_details(item_id)
@@ -333,6 +335,7 @@ class KoSyncClient:
         self.user = os.environ.get("KOSYNC_USER")
         # Kept your MD5 hash logic
         self.auth_token = hashlib.md5(os.environ.get("KOSYNC_KEY", "").encode('utf-8')).hexdigest()
+        self.session = requests.Session()
 
     def is_configured(self):
         return bool(self.base_url and self.user)
@@ -346,7 +349,7 @@ class KoSyncClient:
         url = f"{self.base_url}/healthcheck"
         try:
             headers = {'accept': 'application/vnd.koreader.v1+json'}
-            r = requests.get(url, timeout=5, headers=headers)
+            r = self.session.get(url, timeout=5, headers=headers)
             if r.status_code == 200:
                 # First-run visible INFO, otherwise DEBUG
                 first_run_marker = '/data/.first_run_done'
@@ -365,7 +368,7 @@ class KoSyncClient:
             # Fallback check
             url_sync = f"{self.base_url}/syncs/progress/test-connection"
             headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
-            r = requests.get(url_sync, headers=headers, timeout=5)
+            r = self.session.get(url_sync, headers=headers, timeout=5)
             if r.status_code == 200:
                 return True
             logger.warning(f"❌ KoSync connection failed (Response: {r.status_code})")
@@ -386,15 +389,15 @@ class KoSyncClient:
         headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, 'accept': 'application/vnd.koreader.v1+json'}
         url = f"{self.base_url}/syncs/progress/{doc_id}"
         try:
-            r = requests.get(url, headers=headers)
+            r = self.session.get(url, headers=headers)
             if r.status_code == 200:
                 data = r.json()
                 pct = float(data.get('percentage', 0))
                 # Grab the raw progress string (XPath)
                 xpath = data.get('progress')
                 return pct, xpath
-        except:
-            logger.error(f"Error fetching KoSync progress for doc {doc_id}")
+        except Exception as e:
+            logger.error(f"Error fetching KoSync progress for doc {doc_id}: {e}")
             pass
         return None, None
 
@@ -421,7 +424,7 @@ class KoSyncClient:
             "timestamp": int(time.time())
         }
         try:
-            r = requests.put(url, headers=headers, json=payload, timeout=10)
+            r = self.session.put(url, headers=headers, json=payload, timeout=10)
             if r.status_code in (200, 201, 204):
                 logger.debug(f"   📡 KoSync Updated: {percentage:.1%} with progress '{progress_val}' for doc {doc_id}")
                 return True

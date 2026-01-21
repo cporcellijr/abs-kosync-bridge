@@ -23,6 +23,12 @@ class StorytellerAPIClient:
         self._token_max_age = 30
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json"})
+        self._filename_to_book_cache = {}  # Cache filename -> book mapping
+
+    def clear_cache(self):
+        """Call at start of each sync cycle to refresh."""
+        self._filename_to_book_cache = {}
+        self._book_cache = {}
 
     def is_configured(self):
         return bool(self.username and self.password)
@@ -108,16 +114,28 @@ class StorytellerAPIClient:
         clean_stem = re.sub(r'\s*\[[^\]]*\]\s*$', '', clean_stem)
         clean_stem = clean_stem.strip().lower()
 
-        if clean_stem in self._book_cache: return self._book_cache[clean_stem]
+        clean_stem = clean_stem.strip().lower()
+
+        # Check cache first
+        cache_key = ebook_filename.lower()
+        if cache_key in self._filename_to_book_cache:
+            return self._filename_to_book_cache[cache_key]
+
+        if clean_stem in self._book_cache: 
+            self._filename_to_book_cache[cache_key] = self._book_cache[clean_stem]
+            return self._book_cache[clean_stem]
 
         for title, book_info in self._book_cache.items():
-            if clean_stem in title or title in clean_stem: return book_info
+            if clean_stem in title or title in clean_stem: 
+                self._filename_to_book_cache[cache_key] = book_info
+                return book_info
 
         stem_words = set(clean_stem.split())
         for title, book_info in self._book_cache.items():
             title_words = set(title.split())
             common = stem_words & title_words
             if len(common) >= min(len(stem_words), len(title_words)) * 0.7:
+                self._filename_to_book_cache[cache_key] = book_info
                 return book_info
         return None
 
@@ -143,6 +161,23 @@ class StorytellerAPIClient:
             return pct, ts, href, fragment
 
         return None, None, None, None
+
+    def get_all_positions_bulk(self) -> dict:
+        """Fetch all book positions in one pass. Returns {title_lower: {pct, ts, href, frag, uuid}}"""
+        if not self._book_cache:
+            self._refresh_book_cache()
+        
+        positions = {}
+        for title, book in self._book_cache.items():
+            uuid = book.get('uuid')
+            if not uuid:
+                continue
+            pct, ts, href, frag = self.get_position_details(uuid)
+            if pct is not None:
+                positions[title.lower()] = {
+                    'pct': pct, 'ts': ts, 'href': href, 'frag': frag, 'uuid': uuid
+                }
+        return positions
 
     def update_position(self, book_uuid: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         new_ts = int(time.time() * 1000)
@@ -262,6 +297,12 @@ class StorytellerDBWithAPI:
         elif self.db_fallback:
             return self.db_fallback.get_progress_with_fragment(ebook_filename)
         return None, None, None, None
+
+    def get_all_positions_bulk(self) -> dict:
+        if self.api_client:
+            return self.api_client.get_all_positions_bulk()
+        # SQLite fallback - iterate through books
+        return {}
 
     def update_progress(self, ebook_filename: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         if self.api_client: return self.api_client.update_progress_by_filename(ebook_filename, percentage, rich_locator)

@@ -21,7 +21,7 @@ class BookloreSyncClient(SyncClient):
     def check_connection(self):
         return self.booklore_client.check_connection()
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         epub = book.ebook_filename
         bl_pct, _ = self.booklore_client.get_progress(epub)
 

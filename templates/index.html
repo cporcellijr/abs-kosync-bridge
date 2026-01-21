@@ -1029,8 +1029,32 @@
                 applySorting(savedSort);
             }
 
-            // Auto-refresh every 30 seconds
-            setTimeout(() => location.reload(), 30000);
+            // Auto-refresh via AJAX every 30 seconds
+            setInterval(function() {
+                fetch(window.location.href)
+                    .then(response => response.text())
+                    .then(html => {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        
+                        // Update grids if they exist
+                        ['currently-reading-grid', 'all-books-grid'].forEach(id => {
+                            const newGrid = doc.getElementById(id);
+                            const oldGrid = document.getElementById(id);
+                            if (newGrid && oldGrid) {
+                                oldGrid.innerHTML = newGrid.innerHTML;
+                            }
+                        });
+                        
+                        // Re-apply sorting to maintain user preference
+                        const sortBy = sortSelect ? sortSelect.value : 'title';
+                        const direction = sortState[sortBy] || 'asc';
+                        
+                        if (currentlyReadingGrid) sortCards(currentlyReadingGrid, sortBy, direction);
+                        if (allBooksGrid) sortCards(allBooksGrid, sortBy, direction);
+                    })
+                    .catch(err => console.error("Auto-refresh failed", err));
+            }, 30000);
         </script>
 </body>
 

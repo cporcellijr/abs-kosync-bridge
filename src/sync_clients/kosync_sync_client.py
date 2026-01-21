@@ -22,7 +22,7 @@ class KoSyncSyncClient(SyncClient):
     def check_connection(self):
         return self.kosync_client.check_connection()
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         ko_id = book.kosync_doc_id
         ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
         if ko_xpath is None:

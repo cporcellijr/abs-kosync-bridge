@@ -90,7 +90,10 @@ def setup_dependencies(test_container=None):
     
     ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
     BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
-    MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
+    try:
+        MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
+    except (ValueError, TypeError):
+        MONITOR_INTERVAL = 3600
     SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
@@ -146,7 +149,10 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 # Booklore shelf name for auto-adding matched books
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
-MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
+try:
+    MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
+except (ValueError, TypeError):
+    MONITOR_INTERVAL = 3600
 SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
 # ---------------- HELPER FUNCTIONS ----------------
@@ -581,6 +587,8 @@ def get_searchable_ebooks(search_term):
 
 
 def restart_server():
+    import time
+    time.sleep(0.5)  # Allow response to be sent to browser
     """
     Triggers a graceful restart by sending SIGTERM to the current process.
     The start.sh supervisor loop will catch the exit and restart the application.
@@ -1139,7 +1147,7 @@ def clear_progress(abs_id):
     book = database_service.get_book(abs_id)
 
     if not book:
-        logger.warning(f"Cannot clear progress: book not found for {abs_id}")
+        logger.warning(f"Cannot clear progress: Book {abs_id} not found")
         return redirect(url_for('index'))
 
     try:
@@ -1545,15 +1553,22 @@ def kosync_get_progress(doc_id):
     book = database_service.get_book_by_kosync_id(doc_id)
     if book:
         states = database_service.get_states_for_book(book.abs_id)
+        
+        # Prefer KOSync state, but fall back to latest if available
         kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
-        if kosync_state:
+        latest_state = kosync_state
+        
+        if not latest_state and states:
+             latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
+
+        if latest_state:
             return jsonify({
                 "device": "abs-kosync-bridge",
                 "device_id": "abs-kosync-bridge",
                 "document": doc_id,
-                "percentage": float(kosync_state.percentage) if kosync_state.percentage else 0,
-                "progress": kosync_state.xpath or "",
-                "timestamp": int(kosync_state.last_updated) if kosync_state.last_updated else 0
+                "percentage": float(latest_state.percentage) if latest_state.percentage else 0,
+                "progress": latest_state.xpath or "",
+                "timestamp": int(latest_state.last_updated) if latest_state.last_updated else 0
             }), 200
     
     # Document not found - return 502 per kosync-dotnet spec (NOT 404!)
