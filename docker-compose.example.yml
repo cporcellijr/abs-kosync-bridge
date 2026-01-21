@@ -41,9 +41,7 @@ services:
       - KOSYNC_SERVER=https://your-calibre-server.com/api/koreader
       - KOSYNC_USER=your_username
       - KOSYNC_KEY=your_password
-      # Whether to reject progress updates that go backwards (default: true)
-      # Set to false if you want to allow resetting progress
-      - KOSYNC_FURTHEST_WINS=true
+
       # Hash method: 'content' (recommended) or 'filename'
       - KOSYNC_HASH_METHOD=content
       # Whether to use percentage progress from KOSync server instead of calculating from text matching when saving the previous state
@@ -107,7 +105,6 @@ services:
       - PROCESSING_DIR=/processing
       - AUDIOBOOKS_DIR=/audiobooks
       - STORYTELLER_INGEST_DIR=/storyteller/library
-
       # ============================================
       # Telegram Logging Integration (OPTIONAL)
       # ============================================

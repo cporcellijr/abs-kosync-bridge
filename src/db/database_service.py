@@ -705,4 +705,8 @@ class DatabaseMigrator:
             pass
 
         # Check if JSON files exist
+        if self.json_db_path.exists() or self.json_state_path.exists():
+            return True
+
+        return False
 

@@ -14,7 +14,7 @@ TEST_DIR = '/tmp/test_kosync'
 os.environ['DATA_DIR'] = TEST_DIR
 os.environ['KOSYNC_USER'] = 'testuser'
 os.environ['KOSYNC_KEY'] = 'testpass'
-os.environ['KOSYNC_FURTHEST_WINS'] = 'true'
+
 
 # Ensure test directory exists
 if os.path.exists(TEST_DIR):
@@ -235,8 +235,8 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertEqual(data['device_id'], 'KINDLE456')
         self.assertIn('timestamp', data)
     
-    def test_furthest_progress_wins(self):
-        """Test that backwards progress is rejected."""
+    def test_progress_overwrites(self):
+        """Test that progress updates overwrite previous values (kosync-dotnet behavior)."""
         # First PUT at 50%
         self.client.put(
             '/syncs/progress',
@@ -250,7 +250,7 @@ class TestKosyncEndpoints(unittest.TestCase):
             }
         )
         
-        # Try to go backwards to 25%
+        # Go backwards to 25% - should be ACCEPTED (kosync-dotnet behavior)
         response = self.client.put(
             '/syncs/progress',
             headers=self.auth_headers,
@@ -265,13 +265,13 @@ class TestKosyncEndpoints(unittest.TestCase):
         
         self.assertEqual(response.status_code, 200)
         
-        # Verify progress stayed at 50%
+        # Verify progress IS NOW 25% (overwritten)
         get_response = self.client.get(
             '/syncs/progress/' + 'i' * 32,
             headers=self.auth_headers
         )
         data = get_response.get_json()
-        self.assertAlmostEqual(data['percentage'], 0.50)
+        self.assertAlmostEqual(data['percentage'], 0.25)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,622 @@
+🎯 Dependency Injection Unit Test Suite
+============================================================
+Testing all sync scenarios using dependency injection
+📁 Found 12 test file(s):
+   • tests/test_abs_unittest.py - Abs Scenario
+   • tests/test_booklore_unittest.py - Booklore Scenario
+   • tests/test_clear_progress.py - Clear Progress Scenario
+   • tests/test_database_service_integration.py - Database Service Integration Scenario
+   • tests/test_dependency_injection.py - Dependency Injection Scenario
+   • tests/test_hardcover_sync_client.py - Hardcover Sync Client Scenario
+   • tests/test_kosync_server.py - Kosync Server Scenario
+   • tests/test_kosync_unittest.py - Kosync Scenario
+   • tests/test_nochanges_unittest.py - Nochanges Scenario
+   • tests/test_storyteller_unittest.py - Storyteller Scenario
+   • tests/test_syncmanager_paths.py - Syncmanager Paths Scenario
+   • tests/test_webserver.py - Webserver Scenario
+
+
+🧪 Running Abs Scenario
+============================================================
+test_abs_leads (__main__.TestABSLeadsSync.test_abs_leads) ... 2026-01-21 20:20:36,384 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:36,387 - INFO - ✅ ABS connection verified
+2026-01-21 20:20:36,389 - INFO - ✅ KoSync connection verified
+2026-01-21 20:20:36,391 - INFO - ✅ Storyteller connection verified
+2026-01-21 20:20:36,392 - INFO - ✅ BookLore connection verified
+2026-01-21 20:20:36,393 - INFO - [JOB] Reset crashed book status: Test Audiobook
+2026-01-21 20:20:36,394 - INFO - [JOB] Recovering interrupted job: Test Audiobook
+2026-01-21 20:20:36,396 - INFO - 🔄 Syncing 'Test Audiobook'
+2026-01-21 20:20:36,400 - INFO - 🔄 [Test Audiobook] Change detected
+2026-01-21 20:20:36,401 - INFO - 📊 ABS: 10.0000% -> 40.0000%
+2026-01-21 20:20:36,402 - INFO - 📖 [Test Audiobook] ABS leads at 40.0000%
+2026-01-21 20:20:36,404 - INFO - [Test Audiobook] Updated state data for KoSync: {'pct': 0.4, 'xpath': '/html/body/div[1]/p[10]'}
+2026-01-21 20:20:36,406 - INFO - [Test Audiobook] Updated state data for Storyteller: {'pct': 0.4}
+2026-01-21 20:20:36,407 - INFO - [Test Audiobook] Updated state data for BookLore: {'pct': 0.4}
+2026-01-21 20:20:36,408 - INFO - 💾 [Test Audiobook] States saved to database
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.320s
+
+OK
+
+✅ Abs Scenario PASSED
+
+🧪 Running Booklore Scenario
+============================================================
+test_booklore_leads (__main__.TestBookLoreLeadsSync.test_booklore_leads) ... 2026-01-21 20:20:37,429 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:37,431 - INFO - ✅ ABS connection verified
+2026-01-21 20:20:37,433 - INFO - ✅ KoSync connection verified
+2026-01-21 20:20:37,435 - INFO - ✅ Storyteller connection verified
+2026-01-21 20:20:37,436 - INFO - ✅ BookLore connection verified
+2026-01-21 20:20:37,437 - INFO - [JOB] Reset crashed book status: BookLore Leader Test Book
+2026-01-21 20:20:37,438 - INFO - [JOB] Recovering interrupted job: BookLore Leader Test Book
+2026-01-21 20:20:37,440 - INFO - 🔄 Syncing 'BookLore Leader Test Book'
+2026-01-21 20:20:37,444 - INFO - 🔄 [BookLore Leader Test Book] Change detected
+2026-01-21 20:20:37,445 - INFO - 📊 BookLore: 60.0000% -> 75.0000%
+2026-01-21 20:20:37,446 - INFO - 📊 KoSync: 40.0000% -> 50.0000%
+2026-01-21 20:20:37,447 - INFO - 📊 Storyteller: 50.0000% -> 65.0000%
+2026-01-21 20:20:37,448 - INFO - 📊 ABS: 30.0000% -> 40.0000%
+2026-01-21 20:20:37,448 - INFO - 📖 [BookLore Leader Test Book] BookLore leads at 75.0000%
+2026-01-21 20:20:37,450 - INFO - [BookLore Leader Test Book] Updated state data for ABS: {'ts': 750.0, 'pct': 0.75}
+2026-01-21 20:20:37,451 - INFO - [BookLore Leader Test Book] Updated state data for KoSync: {'pct': 0.75, 'xpath': '/html/body/div[1]/p[18]'}
+2026-01-21 20:20:37,452 - INFO - [BookLore Leader Test Book] Updated state data for Storyteller: {'pct': 0.75}
+2026-01-21 20:20:37,453 - INFO - 💾 [BookLore Leader Test Book] States saved to database
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.251s
+
+OK
+
+✅ Booklore Scenario PASSED
+
+🧪 Running Clear Progress Scenario
+============================================================
+/app/src/db/models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+WARNING - Not setting up file logging because missing data dir
+INFO - setup plugin alembic.autogenerate.schemas
+2026-01-21 20:20:38,159 - INFO - setup plugin alembic.autogenerate.schemas
+INFO - setup plugin alembic.autogenerate.tables
+2026-01-21 20:20:38,159 - INFO - setup plugin alembic.autogenerate.tables
+INFO - setup plugin alembic.autogenerate.types
+2026-01-21 20:20:38,159 - INFO - setup plugin alembic.autogenerate.types
+INFO - setup plugin alembic.autogenerate.constraints
+2026-01-21 20:20:38,160 - INFO - setup plugin alembic.autogenerate.constraints
+INFO - setup plugin alembic.autogenerate.defaults
+2026-01-21 20:20:38,160 - INFO - setup plugin alembic.autogenerate.defaults
+INFO - setup plugin alembic.autogenerate.comments
+2026-01-21 20:20:38,160 - INFO - setup plugin alembic.autogenerate.comments
+INFO - Alembic migrations completed successfully
+2026-01-21 20:20:38,274 - INFO - Alembic migrations completed successfully
+INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:38,321 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+INFO - ✅ kosync connection verified
+2026-01-21 20:20:38,322 - INFO - ✅ kosync connection verified
+INFO - ✅ storyteller connection verified
+2026-01-21 20:20:38,322 - INFO - ✅ storyteller connection verified
+INFO - ✅ abs connection verified
+2026-01-21 20:20:38,322 - INFO - ✅ abs connection verified
+INFO - 🧹 Clearing progress for book nonexistent-book-456...
+2026-01-21 20:20:38,325 - INFO - 🧹 Clearing progress for book nonexistent-book-456...
+ERROR - Error clearing progress for nonexistent-book-456: Book not found: nonexistent-book-456
+2026-01-21 20:20:38,325 - ERROR - Error clearing progress for nonexistent-book-456: Book not found: nonexistent-book-456
+ERROR - Traceback (most recent call last):
+  File "/app/src/sync_manager.py", line 684, in clear_progress
+    raise ValueError(f"Book not found: {abs_id}")
+ValueError: Book not found: nonexistent-book-456
+
+2026-01-21 20:20:38,326 - ERROR - Traceback (most recent call last):
+  File "/app/src/sync_manager.py", line 684, in clear_progress
+    raise ValueError(f"Book not found: {abs_id}")
+ValueError: Book not found: nonexistent-book-456
+
+.INFO - Alembic migrations completed successfully
+2026-01-21 20:20:38,409 - INFO - Alembic migrations completed successfully
+INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:38,437 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+INFO - ✅ kosync connection verified
+2026-01-21 20:20:38,438 - INFO - ✅ kosync connection verified
+INFO - ✅ storyteller connection verified
+2026-01-21 20:20:38,439 - INFO - ✅ storyteller connection verified
+INFO - ✅ abs connection verified
+2026-01-21 20:20:38,439 - INFO - ✅ abs connection verified
+INFO - 🧹 Clearing progress for book test-book-123...
+2026-01-21 20:20:38,443 - INFO - 🧹 Clearing progress for book test-book-123...
+INFO - 📊 Cleared 3 state records from database
+2026-01-21 20:20:38,452 - INFO - 📊 Cleared 3 state records from database
+INFO - ✅ Reset kosync to 0%
+2026-01-21 20:20:38,452 - INFO - ✅ Reset kosync to 0%
+INFO - ✅ Reset storyteller to 0%
+2026-01-21 20:20:38,452 - INFO - ✅ Reset storyteller to 0%
+INFO - ✅ Reset abs to 0%
+2026-01-21 20:20:38,453 - INFO - ✅ Reset abs to 0%
+INFO - ✅ Progress clearing completed for 'Test Book'
+2026-01-21 20:20:38,453 - INFO - ✅ Progress clearing completed for 'Test Book'
+INFO -    Database states cleared: 3
+2026-01-21 20:20:38,453 - INFO -    Database states cleared: 3
+INFO -    Client resets: 3/3 successful
+2026-01-21 20:20:38,453 - INFO -    Client resets: 3/3 successful
+.INFO - Alembic migrations completed successfully
+2026-01-21 20:20:38,542 - INFO - Alembic migrations completed successfully
+INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:38,570 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+INFO - ✅ kosync connection verified
+2026-01-21 20:20:38,571 - INFO - ✅ kosync connection verified
+INFO - ✅ storyteller connection verified
+2026-01-21 20:20:38,571 - INFO - ✅ storyteller connection verified
+INFO - ✅ abs connection verified
+2026-01-21 20:20:38,571 - INFO - ✅ abs connection verified
+INFO - 🧹 Clearing progress for book test-book-123...
+2026-01-21 20:20:38,573 - INFO - 🧹 Clearing progress for book test-book-123...
+INFO - 📊 Cleared 3 state records from database
+2026-01-21 20:20:38,582 - INFO - 📊 Cleared 3 state records from database
+WARNING - ⚠️ Error resetting kosync: Connection error
+2026-01-21 20:20:38,582 - WARNING - ⚠️ Error resetting kosync: Connection error
+INFO - ✅ Reset storyteller to 0%
+2026-01-21 20:20:38,582 - INFO - ✅ Reset storyteller to 0%
+INFO - ✅ Reset abs to 0%
+2026-01-21 20:20:38,582 - INFO - ✅ Reset abs to 0%
+INFO - ✅ Progress clearing completed for 'Test Book'
+2026-01-21 20:20:38,582 - INFO - ✅ Progress clearing completed for 'Test Book'
+INFO -    Database states cleared: 3
+2026-01-21 20:20:38,582 - INFO -    Database states cleared: 3
+INFO -    Client resets: 2/3 successful
+2026-01-21 20:20:38,583 - INFO -    Client resets: 2/3 successful
+.INFO - Alembic migrations completed successfully
+2026-01-21 20:20:38,701 - INFO - Alembic migrations completed successfully
+INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:38,738 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+INFO - ✅ kosync connection verified
+2026-01-21 20:20:38,739 - INFO - ✅ kosync connection verified
+INFO - ✅ storyteller connection verified
+2026-01-21 20:20:38,740 - INFO - ✅ storyteller connection verified
+INFO - ✅ abs connection verified
+2026-01-21 20:20:38,740 - INFO - ✅ abs connection verified
+INFO - 🧹 Clearing progress for book test-book-123...
+2026-01-21 20:20:38,744 - INFO - 🧹 Clearing progress for book test-book-123...
+INFO - 📊 Cleared 3 state records from database
+2026-01-21 20:20:38,753 - INFO - 📊 Cleared 3 state records from database
+INFO - ✅ Reset kosync to 0%
+2026-01-21 20:20:38,754 - INFO - ✅ Reset kosync to 0%
+WARNING - ⚠️ Failed to reset storyteller
+2026-01-21 20:20:38,754 - WARNING - ⚠️ Failed to reset storyteller
+INFO - ✅ Reset abs to 0%
+2026-01-21 20:20:38,754 - INFO - ✅ Reset abs to 0%
+INFO - ✅ Progress clearing completed for 'Test Book'
+2026-01-21 20:20:38,754 - INFO - ✅ Progress clearing completed for 'Test Book'
+INFO -    Database states cleared: 3
+2026-01-21 20:20:38,754 - INFO -    Database states cleared: 3
+INFO -    Client resets: 2/3 successful
+2026-01-21 20:20:38,754 - INFO -    Client resets: 2/3 successful
+.
+----------------------------------------------------------------------
+Ran 4 tests in 1.041s
+
+OK
+
+✅ Clear Progress Scenario PASSED
+
+🧪 Running Database Service Integration Scenario
+============================================================
+❌ Database Service Integration Scenario FAILED
+STDERR:
+test_create_book (__main__.TestDatabaseServiceIntegration.test_create_book)
+Test creating a book record. ... /app/src/db/models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+INFO - setup plugin alembic.autogenerate.schemas
+INFO - setup plugin alembic.autogenerate.tables
+INFO - setup plugin alembic.autogenerate.types
+INFO - setup plugin alembic.autogenerate.constraints
+INFO - setup plugin alembic.autogenerate.defaults
+INFO - setup plugin alembic.autogenerate.comments
+INFO - Alembic migrations completed successfully
+ok
+test_create_states (__main__.TestDatabaseServiceIntegration.test_create_states)
+Test creating state records for multiple clients. ... INFO - Alembic migrations completed successfully
+ok
+test_database_service_initialization (__main__.TestDatabaseServiceIntegration.test_database_service_initialization)
+Test that database service initializes correctly. ... INFO - Alembic migrations completed successfully
+ok
+test_delete_book (__main__.TestDatabaseServiceIntegration.test_delete_book)
+Test deleting a book record with cascading deletes for states and hardcover details. ... INFO - Alembic migrations completed successfully
+ok
+test_get_books_by_status (__main__.TestDatabaseServiceIntegration.test_get_books_by_status)
+Test querying books by status. ... INFO - Alembic migrations completed successfully
+ok
+test_migration_idempotency (__main__.TestDatabaseServiceIntegration.test_migration_idempotency)
+Test that migration doesn't create duplicates when run multiple times. ... INFO - Alembic migrations completed successfully
+INFO - Alembic migrations completed successfully
+FAIL
+test_migration_mapping_json (__main__.TestDatabaseServiceIntegration.test_migration_mapping_json)
+Test migration of mapping JSON data. ... INFO - Alembic migrations completed successfully
+INFO - Alembic migrations completed successfully
+INFO - Starting migration from JSON to SQLAlchemy database...
+INFO - Migrated 1 book mappings
+INFO - Migrated state for 0 books
+INFO - Migration completed
+ok
+test_migration_partial_data (__main__.TestDatabaseServiceIntegration.test_migration_partial_data)
+Test migration with partial/missing data scenarios. ... INFO - Alembic migrations completed successfully
+INFO - Alembic migrations completed successfully
+INFO - Starting migration from JSON to SQLAlchemy database...
+INFO - Migrated 2 book mappings
+INFO - Migrated state for 1 books
+INFO - Migration completed
+ok
+test_migration_should_migrate (__main__.TestDatabaseServiceIntegration.test_migration_should_migrate)
+Test migration detection logic. ... INFO - Alembic migrations completed successfully
+INFO - Alembic migrations completed successfully
+FAIL
+test_migration_state_json (__main__.TestDatabaseServiceIntegration.test_migration_state_json)
+Test migration of state JSON data. ... INFO - Alembic migrations completed successfully
+INFO - Alembic migrations completed successfully
+INFO - Starting migration from JSON to SQLAlchemy database...
+INFO - Migrated 1 book mappings
+INFO - Migrated state for 1 books
+INFO - Migration completed
+ok
+test_statistics (__main__.TestDatabaseServiceIntegration.test_statistics)
+Test database statistics functionality. ... INFO - Alembic migrations completed successfully
+ok
+
+======================================================================
+FAIL: test_migration_idempotency (__main__.TestDatabaseServiceIntegration.test_migration_idempotency)
+Test that migration doesn't create duplicates when run multiple times.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_database_service_integration.py", line 517, in test_migration_idempotency
+    self.assertTrue(migrator.should_migrate())
+AssertionError: None is not true
+
+======================================================================
+FAIL: test_migration_should_migrate (__main__.TestDatabaseServiceIntegration.test_migration_should_migrate)
+Test migration detection logic.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_database_service_integration.py", line 316, in test_migration_should_migrate
+    self.assertTrue(migrator.should_migrate())
+AssertionError: None is not true
+
+----------------------------------------------------------------------
+Ran 11 tests in 2.152s
+
+FAILED (failures=2)
+
+
+🧪 Running Dependency Injection Scenario
+============================================================
+2026-01-21 20:20:41,922 - INFO - EbookParser initialized (cache=3, hash=content, xpath_fallback=False)
+2026-01-21 20:20:42,016 - INFO - setup plugin alembic.autogenerate.schemas
+2026-01-21 20:20:42,017 - INFO - setup plugin alembic.autogenerate.tables
+2026-01-21 20:20:42,017 - INFO - setup plugin alembic.autogenerate.types
+2026-01-21 20:20:42,017 - INFO - setup plugin alembic.autogenerate.constraints
+2026-01-21 20:20:42,017 - INFO - setup plugin alembic.autogenerate.defaults
+2026-01-21 20:20:42,018 - INFO - setup plugin alembic.autogenerate.comments
+2026-01-21 20:20:42,231 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:42,235 - INFO - HARDCOVER_TOKEN not set
+2026-01-21 20:20:42,236 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:42,236 - WARNING - ⚠️ Audiobookshelf not configured (skipping)
+2026-01-21 20:20:42,236 - INFO - ✅ ABS connection verified
+
+✅ Dependency Injection Scenario PASSED
+
+🧪 Running Hardcover Sync Client Scenario
+============================================================
+test_api_error_handling (__main__.TestHardcoverSyncClient.test_api_error_handling)
+Test error handling when Hardcover API calls fail. ... 2026-01-21 20:20:43,044 - INFO - setup plugin alembic.autogenerate.schemas
+2026-01-21 20:20:43,045 - INFO - setup plugin alembic.autogenerate.tables
+2026-01-21 20:20:43,046 - INFO - setup plugin alembic.autogenerate.types
+2026-01-21 20:20:43,047 - INFO - setup plugin alembic.autogenerate.constraints
+2026-01-21 20:20:43,048 - INFO - setup plugin alembic.autogenerate.defaults
+2026-01-21 20:20:43,049 - INFO - setup plugin alembic.autogenerate.comments
+2026-01-21 20:20:43,165 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:43,217 - ERROR - Failed to update Hardcover progress: Hardcover API Error
+ok
+test_automatch_skip_when_already_matched (__main__.TestHardcoverSyncClient.test_automatch_skip_when_already_matched)
+Test that auto-matching is skipped if book is already matched. ... 2026-01-21 20:20:43,318 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:43,337 - INFO - 📚 Hardcover: 'Test Hardcover Book' status promoted to Currently Reading
+ok
+test_automatch_successful_isbn_search (__main__.TestHardcoverSyncClient.test_automatch_successful_isbn_search)
+Test successful auto-matching by ISBN with API calls verification. ... 2026-01-21 20:20:43,423 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:43,442 - INFO - 📚 Hardcover: 'Test ISBN Book' matched and set to Want to Read (matched by isbn)
+2026-01-21 20:20:43,444 - INFO - 📚 Hardcover: 'Test Hardcover Book' status promoted to Currently Reading
+ok
+test_basic_interface_compliance (__main__.TestHardcoverSyncClient.test_basic_interface_compliance)
+Test that HardcoverSyncClient implements the required interface correctly. ... 2026-01-21 20:20:43,528 - INFO - Alembic migrations completed successfully
+ok
+test_finished_book_status_promotion (__main__.TestHardcoverSyncClient.test_finished_book_status_promotion)
+Test that finished books (>99%) get promoted to 'Read' status. ... 2026-01-21 20:20:43,618 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:43,640 - INFO - 📚 Hardcover: 'Test Hardcover Book' status promoted to Read
+ok
+test_get_text_from_current_state_returns_none (__main__.TestHardcoverSyncClient.test_get_text_from_current_state_returns_none)
+Test that get_text_from_current_state always returns None since Hardcover doesn't provide text. ... 2026-01-21 20:20:43,721 - INFO - Alembic migrations completed successfully
+ok
+test_no_configuration_returns_failure (__main__.TestHardcoverSyncClient.test_no_configuration_returns_failure)
+Test that unconfigured client returns failure. ... 2026-01-21 20:20:43,834 - INFO - Alembic migrations completed successfully
+ok
+test_update_progress_calls_hardcover_api (__main__.TestHardcoverSyncClient.test_update_progress_calls_hardcover_api)
+Test that update_progress correctly calls Hardcover API for progress and status updates. ... 2026-01-21 20:20:43,968 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:43,994 - INFO - 📚 Hardcover: 'Test Hardcover Book' status promoted to Currently Reading
+ok
+test_zero_pages_edge_case (__main__.TestHardcoverSyncClient.test_zero_pages_edge_case)
+Test handling of books with zero pages. ... 2026-01-21 20:20:44,058 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:44,085 - INFO - Hardcover: Pages are 0 for Test Hardcover Book, attempting to refresh details...
+2026-01-21 20:20:44,087 - INFO - ⚠️ Hardcover Sync Skipped: Test Hardcover Book still has 0 pages after refresh.
+ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.187s
+
+OK
+
+✅ Hardcover Sync Client Scenario PASSED
+
+🧪 Running Kosync Server Scenario
+============================================================
+.......2026-01-21 20:20:45,987 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:46,003 - INFO - 🌍 HTTP GET /syncs/progress/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz - 502
+.2026-01-21 20:20:46,011 - INFO - KOSync: New document tracked: hhhhhhhh... from device 'TestKindle'
+2026-01-21 20:20:46,021 - INFO - 🔍 KOSync: Scheduled auto-discovery for unmapped document hhhhhhhh...
+.2026-01-21 20:20:46,023 - ERROR - Error in EPUB auto-discovery: 'NoneType' object has no attribute 'booklore_client'
+2026-01-21 20:20:46,025 - INFO - ❌ Auto-discovery finished. No match found.
+2026-01-21 20:20:46,033 - INFO - KOSync: New document tracked: iiiiiiii... from device 'Device1'
+2026-01-21 20:20:46,043 - INFO - 🔍 KOSync: Scheduled auto-discovery for unmapped document iiiiiiii...
+2026-01-21 20:20:46,046 - ERROR - Error in EPUB auto-discovery: 'NoneType' object has no attribute 'booklore_client'
+2026-01-21 20:20:46,046 - INFO - ❌ Auto-discovery finished. No match found.
+.2026-01-21 20:20:46,059 - INFO - 🔍 KOSync: Scheduled auto-discovery for unmapped document iiiiiiii...
+2026-01-21 20:20:46,065 - ERROR - Error in EPUB auto-discovery: 'NoneType' object has no attribute 'booklore_client'
+2026-01-21 20:20:46,066 - INFO - ❌ Auto-discovery finished. No match found.
+2026-01-21 20:20:46,073 - INFO - KOSync: New document tracked: gggggggg... from device 'TestKobo'
+.
+----------------------------------------------------------------------
+2026-01-21 20:20:46,083 - INFO - 🔍 KOSync: Scheduled auto-discovery for unmapped document gggggggg...
+Ran 11 tests in 1.366s
+
+2026-01-21 20:20:46,085 - ERROR - Error in EPUB auto-discovery: 'NoneType' object has no attribute 'booklore_client'
+OK
+2026-01-21 20:20:46,086 - INFO - ❌ Auto-discovery finished. No match found.
+
+✅ Kosync Server Scenario PASSED
+
+🧪 Running Kosync Scenario
+============================================================
+test_kosync_leads (__main__.TestKoSyncLeadsSync.test_kosync_leads) ... 2026-01-21 20:20:47,184 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:47,186 - INFO - ✅ ABS connection verified
+2026-01-21 20:20:47,187 - INFO - ✅ KoSync connection verified
+2026-01-21 20:20:47,189 - INFO - ✅ Storyteller connection verified
+2026-01-21 20:20:47,191 - INFO - ✅ BookLore connection verified
+2026-01-21 20:20:47,192 - INFO - [JOB] Reset crashed book status: KoSync Leader Test Book
+2026-01-21 20:20:47,193 - INFO - [JOB] Recovering interrupted job: KoSync Leader Test Book
+2026-01-21 20:20:47,196 - INFO - 🔄 Syncing 'KoSync Leader Test Book'
+2026-01-21 20:20:47,201 - INFO - 🔄 [KoSync Leader Test Book] Change detected
+2026-01-21 20:20:47,202 - INFO - 📊 Storyteller: 10.0000% -> 15.0000%
+2026-01-21 20:20:47,203 - INFO - 📊 ABS: 10.0000% -> 20.0000%
+2026-01-21 20:20:47,204 - INFO - 📊 BookLore: 0.0000% -> 10.0000%
+2026-01-21 20:20:47,206 - INFO - 📊 KoSync: 20.0000% -> 45.0000%
+2026-01-21 20:20:47,207 - INFO - 📖 [KoSync Leader Test Book] KoSync leads at 45.0000%
+2026-01-21 20:20:47,209 - INFO - [KoSync Leader Test Book] Updated state data for ABS: {'ts': 450.0, 'pct': 0.45}
+2026-01-21 20:20:47,210 - INFO - [KoSync Leader Test Book] Updated state data for Storyteller: {'pct': 0.45}
+2026-01-21 20:20:47,211 - INFO - [KoSync Leader Test Book] Updated state data for BookLore: {'pct': 0.45}
+2026-01-21 20:20:47,212 - INFO - 💾 [KoSync Leader Test Book] States saved to database
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.273s
+
+OK
+
+✅ Kosync Scenario PASSED
+
+🧪 Running Nochanges Scenario
+============================================================
+❌ Nochanges Scenario FAILED
+STDERR:
+test_no_changes_detected (__main__.TestNoChangesDetectedSync.test_no_changes_detected)
+Test sync_cycle when no changes are detected (all deltas are zero). ... 2026-01-21 20:20:48,222 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:48,224 - INFO - ✅ ABS connection verified
+2026-01-21 20:20:48,226 - INFO - ✅ KoSync connection verified
+2026-01-21 20:20:48,228 - INFO - ✅ Storyteller connection verified
+2026-01-21 20:20:48,229 - INFO - ✅ BookLore connection verified
+2026-01-21 20:20:48,230 - INFO - [JOB] Reset crashed book status: No Changes Test Book
+2026-01-21 20:20:48,231 - INFO - [JOB] Recovering interrupted job: No Changes Test Book
+2026-01-21 20:20:48,233 - INFO - 🔄 Syncing 'No Changes Test Book'
+2026-01-21 20:20:48,236 - INFO - 🔄 [No Changes Test Book] Change detected
+2026-01-21 20:20:48,237 - INFO - 📖 [No Changes Test Book] KoSync leads at 25.0000%
+2026-01-21 20:20:48,240 - INFO - [No Changes Test Book] Updated state data for ABS: {'ts': 250.0, 'pct': 0.25}
+2026-01-21 20:20:48,241 - INFO - [No Changes Test Book] Updated state data for Storyteller: {'pct': 0.25}
+2026-01-21 20:20:48,242 - INFO - [No Changes Test Book] Updated state data for BookLore: {'pct': 0.25}
+2026-01-21 20:20:48,243 - INFO - 💾 [No Changes Test Book] States saved to database
+FAIL
+
+======================================================================
+FAIL: test_no_changes_detected (__main__.TestNoChangesDetectedSync.test_no_changes_detected)
+Test sync_cycle when no changes are detected (all deltas are zero).
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_nochanges_unittest.py", line 72, in test_no_changes_detected
+    self.assertNotIn("States saved to database", log_output,
+AssertionError: 'States saved to database' unexpectedly found in "=== Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===\n✅ ABS connection verified\n✅ KoSync connection verified\n✅ Storyteller connection verified\n✅ BookLore connection verified\n[JOB] Reset crashed book status: No Changes Test Book\n[JOB] Recovering interrupted job: No Changes Test Book\n🔄 Syncing 'No Changes Test Book'\n🔄 [No Changes Test Book] Change detected\n📖 [No Changes Test Book] KoSync leads at 25.0000%\n[No Changes Test Book] Updated state data for ABS: {'ts': 250.0, 'pct': 0.25}\n[No Changes Test Book] Updated state data for Storyteller: {'pct': 0.25}\n[No Changes Test Book] Updated state data for BookLore: {'pct': 0.25}\n💾 [No Changes Test Book] States saved to database\n" : Logs should show no change
+
+----------------------------------------------------------------------
+Ran 1 test in 0.276s
+
+FAILED (failures=1)
+
+STDOUT:
+🔍 Final states from database service calls: {'kosync': 0.25, 'abs': 0.25, 'storyteller': 0.25, 'booklore': 0.25}
+
+
+🧪 Running Storyteller Scenario
+============================================================
+test_storyteller_leads (__main__.TestStorytellerLeadsSync.test_storyteller_leads) ... 2026-01-21 20:20:49,250 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:49,252 - INFO - ✅ ABS connection verified
+2026-01-21 20:20:49,253 - INFO - ✅ KoSync connection verified
+2026-01-21 20:20:49,255 - INFO - ✅ Storyteller connection verified
+2026-01-21 20:20:49,256 - INFO - ✅ BookLore connection verified
+2026-01-21 20:20:49,258 - INFO - [JOB] Reset crashed book status: Storyteller Leader Test Book
+2026-01-21 20:20:49,259 - INFO - [JOB] Recovering interrupted job: Storyteller Leader Test Book
+2026-01-21 20:20:49,261 - INFO - 🔄 Syncing 'Storyteller Leader Test Book'
+2026-01-21 20:20:49,264 - INFO - 🔄 [Storyteller Leader Test Book] Change detected
+2026-01-21 20:20:49,266 - INFO - 📊 ABS: 20.0000% -> 30.0000%
+2026-01-21 20:20:49,266 - INFO - 📊 KoSync: 25.0000% -> 35.0000%
+2026-01-21 20:20:49,267 - INFO - 📊 Storyteller: 30.0000% -> 60.0000%
+2026-01-21 20:20:49,268 - INFO - 📊 BookLore: 10.0000% -> 25.0000%
+2026-01-21 20:20:49,269 - INFO - 📖 [Storyteller Leader Test Book] Storyteller leads at 60.0000%
+2026-01-21 20:20:49,270 - INFO - [Storyteller Leader Test Book] Updated state data for ABS: {'ts': 600.0, 'pct': 0.6}
+2026-01-21 20:20:49,271 - INFO - [Storyteller Leader Test Book] Updated state data for KoSync: {'pct': 0.6, 'xpath': '/html/body/div[1]/p[15]'}
+2026-01-21 20:20:49,273 - INFO - [Storyteller Leader Test Book] Updated state data for BookLore: {'pct': 0.6}
+2026-01-21 20:20:49,274 - INFO - 💾 [Storyteller Leader Test Book] States saved to database
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.269s
+
+OK
+
+✅ Storyteller Scenario PASSED
+
+🧪 Running Syncmanager Paths Scenario
+============================================================
+2026-01-21 20:20:50,251 - INFO - HARDCOVER_TOKEN not set
+2026-01-21 20:20:50,253 - INFO - EbookParser initialized (cache=3, hash=content, xpath_fallback=False)
+2026-01-21 20:20:50,351 - INFO - setup plugin alembic.autogenerate.schemas
+2026-01-21 20:20:50,351 - INFO - setup plugin alembic.autogenerate.tables
+2026-01-21 20:20:50,351 - INFO - setup plugin alembic.autogenerate.types
+2026-01-21 20:20:50,351 - INFO - setup plugin alembic.autogenerate.constraints
+2026-01-21 20:20:50,352 - INFO - setup plugin alembic.autogenerate.defaults
+2026-01-21 20:20:50,352 - INFO - setup plugin alembic.autogenerate.comments
+2026-01-21 20:20:50,552 - INFO - Alembic migrations completed successfully
+2026-01-21 20:20:50,554 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===
+2026-01-21 20:20:50,555 - WARNING - ⚠️ Audiobookshelf not configured (skipping)
+2026-01-21 20:20:50,555 - INFO - ✅ ABS connection verified
+
+✅ Syncmanager Paths Scenario PASSED
+
+🧪 Running Webserver Scenario
+============================================================
+❌ Webserver Scenario FAILED
+STDERR:
+test_api_status_endpoint_clean_di (__main__.CleanFlaskIntegrationTest.test_api_status_endpoint_clean_di)
+Test API status endpoint with clean dependency injection. ... /app/src/db/models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+  Base = declarative_base()
+2026-01-21 20:20:51,799 - ERROR - ⚠️  Error loading settings from database: 'Mock' object is not iterable
+2026-01-21 20:20:51,799 - INFO - ✅ Settings loaded into environment variables
+2026-01-21 20:20:51,800 - INFO - 🔄 Globals reloaded from settings (ABS_SERVER=None)
+2026-01-21 20:20:51,800 - INFO - Web server dependencies initialized (DATA_DIR=/tmp/test_data)
+2026-01-21 20:20:51,828 - INFO - 🌍 HTTP GET /api/status - 200
+ok
+test_clear_progress_endpoint_clean_di (__main__.CleanFlaskIntegrationTest.test_clear_progress_endpoint_clean_di)
+Test clear progress endpoint with clean dependency injection. ... 2026-01-21 20:20:51,833 - ERROR - ⚠️  Error loading settings from database: 'Mock' object is not iterable
+2026-01-21 20:20:51,834 - INFO - ✅ Settings loaded into environment variables
+2026-01-21 20:20:51,834 - INFO - 🔄 Globals reloaded from settings (ABS_SERVER=None)
+2026-01-21 20:20:51,834 - INFO - Web server dependencies initialized (DATA_DIR=/tmp/test_data)
+2026-01-21 20:20:51,836 - INFO - Clearing progress for Clear Test Book
+2026-01-21 20:20:51,837 - INFO - ✅ Progress cleared successfully for Clear Test Book
+2026-01-21 20:20:51,837 - INFO - 🌍 HTTP POST /clear-progress/clear-test-book - 302
+ok
+test_dependency_injection_works (__main__.CleanFlaskIntegrationTest.test_dependency_injection_works)
+Verify that dependency injection is working properly. ... 2026-01-21 20:20:51,842 - ERROR - ⚠️  Error loading settings from database: 'Mock' object is not iterable
+2026-01-21 20:20:51,842 - INFO - ✅ Settings loaded into environment variables
+2026-01-21 20:20:51,842 - INFO - 🔄 Globals reloaded from settings (ABS_SERVER=None)
+2026-01-21 20:20:51,843 - INFO - Web server dependencies initialized (DATA_DIR=/tmp/test_data)
+ok
+test_index_endpoint_with_mocked_dependencies (__main__.CleanFlaskIntegrationTest.test_index_endpoint_with_mocked_dependencies)
+Test index endpoint using clean dependency injection. ... 2026-01-21 20:20:51,846 - ERROR - ⚠️  Error loading settings from database: 'Mock' object is not iterable
+2026-01-21 20:20:51,846 - INFO - ✅ Settings loaded into environment variables
+2026-01-21 20:20:51,846 - INFO - 🔄 Globals reloaded from settings (ABS_SERVER=None)
+2026-01-21 20:20:51,847 - INFO - Web server dependencies initialized (DATA_DIR=/tmp/test_data)
+ERROR
+test_match_endpoint_with_clean_di (__main__.CleanFlaskIntegrationTest.test_match_endpoint_with_clean_di)
+Test match endpoint using clean dependency injection. ... 2026-01-21 20:20:51,856 - ERROR - ⚠️  Error loading settings from database: 'Mock' object is not iterable
+2026-01-21 20:20:51,856 - INFO - ✅ Settings loaded into environment variables
+2026-01-21 20:20:51,857 - INFO - 🔄 Globals reloaded from settings (ABS_SERVER=None)
+2026-01-21 20:20:51,857 - INFO - Web server dependencies initialized (DATA_DIR=/tmp/test_data)
+2026-01-21 20:20:51,866 - INFO - 🌍 HTTP POST /match - 302
+ok
+
+======================================================================
+ERROR: test_index_endpoint_with_mocked_dependencies (__main__.CleanFlaskIntegrationTest.test_index_endpoint_with_mocked_dependencies)
+Test index endpoint using clean dependency injection.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_webserver.py", line 193, in test_index_endpoint_with_mocked_dependencies
+    response = self.client.get('/')
+               ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/werkzeug/test.py", line 1162, in get
+    return self.open(*args, **kw)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/testing.py", line 235, in open
+    response = super().open(
+               ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/werkzeug/test.py", line 1116, in open
+    response_parts = self.run_wsgi_app(request.environ, buffered=buffered)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/werkzeug/test.py", line 988, in run_wsgi_app
+    rv = run_wsgi_app(self.application, environ, buffered=buffered)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/werkzeug/test.py", line 1264, in run_wsgi_app
+    app_rv = app(environ, start_response)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 1514, in wsgi_app
+    response = self.handle_exception(e)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/web_server.py", line 722, in index
+    for client_name, client in sync_clients.items():
+TypeError: 'Mock' object is not iterable
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.884s
+
+FAILED (errors=1)
+
+STDOUT:
+🧪 Clean Flask Integration Testing with Dependency Injection
+======================================================================
+✓ No patches required
+✓ Clean dependency injection
+✓ Real HTTP requests via test_client()
+✓ Mocked external services
+✓ Easy to understand and maintain
+======================================================================
+✅ API status endpoint test passed with clean DI
+✅ Clear progress endpoint test passed with clean DI
+✅ Dependency injection working correctly
+✅ Match endpoint test passed with clean DI
+
+
+============================================================
+🎯 FINAL TEST SUMMARY
+============================================================
+✅ Abs Scenario
+✅ Booklore Scenario
+✅ Clear Progress Scenario
+❌ Database Service Integration Scenario
+✅ Dependency Injection Scenario
+✅ Hardcover Sync Client Scenario
+✅ Kosync Server Scenario
+✅ Kosync Scenario
+❌ Nochanges Scenario
+✅ Storyteller Scenario
+✅ Syncmanager Paths Scenario
+❌ Webserver Scenario
+
+📊 Results: 9/12 tests passed
+
+❌ 3 test(s) failed. Please review the failures above.

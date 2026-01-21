@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Optional
@@ -22,7 +22,7 @@ from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
 
 from src.db.database_service import DatabaseService
-from src.db.models import State, Book
+from src.db.models import State, Book, KosyncDocument
 from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
 from src.utils.di_container import Container
@@ -1692,27 +1692,15 @@ def kosync_put_progress():
     progress = data.get('progress', '')  # XPath string
     device = data.get('device', '')
     device_id = data.get('device_id', '')
+    client_ts = data.get('timestamp') # Unix epoch from client
     
     now = datetime.utcnow()
     
     # Get existing document or create new one
     kosync_doc = database_service.get_kosync_document(doc_hash)
     
-    # Implement "furthest progress wins" if enabled
-    furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
-    if furthest_wins and kosync_doc and kosync_doc.percentage:
-        existing_pct = float(kosync_doc.percentage)
-        new_pct = float(percentage)
-        
-        # Use a small epsilon for floating point comparison to avoid rejecting equal values
-        # Only reject if significantly backwards (more than 0.0001 = 0.01%)
-        if new_pct < existing_pct - 0.0001:
-            # Reject backwards progress - return current state
-            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.6f} < {existing_pct:.6f} for {doc_hash[:8]}")
-            return jsonify({
-                "document": doc_hash,
-                "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(time.time())
-            }), 200
+    # Note: kosync-dotnet does NOT implement 'furthest wins' - it accepts whatever the client sends.
+    # The bridge's sync_cycle handles anti-regression separately when syncing TO other platforms.
     
     if kosync_doc is None:
         # Create new document (auto-create like kosync-dotnet)

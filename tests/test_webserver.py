@@ -176,11 +176,14 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         # Mock the sync_clients call for integrations
         # Mock the sync_clients call for integrations
-        self.mock_container.mock_sync_clients.return_value = {
+        # Mock the sync_clients call for integrations
+        # Since container.sync_clients() returns the mock object, we need to mock .items()
+        clients_dict = {
                 'ABS': Mock(is_configured=Mock(return_value=True)),
                 'KoSync': Mock(is_configured=Mock(return_value=True)),
                 'Storyteller': Mock(is_configured=Mock(return_value=False))
-            }
+        }
+        self.mock_container.mock_sync_clients.items.return_value = clients_dict.items()
 
         # Mock render_template to capture arguments
         import src.web_server
