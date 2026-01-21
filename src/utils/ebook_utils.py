@@ -114,6 +114,51 @@ class EbookParser:
             return hashlib.md5(filename.encode('utf-8')).hexdigest()
         return self._compute_koreader_hash_from_bytes(content)
 
+    def extract_cover(self, filepath, output_path):
+        """
+        Extract cover image from EPUB to output_path.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            filepath = Path(filepath)
+            # 1. Try to get cover from metadata using ebooklib
+            try:
+                book = epub.read_epub(str(filepath))
+                # Check for cover item
+                cover_item = None
+                
+                # Method A: get_item_with_id('cover') or similar
+                # ebooklib doesn't have a standard 'get_cover' but often it's in the manifest
+                
+                # Method B: Iterate items
+                for item in book.get_items():
+                    if item.get_type() == ebooklib.ITEM_IMAGE:
+                        # naive check: is it named "cover"?
+                        if 'cover' in item.get_name().lower():
+                            cover_item = item
+                            break
+                    if item.get_type() == ebooklib.ITEM_COVER:
+                        cover_item = item
+                        break
+                
+                if cover_item:
+                    with open(output_path, 'wb') as f:
+                        f.write(cover_item.get_content())
+                    logger.debug(f"Extracted cover for {filepath.name}")
+                    return True
+            except Exception as e:
+                logger.debug(f"ebooklib cover extraction failed for {filepath.name}: {e}")
+
+            # 2. Fallback: ZipFile (if ebooklib fails or returns nothing)
+            # (ebooklib is basically a zip wrapper anyway, but sometimes direct zip access is easier if we just want the file)
+            # For now, let's stick to the attempt above. If valid EPUB, ebooklib should handle it.
+            
+            return False
+
+        except Exception as e:
+            logger.error(f"Error extracting cover from {filepath}: {e}")
+            return False
+
     def extract_text_and_map(self, filepath, progress_callback=None):
         """
         Used for fuzzy matching and general content extraction.

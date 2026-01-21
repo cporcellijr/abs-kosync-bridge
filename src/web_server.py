@@ -18,7 +18,7 @@ from urllib.parse import urljoin
 import requests
 import schedule
 from dependency_injector import providers
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
 
 from src.db.database_service import DatabaseService
 from src.sync_manager import SyncManager
@@ -47,6 +47,7 @@ manager: Optional[SyncManager] = None
 database_service: Optional[DatabaseService] = None
 DATA_DIR: Optional[Path] = None
 EBOOK_DIR: Optional[Path] = None
+COVERS_DIR: Optional[Path] = None
 
 def setup_dependencies(test_container=None):
     """
@@ -56,7 +57,7 @@ def setup_dependencies(test_container=None):
         test_container: Optional test container for dependency injection during testing.
                        If None, creates production container from environment.
     """
-    global container, manager, database_service, DATA_DIR, EBOOK_DIR
+    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR
 
     # 1. Initialize Database Service FIRST (needed to load settings)
     # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
@@ -119,6 +120,11 @@ def setup_dependencies(test_container=None):
     # Get data directories (now using updated env vars)
     DATA_DIR = container.data_dir()
     EBOOK_DIR = container.books_dir()
+    
+    # Initialize covers directory
+    COVERS_DIR = DATA_DIR / "covers"
+    if not COVERS_DIR.exists():
+        COVERS_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
@@ -147,6 +153,7 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
+
 
 # ---------------- HELPER FUNCTIONS ----------------
 def get_audiobooks_conditionally():
@@ -736,6 +743,7 @@ def index():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
+            'sync_mode': getattr(book, 'sync_mode', 'audiobook'),
             'unified_progress': 0,
             'duration': book.duration or 0,
             'states': {}
@@ -1228,6 +1236,48 @@ def update_hash(abs_id):
     return redirect(url_for('index'))
 
 
+@app.route('/covers/<path:filename>')
+def serve_cover(filename):
+    """Serve cover images with lazy extraction."""
+    # Filename is likely <hash>.jpg
+    doc_hash = filename.replace('.jpg', '')
+    
+    # 1. Check if file exists
+    cover_path = COVERS_DIR / filename
+    if cover_path.exists():
+        return send_from_directory(COVERS_DIR, filename)
+        
+    # 2. Try to extract
+    # Find book by kosync ID
+    book = database_service.get_book_by_kosync_id(doc_hash)
+    
+    if book and book.ebook_filename:
+        # We need the full path to the book. ebook_parser resolves it usually.
+        # extract_cover expects a path or filename that can be resolved.
+        # Let's pass what we have.
+        try:
+             # Find actual file path using EbookParser resolution if needed, 
+             # but extract_cover in my implementation takes 'filepath' and calls Path(filepath).
+             # If book.ebook_filename is just a name, we might need to resolve it.
+             # container.ebook_parser().resolve_book_path(book.ebook_filename)
+             
+             # Actually, let's let EbookParser handle resolution or pass full path if we know it.
+             # EbookParser.extract_cover currently does `Path(filepath)`. 
+             # It doesn't call `resolve_book_path` internally in the code I wrote?
+             # Let's double check my implementation of extract_cover.
+             # I wrote: `filepath = Path(filepath); book = epub.read_epub(str(filepath))`
+             # So it expects a valid path. I should resolve it first.
+             
+             parser = container.ebook_parser()
+             full_book_path = parser.resolve_book_path(book.ebook_filename)
+             
+             if parser.extract_cover(full_book_path, cover_path):
+                 return send_from_directory(COVERS_DIR, filename)
+        except Exception as e:
+            logger.debug(f"Lazy cover extraction failed: {e}")
+
+    return "Cover not found", 404
+
 @app.route('/api/status')
 def api_status():
     """Return status of all books from database service"""
@@ -1247,6 +1297,7 @@ def api_status():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
+            'sync_mode': getattr(book, 'sync_mode', 'audiobook'), # Default to audiobook for existing
             'duration': book.duration,
             'states': {}
         }
@@ -1648,9 +1699,14 @@ def kosync_put_progress():
     # Implement "furthest progress wins" if enabled
     furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
     if furthest_wins and kosync_doc and kosync_doc.percentage:
-        if float(percentage) < float(kosync_doc.percentage):
+        existing_pct = float(kosync_doc.percentage)
+        new_pct = float(percentage)
+        
+        # Use a small epsilon for floating point comparison to avoid rejecting equal values
+        # Only reject if significantly backwards (more than 0.0001 = 0.01%)
+        if new_pct < existing_pct - 0.0001:
             # Reject backwards progress - return current state
-            logger.debug(f"KOSync: Rejecting backwards progress {percentage:.4f} < {float(kosync_doc.percentage):.4f} for {doc_hash[:8]}")
+            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.6f} < {existing_pct:.6f} for {doc_hash[:8]}")
             return jsonify({
                 "document": doc_hash,
                 "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(time.time())

@@ -7,9 +7,14 @@
     {# Macro for rendering a book card - used by both currently-reading and all-books grids #}
     {% macro render_book_card(mapping, integrations) %}
     <div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
-        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
+        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}"
+        data-sync-mode="{{ mapping.sync_mode }}">
         <div class="book-cover-container">
-            {% if mapping.cover_url %}
+            {% if mapping.sync_mode == 'ebook_only' %}
+            <img src="/covers/{{ mapping.kosync_doc_id }}.jpg" alt="Cover" class="book-cover"
+                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+            <div class="book-cover-placeholder hidden">📖</div>
+            {% elif mapping.cover_url %}
             <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
             <div class="book-cover-placeholder hidden">📖</div>
@@ -832,6 +837,14 @@
         {% if mappings %}
         <div class="controls-bar">
             <div class="control-group">
+                <label for="filter-select">Show:</label>
+                <select id="filter-select">
+                    <option value="all">All Books</option>
+                    <option value="audiobook">Audiobooks</option>
+                    <option value="ebook_only">Ebooks Only</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label for="sort-select">Sort by:</label>
                 <select id="sort-select">
                     <option value="title">Title</option>
@@ -877,7 +890,36 @@
             const currentlyReadingGrid = document.getElementById('currently-reading-grid');
             const allBooksGrid = document.getElementById('all-books-grid');
             const sortSelect = document.getElementById('sort-select');
+            const filterSelect = document.getElementById('filter-select');
             const directionBtn = document.getElementById('sort-direction');
+
+            function filterBooks() {
+                const filterValue = filterSelect.value;
+                const cards = document.querySelectorAll('.book-card');
+
+                cards.forEach(card => {
+                    // Default to 'audiobook' if not specified
+                    const syncMode = card.dataset.syncMode || 'audiobook';
+
+                    let isVisible = true;
+                    if (filterValue === 'audiobook' && syncMode !== 'audiobook') {
+                        isVisible = false;
+                    } else if (filterValue === 'ebook_only' && syncMode !== 'ebook_only') {
+                        isVisible = false;
+                    }
+
+                    if (isVisible) {
+                        card.classList.remove('hidden');
+                        card.style.display = ''; // Ensure display is reset if it was hidden inline
+                    } else {
+                        card.classList.add('hidden');
+                        card.style.display = 'none'; // Force hide
+                    }
+                });
+
+                // Persist choice
+                localStorage.setItem('abs_kosync_filter', filterValue);
+            }
 
             function linkHardcover(event) {
                 event.stopPropagation();
@@ -1062,6 +1104,15 @@
             // Apply initial sort on load (if content exists)
             if (currentlyReadingGrid || allBooksGrid) {
                 applySorting(savedSort);
+            }
+
+            // Filter Logic initialization
+            if (filterSelect) {
+                filterSelect.addEventListener('change', filterBooks);
+                const savedFilter = localStorage.getItem('abs_kosync_filter') || 'all';
+                filterSelect.value = savedFilter;
+                // Apply filter initially
+                filterBooks();
             }
 
             // Auto-refresh every 30 seconds
