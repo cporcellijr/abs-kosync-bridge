@@ -1922,9 +1922,9 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
 
                     # Not in cache, download and hash
                     try:
-                        temp_path = container.booklore_client().download_book(book_id)
-                        if temp_path:
-                            computed_hash = container.ebook_parser().get_kosync_id(temp_path)
+                        book_content = container.booklore_client().download_book(book_id)
+                        if book_content:
+                            computed_hash = container.ebook_parser().get_kosync_id_from_bytes(book['fileName'], book_content)
                             
                             # Cache the result
                             if hash_cache:
@@ -1936,9 +1936,6 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
                                     booklore_id=book_id
                                 )
                                 cache_updates += 1
-                            
-                            # Clean up temp file
-                            Path(temp_path).unlink(missing_ok=True)
                             
                             if computed_hash == doc_hash:
                                 logger.info(f"📚 Matched EPUB via Booklore download: {book['title']}")
