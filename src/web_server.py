@@ -1503,7 +1503,10 @@ def kosync_users_auth():
 def kosync_users_create():
     """Stub for KOReader user registration check"""
     # Simply accept any "create user" request as valid
-    return jsonify({"username": os.environ.get("KOSYNC_USER", "user")}), 201
+    return jsonify({
+        "id": 1,
+        "username": os.environ.get("KOSYNC_USER", "user")
+    }), 201
 
 @app.route('/users/login', methods=['POST'])
 @app.route('/koreader/users/login', methods=['POST'])
@@ -1513,9 +1516,10 @@ def kosync_users_login():
     # KOReader might send creds here, but we just confirm "Yes, you are logged in"
     # We trust the client will send x-auth-user/key in subsequent requests
     return jsonify({
+        "id": 1,
         "username": os.environ.get("KOSYNC_USER", "user"),
         "active": True,
-        "token": os.environ.get("KOSYNC_KEY", "") # Some clients might want a token
+        "token": os.environ.get("KOSYNC_KEY", "") 
     }), 200
 
 @app.route('/syncs/progress/<doc_id>', methods=['GET'])
