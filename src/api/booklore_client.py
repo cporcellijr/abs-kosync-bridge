@@ -163,6 +163,13 @@ class BookloreClient:
 
         return None
 
+    def get_all_books(self):
+        """Get all books from cache, refreshing if necessary."""
+        # Use a reasonable cache time of 1 hour, similar to find_book_by_filename
+        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
+        if not self._book_cache: self._refresh_book_cache()
+        return list(self._book_cache.values())
+
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
         if time.time() - self._cache_timestamp > 5: self._refresh_book_cache()

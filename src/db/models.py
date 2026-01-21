@@ -63,6 +63,7 @@ class Book(Base):
     transcript_file = Column(String(500))
     status = Column(String(50), default='active')
     duration = Column(Float)  # Duration in seconds from AudioBookShelf
+    sync_mode = Column(String(20), default='audiobook')  # 'audiobook' or 'ebook_only'
 
     # Relationships
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
@@ -71,7 +72,7 @@ class Book(Base):
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
                  kosync_doc_id: str = None, transcript_file: str = None,
-                 status: str = 'active', duration: float = None):
+                 status: str = 'active', duration: float = None, sync_mode: str = 'audiobook'):
         self.abs_id = abs_id
         self.abs_title = abs_title
         self.ebook_filename = ebook_filename
@@ -79,6 +80,7 @@ class Book(Base):
         self.transcript_file = transcript_file
         self.status = status
         self.duration = duration
+        self.sync_mode = sync_mode
 
     def __repr__(self):
         return f"<Book(abs_id='{self.abs_id}', title='{self.abs_title}')>"

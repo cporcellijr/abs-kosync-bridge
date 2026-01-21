@@ -113,10 +113,11 @@ class DatabaseService:
                 logger.error("Database schema creation will be skipped - tables may not exist!")
 
         except Exception as e:
-            logger.error(f"Alembic migration failed: {e}")
-            logger.error("Database schema may be incomplete. Please check Alembic setup.")
+            logger.error(f"Fatal Alembic migration error: {e}")
+            logger.error("Application cannot continue with potentially broken schema.")
             import traceback
             logger.debug(f"Migration error details: {traceback.format_exc()}")
+            raise
 
     @contextmanager
     def get_session(self):
@@ -691,10 +692,17 @@ class DatabaseMigrator:
 
     def should_migrate(self) -> bool:
         """Check if migration is needed (JSON files exist but no data in SQLAlchemy)."""
-        # Check if we have any books in database
-        books = self.db_service.get_all_books()
-        if books:
-            return False  # Already have data, no migration needed
+        # Check if we have any books in database using raw SQL to avoid model mismatch crashes
+        try:
+            with self.db_service.get_session() as session:
+                from sqlalchemy import text
+                count = session.execute(text("SELECT count(*) FROM books")).scalar()
+                if count > 0:
+                    return False  # Already have data, no migration needed
+        except Exception as e:
+            # If table doesn't exist or other DB error, we might need migration
+            logger.debug(f"Could not check books table: {e}")
+            pass
 
         # Check if JSON files exist
 

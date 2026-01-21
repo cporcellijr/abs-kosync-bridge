@@ -1690,6 +1690,44 @@ def kosync_put_progress():
         if linked_book:
             database_service.link_kosync_document(doc_hash, linked_book.abs_id)
     
+    # AUTO-DISCOVERY: If no linked book found, try to automatically create ebook-only mapping
+    # AUTO-DISCOVERY: If no linked book found, try to automatically create ebook-only mapping
+    if not linked_book:
+        auto_create = os.environ.get('AUTO_CREATE_EBOOK_MAPPING', 'true').lower() == 'true'
+        
+        if auto_create:
+            # Run auto-discovery in background to avoid blocking the sync request
+            def run_auto_discovery(doc_hash_val):
+                with app.app_context():
+                    try:
+                        logger.info(f"🔍 KOSync: Scheduled auto-discovery for unmapped document {doc_hash_val[:8]}...")
+                        epub_filename = _try_find_epub_by_hash(doc_hash_val, database_service, container)
+                        
+                        if epub_filename:
+                            book_id = f"ebook-{doc_hash_val[:16]}"
+                            book = Book(
+                                abs_id=book_id,
+                                abs_title=Path(epub_filename).stem,
+                                ebook_filename=epub_filename,
+                                kosync_doc_id=doc_hash_val,
+                                transcript_file=None,
+                                status='active',
+                                duration=None,
+                                sync_mode='ebook_only'
+                            )
+                            database_service.save_book(book)
+                            database_service.link_kosync_document(doc_hash_val, book_id)
+                            logger.info(f"✅ Auto-created ebook-only mapping: {book_id} -> {epub_filename}")
+                            
+                            # Trigger initial sync for this new book
+                            manager.sync_cycle(target_abs_id=book_id)
+                        else:
+                            logger.debug(f"⚠️ Could not auto-match EPUB for KOSync document {doc_hash_val[:8]}...")
+                    except Exception as e:
+                        logger.error(f"Error in auto-discovery background task: {e}")
+
+            threading.Thread(target=run_auto_discovery, args=(doc_hash,), daemon=True).start()
+    
     if linked_book:
         # Update the State table for bridge sync functionality
         state = State(
@@ -1707,6 +1745,60 @@ def kosync_put_progress():
         "document": doc_hash,
         "timestamp": int(now.timestamp())
     }), 200
+
+# ============== Helper Functions for Auto-Discovery ==============
+
+def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Optional[str]:
+    """
+    Try to find matching EPUB file for a KOSync document hash.
+    
+    Searches:
+    1. Local filesystem (/books) - FASTEST, check first
+    2. Booklore API (if configured) - SLOW, fallback
+    
+    Returns:
+        EPUB filename if found, None otherwise
+    """
+    try:
+        # 1. Check Filesystem first (much faster)
+        if EBOOK_DIR and EBOOK_DIR.exists():
+            for epub_path in EBOOK_DIR.rglob("*.epub"):
+                try:
+                    computed_hash = container.ebook_parser().get_kosync_id(epub_path)
+                    if computed_hash == doc_hash:
+                        logger.info(f"📚 Matched EPUB via filesystem: {epub_path.name}")
+                        return epub_path.name
+                except Exception as e:
+                    logger.debug(f"Error checking file {epub_path.name}: {e}")
+
+        # 2. Fallback to Booklore (slower, requires download)
+        if container.booklore_client().is_configured():
+            try:
+                books = container.booklore_client().get_all_books()
+                for book in books:
+                    filename = book.get('fileName', '')
+                    if not filename.lower().endswith('.epub'):
+                        continue
+                    
+                    # Download and compute hash
+                    try:
+                        content = container.booklore_client().download_book(book['id'])
+                        if content:
+                            computed_hash = container.ebook_parser().get_kosync_id_from_bytes(filename, content)
+                            if computed_hash == doc_hash:
+                                logger.info(f"📚 Matched EPUB via Booklore: {filename}")
+                                return filename
+                    except Exception as e:
+                        logger.debug(f"Error checking Booklore book {filename}: {e}")
+            except Exception as e:
+                logger.debug(f"Error querying Booklore for EPUB matching: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error in EPUB auto-discovery: {e}")
+    
+    return None
+
+
 # ============== KOSync Document Management API ==============
 
 @app.route('/api/kosync-documents', methods=['GET'])

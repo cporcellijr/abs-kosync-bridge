@@ -123,13 +123,14 @@ class SyncManager:
         media = ab.get('media', {})
         return media.get('duration', 0)
 
-    def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, abs_bulk_data=None, st_bulk_data=None):
-        """Fetch states from all clients in parallel."""
+    def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, abs_bulk_data=None, st_bulk_data=None, clients_to_use=None):
+        """Fetch states from specified clients (or all if not specified) in parallel."""
+        clients_to_use = clients_to_use or self.sync_clients
         config = {}
         
-        with ThreadPoolExecutor(max_workers=len(self.sync_clients)) as executor:
+        with ThreadPoolExecutor(max_workers=len(clients_to_use)) as executor:
             futures = {}
-            for client_name, client in self.sync_clients.items():
+            for client_name, client in clients_to_use.items():
                 prev_state = prev_states_by_client.get(client_name.lower())
                 
                 # Determine bulk context for this client
@@ -469,17 +470,27 @@ class SyncManager:
                     if state.last_updated and state.last_updated > last_updated:
                         last_updated = state.last_updated
 
-                # Build config using sync_clients - parallel fetch
-                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, abs_bulk_data, st_bulk_data)
+                # Determine active clients based on sync_mode
+                if hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
+                    # Exclude ABS audiobook client for ebook-only books
+                    active_clients = {name: client for name, client in self.sync_clients.items() if name != 'ABS'}
+                    logger.debug(f"[{title_snip}] Ebook-only mode - excluding ABS audiobook client")
+                else:
+                    active_clients = self.sync_clients
+
+                # Build config using active_clients - parallel fetch
+                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, abs_bulk_data, st_bulk_data, active_clients)
 
                 # Filtered config now only contains non-None states
                 if not config:
                     continue  # No valid states to process
 
-                # Check for ABS offline condition
-                abs_state = config.get('ABS')
-                if abs_state is None:
-                    continue  # ABS offline
+                # Check for ABS offline condition (only for audiobook mode)
+                if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
+                    abs_state = config.get('ABS')
+                    if abs_state is None:
+                        logger.debug(f"[{title_snip}] ABS audiobook offline, skipping")
+                        continue  # ABS offline
 
                 # Check if all 'delta' fields in config are zero
                 # We typically skip if nothing changed, BUT if there is a significant discrepancy 
