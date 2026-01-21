@@ -1497,7 +1497,8 @@ def kosync_healthcheck():
 def kosync_users_auth():
     """Stub for KOReader auth check (some versions use this)"""
     user_agent = request.headers.get('User-Agent', '').lower()
-    if 'booknexus' in user_agent:
+    logger.info(f"KOSync Auth Check UA: {user_agent}")
+    if 'booknexus' in user_agent or 'bookfuse' in user_agent:
         return jsonify({"authorized": "true"}), 200
     return jsonify({"authorized": True}), 200
 
