@@ -1495,12 +1495,30 @@ def kosync_healthcheck():
 @app.route('/users/auth', methods=['GET'])
 @app.route('/koreader/users/auth', methods=['GET'])
 def kosync_users_auth():
-    """Stub for KOReader auth check (some versions use this)"""
-    user_agent = request.headers.get('User-Agent', '').lower()
-    logger.info(f"KOSync Auth Check UA: {user_agent}")
-
-    # Force string "true" to match kosync-dotnet behavior (BookNexus requires string, Readest likely handles it)
-    return jsonify({"authorized": "true"}), 200
+    """KOReader auth check - validates credentials per kosync-dotnet spec"""
+    user = request.headers.get('x-auth-user')
+    key = request.headers.get('x-auth-key')
+    
+    expected_user = os.environ.get("KOSYNC_USER")
+    expected_password = os.environ.get("KOSYNC_KEY")
+    
+    if not user or not key:
+        logger.warning(f"KOSync Auth: Missing credentials from {request.remote_addr}")
+        return jsonify({"message": "Invalid credentials"}), 401
+    
+    if not expected_user or not expected_password:
+        logger.error("KOSync Auth: Server credentials not configured")
+        return jsonify({"message": "Server not configured"}), 500
+    
+    # KOReader sends key = md5(password)
+    expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
+    
+    if user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
+        logger.debug(f"KOSync Auth: User '{user}' authenticated successfully")
+        return jsonify({"username": user}), 200
+    
+    logger.warning(f"KOSync Auth: Failed auth attempt for user '{user}' from {request.remote_addr}")
+    return jsonify({"message": "Unauthorized"}), 401
 
 @app.route('/users/create', methods=['POST'])
 @app.route('/koreader/users/create', methods=['POST'])
