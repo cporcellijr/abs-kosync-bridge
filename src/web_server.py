@@ -1877,8 +1877,13 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
         if hash_cache:
             cached_filename = hash_cache.lookup_by_hash(doc_hash)
             if cached_filename:
-                logger.info(f"📚 Matched EPUB via hash cache: {cached_filename}")
-                return cached_filename
+                # IMPORTANT: Verify the file actually exists where we expect it
+                try:
+                    container.ebook_parser().resolve_book_path(cached_filename)
+                    logger.info(f"📚 Matched EPUB via hash cache: {cached_filename}")
+                    return cached_filename
+                except FileNotFoundError:
+                    logger.debug(f"⚠️ Hash cache suggested '{cached_filename}' but file is missing. Re-scanning...")
 
         # 1. Check Filesystem (much faster)
         if EBOOK_DIR and EBOOK_DIR.exists():
@@ -1925,11 +1930,8 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
             try:
                 books = container.booklore_client().get_all_books()
                 logger.info(f"Fetched {len(books)} books from Booklore. Scanning...")
-                bk_count = 0
-                cache_updates = 0
                 
                 for book in books:
-                    bk_count += 1
                     book_id = str(book['id'])
                     
                     # Check cache for this book ID
@@ -1937,38 +1939,47 @@ def _try_find_epub_by_hash(doc_hash: str, database_service, container) -> Option
                         cached_hash = hash_cache.lookup_by_booklore_id(book_id)
                         if cached_hash:
                             if cached_hash == doc_hash:
-                                # We assume filename matches title for Booklore provided books? 
-                                # Actually Booklore client downloads by ID, but we need a filename to satisfy return type
-                                # Using title + extension as virtual filename
                                 safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
-                                logger.info(f"📚 Matched EPUB via Booklore ID cache: {safe_title}")
-                                return safe_title
-                            continue
+                                # Verify it exists in cache dir
+                                try:
+                                    container.ebook_parser().resolve_book_path(safe_title)
+                                    logger.info(f"📚 Matched EPUB via Booklore ID cache: {safe_title}")
+                                    return safe_title
+                                except FileNotFoundError:
+                                    logger.debug(f"⚠️ Booklore cache match found but file missing from cache dir. Re-downloading...")
 
-                    # Not in cache, download and hash
+                    # Not in cache or file missing, download and hash
                     try:
                         book_content = container.booklore_client().download_book(book_id)
                         if book_content:
                             computed_hash = container.ebook_parser().get_kosync_id_from_bytes(book['fileName'], book_content)
                             
+                            safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
+                            
+                            # PERSIST TO CACHE DIRECTORY so resolve_book_path can find it later
+                            cache_dir = container.data_dir() / "epub_cache"
+                            cache_dir.mkdir(parents=True, exist_ok=True)
+                            cache_path = cache_dir / safe_title
+                            with open(cache_path, 'wb') as f:
+                                f.write(book_content)
+                            logger.info(f"📥 Persisted Booklore book to cache: {safe_title}")
+                            
                             # Cache the result
                             if hash_cache:
-                                safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
                                 hash_cache.store_hash(
                                     computed_hash, 
                                     safe_title, 
                                     source='booklore',
                                     booklore_id=book_id
                                 )
-                                cache_updates += 1
                             
                             if computed_hash == doc_hash:
-                                logger.info(f"📚 Matched EPUB via Booklore download: {book['title']}")
-                                return f"{book['title']}.epub"
+                                logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
+                                return safe_title
                     except Exception as e:
                         logger.warning(f"Failed to check Booklore book {book['title']}: {e}")
                         
-                logger.info(f"❌ Booklore search finished. Checked {bk_count} books. No match.")
+                logger.info(f"❌ Booklore search finished. Checked {len(books)} books. No match.")
                 
             except Exception as e:
                 logger.debug(f"Error querying Booklore for EPUB matching: {e}")
