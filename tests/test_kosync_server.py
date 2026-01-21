@@ -238,8 +238,8 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertEqual(data['device_id'], 'KINDLE456')
         self.assertIn('timestamp', data)
     
-    def test_progress_overwrites(self):
-        """Test that progress updates overwrite previous values (kosync-dotnet behavior)."""
+    def test_furthest_wins_rejects_backwards(self):
+        """Test that backwards progress is rejected when KOSYNC_FURTHEST_WINS=true."""
         # First PUT at 50%
         self.client.put(
             '/syncs/progress',
@@ -253,7 +253,7 @@ class TestKosyncEndpoints(unittest.TestCase):
             }
         )
         
-        # Go backwards to 25% - should be ACCEPTED (kosync-dotnet behavior)
+        # Try to go backwards to 25% - should be REJECTED
         response = self.client.put(
             '/syncs/progress',
             headers=self.auth_headers,
@@ -268,13 +268,90 @@ class TestKosyncEndpoints(unittest.TestCase):
         
         self.assertEqual(response.status_code, 200)
         
-        # Verify progress IS NOW 25% (overwritten)
+        # Verify progress stayed at 50% (not overwritten)
         get_response = self.client.get(
             '/syncs/progress/' + 'i' * 32,
             headers=self.auth_headers
         )
         data = get_response.get_json()
-        self.assertAlmostEqual(data['percentage'], 0.25)
+        self.assertAlmostEqual(data['percentage'], 0.50)
+    
+    def test_furthest_wins_allows_equal(self):
+        """Test that equal progress values are accepted (not rejected as backwards)."""
+        # First PUT at 50%
+        self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'j' * 32,
+                'percentage': 0.50,
+                'progress': '/body/middle',
+                'device': 'Device1',
+                'device_id': 'D1'
+            }
+        )
+        
+        # Send same percentage again - should be ACCEPTED
+        response = self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'j' * 32,
+                'percentage': 0.50,
+                'progress': '/body/middle-updated',
+                'device': 'Device2',
+                'device_id': 'D2'
+            }
+        )
+        
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify progress field was updated (same percentage, different xpath)
+        get_response = self.client.get(
+            '/syncs/progress/' + 'j' * 32,
+            headers=self.auth_headers
+        )
+        data = get_response.get_json()
+        self.assertEqual(data['progress'], '/body/middle-updated')
+        self.assertEqual(data['device'], 'Device2')
+    
+    def test_furthest_wins_allows_forward(self):
+        """Test that forward progress is accepted."""
+        # First PUT at 25%
+        self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'k' * 32,
+                'percentage': 0.25,
+                'progress': '/body/early',
+                'device': 'Device1',
+                'device_id': 'D1'
+            }
+        )
+        
+        # Go forward to 75% - should be ACCEPTED
+        response = self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'k' * 32,
+                'percentage': 0.75,
+                'progress': '/body/later',
+                'device': 'Device2',
+                'device_id': 'D2'
+            }
+        )
+        
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify progress moved forward
+        get_response = self.client.get(
+            '/syncs/progress/' + 'k' * 32,
+            headers=self.auth_headers
+        )
+        data = get_response.get_json()
+        self.assertAlmostEqual(data['percentage'], 0.75)
 
 
 if __name__ == '__main__':

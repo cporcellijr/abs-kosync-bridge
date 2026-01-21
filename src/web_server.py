@@ -1707,6 +1707,24 @@ def kosync_put_progress():
     # Note: kosync-dotnet does NOT implement 'furthest wins' - it accepts whatever the client sends.
     # The bridge's sync_cycle handles anti-regression separately when syncing TO other platforms.
     
+    # Optional "furthest wins" protection against backwards progress
+    # Note: kosync-dotnet does NOT implement this - it accepts whatever the client sends.
+    # However, some apps (like BookNexus) send 0% on open, which resets progress.
+    # Enable with KOSYNC_FURTHEST_WINS=true if you experience unwanted progress resets.
+    furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
+    if furthest_wins and kosync_doc and kosync_doc.percentage:
+        existing_pct = float(kosync_doc.percentage)
+        new_pct = float(percentage)
+        
+        # Use epsilon tolerance (0.0001 = 0.01%) to handle floating point precision
+        # This allows equal values and tiny differences through, only blocks significant backwards movement
+        if new_pct < existing_pct - 0.0001:
+            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.4f} < {existing_pct:.4f} for {doc_hash[:8]}")
+            return jsonify({
+                "document": doc_hash,
+                "timestamp": kosync_doc.timestamp.isoformat() + "Z" if kosync_doc.timestamp else now.isoformat() + "Z"
+            }), 200
+    
     if kosync_doc is None:
         # Create new document (auto-create like kosync-dotnet)
         kosync_doc = KosyncDocument(
