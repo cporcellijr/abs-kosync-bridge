@@ -1498,9 +1498,9 @@ def kosync_users_auth():
     """Stub for KOReader auth check (some versions use this)"""
     user_agent = request.headers.get('User-Agent', '').lower()
     logger.info(f"KOSync Auth Check UA: {user_agent}")
-    if 'booknexus' in user_agent or 'bookfuse' in user_agent:
-        return jsonify({"authorized": "true"}), 200
-    return jsonify({"authorized": True}), 200
+
+    # Force string "true" to match kosync-dotnet behavior (BookNexus requires string, Readest likely handles it)
+    return jsonify({"authorized": "true"}), 200
 
 @app.route('/users/create', methods=['POST'])
 @app.route('/koreader/users/create', methods=['POST'])
