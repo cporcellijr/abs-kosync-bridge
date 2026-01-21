@@ -1543,7 +1543,7 @@ def kosync_healthcheck():
 @app.route('/koreader/users/auth', methods=['GET'])
 def kosync_users_auth():
     """Stub for KOReader auth check (some versions use this)"""
-    return jsonify({"authorized": True}), 200
+    return jsonify({"authorized": "true"}), 200
 
 @app.route('/users/create', methods=['POST'])
 @app.route('/koreader/users/create', methods=['POST'])
