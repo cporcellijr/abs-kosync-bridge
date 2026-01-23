@@ -55,6 +55,7 @@ class SyncManager:
         self.books_dir = books_dir
 
         self.sync_delta_between_clients = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1)) / 100.0
+        self.delta_chars_thresh = 2000  # ~400 words
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
         self._job_queue = []
@@ -418,7 +419,29 @@ class SyncManager:
                         delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
                         small_changes.append(f"✋ [{title_snip}] {label} delta {delta_str} (Below threshold): {title_snip}")
 
-                if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
+                # Check for significant changes based on thresholds
+                significant_diff = any(cfg.delta >= cfg.threshold for cfg in config.values())
+
+                if not significant_diff:
+                    # Check for character-based significance
+                    try:
+                        epub_path = self._get_local_epub(book.ebook_filename)
+                        if epub_path:
+                            full_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
+                            total_chars = len(full_text) if full_text else 0
+                            
+                            if total_chars > 0:
+                                for client_name, state in config.items():
+                                    if state.delta > 0:
+                                        char_delta = int(state.delta * total_chars)
+                                        if char_delta >= self.delta_chars_thresh:
+                                            logger.info(f"[{title_snip}] Delta {state.delta:.4f} is {char_delta} chars (> {self.delta_chars_thresh}). Forcing sync.")
+                                            significant_diff = True
+                                            break
+                    except Exception as e:
+                        logger.warning(f"Error checking char delta: {e}")
+
+                if small_changes and not significant_diff:
                     for s in small_changes:
                         logger.info(s)
                     # No further action for only-small changes
