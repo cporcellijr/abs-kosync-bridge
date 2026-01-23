@@ -25,7 +25,7 @@ class ABSEbookSyncClient(SyncClient):
     def can_be_leader(self) -> bool:
         return os.getenv("SYNC_ABS_EBOOK_CAN_BE_LEADER", "true").lower() == "true"
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         abs_id = book.abs_id
         response = self.abs_client.get_progress(abs_id)
         if response is None:
