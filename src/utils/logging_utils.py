@@ -132,6 +132,11 @@ def setup_telegram_logging():
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     log_level_name = os.environ.get('TELEGRAM_LOG_LEVEL', 'ERROR').upper()
     log_level = getattr(logging, log_level_name, logging.ERROR)
+
+    enabled_val = os.environ.get("TELEGRAM_ENABLED", "").lower()
+    if enabled_val == 'false':
+        return None
+
     if not bot_token or not chat_id:
         return None
 

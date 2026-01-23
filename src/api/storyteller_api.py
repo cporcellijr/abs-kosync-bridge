@@ -31,6 +31,9 @@ class StorytellerAPIClient:
         self._book_cache = {}
 
     def is_configured(self):
+        enabled_val = os.environ.get("STORYTELLER_ENABLED", "").lower()
+        if enabled_val == 'false':
+            return False
         return bool(self.username and self.password)
 
     def _get_fresh_token(self) -> Optional[str]:

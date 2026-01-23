@@ -490,13 +490,14 @@
 
             <!-- KOSync Server (Optional) -->
             <div class="settings-section section-highlight" style="border-color: rgba(102, 126, 234, 0.3);">
-                {% set kosync_enabled = get_val('KOSYNC_SERVER') != '' %}
+                {% set kosync_configured = get_val('KOSYNC_SERVER') != '' %}
+                {% set kosync_enabled = get_bool('KOSYNC_ENABLED') or (kosync_configured and get_val('KOSYNC_ENABLED') == '') %}
                 <div class="section-header">
                     <h3 class="text-primary">KOSync Integration</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_kosync"
+                            <input type="checkbox" id="toggle_kosync" name="KOSYNC_ENABLED"
                                 onchange="toggleSection('kosync_body', this.checked)" {% if kosync_enabled %}checked{%
                                 endif %}>
                             <span class="slider"></span>
@@ -575,13 +576,14 @@
 
             <!-- Storyteller (Optional) -->
             <div class="settings-section">
-                {% set storyteller_enabled = get_val('STORYTELLER_API_URL') != '' %}
+                {% set storyteller_configured = get_val('STORYTELLER_API_URL') != '' %}
+                {% set storyteller_enabled = get_bool('STORYTELLER_ENABLED') or (storyteller_configured and get_val('STORYTELLER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Storyteller</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_storyteller"
+                            <input type="checkbox" id="toggle_storyteller" name="STORYTELLER_ENABLED"
                                 onchange="toggleSection('storyteller_body', this.checked)" {% if storyteller_enabled
                                 %}checked{% endif %}>
                             <span class="slider"></span>
@@ -607,13 +609,14 @@
 
             <!-- Booklore (Optional) -->
             <div class="settings-section">
-                {% set booklore_enabled = get_val('BOOKLORE_SERVER') != '' %}
+                {% set booklore_configured = get_val('BOOKLORE_SERVER') != '' %}
+                {% set booklore_enabled = get_bool('BOOKLORE_ENABLED') or (booklore_configured and get_val('BOOKLORE_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Booklore</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_booklore"
+                            <input type="checkbox" id="toggle_booklore" name="BOOKLORE_ENABLED"
                                 onchange="toggleSection('booklore_body', this.checked)" {% if booklore_enabled
                                 %}checked{% endif %}>
                             <span class="slider"></span>
@@ -642,13 +645,14 @@
 
             <!-- Hardcover.app (Optional) -->
             <div class="settings-section">
-                {% set hardcover_enabled = get_val('HARDCOVER_TOKEN') != '' %}
+                {% set hardcover_configured = get_val('HARDCOVER_TOKEN') != '' %}
+                {% set hardcover_enabled = get_bool('HARDCOVER_ENABLED') or (hardcover_configured and get_val('HARDCOVER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Hardcover.app</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_hardcover"
+                            <input type="checkbox" id="toggle_hardcover" name="HARDCOVER_ENABLED"
                                 onchange="toggleSection('hardcover_body', this.checked)" {% if hardcover_enabled
                                 %}checked{% endif %}>
                             <span class="slider"></span>
@@ -665,13 +669,14 @@
 
             <!-- Telegram (Optional) -->
             <div class="settings-section">
-                {% set telegram_enabled = get_val('TELEGRAM_BOT_TOKEN') != '' %}
+                {% set telegram_configured = get_val('TELEGRAM_BOT_TOKEN') != '' %}
+                {% set telegram_enabled = get_bool('TELEGRAM_ENABLED') or (telegram_configured and get_val('TELEGRAM_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_telegram"
+                            <input type="checkbox" id="toggle_telegram" name="TELEGRAM_ENABLED"
                                 onchange="toggleSection('telegram_body', this.checked)" {% if telegram_enabled
                                 %}checked{% endif %}>
                             <span class="slider"></span>

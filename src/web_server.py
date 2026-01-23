@@ -637,14 +637,24 @@ def settings():
         'EBOOK_CACHE_SIZE': '3',
         'KOSYNC_HASH_METHOD': 'content',
         'TELEGRAM_LOG_LEVEL': 'ERROR',
-        'SHELFMARK_URL': ''
+        'SHELFMARK_URL': '',
+        'KOSYNC_ENABLED': 'false',
+        'STORYTELLER_ENABLED': 'false',
+        'BOOKLORE_ENABLED': 'false',
+        'HARDCOVER_ENABLED': 'false',
+        'TELEGRAM_ENABLED': 'false'
     }
 
     if request.method == 'POST':
         bool_keys = [
             'KOSYNC_USE_PERCENTAGE_FROM_SERVER',
             'SYNC_ABS_EBOOK',
-            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
+            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT',
+            'KOSYNC_ENABLED',
+            'STORYTELLER_ENABLED',
+            'BOOKLORE_ENABLED',
+            'HARDCOVER_ENABLED',
+            'TELEGRAM_ENABLED'
         ]
 
         # Current settings in DB
@@ -655,7 +665,9 @@ def settings():
         for key in bool_keys:
             is_checked = (key in request.form)
             # Save "true" or "false"
-            database_service.set_setting(key, str(is_checked).lower())
+            val_str = str(is_checked).lower()
+            database_service.set_setting(key, val_str)
+            os.environ[key] = val_str # Immediate update for current process
 
         # 2. Handle Text Inputs
         # Iterate over form to find other keys
@@ -673,10 +685,12 @@ def settings():
 
             if clean_value:
                 database_service.set_setting(key, clean_value)
+                os.environ[key] = clean_value # Immediate update for current process
             elif key in current_settings:
                 # If key exists in DB but user cleared it, set to empty (or delete?)
                 # Setting to empty string is safer than deleting if defaults exist
                 database_service.set_setting(key, "")
+                os.environ[key] = "" # Immediate update for current process
 
         try:
             # Trigger Auto-Restart in a separate thread so this request finishes

@@ -338,6 +338,9 @@ class KoSyncClient:
         self.session = requests.Session()
 
     def is_configured(self):
+        enabled_val = os.environ.get("KOSYNC_ENABLED", "").lower()
+        if enabled_val == 'false':
+            return False
         return bool(self.base_url and self.user)
 
     def check_connection(self):

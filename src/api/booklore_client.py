@@ -3,6 +3,7 @@ import os
 import time
 import logging
 from typing import Optional
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -25,6 +26,51 @@ class BookloreClient:
         self._token_timestamp = 0
         self._token_max_age = 300
         self.session = requests.Session()
+        
+        # Cache file path
+        self.cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
+        
+        # Load cache on init
+        self._load_cache()
+
+    def _load_cache(self):
+        """Load cache from disk."""
+        if not self.cache_file.exists():
+            return
+            
+        try:
+            with open(self.cache_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self._book_cache = data.get('books', {})
+                self._cache_timestamp = data.get('timestamp', 0)
+                
+                # Rebuild ID cache
+                self._book_id_cache = {}
+                for book in self._book_cache.values():
+                    uid = book.get('id')
+                    if uid:
+                        self._book_id_cache[uid] = book
+                        
+            logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from disk cache")
+        except Exception as e:
+            logger.warning(f"Failed to load Booklore cache: {e}")
+            self._book_cache = {}
+
+    def _save_cache(self):
+        """Save cache to disk."""
+        try:
+            data = {
+                'timestamp': self._cache_timestamp,
+                'books': self._book_cache
+            }
+            # Atomic write
+            temp_file = self.cache_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f)
+            temp_file.replace(self.cache_file)
+            logger.debug("Saved Booklore cache to disk")
+        except Exception as e:
+            logger.error(f"Failed to save Booklore cache: {e}")
 
     def _get_fresh_token(self):
         if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
@@ -77,6 +123,9 @@ class BookloreClient:
 
     def is_configured(self):
         """Return True if Booklore is configured, False otherwise."""
+        enabled_val = os.environ.get("BOOKLORE_ENABLED", "").lower()
+        if enabled_val == 'false':
+            return False
         return bool(self.base_url and self.username and self.password)
 
     def check_connection(self):
@@ -146,6 +195,7 @@ class BookloreClient:
             self._book_cache = {}
             self._book_id_cache = {}
             self._cache_timestamp = time.time()
+            self._save_cache()
             return True
         
         # Step 2: For books not in cache, fetch details to get fileName
@@ -188,6 +238,7 @@ class BookloreClient:
         
         self._cache_timestamp = time.time()
         logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
+        self._save_cache()
         return True
 
     def _process_book_detail(self, detail):
