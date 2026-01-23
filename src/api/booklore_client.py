@@ -46,7 +46,7 @@ class BookloreClient:
                 
                 # Rebuild ID cache
                 self._book_id_cache = {}
-                for book in self._book_cache.values():
+                for book in list(self._book_cache.values()):
                     uid = book.get('id')
                     if uid:
                         self._book_id_cache[uid] = book
@@ -288,10 +288,10 @@ class BookloreClient:
         if filename in self._book_cache: return self._book_cache[filename]
 
         stem = Path(filename).stem.lower()
-        for cached_name, book_info in self._book_cache.items():
+        for cached_name, book_info in list(self._book_cache.items()):
             if Path(cached_name).stem.lower() == stem: return book_info
 
-        for cached_name, book_info in self._book_cache.items():
+        for cached_name, book_info in list(self._book_cache.items()):
             if stem in cached_name or cached_name.replace('.epub', '') in stem:
                 return book_info
 
@@ -300,9 +300,9 @@ class BookloreClient:
             filename = Path(ebook_filename).name.lower()
             if filename in self._book_cache: return self._book_cache[filename]
             stem = Path(filename).stem.lower()
-            for cached_name, book_info in self._book_cache.items():
+            for cached_name, book_info in list(self._book_cache.items()):
                 if Path(cached_name).stem.lower() == stem: return book_info
-            for cached_name, book_info in self._book_cache.items():
+            for cached_name, book_info in list(self._book_cache.items()):
                 if stem in cached_name or cached_name.replace('.epub', '') in stem:
                     return book_info
 
@@ -325,7 +325,7 @@ class BookloreClient:
 
         search_lower = search_term.lower()
         results = []
-        for book_info in self._book_cache.values():
+        for book_info in list(self._book_cache.values()):
             title = (book_info.get('title') or '').lower()
             authors = (book_info.get('authors') or '').lower()
             filename = (book_info.get('fileName') or '').lower()
@@ -417,7 +417,7 @@ class BookloreClient:
     def get_recent_activity(self, min_progress=0.01):
         if not self._book_cache: self._refresh_book_cache()
         results = []
-        for filename, book in self._book_cache.items():
+        for filename, book in list(self._book_cache.items()):
             progress = 0
             if book.get('epubProgress'):
                 progress = (book['epubProgress'].get('percentage') or 0) / 100.0
