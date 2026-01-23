@@ -106,7 +106,7 @@ class ABSSyncClient(SyncClient):
                     'pct': self._abs_to_percentage(abs_ts, book.transcript_file) or 0
                 })
 
-            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, request.previous_location)
+            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, abs_ts or 0.0)
             # Calculate percentage from timestamp for state
             pct = self._abs_to_percentage(final_ts, book.transcript_file)
             updated_state = {
