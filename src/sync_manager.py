@@ -74,7 +74,13 @@ class SyncManager:
         self.cleanup_stale_jobs()
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
-        self.sync_clients = {name: client for name, client in clients.items() if client.is_configured()}
+        self.sync_clients = {}
+        for name, client in clients.items():
+            if client.is_configured():
+                self.sync_clients[name] = client
+                logger.info(f"✅ Sync client enabled: {name}")
+            else:
+                logger.info(f"🚫 Sync client disabled/unconfigured: {name}")
 
     def startup_checks(self):
         # Check configured sync clients
