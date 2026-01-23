@@ -61,6 +61,7 @@ class SyncManager:
             logger.warning("Invalid SYNC_DELTA_BETWEEN_CLIENTS_PERCENT value, defaulting to 1")
             val = 1.0
         self.sync_delta_between_clients = val / 100.0
+        self.delta_chars_thresh = 2000  # ~400 words
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
         self._job_queue = []
@@ -515,6 +516,28 @@ class SyncManager:
                     else:
                         logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
                         # Do not continue here, let the consolidated check handle it
+
+                # Check for Character Delta Threshold (Fix 2B)
+                # Loop through ebook clients (KoSync, Storyteller, BookLore, ABS_Ebook)
+                # If state.delta > 0 and book has epub, get total chars via extract_text_and_map
+                # Calculate char_delta = int(state.delta * total_chars)
+                # If char_delta >= self.delta_chars_thresh, log it and set significant_diff = True
+                if not significant_diff and hasattr(book, 'ebook_filename') and book.ebook_filename:
+                    for client_name_key, client_state in config.items():
+                         if client_state.delta > 0:
+                             try:
+                                 # Use existing ebook_parser which has caching
+                                 full_text, _ = self.ebook_parser.extract_text_and_map(book.ebook_filename)
+                                 if full_text:
+                                     total_chars = len(full_text)
+                                     char_delta = int(client_state.delta * total_chars)
+                                     
+                                     if char_delta >= self.delta_chars_thresh:
+                                         logger.info(f"[{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
+                                         significant_diff = True
+                                         break 
+                             except Exception as e:
+                                 logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
 
                 # Check if all 'delta' fields in config are zero
                 # We typically skip if nothing changed, BUT if there is a significant discrepancy 

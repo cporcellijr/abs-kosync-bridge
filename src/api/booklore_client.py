@@ -3,6 +3,7 @@ import os
 import time
 import logging
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from pathlib import Path
@@ -18,6 +19,7 @@ class BookloreClient:
         self.username = os.environ.get("BOOKLORE_USER")
         self.password = os.environ.get("BOOKLORE_PASSWORD")
         self._book_cache = {}
+        self._book_id_cache = {}  # Maps book_id -> book_info for quick lookups
         self._cache_timestamp = 0
         self._token = None
         self._token_timestamp = 0
@@ -37,7 +39,8 @@ class BookloreClient:
             )
             if response.status_code == 200:
                 data = response.json()
-                self._token = data.get("refreshToken") or data.get("accessToken") or data.get("token")
+                # Booklore v1.17+ uses accessToken instead of token
+                self._token = data.get("accessToken") or data.get("token")
                 self._token_timestamp = time.time()
                 return self._token
             else:
@@ -103,37 +106,127 @@ class BookloreClient:
         logger.warning("❌ Booklore connection failed: could not obtain auth token")
         return False
 
-    def _refresh_book_cache(self):
-        response = self._make_request("GET", "/api/v1/books")
-        if response and response.status_code == 200:
-            books = response.json()
-            self._book_cache = {}
-            for book in books:
-                filename = book.get('fileName', '')
-                if filename:
-                    # Extract authors, title, and subtitle from metadata
-                    metadata = book.get('metadata') or {}
-                    authors = metadata.get('authors') or []
-                    author_str = ', '.join(authors) if authors else ''
-                    subtitle = metadata.get('subtitle') or ''
-                    # Prefer metadata title over top-level title (which may be filename)
-                    title = metadata.get('title') or book.get('title') or filename
+    def _fetch_book_detail(self, book_id, token):
+        """Fetch individual book details to get fileName.
+        
+        Note: Uses requests directly instead of self.session for thread safety
+        when called from ThreadPoolExecutor. Token is passed in to avoid 
+        concurrent token refresh issues.
+        """
+        if not token:
+            return None
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        url = f"{self.base_url}/api/v1/books/{book_id}"
+        try:
+            # Use requests directly (not self.session) for thread safety
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            logger.debug(f"Booklore: Error fetching book {book_id}: {e}")
+            return None
 
-                    self._book_cache[filename.lower()] = {
-                        'id': book.get('id'),
-                        'fileName': filename,
-                        'title': title,
-                        'subtitle': subtitle,
-                        'authors': author_str,
-                        'bookType': book.get('bookType'),
-                        'epubProgress': book.get('epubProgress'),
-                        'pdfProgress': book.get('pdfProgress'),
-                        'cbxProgress': book.get('cbxProgress'),
-                    }
+    def _refresh_book_cache(self):
+        """
+        Refresh the book cache. Booklore v1.17+ requires fetching individual 
+        book details to get fileName, so we do a two-step process:
+        1. Get list of all book IDs
+        2. Fetch details for books we don't have cached yet
+        """
+        # Step 1: Get all books (lightweight list)
+        response = self._make_request("GET", "/api/v1/books")
+        if not response or response.status_code != 200:
+            logger.error(f"Booklore: Failed to fetch book list")
+            return False
+            
+        books_list = response.json()
+        if not books_list:
+            logger.debug("Booklore: No books found in library")
+            self._book_cache = {}
+            self._book_id_cache = {}
             self._cache_timestamp = time.time()
-            logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
             return True
-        return False
+        
+        # Step 2: For books not in cache, fetch details to get fileName
+        # Use parallel fetching for speed
+        new_book_ids = [b['id'] for b in books_list if b['id'] not in self._book_id_cache]
+        
+        if new_book_ids:
+            logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
+            
+            # Get token ONCE before parallel fetching to avoid race conditions
+            token = self._get_fresh_token()
+            if not token:
+                logger.error("Booklore: Could not get token for parallel fetch")
+                return False
+
+            # Fetch in parallel with limited concurrency
+            def fetch_one(book_id):
+                return book_id, self._fetch_book_detail(book_id, token)
+            
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
+                for future in as_completed(futures):
+                    try:
+                        book_id, detail = future.result()
+                        if detail and isinstance(detail, dict):
+                            self._process_book_detail(detail)
+                        elif detail:
+                            logger.debug(f"Booklore: Unexpected response type for book {book_id}: {type(detail)}")
+                    except Exception as e:
+                        logger.debug(f"Booklore: Error fetching book detail: {e}")
+        
+        # Update books that were already in cache with fresh progress data
+        existing_ids = [b['id'] for b in books_list if b['id'] in self._book_id_cache]
+        for book in books_list:
+            if book['id'] in self._book_id_cache:
+                # Update progress fields from the list response if available
+                cached = self._book_id_cache[book['id']]
+                # The list endpoint doesn't have progress, so we keep cached values
+                # Progress is fetched fresh in get_progress() anyway
+        
+        self._cache_timestamp = time.time()
+        logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
+        return True
+
+    def _process_book_detail(self, detail):
+        """Process a book detail response and add to cache."""
+        filename = detail.get('fileName', '')
+        if not filename:
+            return
+            
+        metadata = detail.get('metadata') or {}
+        authors = metadata.get('authors') or []
+        # Handle both list of strings and list of dicts for authors
+        author_list = []
+        for a in authors:
+            if isinstance(a, dict):
+                name = a.get('name', '')
+                if name: author_list.append(name)
+            elif isinstance(a, str) and a.strip():
+                author_list.append(a.strip())
+        
+        author_str = ', '.join(author_list)
+        subtitle = metadata.get('subtitle') or ''
+        title = metadata.get('title') or detail.get('title') or filename
+        
+        book_info = {
+            'id': detail.get('id'),
+            'fileName': filename,
+            'filePath': detail.get('filePath'),
+            'title': title,
+            'subtitle': subtitle,
+            'authors': author_str,
+            'bookType': detail.get('bookType'),
+            'epubProgress': detail.get('epubProgress'),
+            'pdfProgress': detail.get('pdfProgress'),
+            'cbxProgress': detail.get('cbxProgress'),
+            'koreaderProgress': detail.get('koreaderProgress'),
+        }
+        
+        self._book_cache[filename.lower()] = book_info
+        self._book_id_cache[detail['id']] = book_info
 
     def find_book_by_filename(self, ebook_filename):
         # Ensure cache is reasonably fresh for lookups

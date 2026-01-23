@@ -523,6 +523,7 @@ class EbookParser:
             # Find all elements that contain text, in document order
             text_elements = []
             current_count = 0
+            SEPARATOR_LEN = 1
 
             for element in tree.iter():
                 if element.text and element.text.strip():
@@ -530,21 +531,21 @@ class EbookParser:
                     text_elements.append({
                         'element': element,
                         'start_pos': current_count,
-                        'end_pos': current_count + text_len,
+                        'end_pos': current_count + text_len + SEPARATOR_LEN,
                         'text_len': text_len
                     })
-                    current_count += text_len
+                    current_count += (text_len + SEPARATOR_LEN)
 
                 if element.tail and element.tail.strip():
                     tail_len = len(element.tail.strip())
                     text_elements.append({
                         'element': element,
                         'start_pos': current_count,
-                        'end_pos': current_count + tail_len,
+                        'end_pos': current_count + tail_len + SEPARATOR_LEN,
                         'text_len': tail_len,
                         'is_tail': True
                     })
-                    current_count += tail_len
+                    current_count += (tail_len + SEPARATOR_LEN)
 
             # Find the element that contains our target position
             target_element = None
@@ -678,6 +679,7 @@ class EbookParser:
             # Calculate position by counting CLEAN text length
             preceding_len = 0
             found_target = False
+            SEPARATOR_LEN = 1
 
             for node in tree.iter():
                 if node == target_node:
@@ -693,10 +695,10 @@ class EbookParser:
                         preceding_len += target_offset # Best guess
                     break
 
-                if node.text:
-                    preceding_len += len(node.text.strip())
-                if node.tail:
-                    preceding_len += len(node.tail.strip())
+                if node.text and node.text.strip():
+                    preceding_len += (len(node.text.strip()) + SEPARATOR_LEN)
+                if node.tail and node.tail.strip():
+                    preceding_len += (len(node.tail.strip()) + SEPARATOR_LEN)
 
             if not found_target:
                 logger.warning(f"❌ Target node not found in iteration")
