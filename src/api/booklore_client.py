@@ -434,8 +434,11 @@ class BookloreClient:
                 })
         return results
 
-    def add_to_shelf(self, ebook_filename, shelf_name="abs-kosync"):
+    def add_to_shelf(self, ebook_filename, shelf_name=None):
         """Add a book to a shelf, creating the shelf if it doesn't exist."""
+        if not shelf_name:
+             shelf_name = os.environ.get("BOOKLORE_SHELF_NAME", "abs-kosync")
+
         try:
             # Find the book
             book = self.find_book_by_filename(ebook_filename)
@@ -482,8 +485,11 @@ class BookloreClient:
             logger.error(f"Error adding book to Booklore shelf: {e}")
             return False
 
-    def remove_from_shelf(self, ebook_filename, shelf_name="abs-kosync"):
+    def remove_from_shelf(self, ebook_filename, shelf_name=None):
         """Remove a book from a shelf."""
+        if not shelf_name:
+             shelf_name = os.environ.get("BOOKLORE_SHELF_NAME", "abs-kosync")
+             
         try:
             # Find the book
             book = self.find_book_by_filename(ebook_filename)

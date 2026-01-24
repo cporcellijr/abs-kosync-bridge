@@ -1027,7 +1027,7 @@ def match():
 
         container.abs_client().add_to_collection(abs_id, ABS_COLLECTION_NAME)
         if container.booklore_client().is_configured():
-            container.booklore_client().add_to_shelf(ebook_filename)
+            container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
         return redirect(url_for('index'))
@@ -1114,7 +1114,7 @@ def batch_match():
 
                 container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
                 if container.booklore_client().is_configured():
-                    container.booklore_client().add_to_shelf(ebook_filename)
+                    container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
                 if container.storyteller_client().is_configured():
                     container.storyteller_client().add_to_collection(ebook_filename)
 
