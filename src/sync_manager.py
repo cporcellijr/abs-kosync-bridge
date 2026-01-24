@@ -708,55 +708,57 @@ class SyncManager:
         try:
             logger.info(f"🧹 Clearing progress for book {sanitize_log_data(abs_id)}...")
 
-            # Get the book first
-            book = self.database_service.get_book(abs_id)
-            if not book:
-                raise ValueError(f"Book not found: {abs_id}")
+            # Acquire lock to prevent race conditions with active sync cycles
+            with self._sync_lock:
+                # Get the book first
+                book = self.database_service.get_book(abs_id)
+                if not book:
+                    raise ValueError(f"Book not found: {abs_id}")
 
-            # Clear all states for this book from database
-            cleared_count = self.database_service.delete_states_for_book(abs_id)
-            logger.info(f"📊 Cleared {cleared_count} state records from database")
+                # Clear all states for this book from database
+                cleared_count = self.database_service.delete_states_for_book(abs_id)
+                logger.info(f"📊 Cleared {cleared_count} state records from database")
 
-            # Reset all sync clients to 0% progress
-            reset_results = {}
-            locator = LocatorResult(percentage=0.0)
-            request = UpdateProgressRequest(locator_result=locator, txt="", previous_location=None)
+                # Reset all sync clients to 0% progress
+                reset_results = {}
+                locator = LocatorResult(percentage=0.0)
+                request = UpdateProgressRequest(locator_result=locator, txt="", previous_location=None)
 
-            for client_name, client in self.sync_clients.items():
-                if client_name == 'ABS' and book.sync_mode == 'ebook_only':
-                    logger.debug(f"[{book.abs_title}] Ebook-only mode - skipping ABS progress reset")
-                    continue
-                try:
-                    result = client.update_progress(book, request)
-                    reset_results[client_name] = {
-                        'success': result.success,
-                        'message': 'Reset to 0%' if result.success else 'Failed to reset'
-                    }
-                    if result.success:
-                        logger.info(f"✅ Reset {client_name} to 0%")
-                    else:
-                        logger.warning(f"⚠️ Failed to reset {client_name}")
-                except Exception as e:
-                    reset_results[client_name] = {
-                        'success': False,
-                        'message': str(e)
-                    }
-                    logger.warning(f"⚠️ Error resetting {client_name}: {e}")
+                for client_name, client in self.sync_clients.items():
+                    if client_name == 'ABS' and book.sync_mode == 'ebook_only':
+                        logger.debug(f"[{book.abs_title}] Ebook-only mode - skipping ABS progress reset")
+                        continue
+                    try:
+                        result = client.update_progress(book, request)
+                        reset_results[client_name] = {
+                            'success': result.success,
+                            'message': 'Reset to 0%' if result.success else 'Failed to reset'
+                        }
+                        if result.success:
+                            logger.info(f"✅ Reset {client_name} to 0%")
+                        else:
+                            logger.warning(f"⚠️ Failed to reset {client_name}")
+                    except Exception as e:
+                        reset_results[client_name] = {
+                            'success': False,
+                            'message': str(e)
+                        }
+                        logger.warning(f"⚠️ Error resetting {client_name}: {e}")
 
-            summary = {
-                'book_id': abs_id,
-                'book_title': book.abs_title,
-                'database_states_cleared': cleared_count,
-                'client_reset_results': reset_results,
-                'successful_resets': sum(1 for r in reset_results.values() if r['success']),
-                'total_clients': len(reset_results)
-            }
+                summary = {
+                    'book_id': abs_id,
+                    'book_title': book.abs_title,
+                    'database_states_cleared': cleared_count,
+                    'client_reset_results': reset_results,
+                    'successful_resets': sum(1 for r in reset_results.values() if r['success']),
+                    'total_clients': len(reset_results)
+                }
 
-            logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
-            logger.info(f"   Database states cleared: {cleared_count}")
-            logger.info(f"   Client resets: {summary['successful_resets']}/{summary['total_clients']} successful")
+                logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
+                logger.info(f"   Database states cleared: {cleared_count}")
+                logger.info(f"   Client resets: {summary['successful_resets']}/{summary['total_clients']} successful")
 
-            return summary
+                return summary
 
         except Exception as e:
             error_msg = f"Error clearing progress for {abs_id}: {e}"
