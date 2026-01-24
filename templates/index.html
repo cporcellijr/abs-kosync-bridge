@@ -827,6 +827,44 @@
     </div>
 
     <div class="container">
+        {% if suggestions %}
+        <div class="suggestions-container"
+            style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <h2
+                style="font-size: 1.1rem; color: #a0a0a0; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px;">
+                💡 Pending Suggestions
+            </h2>
+            <div class="suggestions-grid"
+                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+                {% for suggestion in suggestions %}
+                <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
+                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; display: flex; gap: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
+                    <img src="{{ suggestion.cover_url }}" alt="Cover"
+                        style="width: 50px; height: 75px; object-fit: cover; border-radius: 4px;"
+                        onerror="this.src='/static/placeholder.jpg'">
+                    <div class="suggestion-details" style="flex: 1; min-width: 0;">
+                        <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                            title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
+                        <div
+                            style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            {{ suggestion.author }}</div>
+
+                        <div
+                            style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
+                            <span>📚</span> Found {{ suggestion.matches|length }} potential match(es)
+                        </div>
+
+                        <div class="suggestion-actions" style="display: flex; gap: 8px;">
+                            <a href="/match?search={{ suggestion.title|urlencode }}" class="btn btn-sm btn-primary"
+                                style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <!-- Dismiss/Ignore scripts removed per user request -->
+        </div>
+        {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         <div class="flash-messages mb-16">

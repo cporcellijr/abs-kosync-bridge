@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, Base
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,9 @@ class DatabaseService:
 
         # Run Alembic migrations to ensure schema is up to date
         self._run_alembic_migrations()
+
+        # Ensure all tables exist (covers new models not yet in migrations)
+        Base.metadata.create_all(self.db_manager.engine)
 
     def _run_alembic_migrations(self):
         """Run Alembic migrations to ensure database schema is up to date."""
@@ -503,6 +506,73 @@ class DatabaseService:
             return doc
 
 
+    # PendingSuggestion operations
+    def get_pending_suggestion(self, source_id: str) -> Optional[PendingSuggestion]:
+        """Get a pending suggestion by source ID (e.g. ABS ID)."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                session.expunge(suggestion)
+            return suggestion
+
+    def save_pending_suggestion(self, suggestion: PendingSuggestion) -> PendingSuggestion:
+        """Save or update a pending suggestion."""
+        with self.get_session() as session:
+            existing = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == suggestion.source_id
+            ).first()
+
+            if existing:
+                for attr in ['title', 'author', 'cover_url', 'matches_json', 'status']:
+                    if hasattr(suggestion, attr):
+                        setattr(existing, attr, getattr(suggestion, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                session.add(suggestion)
+                session.flush()
+                session.refresh(suggestion)
+                session.expunge(suggestion)
+                return suggestion
+
+    def get_all_pending_suggestions(self) -> List[PendingSuggestion]:
+        """Get all pending suggestions."""
+        with self.get_session() as session:
+            suggestions = session.query(PendingSuggestion).filter(
+                PendingSuggestion.status == 'pending'
+            ).order_by(PendingSuggestion.created_at.desc()).all()
+            for s in suggestions:
+                session.expunge(s)
+            return suggestions
+
+    def dismiss_suggestion(self, source_id: str) -> bool:
+        """Mark a suggestion as dismissed."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                suggestion.status = 'dismissed'
+                # The context manager does commit on exit.
+                return True
+            return False
+
+    def ignore_suggestion(self, source_id: str) -> bool:
+        """Mark a suggestion as never ask."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                suggestion.status = 'ignored'
+                return True
+            return False
+
+
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
 
@@ -661,4 +731,6 @@ class DatabaseMigrator:
             return True
 
         return False
+
+
 

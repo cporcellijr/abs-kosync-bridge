@@ -296,15 +296,18 @@ class BookloreClient:
                 return book_info
 
         # If not found, try refreshing cache once (in case Booklore updated externally)
-        if self._refresh_book_cache():
-            filename = Path(ebook_filename).name.lower()
-            if filename in self._book_cache: return self._book_cache[filename]
-            stem = Path(filename).stem.lower()
-            for cached_name, book_info in self._book_cache.items():
-                if Path(cached_name).stem.lower() == stem: return book_info
-            for cached_name, book_info in self._book_cache.items():
-                if stem in cached_name or cached_name.replace('.epub', '') in stem:
-                    return book_info
+        # But ONLY if we haven't refreshed recently (e.g. last 60 seconds)
+        # This prevents N+1 refresh loops when iterating over multiple missing books
+        if time.time() - self._cache_timestamp > 60:
+            if self._refresh_book_cache():
+                filename = Path(ebook_filename).name.lower()
+                if filename in self._book_cache: return self._book_cache[filename]
+                stem = Path(filename).stem.lower()
+                for cached_name, book_info in self._book_cache.items():
+                    if Path(cached_name).stem.lower() == stem: return book_info
+                for cached_name, book_info in self._book_cache.items():
+                    if stem in cached_name or cached_name.replace('.epub', '') in stem:
+                        return book_info
 
         return None
 
