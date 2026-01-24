@@ -481,4 +481,44 @@ class BookloreClient:
         except Exception as e:
             logger.error(f"Error adding book to Booklore shelf: {e}")
             return False
+
+    def remove_from_shelf(self, ebook_filename, shelf_name="abs-kosync"):
+        """Remove a book from a shelf."""
+        try:
+            # Find the book
+            book = self.find_book_by_filename(ebook_filename)
+            if not book:
+                logger.warning(f"Booklore: Book not found for shelf removal: {sanitize_log_data(ebook_filename)}")
+                return False
+
+            # Get shelf
+            shelves_response = self._make_request("GET", "/api/v1/shelves")
+            if not shelves_response or shelves_response.status_code != 200:
+                logger.error("Failed to get Booklore shelves")
+                return False
+
+            shelves = shelves_response.json()
+            target_shelf = next((s for s in shelves if s.get('name') == shelf_name), None)
+
+            if not target_shelf:
+                logger.warning(f"Shelf '{shelf_name}' not found")
+                return False
+
+            # Remove from shelf
+            assign_response = self._make_request("POST", "/api/v1/books/shelves", {
+                "bookIds": [book['id']],
+                "shelvesToAssign": [],
+                "shelvesToUnassign": [target_shelf['id']]
+            })
+
+            if assign_response and assign_response.status_code in [200, 201, 204]:
+                logger.info(f"🗑️ Removed '{sanitize_log_data(ebook_filename)}' from Booklore Shelf: {shelf_name}")
+                return True
+            else:
+                logger.error(f"Failed to remove book from shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error removing book from Booklore shelf: {e}")
+            return False
 # [END FILE]

@@ -289,8 +289,11 @@ class ABSClient:
         except Exception as e:
             logger.warning(f"⚠️ Failed to close session for ABS: {e}")
 
-    def add_to_collection(self, item_id, collection_name="abs-kosync"):
+    def add_to_collection(self, item_id, collection_name=None):
         """Add an audiobook to a collection, creating the collection if it doesn't exist."""
+        if not collection_name:
+             collection_name = os.environ.get("ABS_COLLECTION_NAME", "abs-kosync")
+             
         try:
             collections_url = f"{self.base_url}/api/collections"
             r = self.session.get(collections_url)
@@ -327,6 +330,38 @@ class ABSClient:
             return False
         except Exception as e:
             logger.error(f"Error adding item to ABS collection: {e}")
+            return False
+
+    def remove_from_collection(self, item_id, collection_name="abs-kosync"):
+        """Remove an audiobook from a collection."""
+        try:
+            # Get collection by name
+            collections_url = f"{self.base_url}/api/collections"
+            r = self.session.get(collections_url)
+            if r.status_code != 200:
+                logger.warning(f"Failed to fetch collections to remove item {item_id}")
+                return False
+
+            collections = r.json().get('collections', [])
+            target_collection = next((c for c in collections if c.get('name') == collection_name), None)
+
+            if not target_collection:
+                logger.warning(f"Collection '{collection_name}' not found, cannot remove item {item_id}")
+                return False
+
+            # Remove from collection
+            remove_url = f"{self.base_url}/api/collections/{target_collection['id']}/book/{item_id}"
+            r_remove = self.session.delete(remove_url)
+            
+            if r_remove.status_code in [200, 201, 204]:
+                logger.info(f"🗑️ Removed item {item_id} from ABS Collection: {collection_name}")
+                return True
+            else:
+                logger.warning(f"Failed to remove item {item_id} from collection {collection_name}: {r_remove.status_code} - {r_remove.text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error removing item from ABS collection: {e}")
             return False
 
 class KoSyncClient:
