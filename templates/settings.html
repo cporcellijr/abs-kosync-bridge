@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <title>Settings - ABS-KoSync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/jpeg" href="/static/icon.jpg">
+    <link rel="apple-touch-icon" href="/static/icon.jpg">
     <style>
         * {
             box-sizing: border-box;
@@ -380,8 +382,10 @@
 <body>
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/">
-                <h1>📚 ABS-KoSync</h1>
+            <a href="/" style="display: flex; align-items: center; gap: 12px; text-decoration: none;">
+                <img src="/static/icon.jpg" alt="ABS-KoSync" class="app-icon"
+                    style="height: 32px; width: 32px; border-radius: 6px;">
+                <h1 style="font-size: 22px; margin: 0;">ABS-KoSync</h1>
             </a>
 
             <div class="library-links">
@@ -491,7 +495,8 @@
             <!-- KOSync Server (Optional) -->
             <div class="settings-section section-highlight" style="border-color: rgba(102, 126, 234, 0.3);">
                 {% set kosync_configured = get_val('KOSYNC_SERVER') != '' %}
-                {% set kosync_enabled = get_bool('KOSYNC_ENABLED') or (kosync_configured and get_val('KOSYNC_ENABLED') == '') %}
+                {% set kosync_enabled = get_bool('KOSYNC_ENABLED') or (kosync_configured and get_val('KOSYNC_ENABLED')
+                == '') %}
                 <div class="section-header">
                     <h3 class="text-primary">KOSync Integration</h3>
                     <div class="toggle-switch-wrapper">
@@ -577,7 +582,8 @@
             <!-- Storyteller (Optional) -->
             <div class="settings-section">
                 {% set storyteller_configured = get_val('STORYTELLER_API_URL') != '' %}
-                {% set storyteller_enabled = get_bool('STORYTELLER_ENABLED') or (storyteller_configured and get_val('STORYTELLER_ENABLED') == '') %}
+                {% set storyteller_enabled = get_bool('STORYTELLER_ENABLED') or (storyteller_configured and
+                get_val('STORYTELLER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Storyteller</h3>
                     <div class="toggle-switch-wrapper">
@@ -610,7 +616,8 @@
             <!-- Booklore (Optional) -->
             <div class="settings-section">
                 {% set booklore_configured = get_val('BOOKLORE_SERVER') != '' %}
-                {% set booklore_enabled = get_bool('BOOKLORE_ENABLED') or (booklore_configured and get_val('BOOKLORE_ENABLED') == '') %}
+                {% set booklore_enabled = get_bool('BOOKLORE_ENABLED') or (booklore_configured and
+                get_val('BOOKLORE_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Booklore</h3>
                     <div class="toggle-switch-wrapper">
@@ -646,7 +653,8 @@
             <!-- Hardcover.app (Optional) -->
             <div class="settings-section">
                 {% set hardcover_configured = get_val('HARDCOVER_TOKEN') != '' %}
-                {% set hardcover_enabled = get_bool('HARDCOVER_ENABLED') or (hardcover_configured and get_val('HARDCOVER_ENABLED') == '') %}
+                {% set hardcover_enabled = get_bool('HARDCOVER_ENABLED') or (hardcover_configured and
+                get_val('HARDCOVER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Hardcover.app</h3>
                     <div class="toggle-switch-wrapper">
@@ -670,7 +678,8 @@
             <!-- Telegram (Optional) -->
             <div class="settings-section">
                 {% set telegram_configured = get_val('TELEGRAM_BOT_TOKEN') != '' %}
-                {% set telegram_enabled = get_bool('TELEGRAM_ENABLED') or (telegram_configured and get_val('TELEGRAM_ENABLED') == '') %}
+                {% set telegram_enabled = get_bool('TELEGRAM_ENABLED') or (telegram_configured and
+                get_val('TELEGRAM_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
                     <div class="toggle-switch-wrapper">
