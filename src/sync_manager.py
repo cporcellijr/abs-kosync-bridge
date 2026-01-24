@@ -458,7 +458,7 @@ class SyncManager:
         # Main sync loop - process each active book
         for book in active_books:
             abs_id = book.abs_id
-            logger.info(f"🔄 Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
+            logger.info(f"🔄 [{abs_id}] Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
             title_snip = sanitize_log_data(book.abs_title or 'Unknown')
 
             try:
@@ -480,7 +480,7 @@ class SyncManager:
                     if sync_type in client.get_supported_sync_types()
                 }
                 if sync_type == 'ebook':
-                    logger.debug(f"[{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
 
                 # Build config using active_clients - parallel fetch
                 config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, bulk_states_per_client, active_clients)
@@ -493,7 +493,7 @@ class SyncManager:
                 if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
                     abs_state = config.get('ABS')
                     if abs_state is None:
-                        logger.debug(f"[{title_snip}] ABS audiobook offline, skipping")
+                        logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
                         continue  # ABS offline
 
                 # Check if all 'delta' fields in config are zero
@@ -514,10 +514,10 @@ class SyncManager:
                         significant_diff = True
                         # If we have a significant diff, we verify it's not just noise 
                         # by checking if we have at least one valid state
-                        logger.debug(f"[{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
-                        logger.debug(f"[{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
+                        logger.debug(f"[{abs_id}] [{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
+                        logger.debug(f"[{abs_id}] [{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
                     else:
-                        logger.debug(f"[{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
+                        logger.debug(f"[{abs_id}] [{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
                         # Do not continue here, let the consolidated check handle it
 
                 # Check for Character Delta Threshold (Fix 2B)
@@ -536,7 +536,7 @@ class SyncManager:
                                      char_delta = int(client_state.delta * total_chars)
                                      
                                      if char_delta >= self.delta_chars_thresh:
-                                         logger.info(f"[{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
+                                         logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
                                          significant_diff = True
                                          break 
                              except Exception as e:
@@ -549,11 +549,11 @@ class SyncManager:
 
                 # If nothing changed AND clients are effectively in sync, skip
                 if deltas_zero and not significant_diff:
-                    logger.debug(f"[{title_snip}] No changes and clients in sync, skipping")
+                    logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
                     continue
                 
                 if significant_diff:
-                    logger.debug(f"[{title_snip}] Proceeding due to client discrepancy")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Proceeding due to client discrepancy")
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
@@ -568,13 +568,13 @@ class SyncManager:
                     if delta is not None and threshold is not None and 0 < delta < threshold:
                         label, fmt = cfg.display
                         delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
-                        small_changes.append(f"✋ [{title_snip}] {label} delta {delta_str} (Below threshold): {title_snip}")
+                        small_changes.append(f"✋ [{abs_id}] [{title_snip}] {label} delta {delta_str} (Below threshold)")
 
                 if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
                     # If we have significant discrepancies between clients, we MUST NOT skip,
                     # even if individual deltas are small (e.g. from DB pre-update).
                     if significant_diff:
-                        logger.debug(f"[{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
+                        logger.debug(f"[{abs_id}] [{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
                     else:
                         for s in small_changes:
                             logger.info(s)
@@ -582,7 +582,7 @@ class SyncManager:
                         continue
 
                 # At this point we have a significant change to act on
-                logger.info(f"🔄 [{title_snip}] Change detected")
+                logger.info(f"🔄 [{abs_id}] [{title_snip}] Change detected")
 
                 # Status block - show only changed lines
                 status_lines = []
@@ -605,13 +605,13 @@ class SyncManager:
 
                 # Ensure we have at least one potential leader
                 if not vals:
-                    logger.warning(f"⚠️ [{title_snip}] No clients available to be leader")
+                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
                     continue
 
                 leader = max(vals, key=vals.get)
                 leader_formatter = config[leader].value_formatter
                 leader_pct = vals[leader]
-                logger.info(f"📖 [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
+                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
 
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]
@@ -619,14 +619,14 @@ class SyncManager:
                 # Get canonical text from leader
                 txt = leader_client.get_text_from_current_state(book, leader_state)
                 if not txt:
-                    logger.warning(f"⚠️ [{title_snip}] Could not get text from leader {leader}")
+                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not get text from leader {leader}")
                     continue
 
                 # Get locator (percentage, xpath, etc) from text
                 epub = book.ebook_filename
                 locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
                 if not locator:
-                    logger.warning(f"⚠️ [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
+                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
                     locator = LocatorResult(percentage=leader_pct)
 
                 # Update all other clients and store results
@@ -668,7 +668,7 @@ class SyncManager:
                     if result.success:
                         # Use updated_state if provided, otherwise fall back to basic state
                         state_data = result.updated_state if result.updated_state else {'pct': result.location}
-                        logger.info(f"[{title_snip}] Updated state data for {client_name}: " + str(state_data))
+                        logger.info(f"[{abs_id}] [{title_snip}] Updated state data for {client_name}: " + str(state_data))
                         client_state_model = State(
                             abs_id=book.abs_id,
                             client_name=client_name.lower(),
@@ -680,7 +680,7 @@ class SyncManager:
                         )
                         self.database_service.save_state(client_state_model)
 
-                logger.info(f"💾 [{title_snip}] States saved to database")
+                logger.info(f"💾 [{abs_id}] [{title_snip}] States saved to database")
                 
                 # Debugging crash: Flush logs to ensure we see this before any potential hard crash
                 for handler in logger.handlers:
