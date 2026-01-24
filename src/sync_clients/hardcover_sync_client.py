@@ -37,6 +37,10 @@ class HardcoverSyncClient(SyncClient):
         """
         return False
 
+    def get_supported_sync_types(self) -> set:
+        """Hardcover supports both audiobook and ebook syncing (as a follower)."""
+        return {'audiobook', 'ebook'}
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         """
         Since Hardcover can never be the leader, its service state is not used for

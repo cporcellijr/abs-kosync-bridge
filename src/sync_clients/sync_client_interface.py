@@ -71,6 +71,23 @@ class SyncClient:
         """
         return True
 
+    def fetch_bulk_state(self) -> Optional[dict]:
+        """
+        Pre-fetch all progress data in one API call.
+        Returns a dict keyed by book identifier for quick lookup.
+        Only implemented by clients that support bulk fetching (ABS, Storyteller).
+        Default returns None (no bulk support).
+        """
+        return None
+
+    def get_supported_sync_types(self) -> set:
+        """
+        Return set of sync types this client supports.
+        Options: 'audiobook', 'ebook'
+        Used for filtering which clients apply to which book sync modes.
+        """
+        return {'audiobook', 'ebook'}  # Default: supports both
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         """
         Args:

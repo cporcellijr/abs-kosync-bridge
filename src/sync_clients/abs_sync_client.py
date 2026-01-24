@@ -26,6 +26,14 @@ class ABSSyncClient(SyncClient):
     def check_connection(self):
         return self.abs_client.check_connection()
 
+    def fetch_bulk_state(self):
+        """Pre-fetch all ABS progress data at once."""
+        return self.abs_client.get_all_progress_raw()
+
+    def get_supported_sync_types(self) -> set:
+        """ABS audiobook client only syncs audiobooks."""
+        return {'audiobook'}
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         abs_id = book.abs_id
         

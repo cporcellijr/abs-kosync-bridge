@@ -130,22 +130,19 @@ class SyncManager:
         media = ab.get('media', {})
         return media.get('duration', 0)
 
-    def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, abs_bulk_data=None, st_bulk_data=None, clients_to_use=None):
+    def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, bulk_states_per_client=None, clients_to_use=None):
         """Fetch states from specified clients (or all if not specified) in parallel."""
         clients_to_use = clients_to_use or self.sync_clients
         config = {}
+        bulk_states_per_client = bulk_states_per_client or {}
         
         with ThreadPoolExecutor(max_workers=len(clients_to_use)) as executor:
             futures = {}
             for client_name, client in clients_to_use.items():
                 prev_state = prev_states_by_client.get(client_name.lower())
                 
-                # Determine bulk context for this client
-                bulk_ctx = None
-                if client_name == 'ABS':
-                    bulk_ctx = abs_bulk_data
-                elif client_name == 'Storyteller':
-                    bulk_ctx = st_bulk_data
+                # Get bulk context from the unified dict
+                bulk_ctx = bulk_states_per_client.get(client_name)
                 
                 future = executor.submit(
                     client.get_service_state, book, prev_state, title_snip, bulk_ctx
@@ -162,6 +159,7 @@ class SyncManager:
                     logger.warning(f"⚠️ {client_name} state fetch failed: {e}")
         
         return config
+
 
     def _get_local_epub(self, ebook_filename):
         """
@@ -445,19 +443,17 @@ class SyncManager:
         if not active_books:
             return
 
-        # Optimization: Fetch ALL ABS progress at once to avoid N+1 API calls
+        # Optimization: Pre-fetch bulk data from all clients that support it
         # Only do this if we are in a full cycle (target_abs_id is None)
-        abs_bulk_data = {}
-        st_bulk_data = {}
+        bulk_states_per_client = {}
         
         if not target_abs_id:
             logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
-            if self.abs_client:
-                abs_bulk_data = self.abs_client.get_all_progress_raw()
-            
-            # Storyteller Bulk Fetch
-            if storyteller_client and hasattr(storyteller_client.storyteller_client, 'get_all_positions_bulk'):
-                st_bulk_data = storyteller_client.storyteller_client.get_all_positions_bulk()
+            for client_name, client in self.sync_clients.items():
+                bulk_data = client.fetch_bulk_state()
+                if bulk_data:
+                    bulk_states_per_client[client_name] = bulk_data
+                    logger.debug(f"📊 Pre-fetched bulk state for {client_name}")
                 
         # Main sync loop - process each active book
         for book in active_books:
@@ -477,16 +473,17 @@ class SyncManager:
                     if state.last_updated and state.last_updated > last_updated:
                         last_updated = state.last_updated
 
-                # Determine active clients based on sync_mode
-                if hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
-                    # Exclude ABS audiobook client for ebook-only books
-                    active_clients = {name: client for name, client in self.sync_clients.items() if name != 'ABS'}
-                    logger.debug(f"[{title_snip}] Ebook-only mode - excluding ABS audiobook client")
-                else:
-                    active_clients = self.sync_clients
+                # Determine active clients based on sync_mode using interface method
+                sync_type = 'ebook' if (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only') else 'audiobook'
+                active_clients = {
+                    name: client for name, client in self.sync_clients.items()
+                    if sync_type in client.get_supported_sync_types()
+                }
+                if sync_type == 'ebook':
+                    logger.debug(f"[{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
 
                 # Build config using active_clients - parallel fetch
-                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, abs_bulk_data, st_bulk_data, active_clients)
+                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, bulk_states_per_client, active_clients)
 
                 # Filtered config now only contains non-None states
                 if not config:

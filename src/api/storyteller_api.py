@@ -288,6 +288,17 @@ class StorytellerDBWithAPI:
         elif self.db_fallback: return self.db_fallback.check_connection()
         return False
 
+    def find_book_by_title(self, ebook_filename: str) -> Optional[Dict]:
+        """Find book by title/filename. Delegates to API client if available."""
+        if self.api_client:
+            return self.api_client.find_book_by_title(ebook_filename)
+        return None  # DB fallback doesn't support title lookup
+
+    def clear_cache(self):
+        """Call at start of each sync cycle to refresh caches."""
+        if self.api_client:
+            self.api_client.clear_cache()
+
     def get_progress(self, ebook_filename: str):
         # Legacy Wrapper
         pct, ts, _, _ = self.get_progress_with_fragment(ebook_filename)

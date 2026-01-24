@@ -1,0 +1,34 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- C:\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\cporc\docker-utils\stacks\abs-kosync-enhanced
+plugins: anyio-4.11.0
+collecting ... collected 1 item
+
+tests/test_abs_unittest.py::TestABSLeadsSync::test_abs_leads FAILED      [100%]
+
+================================== FAILURES ===================================
+_______________________ TestABSLeadsSync.test_abs_leads _______________________
+tests\test_abs_unittest.py:75: in test_abs_leads
+    super().run_test(10, 40)
+tests\base_sync_test.py:369: in run_test
+    mocks, manager, final_state = self.run_sync_test_with_leader_verification()
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\base_sync_test.py:242: in run_sync_test_with_leader_verification
+    self.verify_common_assertions(mocks, manager)
+tests\base_sync_test.py:258: in verify_common_assertions
+    self.assertTrue(mocks['kosync_client'].get_progress.called, "KoSync get_progress was not called")
+E   AssertionError: False is not true : KoSync get_progress was not called
+---------------------------- Captured stderr call -----------------------------
+2026-01-24 08:48:17,586 - INFO - === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===\n2026-01-24 08:48:17,586 - INFO - \u2705 Sync client enabled: ABS\n2026-01-24 08:48:17,586 - INFO - \U0001f6ab Sync client disabled/unconfigured: ABS eBook\n2026-01-24 08:48:17,586 - INFO - \u2705 Sync client enabled: KoSync\n2026-01-24 08:48:17,586 - INFO - \u2705 Sync client enabled: Storyteller\n2026-01-24 08:48:17,587 - INFO - \u2705 Sync client enabled: BookLore\n2026-01-24 08:48:17,587 - INFO - \u2705 ABS connection verified\n2026-01-24 08:48:17,587 - INFO - \u2705 KoSync connection verified\n2026-01-24 08:48:17,587 - INFO - \u2705 Storyteller connection verified\n2026-01-24 08:48:17,588 - INFO - \u2705 BookLore connection verified\n2026-01-24 08:48:17,588 - INFO - [JOB] Reset crashed book status: Test Audiobook\n2026-01-24 08:48:17,588 - INFO - [JOB] Recovering interrupted job: Test Audiobook\n2026-01-24 08:48:17,589 - INFO - \U0001f504 Syncing 'Test Audiobook'\n2026-01-24 08:48:17,591 - WARNING - Failed to check char delta for ABS: cannot unpack non-iterable Mock object\n2026-01-24 08:48:17,591 - INFO - \U0001f504 [Test Audiobook] Change detected\n2026-01-24 08:48:17,591 - INFO - \U0001f4ca ABS: 10.0000% -> 40.0000%\n2026-01-24 08:48:17,591 - INFO - \U0001f4d6 [Test Audiobook] ABS leads at 40.0000%\n2026-01-24 08:48:17,591 - INFO - [Test Audiobook] Updated state data for KoSync: {'pct': 0.4, 'xpath': '/html/body/div[1]/p[10]'}\n2026-01-24 08:48:17,592 - INFO - [Test Audiobook] Updated state data for Storyteller: {'pct': 0.4}\n2026-01-24 08:48:17,592 - INFO - [Test Audiobook] Updated state data for BookLore: {'pct': 0.4}\n2026-01-24 08:48:17,592 - INFO - \U0001f4be [Test Audiobook] States saved to database
+------------------------------ Captured log call ------------------------------
+INFO     src.sync_manager:sync_manager.py:46 === Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===\nINFO     src.sync_manager:sync_manager.py:81 \u2705 Sync client enabled: ABS\nINFO     src.sync_manager:sync_manager.py:83 \U0001f6ab Sync client disabled/unconfigured: ABS eBook\nINFO     src.sync_manager:sync_manager.py:81 \u2705 Sync client enabled: KoSync\nINFO     src.sync_manager:sync_manager.py:81 \u2705 Sync client enabled: Storyteller\nINFO     src.sync_manager:sync_manager.py:81 \u2705 Sync client enabled: BookLore\nINFO     src.sync_manager:sync_manager.py:90 \u2705 ABS connection verified\nINFO     src.sync_manager:sync_manager.py:90 \u2705 KoSync connection verified\nINFO     src.sync_manager:sync_manager.py:90 \u2705 Storyteller connection verified\nINFO     src.sync_manager:sync_manager.py:90 \u2705 BookLore connection verified\nINFO     src.sync_manager:sync_manager.py:102 [JOB] Reset crashed book status: Test Audiobook\nINFO     src.sync_manager:sync_manager.py:107 [JOB] Recovering interrupted job: Test Audiobook\nINFO     src.sync_manager:sync_manager.py:461 \U0001f504 Syncing 'Test Audiobook'\nWARNING  src.sync_manager:sync_manager.py:543 Failed to check char delta for ABS: cannot unpack non-iterable Mock object\nINFO     src.sync_manager:sync_manager.py:585 \U0001f504 [Test Audiobook] Change detected\nINFO     src.sync_manager:sync_manager.py:597 \U0001f4ca ABS: 10.0000% -> 40.0000%\nINFO     src.sync_manager:sync_manager.py:614 \U0001f4d6 [Test Audiobook] ABS leads at 40.0000%\nINFO     src.sync_manager:sync_manager.py:671 [Test Audiobook] Updated state data for KoSync: {'pct': 0.4, 'xpath': '/html/body/div[1]/p[10]'}\nINFO     src.sync_manager:sync_manager.py:671 [Test Audiobook] Updated state data for Storyteller: {'pct': 0.4}\nINFO     src.sync_manager:sync_manager.py:671 [Test Audiobook] Updated state data for BookLore: {'pct': 0.4}\nINFO     src.sync_manager:sync_manager.py:683 \U0001f4be [Test Audiobook] States saved to database
+============================== warnings summary ===============================
+src\db\models.py:11
+  C:\Users\cporc\docker-utils\stacks\abs-kosync-enhanced\src\db\models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_abs_unittest.py::TestABSLeadsSync::test_abs_leads - Asserti...
+======================== 1 failed, 1 warning in 0.92s =========================
