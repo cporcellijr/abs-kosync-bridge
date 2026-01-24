@@ -719,6 +719,14 @@ class SyncManager:
                 cleared_count = self.database_service.delete_states_for_book(abs_id)
                 logger.info(f"📊 Cleared {cleared_count} state records from database")
 
+                # Delete KOSync document record to bypass "furthest wins" protection
+                # Without this, the integrated KOSync server will reject the 0% update
+                # and the old progress will sync back on the next cycle
+                if book.kosync_doc_id:
+                    deleted = self.database_service.delete_kosync_document(book.kosync_doc_id)
+                    if deleted:
+                        logger.info(f"🗑️ Deleted KOSync document record: {book.kosync_doc_id[:8]}...")
+
                 # Reset all sync clients to 0% progress
                 reset_results = {}
                 locator = LocatorResult(percentage=0.0)
