@@ -838,11 +838,8 @@
                 style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
                 {% for suggestion in suggestions %}
                 <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
-                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; display: flex; gap: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
-                    <img src="{{ suggestion.cover_url }}" alt="Cover"
-                        style="width: 50px; height: 75px; object-fit: cover; border-radius: 4px;"
-                        onerror="this.src='/static/placeholder.jpg'">
-                    <div class="suggestion-details" style="flex: 1; min-width: 0;">
+                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
+                    <div class="suggestion-details">
                         <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
                             title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
                         <div
@@ -857,12 +854,40 @@
                         <div class="suggestion-actions" style="display: flex; gap: 8px;">
                             <a href="/match?search={{ suggestion.title|urlencode }}" class="btn btn-sm btn-primary"
                                 style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
+                            <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')" class="btn btn-sm"
+                                style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
                         </div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
-            <!-- Dismiss/Ignore scripts removed per user request -->
+            <script>
+                function dismissSuggestion(e, id) {
+                    e.preventDefault();
+                    console.log('Dismissing suggestion:', id);
+                    fetch(`/api/suggestions/${id}/dismiss`, { method: 'POST' })
+                        .then(r => {
+                            console.log('Response status:', r.status);
+                            return r.json();
+                        })
+                        .then(data => {
+                            console.log('Response data:', data);
+                            if (data.success) {
+                                const card = document.getElementById(`suggestion-${id}`);
+                                if (card) {
+                                    card.style.transition = 'opacity 0.3s';
+                                    card.style.opacity = '0';
+                                    setTimeout(() => { card.remove(); }, 300);
+                                }
+                            } else {
+                                console.error('Dismiss failed:', data.error);
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Fetch error:', err);
+                        });
+                }
+            </script>
         </div>
         {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}

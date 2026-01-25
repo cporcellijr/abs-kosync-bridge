@@ -862,9 +862,9 @@ def index():
         mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
 
         # Booklore deep link (if configured and book found)
-        # Optimization: BookloreClient.find_book_by_filename now respects cache freshness
+        # Optimization: BookloreClient.find_book_by_filename called with allow_refresh=False to prevent UI blocking
         if manager.booklore_client.is_configured():
-            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename)
+            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
         else:
             bl_book = None
             
@@ -1606,6 +1606,67 @@ def view_log():
 
 # Note: KoSync endpoints moved to src/api/kosync_server.py Blueprint
 
+# ---------------- SUGGESTION API ROUTES ----------------
+@app.route('/api/suggestions', methods=['GET'])
+def get_suggestions():
+    suggestions = database_service.get_all_pending_suggestions()
+    result = []
+    for s in suggestions:
+        try:
+            matches = json.loads(s.matches_json) if s.matches_json else []
+        except:
+            matches = []
+            
+        result.append({
+            "id": s.id,
+            "source_id": s.source_id,
+            "title": s.title,
+            "author": s.author,
+            "cover_url": s.cover_url,
+            "matches": matches,
+            "created_at": s.created_at.isoformat()
+        })
+    return jsonify(result)
+
+
+@app.route('/api/suggestions/<source_id>/dismiss', methods=['POST'])
+def dismiss_suggestion(source_id):
+    if database_service.dismiss_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+@app.route('/api/suggestions/<source_id>/ignore', methods=['POST'])
+def ignore_suggestion(source_id):
+    if database_service.ignore_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+@app.route('/api/cover-proxy/<abs_id>')
+def proxy_cover(abs_id):
+    """Proxy cover access to allow loading covers from local network ABS instances."""
+    try:
+        token = container.abs_client().token
+        base_url = container.abs_client().base_url
+        if not token or not base_url:
+            return "ABS not configured", 500
+
+        url = f"{base_url.rstrip('/')}/api/items/{abs_id}/cover?token={token}"
+        
+        # Stream the response to avoid loading large images into memory
+        req = requests.get(url, stream=True, timeout=10)
+        if req.status_code == 200:
+            from flask import Response
+            return Response(req.iter_content(chunk_size=1024), content_type=req.headers.get('content-type', 'image/jpeg'))
+        else:
+            return "Cover not found", 404
+    except Exception as e:
+        logger.error(f"Error proxying cover for {abs_id}: {e}")
+        return "Error loading cover", 500
+
+
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
     # Initialize dependencies for production mode
     setup_dependencies()
@@ -1655,50 +1716,5 @@ if __name__ == '__main__':
     logger.info(f"🌐 Web interface starting on port 5757")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
-# [END FILE]
-@app.route('/api/suggestions', methods=['GET'])
-def get_suggestions():
-    suggestions = database_service.get_all_pending_suggestions()
-    result = []
-    for s in suggestions:
-        try:
-            matches = json.loads(s.matches_json) if s.matches_json else []
-        except:
-            matches = []
-            
-        result.append({
-            "id": s.id,
-            "source_id": s.source_id,
-            "title": s.title,
-            "author": s.author,
-            "cover_url": s.cover_url,
-            "matches": matches,
-            "created_at": s.created_at.isoformat()
-        })
-    return jsonify(result)
 
 
-# Suggestions API - Dismiss/Ignore removed per user request
-
-
-@app.route('/api/cover-proxy/<abs_id>')
-def proxy_cover(abs_id):
-    """Proxy cover access to allow loading covers from local network ABS instances."""
-    try:
-        token = container.abs_client().token
-        base_url = container.abs_client().base_url
-        if not token or not base_url:
-            return "ABS not configured", 500
-
-        url = f"{base_url.rstrip('/')}/api/items/{abs_id}/cover?token={token}"
-        
-        # Stream the response to avoid loading large images into memory
-        req = requests.get(url, stream=True, timeout=10)
-        if req.status_code == 200:
-            from flask import Response
-            return Response(req.iter_content(chunk_size=1024), content_type=req.headers.get('content-type', 'image/jpeg'))
-        else:
-            return "Cover not found", 404
-    except Exception as e:
-        logger.error(f"Error proxying cover for {abs_id}: {e}")
-        return "Error loading cover", 500

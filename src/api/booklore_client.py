@@ -279,10 +279,21 @@ class BookloreClient:
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
 
-    def find_book_by_filename(self, ebook_filename):
-        # Ensure cache is reasonably fresh for lookups
-        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+    def find_book_by_filename(self, ebook_filename, allow_refresh=True):
+        """
+        Find a book by its filename.
+        Args:
+            ebook_filename: The filename to search for.
+            allow_refresh: If True, allows triggering a network refresh of the cache.
+                           Set to False for blocking UI threads to ensure instant return.
+        """
+        # Ensure cache is initialized if empty, but respect allow_refresh for updates
+        if not self._book_cache and allow_refresh: 
+            self._refresh_book_cache()
+            
+        # Check cache freshness if refresh is allowed
+        if allow_refresh and time.time() - self._cache_timestamp > 3600:
+            self._refresh_book_cache()
 
         filename = Path(ebook_filename).name.lower()
         if filename in self._book_cache: return self._book_cache[filename]
@@ -296,10 +307,10 @@ class BookloreClient:
                 return book_info
 
         # If not found, try refreshing cache once (in case Booklore updated externally)
-        # But ONLY if we haven't refreshed recently (e.g. last 60 seconds)
-        # This prevents N+1 refresh loops when iterating over multiple missing books
-        if time.time() - self._cache_timestamp > 60:
+        # But ONLY if allow_refresh is True AND we haven't refreshed recently (e.g. last 60 seconds)
+        if allow_refresh and time.time() - self._cache_timestamp > 60:
             if self._refresh_book_cache():
+                # Re-check after refresh
                 filename = Path(ebook_filename).name.lower()
                 if filename in self._book_cache: return self._book_cache[filename]
                 stem = Path(filename).stem.lower()

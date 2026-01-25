@@ -524,6 +524,19 @@ class SyncManager:
         if storyteller_client and hasattr(storyteller_client, 'storyteller_client'):
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
+                
+        # [NEW] Refresh Booklore cache in background
+        if self.booklore_client and self.booklore_client.is_configured():
+            # This triggers a refresh if needed (older than 1h), or can be forced if desired
+            # Pass allow_refresh=True (default) implicitly by just checking cache
+            # But we can call _refresh_book_cache directly if we want to enforce it periodically
+            # For now, let's just "touch" it safely
+            pass 
+            # Actually, let's explicitly refresh if it's stale (>1h) to keep UI fast
+            # Accessing internal method is dirty but effective for this patch
+            if time.time() - self.booklore_client._cache_timestamp > 3600:
+                logger.info("Background refreshing Booklore cache...")
+                self.booklore_client._refresh_book_cache()
     
         # Get active books directly from database service
         active_books = []
