@@ -135,20 +135,20 @@ class SyncManager:
         clients_to_use = clients_to_use or self.sync_clients
         config = {}
         bulk_states_per_client = bulk_states_per_client or {}
-        
+
         with ThreadPoolExecutor(max_workers=len(clients_to_use)) as executor:
             futures = {}
             for client_name, client in clients_to_use.items():
                 prev_state = prev_states_by_client.get(client_name.lower())
-                
+
                 # Get bulk context from the unified dict
                 bulk_ctx = bulk_states_per_client.get(client_name)
-                
+
                 future = executor.submit(
                     client.get_service_state, book, prev_state, title_snip, bulk_ctx
                 )
                 futures[future] = client_name
-            
+
             for future in as_completed(futures, timeout=15):
                 client_name = futures[future]
                 try:
@@ -157,7 +157,7 @@ class SyncManager:
                         config[client_name] = state
                 except Exception as e:
                     logger.warning(f"⚠️ {client_name} state fetch failed: {e}")
-        
+
         return config
 
 
@@ -301,7 +301,7 @@ class SyncManager:
                     global_pct = 0.1 + (local_pct * 0.8)
                 elif phase == 3:
                     global_pct = 0.9 + (local_pct * 0.1)
-                
+
                 # Save to DB every time for now (or throttle if too frequent)
                 self.database_service.update_latest_job(abs_id, progress=global_pct)
 
@@ -323,7 +323,7 @@ class SyncManager:
             # Attempt SMIL extraction
             if hasattr(self.transcriber, 'transcribe_from_smil'):
                  transcript_path = self.transcriber.transcribe_from_smil(
-                     abs_id, epub_path, chapters, 
+                     abs_id, epub_path, chapters,
                      progress_callback=lambda p: update_progress(p, 2)
                  )
 
@@ -332,7 +332,7 @@ class SyncManager:
                 logger.info("ℹ️ SMIL data not found or failed, falling back to Whisper transcription.")
                 audio_files = self.abs_client.get_audio_files(abs_id)
                 transcript_path = self.transcriber.process_audio(
-                    abs_id, audio_files, 
+                    abs_id, audio_files,
                     progress_callback=lambda p: update_progress(p, 2)
                 )
             else:
@@ -341,7 +341,7 @@ class SyncManager:
 
             # Step 4: Parse EPUB
             self.ebook_parser.extract_text_and_map(
-                epub_path, 
+                epub_path,
                 progress_callback=lambda p: update_progress(p, 3)
             )
 
@@ -394,7 +394,7 @@ class SyncManager:
     def sync_cycle(self, target_abs_id=None):
         """
         Run a sync cycle.
-        
+
         Args:
             target_abs_id: If provided, only sync this specific book (Instant Sync trigger).
                            Otherwise, sync all active books using bulk-poll optimization.
@@ -429,7 +429,7 @@ class SyncManager:
         if storyteller_client and hasattr(storyteller_client, 'storyteller_client'):
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
-    
+
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
@@ -446,7 +446,7 @@ class SyncManager:
         # Optimization: Pre-fetch bulk data from all clients that support it
         # Only do this if we are in a full cycle (target_abs_id is None)
         bulk_states_per_client = {}
-        
+
         if not target_abs_id:
             logger.debug(f"🔄 Sync cycle starting - {len(active_books)} active book(s)")
             for client_name, client in self.sync_clients.items():
@@ -454,7 +454,7 @@ class SyncManager:
                 if bulk_data:
                     bulk_states_per_client[client_name] = bulk_data
                     logger.debug(f"📊 Pre-fetched bulk state for {client_name}")
-                
+
         # Main sync loop - process each active book
         for book in active_books:
             abs_id = book.abs_id
@@ -497,22 +497,22 @@ class SyncManager:
                         continue  # ABS offline
 
                 # Check if all 'delta' fields in config are zero
-                # We typically skip if nothing changed, BUT if there is a significant discrepancy 
+                # We typically skip if nothing changed, BUT if there is a significant discrepancy
                 # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
                 deltas_zero = all(round(cfg.delta, 2) == 0 for cfg in config.values())
 
                 # Check for sync delta threshold between clients
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
                 significant_diff = False
-                
+
                 if len(progress_values) >= 2:
                     max_progress = max(progress_values)
                     min_progress = min(progress_values)
                     progress_diff = max_progress - min_progress
-                    
+
                     if progress_diff >= self.sync_delta_between_clients:
                         significant_diff = True
-                        # If we have a significant diff, we verify it's not just noise 
+                        # If we have a significant diff, we verify it's not just noise
                         # by checking if we have at least one valid state
                         logger.debug(f"[{abs_id}] [{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
                         logger.debug(f"[{abs_id}] [{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
@@ -534,16 +534,16 @@ class SyncManager:
                                  if full_text:
                                      total_chars = len(full_text)
                                      char_delta = int(client_state.delta * total_chars)
-                                     
+
                                      if char_delta >= self.delta_chars_thresh:
                                          logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
                                          significant_diff = True
-                                         break 
+                                         break
                              except Exception as e:
                                  logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
 
                 # Check if all 'delta' fields in config are zero
-                # We typically skip if nothing changed, BUT if there is a significant discrepancy 
+                # We typically skip if nothing changed, BUT if there is a significant discrepancy
                 # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
                 deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
 
@@ -551,7 +551,7 @@ class SyncManager:
                 if deltas_zero and not significant_diff:
                     logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
                     continue
-                
+
                 if significant_diff:
                     logger.debug(f"[{abs_id}] [{title_snip}] Proceeding due to client discrepancy")
 
@@ -560,7 +560,7 @@ class SyncManager:
                 for key, cfg in config.items():
                     delta = cfg.delta
                     threshold = cfg.threshold
-                    
+
                     # Debug logging for potential None values
                     if delta is None or threshold is None:
                          logger.debug(f"[{title_snip}] {key} delta={delta}, threshold={threshold}")
@@ -634,7 +634,7 @@ class SyncManager:
                 for client_name, client in self.sync_clients.items():
                     if client_name == leader:
                         continue
-                    
+
                     # Skip ABS update if in ebook-only mode
                     if client_name == 'ABS' and hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
                         continue
@@ -681,7 +681,7 @@ class SyncManager:
                         self.database_service.save_state(client_state_model)
 
                 logger.info(f"💾 [{abs_id}] [{title_snip}] States saved to database")
-                
+
                 # Debugging crash: Flush logs to ensure we see this before any potential hard crash
                 for handler in logger.handlers:
                     handler.flush()
@@ -692,7 +692,7 @@ class SyncManager:
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"Sync error: {e}")
-        
+
         logger.debug(f"End of sync cycle for active books")
 
     def clear_progress(self, abs_id):

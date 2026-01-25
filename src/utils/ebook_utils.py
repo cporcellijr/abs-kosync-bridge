@@ -126,10 +126,10 @@ class EbookParser:
                 book = epub.read_epub(str(filepath))
                 # Check for cover item
                 cover_item = None
-                
+
                 # Method A: get_item_with_id('cover') or similar
                 # ebooklib doesn't have a standard 'get_cover' but often it's in the manifest
-                
+
                 # Method B: Iterate items
                 for item in book.get_items():
                     if item.get_type() == ebooklib.ITEM_IMAGE:
@@ -140,7 +140,7 @@ class EbookParser:
                     if item.get_type() == ebooklib.ITEM_COVER:
                         cover_item = item
                         break
-                
+
                 if cover_item:
                     with open(output_path, 'wb') as f:
                         f.write(cover_item.get_content())
@@ -152,7 +152,7 @@ class EbookParser:
             # 2. Fallback: ZipFile (if ebooklib fails or returns nothing)
             # (ebooklib is basically a zip wrapper anyway, but sometimes direct zip access is easier if we just want the file)
             # For now, let's stick to the attempt above. If valid EPUB, ebooklib should handle it.
-            
+
             return False
 
         except Exception as e:
@@ -181,13 +181,13 @@ class EbookParser:
             full_text_parts = []
             spine_map = []
             current_idx = 0
-            
+
             total_spine = len(book.spine)
 
             for i, item_ref in enumerate(book.spine):
                 if progress_callback:
                     progress_callback(i / total_spine)
-                
+
                 item = book.get_item_with_id(item_ref[0])
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')

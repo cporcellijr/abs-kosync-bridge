@@ -36,7 +36,7 @@ class ABSSyncClient(SyncClient):
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         abs_id = book.abs_id
-        
+
         # Use bulk context if available, otherwise fetch individually
         if bulk_context and abs_id in bulk_context:
             item_data = bulk_context[abs_id]
@@ -114,7 +114,7 @@ class ABSSyncClient(SyncClient):
                     'pct': self._abs_to_percentage(abs_ts, book.transcript_file) or 0
                 })
 
-            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, abs_ts or 0.0)
+            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, abs_ts if abs_ts is not None else 0.0)
             # Calculate percentage from timestamp for state
             pct = self._abs_to_percentage(final_ts, book.transcript_file)
             updated_state = {

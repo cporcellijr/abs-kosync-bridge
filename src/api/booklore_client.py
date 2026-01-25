@@ -26,10 +26,10 @@ class BookloreClient:
         self._token_timestamp = 0
         self._token_max_age = 300
         self.session = requests.Session()
-        
+
         # Cache file path
         self.cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
-        
+
         # Load cache on init
         self._load_cache()
 
@@ -37,20 +37,20 @@ class BookloreClient:
         """Load cache from disk."""
         if not self.cache_file.exists():
             return
-            
+
         try:
             with open(self.cache_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 self._book_cache = data.get('books', {})
                 self._cache_timestamp = data.get('timestamp', 0)
-                
+
                 # Rebuild ID cache
                 self._book_id_cache = {}
                 for book in self._book_cache.values():
                     uid = book.get('id')
                     if uid:
                         self._book_id_cache[uid] = book
-                        
+
             logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from disk cache")
         except Exception as e:
             logger.warning(f"Failed to load Booklore cache: {e}")
@@ -157,9 +157,9 @@ class BookloreClient:
 
     def _fetch_book_detail(self, book_id, token):
         """Fetch individual book details to get fileName.
-        
+
         Note: Uses requests directly instead of self.session for thread safety
-        when called from ThreadPoolExecutor. Token is passed in to avoid 
+        when called from ThreadPoolExecutor. Token is passed in to avoid
         concurrent token refresh issues.
         """
         if not token:
@@ -178,7 +178,7 @@ class BookloreClient:
 
     def _refresh_book_cache(self):
         """
-        Refresh the book cache. Booklore v1.17+ requires fetching individual 
+        Refresh the book cache. Booklore v1.17+ requires fetching individual
         book details to get fileName, so we do a two-step process:
         1. Get list of all book IDs
         2. Fetch details for books we don't have cached yet
@@ -188,7 +188,7 @@ class BookloreClient:
         if not response or response.status_code != 200:
             logger.error(f"Booklore: Failed to fetch book list")
             return False
-            
+
         books_list = response.json()
         if not books_list:
             logger.debug("Booklore: No books found in library")
@@ -197,14 +197,14 @@ class BookloreClient:
             self._cache_timestamp = time.time()
             self._save_cache()
             return True
-        
+
         # Step 2: For books not in cache, fetch details to get fileName
         # Use parallel fetching for speed
         new_book_ids = [b['id'] for b in books_list if b['id'] not in self._book_id_cache]
-        
+
         if new_book_ids:
             logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
-            
+
             # Get token ONCE before parallel fetching to avoid race conditions
             token = self._get_fresh_token()
             if not token:
@@ -214,7 +214,7 @@ class BookloreClient:
             # Fetch in parallel with limited concurrency
             def fetch_one(book_id):
                 return book_id, self._fetch_book_detail(book_id, token)
-            
+
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
                 for future in as_completed(futures):
@@ -226,7 +226,7 @@ class BookloreClient:
                             logger.debug(f"Booklore: Unexpected response type for book {book_id}: {type(detail)}")
                     except Exception as e:
                         logger.debug(f"Booklore: Error fetching book detail: {e}")
-        
+
         # Update books that were already in cache with fresh progress data
         existing_ids = [b['id'] for b in books_list if b['id'] in self._book_id_cache]
         for book in books_list:
@@ -235,7 +235,7 @@ class BookloreClient:
                 cached = self._book_id_cache[book['id']]
                 # The list endpoint doesn't have progress, so we keep cached values
                 # Progress is fetched fresh in get_progress() anyway
-        
+
         self._cache_timestamp = time.time()
         logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
         self._save_cache()
@@ -246,7 +246,7 @@ class BookloreClient:
         filename = detail.get('fileName', '')
         if not filename:
             return
-            
+
         metadata = detail.get('metadata') or {}
         authors = metadata.get('authors') or []
         # Handle both list of strings and list of dicts for authors
@@ -257,11 +257,11 @@ class BookloreClient:
                 if name: author_list.append(name)
             elif isinstance(a, str) and a.strip():
                 author_list.append(a.strip())
-        
+
         author_str = ', '.join(author_list)
         subtitle = metadata.get('subtitle') or ''
         title = metadata.get('title') or detail.get('title') or filename
-        
+
         book_info = {
             'id': detail.get('id'),
             'fileName': filename,
@@ -275,7 +275,7 @@ class BookloreClient:
             'cbxProgress': detail.get('cbxProgress'),
             'koreaderProgress': detail.get('koreaderProgress'),
         }
-        
+
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
 
@@ -288,10 +288,10 @@ class BookloreClient:
         if filename in self._book_cache: return self._book_cache[filename]
 
         stem = Path(filename).stem.lower()
-        for cached_name, book_info in self._book_cache.items():
+        for cached_name, book_info in list(self._book_cache.items()):
             if Path(cached_name).stem.lower() == stem: return book_info
 
-        for cached_name, book_info in self._book_cache.items():
+        for cached_name, book_info in list(self._book_cache.items()):
             if stem in cached_name or cached_name.replace('.epub', '') in stem:
                 return book_info
 
@@ -300,9 +300,9 @@ class BookloreClient:
             filename = Path(ebook_filename).name.lower()
             if filename in self._book_cache: return self._book_cache[filename]
             stem = Path(filename).stem.lower()
-            for cached_name, book_info in self._book_cache.items():
+            for cached_name, book_info in list(self._book_cache.items()):
                 if Path(cached_name).stem.lower() == stem: return book_info
-            for cached_name, book_info in self._book_cache.items():
+            for cached_name, book_info in list(self._book_cache.items()):
                 if stem in cached_name or cached_name.replace('.epub', '') in stem:
                     return book_info
 
@@ -325,7 +325,7 @@ class BookloreClient:
 
         search_lower = search_term.lower()
         results = []
-        for book_info in self._book_cache.values():
+        for book_info in list(self._book_cache.values()):
             title = (book_info.get('title') or '').lower()
             authors = (book_info.get('authors') or '').lower()
             filename = (book_info.get('fileName') or '').lower()
@@ -417,7 +417,7 @@ class BookloreClient:
     def get_recent_activity(self, min_progress=0.01):
         if not self._book_cache: self._refresh_book_cache()
         results = []
-        for filename, book in self._book_cache.items():
+        for filename, book in list(self._book_cache.items()):
             progress = 0
             if book.get('epubProgress'):
                 progress = (book['epubProgress'].get('percentage') or 0) / 100.0
@@ -489,7 +489,7 @@ class BookloreClient:
         """Remove a book from a shelf."""
         if not shelf_name:
              shelf_name = os.environ.get("BOOKLORE_SHELF_NAME", "abs-kosync")
-             
+
         try:
             # Find the book
             book = self.find_book_by_filename(ebook_filename)
