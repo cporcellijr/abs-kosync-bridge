@@ -171,6 +171,15 @@ Found a bug or have a suggestion?
 1. Open an [Issue](https://github.com/cporcellijr/abs-kosync-bridge/issues)
 2. Submit a [Pull Request](https://github.com/cporcellijr/abs-kosync-bridge/pulls)
 
+### 📝 Contribution Guidelines
+We follow a structured workflow to ensure stability:
+- **`main`**: Stable release branch. Accepts merges **only** from `dev`.
+- **`dev`**: Development branch. Target this branch for all Pull Requests.
+- **Feature Branches**: Create your branch from `dev` (e.g., `feature/new-thing` or `fix/bug-name`).
+
+> [!IMPORTANT]
+> **PRs targeting `main` directly will be automatically blocked.** Please ensure your PR targets `dev`.
+
 ---
 
 <p align="center">
