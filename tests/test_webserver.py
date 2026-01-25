@@ -23,6 +23,7 @@ class MockContainer:
         self.mock_booklore_client = Mock()
         self.mock_storyteller_client = Mock()
         self.mock_database_service = Mock()
+        self.mock_database_service.get_all_settings.return_value = {}  # Default empty settings
         self.mock_ebook_parser = Mock()
         self.mock_sync_clients = Mock()
 
@@ -127,7 +128,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIs(manager, self.mock_container.mock_sync_manager)
         self.assertIs(database_service, self.mock_container.mock_database_service)
 
-        print("✅ Dependency injection working correctly")
+        print("[OK] Dependency injection working correctly")
 
     def test_index_endpoint_with_mocked_dependencies(self):
         """Test index endpoint using clean dependency injection."""
@@ -177,7 +178,10 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         self.mock_database_service.get_all_books.return_value = [test_book]
         self.mock_database_service.get_states_for_book.return_value = mock_states
+        self.mock_database_service.get_all_states.return_value = mock_states
         self.mock_database_service.get_hardcover_details.return_value = None
+        self.mock_database_service.get_all_hardcover_details.return_value = []
+        self.mock_database_service.get_all_pending_suggestions.return_value = []
 
         # Mock the sync_clients call for integrations
         # Mock the sync_clients call for integrations
@@ -206,8 +210,8 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
             # Verify database was called
             self.mock_database_service.get_all_books.assert_called_once()
-            self.mock_database_service.get_states_for_book.assert_called_once_with('test-book-123')
-            self.mock_database_service.get_hardcover_details.assert_called_once_with('test-book-123')
+            self.mock_database_service.get_all_states.assert_called_once()
+            self.mock_database_service.get_all_hardcover_details.assert_called_once()
 
             # Verify render_template was called with correct arguments
             mock_render.assert_called_once()
@@ -281,7 +285,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.assertGreater(overall_progress, 0)  # Should be > 0 now that we have progress data
             self.assertLessEqual(overall_progress, 100)  # Should be a valid percentage
 
-            print("✅ Index endpoint test passed with correct response verification")
+            print("[OK] Index endpoint test passed with correct response verification")
 
         finally:
             src.web_server.render_template = original_render
@@ -314,7 +318,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertEqual(len(data['mappings']), 1)
         self.assertEqual(data['mappings'][0]['abs_id'], 'api-test-book-123')
 
-        print("✅ API status endpoint test passed with clean DI")
+        print("[OK] API status endpoint test passed with clean DI")
 
     def test_match_endpoint_with_clean_di(self):
         """Test match endpoint using clean dependency injection."""
@@ -372,7 +376,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub', 'Kobo')
             self.mock_storyteller_client.add_to_collection.assert_called_once_with('test-book.epub')
 
-            print("✅ Match endpoint test passed with clean DI")
+            print("[OK] Match endpoint test passed with clean DI")
 
         finally:
             src.web_server.get_kosync_id_for_ebook = original_get_kosync
@@ -401,7 +405,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         # Verify clear_progress was called on manager
         self.mock_manager.clear_progress.assert_called_once_with('clear-test-book')
 
-        print("✅ Clear progress endpoint test passed with clean DI")
+        print("[OK] Clear progress endpoint test passed with clean DI")
 
     def test_settings_endpoint_clean_di(self):
         """Test settings endpoint with clean dependency injection."""
@@ -437,20 +441,20 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             args, _ = mock_render.call_args
             self.assertEqual(args[0], 'settings.html')
 
-            print("✅ Settings endpoint test passed")
+            print("[OK] Settings endpoint test passed")
 
         finally:
             src.web_server.render_template = original_render
 
 
 if __name__ == '__main__':
-    print("🧪 Clean Flask Integration Testing with Dependency Injection")
+    print("TEST Clean Flask Integration Testing with Dependency Injection")
     print("=" * 70)
-    print("✓ No patches required")
-    print("✓ Clean dependency injection")
-    print("✓ Real HTTP requests via test_client()")
-    print("✓ Mocked external services")
-    print("✓ Easy to understand and maintain")
+    print("- No patches required")
+    print("- Clean dependency injection")
+    print("- Real HTTP requests via test_client()")
+    print("- Mocked external services")
+    print("- Easy to understand and maintain")
     print("=" * 70)
 
     unittest.main(verbosity=2)

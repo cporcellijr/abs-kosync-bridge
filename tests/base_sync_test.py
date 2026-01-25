@@ -119,6 +119,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         abs_client = Mock()
         kosync_client = Mock()
         booklore_client = Mock()
+        booklore_client._cache_timestamp = 0
         hardcover_client = Mock()
         storyteller_db = Mock()
         ebook_parser = Mock()
