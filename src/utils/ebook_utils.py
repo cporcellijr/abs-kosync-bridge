@@ -86,9 +86,21 @@ class EbookParser:
         filepath = Path(filepath)
         if self.hash_method == "filename":
             return hashlib.md5(filepath.name.encode('utf-8')).hexdigest()
+        
+        md5 = hashlib.md5()
         try:
+            file_size = os.path.getsize(filepath)
             with open(filepath, 'rb') as f:
-                return hashlib.md5(f.read(4096)).hexdigest()
+                for i in range(-1, 11):
+                    offset = 0 if i == -1 else 1024 * (4 ** i)
+                    if offset >= file_size:
+                        break
+                    f.seek(offset)
+                    chunk = f.read(1024)
+                    if not chunk:
+                        break
+                    md5.update(chunk)
+            return md5.hexdigest()
         except Exception as e:
             logger.error(f"Error computing hash for {filepath}: {e}")
             return None
