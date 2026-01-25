@@ -261,27 +261,26 @@ def kosync_put_progress():
                         audiobook_matches = []
                         if _container.abs_client().is_configured():
                             try:
+                                from src.utils.string_utils import fuzzy_match_title
+                                
                                 audiobooks = _container.abs_client().get_all_audiobooks()
-                                search_term = title.lower()
+                                search_term = title
                                 
                                 for ab in audiobooks:
                                     media = ab.get('media', {})
                                     metadata = media.get('metadata', {})
-                                    ab_title = (metadata.get('title') or ab.get('name', '')).lower()
-                                    ab_author = metadata.get('authorName', '').lower()
+                                    ab_title = (metadata.get('title') or ab.get('name', ''))
+                                    ab_author = metadata.get('authorName', '')
                                     
-                                    # Check for title match (fuzzy - title words in audiobook title)
-                                    title_words = [w for w in search_term.split() if len(w) > 3]
-                                    matches = sum(1 for w in title_words if w in ab_title)
-                                    
-                                    if matches >= len(title_words) * 0.5 or search_term in ab_title:
+                                    # Use shared fuzzy matching logic
+                                    if fuzzy_match_title(search_term, ab_title):
                                         audiobook_matches.append({
                                             "source": "abs",
                                             "abs_id": ab['id'],
-                                            "title": metadata.get('title') or ab.get('name'),
+                                            "title": ab_title,
                                             "author": ab_author,
                                             "duration": media.get('duration', 0),
-                                            "confidence": "high" if search_term in ab_title else "medium"
+                                            "confidence": "high" if search_term.lower() in ab_title.lower() else "medium"
                                         })
                                         
                             except Exception as e:
