@@ -1,0 +1,18 @@
+name: PR Target Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-target:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR target branch
+        if: github.base_ref == 'main' && github.head_ref != 'dev'
+        run: |
+          echo "❌ PRs should target the 'dev' branch, not 'main'."
+          echo ""
+          echo "Please close this PR and reopen it targeting 'dev' instead."
+          echo "The 'main' branch only accepts merges from 'dev'."
+          exit 1
