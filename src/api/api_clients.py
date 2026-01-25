@@ -18,9 +18,13 @@ class ABSClient:
         self.session = requests.Session()
         self.session.headers.update(self.headers)
 
+    def is_configured(self):
+        """Check if ABS is configured with URL and token."""
+        return bool(self.base_url and self.token)
+
     def check_connection(self):
         # Verify configuration first
-        if not self.base_url or not self.token:
+        if not self.is_configured():
             logger.warning("⚠️ Audiobookshelf not configured (skipping)")
             return False
 
