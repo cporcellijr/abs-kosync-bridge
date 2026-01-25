@@ -73,6 +73,8 @@ class SyncManager:
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
+        # [NEW] Scan for corrupted transcripts
+        self.scan_and_fix_legacy_transcripts()
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
         self.sync_clients = {}
@@ -160,6 +162,54 @@ class SyncManager:
                     logger.warning(f"⚠️ {client_name} state fetch failed: {e}")
 
         return config
+
+    def scan_and_fix_legacy_transcripts(self):
+        """
+        One-time scan of active books to identify and purge corrupted SMIL transcripts.
+        """
+        logger.info("🔍 Scanning for corrupted legacy transcripts...")
+        active_books = self.database_service.get_books_by_status('active')
+        count = 0
+        
+        for book in active_books:
+            if not book.transcript_file or not os.path.exists(book.transcript_file):
+                continue
+                
+            try:
+                # Load transcript
+                # We use the transcriber's cache method or direct load
+                with open(book.transcript_file, 'r', encoding='utf-8') as f:
+                    segments = json.load(f)
+                
+                # Validate using transcriber's method
+                is_valid, ratio = self.transcriber.validate_transcript(segments)
+                
+                if not is_valid:
+                    logger.warning(f"⚠️ Found corrupted transcript for '{sanitize_log_data(book.abs_title)}': {ratio:.1%} overlap.")
+                    
+                    # Mark for retry (using 'pending' as requested)
+                    book.status = 'pending'
+                    # Clear transcript file from DB record
+                    current_file = book.transcript_file
+                    book.transcript_file = None
+                    self.database_service.save_book(book)
+                    
+                    # Delete the corrupted file
+                    if current_file and os.path.exists(current_file):
+                        try:
+                            os.remove(current_file)
+                            logger.info(f"   🗑️ Deleted corrupted file: {current_file}")
+                        except Exception as e:
+                            logger.error(f"   ❌ Failed to delete file {current_file}: {e}")
+                            
+                    count += 1
+            except Exception as e:
+                logger.debug(f"   Skipping validation for '{book.abs_title}': {e}")
+                pass
+        
+        if count > 0:
+            logger.info(f"♻️ Scheduled {count} corrupted transcripts for re-processing.")
+
 
 
     def _get_local_epub(self, ebook_filename):

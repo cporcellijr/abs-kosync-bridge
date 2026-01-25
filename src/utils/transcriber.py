@@ -51,6 +51,26 @@ class AudioTranscriber:
         # [UPDATED] Use the injected instance
         self.smil_extractor = smil_extractor
 
+    def validate_transcript(self, segments: list, max_overlap_ratio: float = 0.05) -> tuple[bool, float]:
+        """
+        Validate transcript for overlapping timestamps.
+        
+        Returns:
+            (is_valid, overlap_ratio)
+        """
+        if not segments or len(segments) < 2:
+            return True, 0.0
+        
+        overlap_count = 0
+        for i in range(1, len(segments)):
+            if segments[i]['start'] < segments[i-1]['end']:
+                overlap_count += 1
+        
+        overlap_ratio = overlap_count / len(segments)
+        is_valid = overlap_ratio <= max_overlap_ratio
+        
+        return is_valid, overlap_ratio
+
     def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list, progress_callback=None) -> Optional[Path]:
         """
         Attempts to extract a transcript directly from the EPUB's SMIL overlay data.
@@ -66,6 +86,22 @@ class AudioTranscriber:
         try:
             transcript = self.smil_extractor.extract_transcript(str(epub_path), abs_chapters)
             if not transcript:
+                return None
+
+            # [NEW] Validate transcript before saving
+            is_valid, overlap_ratio = self.validate_transcript(transcript)
+            
+            if not is_valid:
+                logger.warning(f"⚠️ SMIL extraction failed validation: {overlap_ratio:.1%} overlap (threshold: 5%)")
+                logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
+                
+                # Delete output file if it exists to ensure clean state
+                if output_file.exists():
+                    try:
+                        os.remove(output_file)
+                    except:
+                        pass
+                        
                 return None
 
             with open(output_file, 'w', encoding='utf-8') as f:
