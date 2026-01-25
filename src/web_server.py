@@ -716,6 +716,21 @@ def index():
 
     # Load books from database service
     books = database_service.get_all_books()
+    
+    # [OPTIMIZATION] Fetch all states at once to avoid N+1 queries with NullPool
+    all_states = database_service.get_all_states()
+    states_by_book = {}
+    for state in all_states:
+        if state.abs_id not in states_by_book:
+            states_by_book[state.abs_id] = []
+        states_by_book[state.abs_id].append(state)
+
+    # [NEW] Fetch pending suggestions
+    suggestions = database_service.get_all_pending_suggestions()
+    
+    # [OPTIMIZATION] Fetch all hardcover details at once
+    all_hardcover = database_service.get_all_hardcover_details()
+    hardcover_by_book = {h.abs_id: h for h in all_hardcover}
 
     integrations = {}
 
@@ -733,8 +748,8 @@ def index():
     total_listened = 0
 
     for book in books:
-        # Get states for this book from database service
-        states = database_service.get_states_for_book(book.abs_id)
+        # Get states for this book from pre-fetched dict
+        states = states_by_book.get(book.abs_id, [])
 
         # Convert states to a dict by client name for easy access
         state_by_client = {state.client_name: state for state in states}
@@ -782,7 +797,7 @@ def index():
                 max_progress = max(max_progress, progress_pct)
 
         # Add hardcover mapping details
-        hardcover_details = database_service.get_hardcover_details(book.abs_id)
+        hardcover_details = hardcover_by_book.get(book.abs_id)
         if hardcover_details:
             mapping.update({
                 'hardcover_book_id': hardcover_details.hardcover_book_id,
@@ -812,14 +827,15 @@ def index():
         mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
 
         # Booklore deep link (if configured and book found)
+        # Optimization: BookloreClient.find_book_by_filename called with allow_refresh=False to prevent UI blocking
         if manager.booklore_client.is_configured():
-            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename)
-            if bl_book:
-                mapping['booklore_id'] = bl_book.get('id')
-                mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
-            else:
-                mapping['booklore_id'] = None
-                mapping['booklore_url'] = None
+            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
+        else:
+            bl_book = None
+            
+        if bl_book:
+            mapping['booklore_id'] = bl_book.get('id')
+            mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
         else:
             mapping['booklore_id'] = None
             mapping['booklore_url'] = None
@@ -870,7 +886,7 @@ def index():
     else:
         overall_progress = 0
 
-    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
+    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress, suggestions=suggestions)
 
 
 def shelfmark():
@@ -1527,6 +1543,62 @@ def view_log():
 
 # Note: KoSync endpoints moved to src/api/kosync_server.py Blueprint
 
+# ---------------- SUGGESTION API ROUTES ----------------
+def get_suggestions():
+    suggestions = database_service.get_all_pending_suggestions()
+    result = []
+    for s in suggestions:
+        try:
+            matches = json.loads(s.matches_json) if s.matches_json else []
+        except:
+            matches = []
+            
+        result.append({
+            "id": s.id,
+            "source_id": s.source_id,
+            "title": s.title,
+            "author": s.author,
+            "cover_url": s.cover_url,
+            "matches": matches,
+            "created_at": s.created_at.isoformat()
+        })
+    return jsonify(result)
+
+
+def dismiss_suggestion(source_id):
+    if database_service.dismiss_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+def ignore_suggestion(source_id):
+    if database_service.ignore_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+def proxy_cover(abs_id):
+    """Proxy cover access to allow loading covers from local network ABS instances."""
+    try:
+        token = container.abs_client().token
+        base_url = container.abs_client().base_url
+        if not token or not base_url:
+            return "ABS not configured", 500
+
+        url = f"{base_url.rstrip('/')}/api/items/{abs_id}/cover?token={token}"
+        
+        # Stream the response to avoid loading large images into memory
+        req = requests.get(url, stream=True, timeout=10)
+        if req.status_code == 200:
+            from flask import Response
+            return Response(req.iter_content(chunk_size=1024), content_type=req.headers.get('content-type', 'image/jpeg'))
+        else:
+            return "Cover not found", 404
+    except Exception as e:
+        logger.error(f"Error proxying cover for {abs_id}: {e}")
+        return "Error loading cover", 500
+
+
 # --- Logger setup (already present) ---
 logger = logging.getLogger(__name__)
 
@@ -1568,10 +1640,17 @@ def create_app(test_container=None):
     app.add_url_rule('/api/logs', 'api_logs', api_logs)
     app.add_url_rule('/api/logs/live', 'api_logs_live', api_logs_live)
     app.add_url_rule('/view_log', 'view_log', view_log)
+    
+    # Suggestion routes
+    app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])
+    app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
+    app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
+    app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
 
     # Return both app and container for external reference
     return app, container
 
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
 
     # Setup signal handlers to catch unexpected kills
@@ -1621,4 +1700,5 @@ if __name__ == '__main__':
     logger.info(f"🌐 Web interface starting on port 5757")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
-# [END FILE]
+
+

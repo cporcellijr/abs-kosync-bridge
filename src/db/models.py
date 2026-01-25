@@ -182,6 +182,45 @@ class Job(Base):
 
 
 
+
+class PendingSuggestion(Base):
+    """
+    Model for progress-triggered ebook suggestions.
+    """
+    __tablename__ = 'pending_suggestions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String(50), default='abs')
+    source_id = Column(String(255))
+    title = Column(String(500))
+    author = Column(String(500))
+    cover_url = Column(String(500))
+    matches_json = Column(Text)
+    status = Column(String(20), default='pending')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __init__(self, source_id: str, title: str, author: str = None, 
+                 cover_url: str = None, matches_json: str = "[]", status: str = 'pending'):
+        self.source_id = source_id
+        self.title = title
+        self.author = author
+        self.cover_url = cover_url
+        self.matches_json = matches_json
+        self.status = status
+        self.created_at = datetime.utcnow()
+
+    @property
+    def matches(self):
+        import json
+        try:
+            return json.loads(self.matches_json) if self.matches_json else []
+        except:
+            return []
+
+    def __repr__(self):
+        return f"<PendingSuggestion(id={self.id}, title='{self.title}', status='{self.status}')>"
+
+
 class Setting(Base):
     """
     Setting model storing application configuration.
@@ -207,7 +246,21 @@ class DatabaseManager:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
+        # Increase timeout to reduce lock errors, enable WAL mode for concurrency, allow multi-thread access
+        self.engine = create_engine(
+            f'sqlite:///{db_path}', 
+            echo=False, 
+            connect_args={'timeout': 30, 'check_same_thread': False}
+        )
+        
+        from sqlalchemy import event
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
         self.SessionLocal = sessionmaker(bind=self.engine)
 
         # Note: Schema creation is handled by Alembic migrations

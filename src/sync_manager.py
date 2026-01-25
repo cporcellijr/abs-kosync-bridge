@@ -8,9 +8,10 @@ from pathlib import Path
 import schedule
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import json
 from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.models import Job
-from src.db.models import State, Book
+from src.db.models import State, Book, PendingSuggestion
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
@@ -200,6 +201,100 @@ class SyncManager:
                 logger.error(f"EPUB not found on filesystem and Booklore not configured")
 
         return None
+
+    # [NEW] Suggestion Logic
+    def check_for_suggestions(self, abs_progress_map, active_books):
+        """Check for unmapped books with progress and create suggestions."""
+        try:
+            # optimization: get all mapped IDs to avoid suggesting existing books (even if inactive)
+            all_books = self.database_service.get_all_books()
+            mapped_ids = {b.abs_id for b in all_books}
+
+            for abs_id, item_data in abs_progress_map.items():
+                if abs_id in mapped_ids:
+                    continue
+
+                duration = item_data.get('duration', 0)
+                current_time = item_data.get('currentTime', 0)
+                
+                if duration > 0:
+                    pct = current_time / duration
+                    if pct > 0.01:
+                        # Check existing pending suggestion
+                        if self.database_service.get_pending_suggestion(abs_id):
+                            continue
+                            
+                        self._create_suggestion(abs_id, item_data)
+        except Exception as e:
+            logger.error(f"Error checking suggestions: {e}")
+
+    def _create_suggestion(self, abs_id, progress_data):
+        """Create a new suggestion for an unmapped book."""
+        logger.info(f"💡 Found potential new book for suggestion: {abs_id}")
+        
+        try:
+            # 1. Get Details from ABS
+            item = self.abs_client.get_item_details(abs_id)
+            if not item:
+                return
+
+            media = item.get('media', {})
+            metadata = media.get('metadata', {})
+            title = metadata.get('title')
+            author = metadata.get('authorName')
+            # Use local proxy for cover image to ensure accessibility
+            cover = f"/api/cover-proxy/{abs_id}"
+            
+            matches = []
+            
+            # 2a. Search Booklore
+            if self.booklore_client and self.booklore_client.is_configured():
+                try:
+                    bl_results = self.booklore_client.search_books(title)
+                    for b in bl_results:
+                         # Filter for EPUBs
+                         if b.get('fileName', '').lower().endswith('.epub'):
+                             matches.append({
+                                 "source": "booklore",
+                                 "title": b.get('title'),
+                                 "author": b.get('authors'),
+                                 "filename": b.get('fileName'), # Important for auto-linking
+                                 "id": str(b.get('id')),
+                                 "confidence": "high" if title.lower() in b.get('title', '').lower() else "medium"
+                             })
+                except Exception as e:
+                    logger.warning(f"Booklore search failed during suggestion: {e}")
+
+            # 2b. Search Local Filesystem
+            if self.books_dir and self.books_dir.exists():
+                try:
+                    clean_title = title.lower()
+                    for epub in self.books_dir.rglob("*.epub"):
+                         if clean_title in epub.name.lower():
+                             matches.append({
+                                 "source": "filesystem",
+                                 "filename": epub.name,
+                                 "path": str(epub),
+                                 "confidence": "high"
+                             })
+                except Exception as e:
+                    logger.warning(f"Filesystem search failed during suggestion: {e}")
+            
+            # 3. Save to DB
+            suggestion = PendingSuggestion(
+                source_id=abs_id,
+                title=title,
+                author=author,
+                cover_url=cover,
+                matches_json=json.dumps(matches)
+            )
+            self.database_service.save_pending_suggestion(suggestion)
+            match_count = len(matches)
+            logger.info(f"✅ Created suggestion for '{title}' with {match_count} matches")
+
+        except Exception as e:
+            logger.error(f"Failed to create suggestion for {abs_id}: {e}")
+            logger.debug(traceback.format_exc())
 
     def check_pending_jobs(self):
         """
@@ -429,7 +524,20 @@ class SyncManager:
         if storyteller_client and hasattr(storyteller_client, 'storyteller_client'):
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
-
+                
+        # [NEW] Refresh Booklore cache in background
+        if self.booklore_client and self.booklore_client.is_configured():
+            # This triggers a refresh if needed (older than 1h), or can be forced if desired
+            # Pass allow_refresh=True (default) implicitly by just checking cache
+            # But we can call _refresh_book_cache directly if we want to enforce it periodically
+            # For now, let's just "touch" it safely
+            pass 
+            # Actually, let's explicitly refresh if it's stale (>1h) to keep UI fast
+            # Accessing internal method is dirty but effective for this patch
+            if time.time() - self.booklore_client._cache_timestamp > 3600:
+                logger.info("Background refreshing Booklore cache...")
+                self.booklore_client._refresh_book_cache()
+    
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
@@ -454,7 +562,11 @@ class SyncManager:
                 if bulk_data:
                     bulk_states_per_client[client_name] = bulk_data
                     logger.debug(f"📊 Pre-fetched bulk state for {client_name}")
-
+            
+            # [NEW] Check for suggestions
+            if 'ABS' in bulk_states_per_client:
+                self.check_for_suggestions(bulk_states_per_client['ABS'], active_books)
+                
         # Main sync loop - process each active book
         for book in active_books:
             abs_id = book.abs_id

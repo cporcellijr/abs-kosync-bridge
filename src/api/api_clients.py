@@ -199,14 +199,39 @@ class ABSClient:
 
     def get_all_progress_raw(self):
         """Fetch all user progress in one API call."""
+        # Try specific progress endpoint first
         url = f"{self.base_url}/api/me/progress"
         try:
             r = self.session.get(url, timeout=10)
-            if r.status_code != 200: return {}
-            data = r.json()
-            # Returns a dict where key is libraryItemId for fast lookup
-            items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
-            return {item.get('libraryItemId'): item for item in items if item.get('libraryItemId')}
+            if r.status_code == 200:
+                data = r.json()
+                items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
+                mapped_items = {item.get('libraryItemId'): item for item in items if item.get('libraryItemId')}
+                # logger.debug(f"📊 ABS Bulk Progress (Direct): {len(mapped_items)} items")
+                return mapped_items
+            elif r.status_code == 404:
+                # Fallback to /api/me
+                logger.debug("⚠️ /api/me/progress not found (404), falling back to /api/me")
+                url_fallback = f"{self.base_url}/api/me"
+                r2 = self.session.get(url_fallback, timeout=10)
+                if r2.status_code == 200:
+                    data = r2.json()
+                    
+                    # Try 'mediaInProgress' (some versions) or 'mediaProgress' (others)
+                    items = data.get('mediaInProgress', [])
+                    if not items:
+                        items = data.get('mediaProgress', [])
+                        
+                    return {item.get('libraryItemId'): item for item in items if item.get('libraryItemId')}
+                else:
+                    logger.warning(f"⚠️ Fallback to /api/me failed: {r2.status_code}")
+            else:
+                logger.warning(f"⚠️ Failed to fetch all progress: {r.status_code}")
+                
+            return {}
+        except Exception as e:
+            logger.error(f"Error fetching all ABS progress: {e}")
+            return {}
         except Exception as e:
             logger.error(f"Error fetching all ABS progress: {e}")
             return {}
