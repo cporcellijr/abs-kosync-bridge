@@ -1640,6 +1640,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/logs', 'api_logs', api_logs)
     app.add_url_rule('/api/logs/live', 'api_logs_live', api_logs_live)
     app.add_url_rule('/view_log', 'view_log', view_log)
+    app.add_url_rule('/settings', 'settings', settings, methods=['GET', 'POST'])
     
     # Suggestion routes
     app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])

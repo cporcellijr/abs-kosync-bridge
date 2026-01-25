@@ -403,6 +403,45 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         print("✅ Clear progress endpoint test passed with clean DI")
 
+    def test_settings_endpoint_clean_di(self):
+        """Test settings endpoint with clean dependency injection."""
+        # Mock database settings
+        self.mock_database_service.get_all_settings.return_value = {
+            'KOSYNC_ENABLED': 'true',
+            'SYNC_PERIOD_MINS': '10'
+        }
+
+        # Mock render_template
+        import src.web_server
+        original_render = src.web_server.render_template
+        mock_render = Mock(return_value="Settings Page HTML")
+        src.web_server.render_template = mock_render
+
+        try:
+            # Make HTTP request
+            response = self.client.get('/settings')
+
+            # Verify response
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, b"Settings Page HTML")
+
+            # Verify database was called to load settings
+            # Note: settings() function calls database_service.get_all_settings() implicitly 
+            # via ConfigLoader or os.environ?
+            # Actually, looking at the code, settings() calls database_service.get_all_settings() 
+            # only on POST. On GET it just renders template.
+            # But the template rendering uses `get_val` helper which reads from os.environ.
+            # So we just verify it renders successfully.
+            
+            mock_render.assert_called_once()
+            args, _ = mock_render.call_args
+            self.assertEqual(args[0], 'settings.html')
+
+            print("✅ Settings endpoint test passed")
+
+        finally:
+            src.web_server.render_template = original_render
+
 
 if __name__ == '__main__':
     print("🧪 Clean Flask Integration Testing with Dependency Injection")
