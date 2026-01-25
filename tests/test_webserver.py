@@ -33,6 +33,16 @@ class MockContainer:
         self.mock_sync_manager.get_duration.return_value = 3600
         self.mock_sync_manager.clear_progress = Mock()
 
+    def sync_clients(self):
+        """Return mock sync clients dictionary."""
+        return {
+            'ABS': Mock(is_configured=Mock(return_value=True)),
+            'KoSync': Mock(is_configured=Mock(return_value=True)),
+            'Storyteller': Mock(is_configured=Mock(return_value=False)),
+            'Booklore': Mock(is_configured=Mock(return_value=False)),
+            'Hardcover': Mock(is_configured=Mock(return_value=False))
+        }
+
     def sync_manager(self):
         return self.mock_sync_manager
 
