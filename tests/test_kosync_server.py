@@ -28,20 +28,20 @@ from src.db.database_service import DatabaseService
 
 class TestKosyncDocument(unittest.TestCase):
     """Test KosyncDocument model and database operations."""
-    
+
     @classmethod
     def setUpClass(cls):
         """Set up test database."""
         cls.db_path = os.path.join(TEST_DIR, 'test.db')
         cls.db_service = DatabaseService(cls.db_path)
-    
+
     def setUp(self):
         """Clean tables before each test."""
         with self.db_service.get_session() as session:
             session.query(KosyncDocument).delete()
             session.query(State).delete()
             session.query(Book).delete()
-    
+
     def test_create_kosync_document(self):
         """Test creating a new KOSync document."""
         doc = KosyncDocument(
@@ -52,12 +52,12 @@ class TestKosyncDocument(unittest.TestCase):
             device_id='TEST123'
         )
         saved = self.db_service.save_kosync_document(doc)
-        
+
         self.assertEqual(saved.document_hash, 'a' * 32)
         # Handle float/decimal comparison loosely
         self.assertAlmostEqual(float(saved.percentage), 0.25)
         self.assertEqual(saved.device, 'TestDevice')
-    
+
     def test_get_kosync_document(self):
         """Test retrieving a KOSync document."""
         # Create first
@@ -66,17 +66,17 @@ class TestKosyncDocument(unittest.TestCase):
             percentage=0.5
         )
         self.db_service.save_kosync_document(doc)
-        
+
         # Retrieve
         retrieved = self.db_service.get_kosync_document('b' * 32)
         self.assertIsNotNone(retrieved)
         self.assertAlmostEqual(float(retrieved.percentage), 0.5)
-    
+
     def test_get_nonexistent_document(self):
         """Test retrieving a document that doesn't exist."""
         retrieved = self.db_service.get_kosync_document('nonexistent' + '0' * 21)
         self.assertIsNone(retrieved)
-    
+
     def test_update_kosync_document(self):
         """Test updating an existing KOSync document."""
         doc = KosyncDocument(
@@ -84,17 +84,17 @@ class TestKosyncDocument(unittest.TestCase):
             percentage=0.1
         )
         self.db_service.save_kosync_document(doc)
-        
+
         # Update
         doc.percentage = 0.9
         doc.progress = '/body/div[99]'
         self.db_service.save_kosync_document(doc)
-        
+
         # Verify
         retrieved = self.db_service.get_kosync_document('c' * 32)
         self.assertAlmostEqual(float(retrieved.percentage), 0.9)
         self.assertEqual(retrieved.progress, '/body/div[99]')
-    
+
     def test_link_kosync_document(self):
         """Test linking a document to an ABS book."""
         # Create doc
@@ -103,15 +103,15 @@ class TestKosyncDocument(unittest.TestCase):
             percentage=0.3
         )
         self.db_service.save_kosync_document(doc)
-        
+
         # Create book
         book = Book(abs_id="book-1", abs_title="Test Book")
         self.db_service.save_book(book)
-        
+
         # Link
         result = self.db_service.link_kosync_document('d' * 32, 'book-1')
         self.assertTrue(result)
-        
+
         # Verify
         retrieved = self.db_service.get_kosync_document('d' * 32)
         self.assertEqual(retrieved.linked_abs_id, 'book-1')
@@ -123,11 +123,11 @@ class TestKosyncDocument(unittest.TestCase):
             percentage=0.4
         )
         self.db_service.save_kosync_document(doc)
-        
+
         unlinked = self.db_service.get_unlinked_kosync_documents()
         hashes = [d.document_hash for d in unlinked]
         self.assertIn('e' * 32, hashes)
-    
+
     def test_delete_kosync_document(self):
         """Test deleting a KOSync document."""
         doc = KosyncDocument(
@@ -135,11 +135,11 @@ class TestKosyncDocument(unittest.TestCase):
             percentage=0.6
         )
         self.db_service.save_kosync_document(doc)
-        
+
         # Delete
         result = self.db_service.delete_kosync_document('f' * 32)
         self.assertTrue(result)
-        
+
         # Verify gone
         retrieved = self.db_service.get_kosync_document('f' * 32)
         self.assertIsNone(retrieved)
@@ -147,7 +147,7 @@ class TestKosyncDocument(unittest.TestCase):
 
 class TestKosyncEndpoints(unittest.TestCase):
     """Test KOSync HTTP endpoints."""
-    
+
     @classmethod
     def setUpClass(cls):
         # Setup DB one time
@@ -156,6 +156,8 @@ class TestKosyncEndpoints(unittest.TestCase):
         # We need to monkeypatch the global database_service in web_server
         from src import web_server
         web_server.database_service = DatabaseService(cls.db_path)
+        if not hasattr(web_server, 'app'):
+            web_server.app, _ = web_server.create_app()
         cls.app = web_server.app
         cls.client = cls.app.test_client()
 
@@ -185,7 +187,7 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'KOBO123'
             }
         )
-        
+
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data['document'], 'g' * 32)
@@ -193,19 +195,19 @@ class TestKosyncEndpoints(unittest.TestCase):
         # PUT response timestamp should be ISO 8601 string (kosync-dotnet behavior)
         self.assertIsInstance(data['timestamp'], str)
         self.assertIn('T', data['timestamp'])  # ISO format contains 'T'
-    
+
     def test_get_progress_returns_502_for_missing(self):
         """Test that GET returns 502 (not 404) for missing document."""
         response = self.client.get(
             '/syncs/progress/' + 'z' * 32,
             headers=self.auth_headers
         )
-        
+
         self.assertEqual(response.status_code, 502)
         data = response.get_json()
         self.assertIn('message', data)
         self.assertIn('not found', data['message'].lower())
-    
+
     def test_get_progress_returns_full_data(self):
         """Test that GET returns all fields."""
         # First PUT
@@ -220,16 +222,16 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'KINDLE456'
             }
         )
-        
+
         # Then GET
         response = self.client.get(
             '/syncs/progress/' + 'h' * 32,
             headers=self.auth_headers
         )
-        
+
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
-        
+
         # Verify all fields present (matching kosync-dotnet)
         self.assertEqual(data['document'], 'h' * 32)
         self.assertEqual(data['progress'], '/body/chapter[5]')
@@ -237,7 +239,7 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertEqual(data['device'], 'TestKindle')
         self.assertEqual(data['device_id'], 'KINDLE456')
         self.assertIn('timestamp', data)
-    
+
     def test_furthest_wins_rejects_backwards(self):
         """Test that backwards progress is rejected when KOSYNC_FURTHEST_WINS=true."""
         # First PUT at 50%
@@ -252,7 +254,7 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D1'
             }
         )
-        
+
         # Try to go backwards to 25% - should be REJECTED
         response = self.client.put(
             '/syncs/progress',
@@ -265,9 +267,9 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D2'
             }
         )
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Verify progress stayed at 50% (not overwritten)
         get_response = self.client.get(
             '/syncs/progress/' + 'i' * 32,
@@ -275,7 +277,7 @@ class TestKosyncEndpoints(unittest.TestCase):
         )
         data = get_response.get_json()
         self.assertAlmostEqual(data['percentage'], 0.50)
-    
+
     def test_furthest_wins_allows_equal(self):
         """Test that equal progress values are accepted (not rejected as backwards)."""
         # First PUT at 50%
@@ -290,7 +292,7 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D1'
             }
         )
-        
+
         # Send same percentage again - should be ACCEPTED
         response = self.client.put(
             '/syncs/progress',
@@ -303,9 +305,9 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D2'
             }
         )
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Verify progress field was updated (same percentage, different xpath)
         get_response = self.client.get(
             '/syncs/progress/' + 'j' * 32,
@@ -314,7 +316,7 @@ class TestKosyncEndpoints(unittest.TestCase):
         data = get_response.get_json()
         self.assertEqual(data['progress'], '/body/middle-updated')
         self.assertEqual(data['device'], 'Device2')
-    
+
     def test_furthest_wins_allows_forward(self):
         """Test that forward progress is accepted."""
         # First PUT at 25%
@@ -329,7 +331,7 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D1'
             }
         )
-        
+
         # Go forward to 75% - should be ACCEPTED
         response = self.client.put(
             '/syncs/progress',
@@ -342,9 +344,9 @@ class TestKosyncEndpoints(unittest.TestCase):
                 'device_id': 'D2'
             }
         )
-        
+
         self.assertEqual(response.status_code, 200)
-        
+
         # Verify progress moved forward
         get_response = self.client.get(
             '/syncs/progress/' + 'k' * 32,

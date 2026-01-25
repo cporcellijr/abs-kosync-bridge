@@ -1,19 +1,14 @@
 # [START FILE: abs-kosync-enhanced/web_server.py]
-import hashlib
 import html
 import logging
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import threading
 import time
-import json
-from datetime import datetime, timedelta
-from functools import wraps
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urljoin
 
 import requests
@@ -21,12 +16,7 @@ import schedule
 from dependency_injector import providers
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
 
-from src.db.database_service import DatabaseService
-from src.db.models import State, Book, KosyncDocument
-from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
-from src.utils.di_container import Container
-# Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.hash_cache import HashCache
@@ -34,27 +24,7 @@ from src.api.kosync_server import kosync_bp, init_kosync_server
 
 # ---------------- APP SETUP ----------------
 
-# Get static and template folder paths from environment variables, with fallback
-STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
-TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/app/templates')
-
-app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static', template_folder=TEMPLATE_DIR)
-app.secret_key = "kosync-queue-secret-unified-app"
-
-# NOTE: Logging is configured centrally in `main.py`. Avoid calling
-# `logging.basicConfig` here to prevent adding duplicate handlers.
-logger = logging.getLogger(__name__)
-
-# Global variables - will be initialized via setup_dependencies()
-container: Optional[Container] = None
-manager: Optional[SyncManager] = None
-database_service: Optional[DatabaseService] = None
-DATA_DIR: Optional[Path] = None
-EBOOK_DIR: Optional[Path] = None
-COVERS_DIR: Optional[Path] = None
-hash_cache: Optional[HashCache] = None
-
-def setup_dependencies(test_container=None):
+def setup_dependencies(app, test_container=None):
     """
     Initialize dependencies for the web server.
 
@@ -194,7 +164,6 @@ def get_audiobooks_conditionally():
         return container.abs_client().get_all_audiobooks()
 
 # ---------------- CONTEXT PROCESSORS ----------------
-@app.context_processor
 def inject_global_vars():
     return dict(
         shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
@@ -211,8 +180,6 @@ def safe_folder_name(name: str) -> str:
         name = name.replace(c, '_')
     return name.strip() or "Unknown"
 
-
-app.jinja_env.globals['safe_folder_name'] = safe_folder_name
 
 def get_stats(ebooks, audiobooks):
     total = sum(m["file_size_mb"] for m in ebooks) + sum(m.get("file_size_mb", 0) for m in audiobooks)
@@ -459,7 +426,7 @@ def sync_daemon():
     try:
         # Setup schedule for sync operations
         # Use the global SYNC_PERIOD_MINS which is validated
-        schedule.every(SYNC_PERIOD_MINS).minutes.do(manager.sync_cycle)
+        schedule.every(int(SYNC_PERIOD_MINS)).minutes.do(manager.sync_cycle)
         schedule.every(1).minutes.do(manager.check_pending_jobs)
 
         logger.info(f"🔄 Sync daemon started (period: {SYNC_PERIOD_MINS} minutes)")
@@ -614,7 +581,6 @@ def restart_server():
     logger.info("👋 Exiting process to trigger restart...")
     sys.exit(0)
 
-@app.route('/settings', methods=['GET', 'POST'])
 def settings():
     # Priority Level 3: Application Defaults
     DEFAULTS = {
@@ -745,7 +711,6 @@ def audiobook_matches_search(ab, search_term):
     return search_term in title or search_term in author
 
 # ---------------- ROUTES ----------------
-@app.route('/')
 def index():
     """Dashboard - loads books and progress from database service"""
 
@@ -908,7 +873,6 @@ def index():
     return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
 
 
-@app.route('/shelfmark')
 def shelfmark():
     """Shelfmark view - renders an iframe with SHELFMARK_URL"""
     url = os.environ.get("SHELFMARK_URL")
@@ -917,7 +881,6 @@ def shelfmark():
     return render_template('shelfmark.html', shelfmark_url=url)
 
 
-@app.route('/book-linker', methods=['GET', 'POST'])
 def book_linker():
     message = session.pop("message", None)
     is_error = session.pop("is_error", False)
@@ -938,7 +901,6 @@ def book_linker():
                            storyteller_ingest=str(STORYTELLER_INGEST))
 
 
-@app.route('/book-linker/process', methods=['POST'])
 def book_linker_process():
     book_name = request.form.get("book_name", "").strip()
     if not book_name:
@@ -969,7 +931,6 @@ def book_linker_process():
     return redirect(url_for('book_linker'))
 
 
-@app.route('/book-linker/trigger-monitor', methods=['POST'])
 def trigger_monitor():
     processed, skipped = run_processing_scan(manual=True)
     if processed > 0:
@@ -984,7 +945,6 @@ def trigger_monitor():
     return redirect(url_for('book_linker'))
 
 
-@app.route('/match', methods=['GET', 'POST'])
 def match():
     if request.method == 'POST':
         abs_id = request.form.get('audiobook_id')
@@ -1046,7 +1006,6 @@ def match():
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager.get_abs_title)
 
 
-@app.route('/batch-match', methods=['GET', 'POST'])
 def batch_match():
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1137,7 +1096,6 @@ def batch_match():
                            get_title=manager.get_abs_title)
 
 
-@app.route('/delete/<abs_id>', methods=['POST'])
 def delete_mapping(abs_id):
     # Get book from database service
     book = database_service.get_book(abs_id)
@@ -1148,7 +1106,7 @@ def delete_mapping(abs_id):
                 Path(book.transcript_file).unlink()
             except:
                 pass
-        
+
         # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
         if book.sync_mode == 'ebook_only' and book.kosync_doc_id:
             logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
@@ -1161,19 +1119,8 @@ def delete_mapping(abs_id):
             # Log is handled inside the method, but user asked for log here?
             # User instruction: "logger.info(f'📚 Removed from ABS collection: {collection_name}')"
             # My implementation of remove_from_collection DOES log info.
-            # But I will follow instructions and keep the try/except block structure,
+            # But I will follow the snippets and keep the try/except block structure,
             # trusting the method to log or logging here if requested.
-            # The method returns True/False.
-            # The user snippet had logging inside the try block.
-            # Let's check the snippet again.
-            
-            # Snippet:
-            # container.abs_client().remove_from_collection(abs_id, collection_name)
-            # logger.info(f"📚 Removed from ABS collection: {collection_name}")
-            
-            # Since my method logs, I might double log.
-            # But I will stick to the user's requested logic in web_server.py just in case.
-            # Actually, excessive logging is better than missing.
         except Exception as e:
             logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
 
@@ -1192,7 +1139,6 @@ def delete_mapping(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/clear-progress/<abs_id>', methods=['POST'])
 def clear_progress(abs_id):
     """Clear progress for a mapping by setting all systems to 0%"""
     # Get book from database service
@@ -1214,7 +1160,6 @@ def clear_progress(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/link-hardcover/<abs_id>', methods=['POST'])
 def link_hardcover(abs_id):
     from flask import flash
     url = request.form.get('hardcover_url', '').strip()
@@ -1256,7 +1201,6 @@ def link_hardcover(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/update-hash/<abs_id>', methods=['POST'])
 def update_hash(abs_id):
     from flask import flash
     new_hash = request.form.get('new_hash', '').strip()
@@ -1267,7 +1211,6 @@ def update_hash(abs_id):
         return redirect(url_for('index'))
 
     old_hash = book.kosync_doc_id
-    updated = False
 
     if new_hash:
         book.kosync_doc_id = new_hash
@@ -1312,41 +1255,40 @@ def update_hash(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/covers/<path:filename>')
 def serve_cover(filename):
     """Serve cover images with lazy extraction."""
     # Filename is likely <hash>.jpg
     doc_hash = filename.replace('.jpg', '')
-    
+
     # 1. Check if file exists
     cover_path = COVERS_DIR / filename
     if cover_path.exists():
         return send_from_directory(COVERS_DIR, filename)
-        
+
     # 2. Try to extract
     # Find book by kosync ID
     book = database_service.get_book_by_kosync_id(doc_hash)
-    
+
     if book and book.ebook_filename:
         # We need the full path to the book. ebook_parser resolves it usually.
         # extract_cover expects a path or filename that can be resolved.
         # Let's pass what we have.
         try:
-             # Find actual file path using EbookParser resolution if needed, 
+             # Find actual file path using EbookParser resolution if needed,
              # but extract_cover in my implementation takes 'filepath' and calls Path(filepath).
              # If book.ebook_filename is just a name, we might need to resolve it.
              # container.ebook_parser().resolve_book_path(book.ebook_filename)
-             
+
              # Actually, let's let EbookParser handle resolution or pass full path if we know it.
-             # EbookParser.extract_cover currently does `Path(filepath)`. 
+             # EbookParser.extract_cover currently does `Path(filepath)`.
              # It doesn't call `resolve_book_path` internally in the code I wrote?
              # Let's double check my implementation of extract_cover.
              # I wrote: `filepath = Path(filepath); book = epub.read_epub(str(filepath))`
              # So it expects a valid path. I should resolve it first.
-             
+
              parser = container.ebook_parser()
              full_book_path = parser.resolve_book_path(book.ebook_filename)
-             
+
              if parser.extract_cover(full_book_path, cover_path):
                  return send_from_directory(COVERS_DIR, filename)
         except Exception as e:
@@ -1354,7 +1296,6 @@ def serve_cover(filename):
 
     return "Cover not found", 404
 
-@app.route('/api/status')
 def api_status():
     """Return status of all books from database service"""
     books = database_service.get_all_books()
@@ -1407,13 +1348,11 @@ def api_status():
     return jsonify({"mappings": mappings})
 
 
-@app.route('/logs')
 def logs_view():
     """Display logs frontend with filtering capabilities."""
     return render_template('logs.html')
 
 
-@app.route('/api/logs')
 def api_logs():
     """API endpoint for fetching logs with filtering and pagination."""
     try:
@@ -1540,7 +1479,6 @@ def api_logs():
         return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
 
 
-@app.route('/api/logs/live')
 def api_logs_live():
     """API endpoint for fetching recent live logs from memory."""
     try:
@@ -1583,16 +1521,58 @@ def api_logs_live():
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
 
 
-@app.route('/view_log')
 def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
 
 # Note: KoSync endpoints moved to src/api/kosync_server.py Blueprint
 
+# --- Logger setup (already present) ---
+logger = logging.getLogger(__name__)
+
+# --- Application Factory ---
+def create_app(test_container=None):
+    STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
+    TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/app/templates')
+    app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static', template_folder=TEMPLATE_DIR)
+    app.secret_key = "kosync-queue-secret-unified-app"
+
+    # Setup dependencies and inject into app context
+    setup_dependencies(app, test_container=test_container)
+
+    # Register context processors, jinja globals, etc.
+    @app.context_processor
+    def inject_global_vars():
+        return dict(
+            shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
+            abs_server=os.environ.get("ABS_SERVER", ""),
+            booklore_server=os.environ.get("BOOKLORE_SERVER", "")
+        )
+    app.jinja_env.globals['safe_folder_name'] = safe_folder_name
+
+    # Register all routes here
+    app.add_url_rule('/', 'index', index)
+    app.add_url_rule('/shelfmark', 'shelfmark', shelfmark)
+    app.add_url_rule('/book-linker', 'book_linker', book_linker, methods=['GET', 'POST'])
+    app.add_url_rule('/book-linker/process', 'book_linker_process', book_linker_process, methods=['POST'])
+    app.add_url_rule('/book-linker/trigger-monitor', 'trigger_monitor', trigger_monitor, methods=['POST'])
+    app.add_url_rule('/match', 'match', match, methods=['GET', 'POST'])
+    app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
+    app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
+    app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
+    app.add_url_rule('/link-hardcover/<abs_id>', 'link_hardcover', link_hardcover, methods=['POST'])
+    app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
+    app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
+    app.add_url_rule('/api/status', 'api_status', api_status)
+    app.add_url_rule('/logs', 'logs_view', logs_view)
+    app.add_url_rule('/api/logs', 'api_logs', api_logs)
+    app.add_url_rule('/api/logs/live', 'api_logs_live', api_logs_live)
+    app.add_url_rule('/view_log', 'view_log', view_log)
+
+    # Return both app and container for external reference
+    return app, container
+
 if __name__ == '__main__':
-    # Initialize dependencies for production mode
-    setup_dependencies()
 
     # Setup signal handlers to catch unexpected kills
     import signal
@@ -1609,6 +1589,8 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, handle_exit_signal)
     signal.signal(signal.SIGINT, handle_exit_signal)
 
+    app, container = create_app()
+
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 
     # Start sync daemon in background thread
@@ -1622,14 +1604,14 @@ if __name__ == '__main__':
 
     # Check ebook source configuration
     booklore_configured = container.booklore_client().is_configured()
-    books_volume_exists = EBOOK_DIR.exists()
+    books_volume_exists = container.books_dir().exists()
 
     if booklore_configured:
         logger.info(f"✅ Booklore integration enabled - ebooks sourced from API")
     elif books_volume_exists:
-        logger.info(f"✅ Ebooks directory mounted at {EBOOK_DIR}")
+        logger.info(f"✅ Ebooks directory mounted at {container.books_dir()}")
     else:
-        logger.warning(
+        logger.info(
             "⚠️  NO EBOOK SOURCE CONFIGURED: Neither Booklore integration nor /books volume is available. "
             "New book matches will fail. Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
             "or mount the ebooks directory to /books."

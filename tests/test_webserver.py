@@ -94,17 +94,14 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.original_init_db = src.db.migration_utils.initialize_database
         src.db.migration_utils.initialize_database = mock_initialize_database
 
-        # Now import and setup the web server with our mock container
-        from src.web_server import app, setup_dependencies
-        setup_dependencies(test_container=self.mock_container)
-
-        # Configure Flask for testing
-        app.config['TESTING'] = True
-        app.config['WTF_CSRF_ENABLED'] = False
-        self.client = app.test_client()
+        # Use the app factory to get a fresh app instance for each test
+        from src.web_server import create_app, setup_dependencies
+        self.app, _ = create_app(test_container=self.mock_container)
+        self.app.config['TESTING'] = True
+        self.app.config['WTF_CSRF_ENABLED'] = False
+        self.client = self.app.test_client()
 
         # Store references for easy access
-        self.app = app
         self.mock_manager = self.mock_container.mock_sync_manager
         self.mock_abs_client = self.mock_container.mock_abs_client
         self.mock_booklore_client = self.mock_container.mock_booklore_client
@@ -371,8 +368,8 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.assertEqual(saved_book.duration, 3600)
             self.assertIsNone(saved_book.transcript_file)
 
-            self.mock_abs_client.add_to_collection.assert_called_once_with('test-audiobook-123')
-            self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub')
+            self.mock_abs_client.add_to_collection.assert_called_once_with('test-audiobook-123', 'Synced with KOReader')
+            self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub', 'Kobo')
             self.mock_storyteller_client.add_to_collection.assert_called_once_with('test-book.epub')
 
             print("✅ Match endpoint test passed with clean DI")
