@@ -245,29 +245,88 @@ def kosync_put_progress():
 
                 def run_auto_discovery(doc_hash_val):
                     try:
+                        from src.db.models import PendingSuggestion
+                        import json
+                        
                         logger.info(f"🔍 KOSync: Scheduled auto-discovery for unmapped document {doc_hash_val[:8]}...")
                         epub_filename = _try_find_epub_by_hash(doc_hash_val)
 
-                        if epub_filename:
-                            book_id = f"ebook-{doc_hash_val[:16]}"
-                            book = Book(
-                                abs_id=book_id,
-                                abs_title=Path(epub_filename).stem,
-                                ebook_filename=epub_filename,
-                                kosync_doc_id=doc_hash_val,
-                                transcript_file=None,
-                                status='active',
-                                duration=None,
-                                sync_mode='ebook_only'
-                            )
-                            _database_service.save_book(book)
-                            _database_service.link_kosync_document(doc_hash_val, book_id)
-                            logger.info(f"✅ Auto-created ebook-only mapping: {book_id} -> {epub_filename}")
-
-                            if _manager:
-                                _manager.sync_cycle(target_abs_id=book_id)
-                        else:
+                        if not epub_filename:
                             logger.debug(f"⚠️ Could not auto-match EPUB for KOSync document {doc_hash_val[:8]}...")
+                            return
+                        
+                        title = Path(epub_filename).stem
+                        
+                        # Step 1: Check if there's a matching audiobook in ABS
+                        audiobook_matches = []
+                        if _container.abs_client().is_configured():
+                            try:
+                                audiobooks = _container.abs_client().get_all_audiobooks()
+                                search_term = title.lower()
+                                
+                                for ab in audiobooks:
+                                    media = ab.get('media', {})
+                                    metadata = media.get('metadata', {})
+                                    ab_title = (metadata.get('title') or ab.get('name', '')).lower()
+                                    ab_author = metadata.get('authorName', '').lower()
+                                    
+                                    # Check for title match (fuzzy - title words in audiobook title)
+                                    title_words = [w for w in search_term.split() if len(w) > 3]
+                                    matches = sum(1 for w in title_words if w in ab_title)
+                                    
+                                    if matches >= len(title_words) * 0.5 or search_term in ab_title:
+                                        audiobook_matches.append({
+                                            "source": "abs",
+                                            "abs_id": ab['id'],
+                                            "title": metadata.get('title') or ab.get('name'),
+                                            "author": ab_author,
+                                            "duration": media.get('duration', 0),
+                                            "confidence": "high" if search_term in ab_title else "medium"
+                                        })
+                                        
+                            except Exception as e:
+                                logger.warning(f"Error searching ABS for audiobooks: {e}")
+                        
+                        # Step 2: If audiobook matches found, create a suggestion for user review
+                        if audiobook_matches:
+                            # Check if suggestion already exists
+                            existing = _database_service.get_pending_suggestion(doc_hash_val)
+                            if not existing:
+                                suggestion = PendingSuggestion(
+                                    source_id=doc_hash_val,
+                                    title=title,
+                                    author=None,  # Could extract from EPUB metadata
+                                    cover_url=f"/api/cover-proxy/{audiobook_matches[0]['abs_id']}",
+                                    matches_json=json.dumps(audiobook_matches + [{
+                                        "source": "ebook",
+                                        "filename": epub_filename,
+                                        "confidence": "high"
+                                    }])
+                                )
+                                _database_service.save_pending_suggestion(suggestion)
+                                logger.info(f"💡 Created suggestion for '{title}' - found {len(audiobook_matches)} audiobook match(es)")
+                            return
+                        
+                        # Step 3: No audiobook found - fall back to ebook-only mapping
+                        logger.info(f"📖 No audiobook match for '{title}' - creating ebook-only mapping")
+                        book_id = f"ebook-{doc_hash_val[:16]}"
+                        book = Book(
+                            abs_id=book_id,
+                            abs_title=title,
+                            ebook_filename=epub_filename,
+                            kosync_doc_id=doc_hash_val,
+                            transcript_file=None,
+                            status='active',
+                            duration=None,
+                            sync_mode='ebook_only'
+                        )
+                        _database_service.save_book(book)
+                        _database_service.link_kosync_document(doc_hash_val, book_id)
+                        logger.info(f"✅ Auto-created ebook-only mapping: {book_id} -> {epub_filename}")
+
+                        if _manager:
+                            _manager.sync_cycle(target_abs_id=book_id)
+                            
                     except Exception as e:
                         logger.error(f"Error in auto-discovery background task: {e}")
                     finally:
