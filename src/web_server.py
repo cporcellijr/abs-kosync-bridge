@@ -607,7 +607,8 @@ def settings():
         'STORYTELLER_ENABLED': 'false',
         'BOOKLORE_ENABLED': 'false',
         'HARDCOVER_ENABLED': 'false',
-        'TELEGRAM_ENABLED': 'false'
+        'TELEGRAM_ENABLED': 'false',
+        'SUGGESTIONS_ENABLED': 'true'
     }
 
     if request.method == 'POST':
@@ -619,7 +620,8 @@ def settings():
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
             'HARDCOVER_ENABLED',
-            'TELEGRAM_ENABLED'
+            'TELEGRAM_ENABLED',
+            'SUGGESTIONS_ENABLED'
         ]
 
         # Current settings in DB
@@ -999,6 +1001,10 @@ def match():
             container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
+        
+        # Auto-dismiss any pending suggestion for this book
+        database_service.dismiss_suggestion(abs_id)
+
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
