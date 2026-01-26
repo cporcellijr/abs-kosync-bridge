@@ -255,6 +255,9 @@ class SyncManager:
     # Suggestion Logic
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
+        if os.environ.get("SUGGESTIONS_ENABLED", "true").lower() != "true":
+            return
+
         try:
             # optimization: get all mapped IDs to avoid suggesting existing books (even if inactive)
             all_books = self.database_service.get_all_books()

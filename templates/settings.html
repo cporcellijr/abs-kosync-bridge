@@ -730,6 +730,27 @@
 
             <div class="settings-section">
                 <div class="section-header">
+                    <h3>Suggestions</h3>
+                    <div class="toggle-switch-wrapper">
+                        <span class="toggle-label">Enable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle_suggestions" name="SUGGESTIONS_ENABLED"
+                                {% if get_bool('SUGGESTIONS_ENABLED') %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="section-body">
+                    <div class="full-width">
+                        <p class="help-text">
+                            When enabled, the system will look for unmapped audiobooks with progress and suggest matching ebooks from your library.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-header">
                     <h3>Sync Behavior</h3>
                 </div>
                 <div class="section-body">
