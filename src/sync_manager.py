@@ -788,6 +788,16 @@ class SyncManager:
                 epub = book.ebook_filename
                 locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
                 if not locator:
+                    # Try fallback if enabled (e.g. look at previous segment)
+                    if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
+                        fallback_txt = leader_client.get_fallback_text(book, leader_state)
+                        if fallback_txt and fallback_txt != txt:
+                            logger.info(f"🔄 [{abs_id}] [{title_snip}] Primary text match failed. Trying previous segment fallback...")
+                            locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
+                            if locator:
+                                logger.info(f"✅ [{abs_id}] [{title_snip}] Fallback successful!")
+
+                if not locator:
                     logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
                     locator = LocatorResult(percentage=leader_pct)
 
