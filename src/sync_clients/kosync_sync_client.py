@@ -22,14 +22,18 @@ class KoSyncSyncClient(SyncClient):
     def check_connection(self):
         return self.kosync_client.check_connection()
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def get_supported_sync_types(self) -> set:
+        """KoSync participates in both audiobook and ebook sync modes."""
+        return {'audiobook', 'ebook'}
+
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         ko_id = book.kosync_doc_id
         ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
         if ko_xpath is None:
             logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
 
         if ko_pct is None:
-            logger.warning("⚠️ KoSync percentage is None - returning None for service state")
+            logger.debug("⚠️ KoSync percentage is None - returning None for service state")
             return None
 
         # Get previous KoSync state

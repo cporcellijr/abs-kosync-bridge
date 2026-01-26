@@ -30,8 +30,8 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
         """Return no changes test state data - EXACTLY matches mock returns."""
         return {
             'abs': {
-                'pct': 0.15,  # 15%
-                'ts': 150.0,  # timestamp
+                'pct': 0.25,  # 25%
+                'ts': 250.0,  # timestamp
                 'last_updated': 1234567890
             },
             'kosync': {
@@ -39,11 +39,11 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
                 'last_updated': 1234567890
             },
             'storyteller': {
-                'pct': 0.18,  # 18%
+                'pct': 0.25,  # 25%
                 'last_updated': 1234567890
             },
             'booklore': {
-                'pct': 0.12,  # 12%
+                'pct': 0.25,  # 25%
                 'last_updated': 1234567890
             }
         }
@@ -59,17 +59,17 @@ class TestNoChangesDetectedSync(BaseSyncCycleTestCase):
     def get_progress_mock_returns(self):
         """Return progress mock return values that EXACTLY match current state."""
         return {
-            'abs_progress': {'ebookProgress': 0.15, 'currentTime': 150.0, 'ebookLocation': 'epubcfi(/6/2[chapter1]!/4/2[content]/4/1:0)'},  # 15%
-            'abs_in_progress': [{'id': 'test-abs-id-nochange', 'progress': 0.15, 'duration': 1000}],
-            'kosync_progress': (0.25, "/html/body/div[1]/p[6]"),  # 25% (SAME as state)
-            'storyteller_progress': (0.18, 18.0, "ch2", "frag2"),  # 18% (SAME as state)
-            'booklore_progress': (0.12, None)  # 12% (SAME as state)
+            'abs_progress': {'ebookProgress': 0.25, 'currentTime': 250.0, 'ebookLocation': 'epubcfi(/6/2[chapter1]!/4/2[content]/4/1:0)'},  # 25%
+            'abs_in_progress': [{'id': 'test-abs-id-nochange', 'progress': 0.25, 'duration': 1000}],
+            'kosync_progress': (0.25, "/html/body/div[1]/p[6]"),  # 25%
+            'storyteller_progress': (0.25, 25.0, "ch2", "frag2"),  # 25%
+            'booklore_progress': (0.25, None)  # 25%
         }
 
     def test_no_changes_detected(self):
         """Test sync_cycle when no changes are detected (all deltas are zero)."""
         log_output = super().run_test(None, None)
-        self.assertNotIn("State saved to last_state.json", log_output,
+        self.assertNotIn("States saved to database", log_output,
                       "Logs should show no change")
 
 

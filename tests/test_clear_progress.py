@@ -32,7 +32,7 @@ class TestClearProgressMethod(unittest.TestCase):
 
         # Import here to avoid circular imports
         from src.db.database_service import DatabaseService
-        from src.db.models import Book, State
+        from src.db.models import Book, State, KosyncDocument
         from src.sync_manager import SyncManager
         from src.sync_clients.sync_client_interface import SyncResult, UpdateProgressRequest, LocatorResult
 
@@ -44,9 +44,18 @@ class TestClearProgressMethod(unittest.TestCase):
             abs_id='test-book-123',
             abs_title='Test Book',
             ebook_filename='test-book.epub',
-            status='active'
+            status='active',
+            kosync_doc_id='test-hash-123'
         )
         self.db_service.save_book(self.test_book)
+
+        # Create test KoSync document
+        self.test_doc = KosyncDocument(
+            document_hash='test-hash-123',
+            linked_abs_id='test-book-123',
+            percentage=0.45
+        )
+        self.db_service.save_kosync_document(self.test_doc)
 
         # Create test states for different clients
         test_states = [
@@ -112,6 +121,9 @@ class TestClearProgressMethod(unittest.TestCase):
         # Verify initial state - should have 3 state records
         initial_states = self.db_service.get_states_for_book('test-book-123')
         self.assertEqual(len(initial_states), 3, "Should start with 3 state records")
+        
+        # Verify KoSync document exists
+        self.assertIsNotNone(self.db_service.get_kosync_document('test-hash-123'))
 
         # Verify initial progress values
         state_by_client = {state.client_name: state for state in initial_states}
@@ -148,6 +160,9 @@ class TestClearProgressMethod(unittest.TestCase):
         # Verify database states were cleared
         remaining_states = self.db_service.get_states_for_book('test-book-123')
         self.assertEqual(len(remaining_states), 0, "All state records should be cleared")
+
+        # Verify KoSync document was deleted
+        self.assertIsNone(self.db_service.get_kosync_document('test-hash-123'), "KoSync document should be deleted")
 
         # Verify sync clients were called correctly
         from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult

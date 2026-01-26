@@ -41,6 +41,14 @@ class SyncResult:
     updated_state: dict = field(default_factory=dict)
 
 class SyncClient:
+    """
+    Base class for sync clients.
+    
+    Error Handling Convention:
+    - Methods return None when data is not found (e.g., book doesn't exist)
+    - Methods return SyncResult(success=False) for operational failures
+    - Exceptions are only raised for unexpected errors (connection issues, etc.)
+    """
 
     def __init__(self, ebook_parser):
         self.ebook_parser = ebook_parser
@@ -63,7 +71,28 @@ class SyncClient:
         """
         return True
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def fetch_bulk_state(self) -> Optional[dict]:
+        """
+        Pre-fetch all progress data in one API call.
+        Returns a dict keyed by book identifier for quick lookup.
+        Only implemented by clients that support bulk fetching (ABS, Storyteller).
+        Default returns None (no bulk support).
+        """
+        return None
+
+    def get_supported_sync_types(self) -> set:
+        """
+        Return set of sync types this client supports.
+        Options: 'audiobook', 'ebook'
+        Used for filtering which clients apply to which book sync modes.
+        """
+        return {'audiobook', 'ebook'}  # Default: supports both
+
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
+        """
+        Args:
+            bulk_context: Optional pre-fetched data to avoid redundant API calls
+        """
         ...
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         ...

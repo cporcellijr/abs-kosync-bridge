@@ -39,6 +39,9 @@ class HardcoverClient:
         }
 
     def is_configured(self):
+        enabled_val = os.environ.get("HARDCOVER_ENABLED", "").lower()
+        if enabled_val == 'false':
+            return False
         return bool(self.token)
 
     def check_connection(self):

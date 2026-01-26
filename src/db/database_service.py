@@ -8,7 +8,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, Base
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class DatabaseService:
         # Run Alembic migrations to ensure schema is up to date
         self._run_alembic_migrations()
 
+        # Ensure all tables exist (covers new models not yet in migrations)
+        Base.metadata.create_all(self.db_manager.engine)
+
     def _run_alembic_migrations(self):
         """Run Alembic migrations to ensure database schema is up to date."""
         try:
@@ -36,84 +40,32 @@ class DatabaseService:
             from alembic import command
             import io
 
-            # Completely preserve current logging configuration
-            root_logger = logging.getLogger()
-            preserved_handlers = root_logger.handlers.copy()
-            preserved_level = root_logger.level
-            preserved_disabled = root_logger.disabled
-
-            # Preserve all child loggers' settings
-            preserved_loggers = {}
-            for name in logging.Logger.manager.loggerDict:
-                child_logger = logging.getLogger(name)
-                if hasattr(child_logger, 'handlers') and hasattr(child_logger, 'level'):
-                    preserved_loggers[name] = {
-                        'handlers': child_logger.handlers.copy(),
-                        'level': child_logger.level,
-                        'disabled': child_logger.disabled,
-                        'propagate': child_logger.propagate
-                    }
-
-            # Get the project root directory
             project_root = Path(__file__).parent.parent.parent
             alembic_cfg_path = project_root / "alembic.ini"
+            
+            if not alembic_cfg_path.exists():
+                logger.warning("alembic.ini not found, skipping migrations")
+                return
 
-            if alembic_cfg_path.exists():
-                # Create Alembic config
-                alembic_cfg = Config(str(alembic_cfg_path))
-
-                # Set the database URL to our database path
-                alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
-
-                # Minimize Alembic logging noise
-                alembic_loggers = ['alembic', 'alembic.runtime', 'alembic.env', 'sqlalchemy.engine']
-                original_levels = {}
-                for logger_name in alembic_loggers:
-                    alembic_logger = logging.getLogger(logger_name)
-                    original_levels[logger_name] = alembic_logger.level
-                    alembic_logger.setLevel(logging.ERROR)  # Only show errors
-
-                try:
-                    # Run migrations with minimal output
-                    command.upgrade(alembic_cfg, "head")
-                    logger.info("Alembic migrations completed successfully")
-
-                except Exception as migration_error:
-                    logger.error(f"Alembic migration failed: {migration_error}")
-                    # Check if it's just a "no changes" scenario
-                    if "No changes" in str(migration_error) or "already at head" in str(migration_error):
-                        logger.debug("Database is already up to date")
-                    else:
-                        raise
-
-                finally:
-                    # Restore all Alembic logger levels
-                    for logger_name, level in original_levels.items():
-                        logging.getLogger(logger_name).setLevel(level)
-
-                    # Completely restore the original logging configuration
-                    root_logger.handlers.clear()
-                    root_logger.handlers.extend(preserved_handlers)
-                    root_logger.setLevel(preserved_level)
-                    root_logger.disabled = preserved_disabled
-
-                    # Restore all child loggers
-                    for name, settings in preserved_loggers.items():
-                        child_logger = logging.getLogger(name)
-                        if hasattr(child_logger, 'handlers'):
-                            child_logger.handlers.clear()
-                            child_logger.handlers.extend(settings['handlers'])
-                            child_logger.setLevel(settings['level'])
-                            child_logger.disabled = settings['disabled']
-                            child_logger.propagate = settings['propagate']
-
-            else:
-                logger.error(f"Alembic configuration not found at {alembic_cfg_path}")
-                logger.error("Database schema creation will be skipped - tables may not exist!")
-
+            alembic_cfg = Config(str(alembic_cfg_path))
+            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+            
+            # Suppress stdout
+            alembic_cfg.attributes['output_buffer'] = io.StringIO()
+            
+            # Suppress Alembic logging noise
+            alembic_logger = logging.getLogger('alembic')
+            original_level = alembic_logger.level
+            alembic_logger.setLevel(logging.WARNING)
+            
+            try:
+                command.upgrade(alembic_cfg, "head")
+                logger.debug("Database migrations completed successfully")
+            finally:
+                alembic_logger.setLevel(original_level)
+            
         except Exception as e:
             logger.error(f"Alembic migration failed: {e}")
-            logger.error("Database schema may be incomplete. Please check Alembic setup.")
             import traceback
             logger.debug(f"Migration error details: {traceback.format_exc()}")
 
@@ -182,6 +134,14 @@ class DatabaseService:
                 session.expunge(book)  # Detach from session
             return book
 
+    def get_book_by_kosync_id(self, kosync_id: str) -> Optional[Book]:
+        """Get a book by its KoSync document ID."""
+        with self.get_session() as session:
+            book = session.query(Book).filter(Book.kosync_doc_id == kosync_id).first()
+            if book:
+                session.expunge(book)
+            return book
+
     def get_all_books(self) -> List[Book]:
         """Get all books as model objects."""
         with self.get_session() as session:
@@ -225,6 +185,11 @@ class DatabaseService:
     def delete_book(self, abs_id: str) -> bool:
         """Delete a book and all its related data."""
         with self.get_session() as session:
+            # First, unlink any kosync documents explicitly
+            session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id == abs_id
+            ).update({KosyncDocument.linked_abs_id: None})
+            
             book = session.query(Book).filter(Book.abs_id == abs_id).first()
             if book:
                 session.delete(book)  # Cascade will handle states and jobs
@@ -442,6 +407,171 @@ class DatabaseService:
 
             return stats
 
+    def get_kosync_document(self, document_hash: str) -> Optional[KosyncDocument]:
+        """Get a KOSync document by its hash."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+    def save_kosync_document(self, doc: KosyncDocument) -> KosyncDocument:
+        """Save or update a KOSync document."""
+        with self.get_session() as session:
+            doc.last_updated = datetime.utcnow()
+            merged = session.merge(doc)
+            session.commit()
+            session.refresh(merged)
+            session.expunge(merged)
+            return merged
+
+    def get_all_kosync_documents(self) -> List[KosyncDocument]:
+        """Get all KOSync documents."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).order_by(
+                KosyncDocument.last_updated.desc()
+            ).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def get_unlinked_kosync_documents(self) -> List[KosyncDocument]:
+        """Get KOSync documents not linked to any ABS book."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id.is_(None)
+            ).order_by(KosyncDocument.last_updated.desc()).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def get_linked_kosync_documents(self) -> List[KosyncDocument]:
+        """Get KOSync documents that are linked to an ABS book."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id.isnot(None)
+            ).order_by(KosyncDocument.last_updated.desc()).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def link_kosync_document(self, document_hash: str, abs_id: str) -> bool:
+        """Link a KOSync document to an ABS book."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                doc.linked_abs_id = abs_id
+                doc.last_updated = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    def unlink_kosync_document(self, document_hash: str) -> bool:
+        """Remove the ABS book link from a KOSync document."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                doc.linked_abs_id = None
+                doc.last_updated = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+
+    def delete_kosync_document(self, document_hash: str) -> bool:
+        """Delete a KOSync document."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == document_hash
+            ).first()
+            if doc:
+                session.delete(doc)
+                session.commit()
+                return True
+            return False
+
+    def get_kosync_document_by_linked_book(self, abs_id: str) -> Optional[KosyncDocument]:
+        """Get a KOSync document linked to a specific ABS book."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id == abs_id
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+
+    # PendingSuggestion operations
+    def get_pending_suggestion(self, source_id: str) -> Optional[PendingSuggestion]:
+        """Get a pending suggestion by source ID (e.g. ABS ID)."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                session.expunge(suggestion)
+            return suggestion
+
+    def save_pending_suggestion(self, suggestion: PendingSuggestion) -> PendingSuggestion:
+        """Save or update a pending suggestion."""
+        with self.get_session() as session:
+            existing = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == suggestion.source_id
+            ).first()
+
+            if existing:
+                for attr in ['title', 'author', 'cover_url', 'matches_json', 'status']:
+                    if hasattr(suggestion, attr):
+                        setattr(existing, attr, getattr(suggestion, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                session.add(suggestion)
+                session.flush()
+                session.refresh(suggestion)
+                session.expunge(suggestion)
+                return suggestion
+
+    def get_all_pending_suggestions(self) -> List[PendingSuggestion]:
+        """Get all pending suggestions."""
+        with self.get_session() as session:
+            suggestions = session.query(PendingSuggestion).filter(
+                PendingSuggestion.status == 'pending'
+            ).order_by(PendingSuggestion.created_at.desc()).all()
+            for s in suggestions:
+                session.expunge(s)
+            return suggestions
+
+    def dismiss_suggestion(self, source_id: str) -> bool:
+        """Mark a suggestion as dismissed."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                suggestion.status = 'dismissed'
+                # The context manager does commit on exit.
+                return True
+            return False
+
+    def ignore_suggestion(self, source_id: str) -> bool:
+        """Mark a suggestion as never ask."""
+        with self.get_session() as session:
+            suggestion = session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first()
+            if suggestion:
+                suggestion.status = 'ignored'
+                return True
+            return False
+
 
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
@@ -584,10 +714,23 @@ class DatabaseMigrator:
 
     def should_migrate(self) -> bool:
         """Check if migration is needed (JSON files exist but no data in SQLAlchemy)."""
-        # Check if we have any books in database
-        books = self.db_service.get_all_books()
-        if books:
-            return False  # Already have data, no migration needed
+        # Check if we have any books in database using raw SQL to avoid model mismatch crashes
+        try:
+            with self.db_service.get_session() as session:
+                from sqlalchemy import text
+                count = session.execute(text("SELECT count(*) FROM books")).scalar()
+                if count > 0:
+                    return False  # Already have data, no migration needed
+        except Exception as e:
+            # If table doesn't exist or other DB error, we might need migration
+            logger.debug(f"Could not check books table: {e}")
+            pass
 
         # Check if JSON files exist
-        return (self.json_db_path.exists() or self.json_state_path.exists())
+        if self.json_db_path.exists() or self.json_state_path.exists():
+            return True
+
+        return False
+
+
+

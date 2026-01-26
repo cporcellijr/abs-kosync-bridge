@@ -1,52 +1,31 @@
 # [START FILE: abs-kosync-enhanced/web_server.py]
 import html
 import logging
+import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urljoin
 
 import requests
 import schedule
 from dependency_injector import providers
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
 
-from src.db.database_service import DatabaseService
-from src.sync_manager import SyncManager
 from src.utils.config_loader import ConfigLoader
-from src.utils.di_container import Container
-# Import memory logging setup - this must happen early to capture all logs
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
+from src.utils.hash_cache import HashCache
+from src.api.kosync_server import kosync_bp, init_kosync_server
 
 # ---------------- APP SETUP ----------------
 
-# Get static and template folder paths from environment variables, with fallback
-STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
-TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/app/templates')
-
-app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static', template_folder=TEMPLATE_DIR)
-app.secret_key = "kosync-queue-secret-unified-app"
-
-# NOTE: Logging is configured centrally in `main.py`. Avoid calling
-# `logging.basicConfig` here to prevent adding duplicate handlers.
-logger = logging.getLogger(__name__)
-
-# Global variables - will be initialized via setup_dependencies()
-container: Optional[Container] = None
-manager: Optional[SyncManager] = None
-database_service: Optional[DatabaseService] = None
-DATA_DIR: Optional[Path] = None
-EBOOK_DIR: Optional[Path] = None
-
-def setup_dependencies(test_container=None):
+def setup_dependencies(app, test_container=None):
     """
     Initialize dependencies for the web server.
 
@@ -54,17 +33,14 @@ def setup_dependencies(test_container=None):
         test_container: Optional test container for dependency injection during testing.
                        If None, creates production container from environment.
     """
-    global container, manager, database_service, DATA_DIR, EBOOK_DIR
+    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR, hash_cache
 
-    # 1. Initialize Database Service FIRST (needed to load settings)
-    # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
-    # If the user changed DATA_DIR in settings, we might need a two-stage init, but
-    # for now we assume the DB location itself doesn't move dynamically based on DB settings
-    # (chicken and egg).
+    # Initialize Database Service
     from src.db.migration_utils import initialize_database
     database_service = initialize_database(os.environ.get("DATA_DIR", "/data"))
 
-    # 2. LOAD SETTINGS FROM DB (Priority Level 1)
+    # Load settings from DB
+
     # This updates os.environ with values from the database
     if database_service:
         ConfigLoader.load_settings(database_service)
@@ -75,6 +51,7 @@ def setup_dependencies(test_container=None):
     global LINKER_BOOKS_DIR, DEST_BASE, STORYTELLER_INGEST, ABS_AUDIO_ROOT
     global ABS_API_URL, ABS_API_TOKEN, ABS_LIBRARY_ID
     global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL, SHELFMARK_URL
+    global SYNC_PERIOD_MINS, SYNC_DELTA_ABS_SECONDS, SYNC_DELTA_KOSYNC_PERCENT, FUZZY_MATCH_THRESHOLD
 
     LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
     DEST_BASE = Path(os.environ.get("PROCESSING_DIR", "/processing"))
@@ -84,17 +61,25 @@ def setup_dependencies(test_container=None):
     ABS_API_URL = os.environ.get("ABS_SERVER")
     ABS_API_TOKEN = os.environ.get("ABS_KEY")
     ABS_LIBRARY_ID = os.environ.get("ABS_LIBRARY_ID")
-    
+
+    def _get_float_env(key, default):
+        try:
+            return float(os.environ.get(key, str(default)))
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid {key} value, defaulting to {default}")
+            return float(default)
+
+    SYNC_PERIOD_MINS = _get_float_env("SYNC_PERIOD_MINS", 5)
+    SYNC_DELTA_ABS_SECONDS = _get_float_env("SYNC_DELTA_ABS_SECONDS", 30)
+    SYNC_DELTA_KOSYNC_PERCENT = _get_float_env("SYNC_DELTA_KOSYNC_PERCENT", 0.005)
+    FUZZY_MATCH_THRESHOLD = _get_float_env("FUZZY_MATCH_THRESHOLD", 0.8)
+
     ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
     BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
     MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
     SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
-    
-    # DEBUG: Log all critical env vars to debug priority issues
-    logger.debug(f"DEBUG ENV VARS: ABS_SERVER={os.environ.get('ABS_SERVER')}, ABS_KEY={'*' * 5 if os.environ.get('ABS_KEY') else 'None'}")
-
 
     if test_container is not None:
         # Use injected test container
@@ -117,6 +102,18 @@ def setup_dependencies(test_container=None):
     # Get data directories (now using updated env vars)
     DATA_DIR = container.data_dir()
     EBOOK_DIR = container.books_dir()
+
+    # Initialize covers directory
+    COVERS_DIR = DATA_DIR / "covers"
+    if not COVERS_DIR.exists():
+        COVERS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Initialize hash cache
+    hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
+
+    # Register KoSync Blueprint and initialize with dependencies
+    init_kosync_server(database_service, container, manager, hash_cache, EBOOK_DIR)
+    app.register_blueprint(kosync_bp)
 
     logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
@@ -146,6 +143,7 @@ BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))  # Default 1 hour
 SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
+
 # ---------------- HELPER FUNCTIONS ----------------
 def get_audiobooks_conditionally():
     """Get audiobooks either from specific library or all libraries based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting."""
@@ -160,7 +158,6 @@ def get_audiobooks_conditionally():
         return container.abs_client().get_all_audiobooks()
 
 # ---------------- CONTEXT PROCESSORS ----------------
-@app.context_processor
 def inject_global_vars():
     return dict(
         shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
@@ -177,8 +174,6 @@ def safe_folder_name(name: str) -> str:
         name = name.replace(c, '_')
     return name.strip() or "Unknown"
 
-
-app.jinja_env.globals['safe_folder_name'] = safe_folder_name
 
 def get_stats(ebooks, audiobooks):
     total = sum(m["file_size_mb"] for m in ebooks) + sum(m.get("file_size_mb", 0) for m in audiobooks)
@@ -424,11 +419,11 @@ def sync_daemon():
     """Background sync daemon running in a separate thread."""
     try:
         # Setup schedule for sync operations
-        sync_period = int(os.environ.get("SYNC_PERIOD_MINS", "5"))
-        schedule.every(sync_period).minutes.do(manager.sync_cycle)
+        # Use the global SYNC_PERIOD_MINS which is validated
+        schedule.every(int(SYNC_PERIOD_MINS)).minutes.do(manager.sync_cycle)
         schedule.every(1).minutes.do(manager.check_pending_jobs)
 
-        logger.info(f"🔄 Sync daemon started (period: {sync_period} minutes)")
+        logger.info(f"🔄 Sync daemon started (period: {SYNC_PERIOD_MINS} minutes)")
 
         # Run initial sync cycle
         try:
@@ -575,14 +570,13 @@ def restart_server():
     """
     logger.info("♻️  Stopping application (Supervisor will restart it)...")
     time.sleep(1.0)  # Give Flask time to send the redirect response
-    
+
     # Exit with 0 so start.sh loop restarts the process
     logger.info("👋 Exiting process to trigger restart...")
     sys.exit(0)
 
-@app.route('/settings', methods=['GET', 'POST'])
 def settings():
-    # Priority Level 3: Application Defaults
+    # Application Defaults
     DEFAULTS = {
         'TZ': 'America/New_York',
         'LOG_LEVEL': 'INFO',
@@ -608,14 +602,24 @@ def settings():
         'EBOOK_CACHE_SIZE': '3',
         'KOSYNC_HASH_METHOD': 'content',
         'TELEGRAM_LOG_LEVEL': 'ERROR',
-        'SHELFMARK_URL': ''
+        'SHELFMARK_URL': '',
+        'KOSYNC_ENABLED': 'false',
+        'STORYTELLER_ENABLED': 'false',
+        'BOOKLORE_ENABLED': 'false',
+        'HARDCOVER_ENABLED': 'false',
+        'TELEGRAM_ENABLED': 'false'
     }
 
     if request.method == 'POST':
         bool_keys = [
             'KOSYNC_USE_PERCENTAGE_FROM_SERVER',
             'SYNC_ABS_EBOOK',
-            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT'
+            'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT',
+            'KOSYNC_ENABLED',
+            'STORYTELLER_ENABLED',
+            'BOOKLORE_ENABLED',
+            'HARDCOVER_ENABLED',
+            'TELEGRAM_ENABLED'
         ]
 
         # Current settings in DB
@@ -626,7 +630,9 @@ def settings():
         for key in bool_keys:
             is_checked = (key in request.form)
             # Save "true" or "false"
-            database_service.set_setting(key, str(is_checked).lower())
+            val_str = str(is_checked).lower()
+            database_service.set_setting(key, val_str)
+            os.environ[key] = val_str # Immediate update for current process
 
         # 2. Handle Text Inputs
         # Iterate over form to find other keys
@@ -644,10 +650,12 @@ def settings():
 
             if clean_value:
                 database_service.set_setting(key, clean_value)
+                os.environ[key] = clean_value # Immediate update for current process
             elif key in current_settings:
                 # If key exists in DB but user cleared it, set to empty (or delete?)
                 # Setting to empty string is safer than deleting if defaults exist
                 database_service.set_setting(key, "")
+                os.environ[key] = "" # Immediate update for current process
 
         try:
             # Trigger Auto-Restart in a separate thread so this request finishes
@@ -697,12 +705,26 @@ def audiobook_matches_search(ab, search_term):
     return search_term in title or search_term in author
 
 # ---------------- ROUTES ----------------
-@app.route('/')
 def index():
     """Dashboard - loads books and progress from database service"""
 
     # Load books from database service
     books = database_service.get_all_books()
+    
+    # Fetch all states at once to avoid N+1 queries with NullPool
+    all_states = database_service.get_all_states()
+    states_by_book = {}
+    for state in all_states:
+        if state.abs_id not in states_by_book:
+            states_by_book[state.abs_id] = []
+        states_by_book[state.abs_id].append(state)
+
+    # Fetch pending suggestions
+    suggestions = database_service.get_all_pending_suggestions()
+    
+    # [OPTIMIZATION] Fetch all hardcover details at once
+    all_hardcover = database_service.get_all_hardcover_details()
+    hardcover_by_book = {h.abs_id: h for h in all_hardcover}
 
     integrations = {}
 
@@ -720,8 +742,8 @@ def index():
     total_listened = 0
 
     for book in books:
-        # Get states for this book from database service
-        states = database_service.get_states_for_book(book.abs_id)
+        # Get states for this book from pre-fetched dict
+        states = states_by_book.get(book.abs_id, [])
 
         # Convert states to a dict by client name for easy access
         state_by_client = {state.client_name: state for state in states}
@@ -734,6 +756,7 @@ def index():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
+            'sync_mode': getattr(book, 'sync_mode', 'audiobook'),
             'unified_progress': 0,
             'duration': book.duration or 0,
             'states': {}
@@ -768,7 +791,7 @@ def index():
                 max_progress = max(max_progress, progress_pct)
 
         # Add hardcover mapping details
-        hardcover_details = database_service.get_hardcover_details(book.abs_id)
+        hardcover_details = hardcover_by_book.get(book.abs_id)
         if hardcover_details:
             mapping.update({
                 'hardcover_book_id': hardcover_details.hardcover_book_id,
@@ -799,13 +822,13 @@ def index():
 
         # Booklore deep link (if configured and book found)
         if manager.booklore_client.is_configured():
-            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename)
-            if bl_book:
-                mapping['booklore_id'] = bl_book.get('id')
-                mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
-            else:
-                mapping['booklore_id'] = None
-                mapping['booklore_url'] = None
+            bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
+        else:
+            bl_book = None
+            
+        if bl_book:
+            mapping['booklore_id'] = bl_book.get('id')
+            mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
         else:
             mapping['booklore_id'] = None
             mapping['booklore_url'] = None
@@ -856,10 +879,9 @@ def index():
     else:
         overall_progress = 0
 
-    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress)
+    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress, suggestions=suggestions)
 
 
-@app.route('/shelfmark')
 def shelfmark():
     """Shelfmark view - renders an iframe with SHELFMARK_URL"""
     url = os.environ.get("SHELFMARK_URL")
@@ -868,7 +890,6 @@ def shelfmark():
     return render_template('shelfmark.html', shelfmark_url=url)
 
 
-@app.route('/book-linker', methods=['GET', 'POST'])
 def book_linker():
     message = session.pop("message", None)
     is_error = session.pop("is_error", False)
@@ -889,7 +910,6 @@ def book_linker():
                            storyteller_ingest=str(STORYTELLER_INGEST))
 
 
-@app.route('/book-linker/process', methods=['POST'])
 def book_linker_process():
     book_name = request.form.get("book_name", "").strip()
     if not book_name:
@@ -920,7 +940,6 @@ def book_linker_process():
     return redirect(url_for('book_linker'))
 
 
-@app.route('/book-linker/trigger-monitor', methods=['POST'])
 def trigger_monitor():
     processed, skipped = run_processing_scan(manual=True)
     if processed > 0:
@@ -935,7 +954,6 @@ def trigger_monitor():
     return redirect(url_for('book_linker'))
 
 
-@app.route('/match', methods=['GET', 'POST'])
 def match():
     if request.method == 'POST':
         abs_id = request.form.get('audiobook_id')
@@ -976,9 +994,9 @@ def match():
         if hardcover_sync_client and hardcover_sync_client.is_configured():
             hardcover_sync_client._automatch_hardcover(book)
 
-        container.abs_client().add_to_collection(abs_id)
+        container.abs_client().add_to_collection(abs_id, ABS_COLLECTION_NAME)
         if container.booklore_client().is_configured():
-            container.booklore_client().add_to_shelf(ebook_filename)
+            container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
         return redirect(url_for('index'))
@@ -997,7 +1015,6 @@ def match():
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager.get_abs_title)
 
 
-@app.route('/batch-match', methods=['GET', 'POST'])
 def batch_match():
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1063,9 +1080,9 @@ def batch_match():
                 if hardcover_sync_client and hardcover_sync_client.is_configured():
                     hardcover_sync_client._automatch_hardcover(book)
 
-                container.abs_client().add_to_collection(item['abs_id'])
+                container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
                 if container.booklore_client().is_configured():
-                    container.booklore_client().add_to_shelf(ebook_filename)
+                    container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
                 if container.storyteller_client().is_configured():
                     container.storyteller_client().add_to_collection(ebook_filename)
 
@@ -1088,7 +1105,6 @@ def batch_match():
                            get_title=manager.get_abs_title)
 
 
-@app.route('/delete/<abs_id>', methods=['POST'])
 def delete_mapping(abs_id):
     # Get book from database service
     book = database_service.get_book(abs_id)
@@ -1100,13 +1116,33 @@ def delete_mapping(abs_id):
             except:
                 pass
 
+        # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
+        if book.sync_mode == 'ebook_only' and book.kosync_doc_id:
+            logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
+            database_service.delete_kosync_document(book.kosync_doc_id)
+
+        # Remove from ABS collection
+        collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
+        try:
+            container.abs_client().remove_from_collection(abs_id, collection_name)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
+
+        # Remove from Booklore shelf
+        if book.ebook_filename and container.booklore_client().is_configured():
+            shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
+            try:
+                container.booklore_client().remove_from_shelf(book.ebook_filename, shelf_name)
+                # Same here regarding logging.
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
+
     # Delete book and all associated data (states, jobs, hardcover details) via database service
     database_service.delete_book(abs_id)
 
     return redirect(url_for('index'))
 
 
-@app.route('/clear-progress/<abs_id>', methods=['POST'])
 def clear_progress(abs_id):
     """Clear progress for a mapping by setting all systems to 0%"""
     # Get book from database service
@@ -1128,7 +1164,6 @@ def clear_progress(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/link-hardcover/<abs_id>', methods=['POST'])
 def link_hardcover(abs_id):
     from flask import flash
     url = request.form.get('hardcover_url', '').strip()
@@ -1170,7 +1205,101 @@ def link_hardcover(abs_id):
     return redirect(url_for('index'))
 
 
-@app.route('/api/status')
+def update_hash(abs_id):
+    from flask import flash
+    new_hash = request.form.get('new_hash', '').strip()
+    book = database_service.get_book(abs_id)
+
+    if not book:
+        flash("❌ Book not found", "error")
+        return redirect(url_for('index'))
+
+    old_hash = book.kosync_doc_id
+
+    if new_hash:
+        book.kosync_doc_id = new_hash
+        database_service.save_book(book)
+        logger.info(f"Updated KoSync hash for '{sanitize_log_data(book.abs_title)}' to manual input: {new_hash}")
+        updated = True
+    else:
+        # Auto-regenerate
+        booklore_id = None
+        if container.booklore_client().is_configured():
+            bl_book = container.booklore_client().find_book_by_filename(book.ebook_filename)
+            if bl_book:
+                booklore_id = bl_book.get('id')
+
+        recalc_hash = get_kosync_id_for_ebook(book.ebook_filename, booklore_id)
+        if recalc_hash:
+            book.kosync_doc_id = recalc_hash
+            database_service.save_book(book)
+            logger.info(f"Auto-regenerated KoSync hash for '{sanitize_log_data(book.abs_title)}': {recalc_hash}")
+            updated = True
+        else:
+            flash("❌ Could not recalculate hash (file not found?)", "error")
+            return redirect(url_for('index'))
+
+    # Migration: Push current progress to the NEW hash if it changed
+    if updated and book.kosync_doc_id != old_hash:
+        states = database_service.get_states_for_book(abs_id)
+        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
+
+        if kosync_state and kosync_state.percentage is not None:
+            kosync_client = container.sync_clients().get('KoSync')
+            if kosync_client and kosync_client.is_configured():
+                success = kosync_client.kosync_client.update_progress(
+                    book.kosync_doc_id,
+                    kosync_state.percentage,
+                    kosync_state.xpath
+                )
+                if success:
+                    logger.info(f"Migrated progress for '{sanitize_log_data(book.abs_title)}' to new hash {book.kosync_doc_id}")
+
+    flash(f"✅ Updated KoSync Hash for {book.abs_title}", "success")
+    return redirect(url_for('index'))
+
+
+def serve_cover(filename):
+    """Serve cover images with lazy extraction."""
+    # Filename is likely <hash>.jpg
+    doc_hash = filename.replace('.jpg', '')
+
+    # 1. Check if file exists
+    cover_path = COVERS_DIR / filename
+    if cover_path.exists():
+        return send_from_directory(COVERS_DIR, filename)
+
+    # 2. Try to extract
+    # Find book by kosync ID
+    book = database_service.get_book_by_kosync_id(doc_hash)
+
+    if book and book.ebook_filename:
+        # We need the full path to the book. ebook_parser resolves it usually.
+        # extract_cover expects a path or filename that can be resolved.
+        # Let's pass what we have.
+        try:
+             # Find actual file path using EbookParser resolution if needed,
+             # but extract_cover in my implementation takes 'filepath' and calls Path(filepath).
+             # If book.ebook_filename is just a name, we might need to resolve it.
+             # container.ebook_parser().resolve_book_path(book.ebook_filename)
+
+             # Actually, let's let EbookParser handle resolution or pass full path if we know it.
+             # EbookParser.extract_cover currently does `Path(filepath)`.
+             # It doesn't call `resolve_book_path` internally in the code I wrote?
+             # Let's double check my implementation of extract_cover.
+             # I wrote: `filepath = Path(filepath); book = epub.read_epub(str(filepath))`
+             # So it expects a valid path. I should resolve it first.
+
+             parser = container.ebook_parser()
+             full_book_path = parser.resolve_book_path(book.ebook_filename)
+
+             if parser.extract_cover(full_book_path, cover_path):
+                 return send_from_directory(COVERS_DIR, filename)
+        except Exception as e:
+            logger.debug(f"Lazy cover extraction failed: {e}")
+
+    return "Cover not found", 404
+
 def api_status():
     """Return status of all books from database service"""
     books = database_service.get_all_books()
@@ -1189,6 +1318,7 @@ def api_status():
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
             'status': book.status,
+            'sync_mode': getattr(book, 'sync_mode', 'audiobook'), # Default to audiobook for existing
             'duration': book.duration,
             'states': {}
         }
@@ -1196,25 +1326,27 @@ def api_status():
         # Add progress information from states
         for client_name, state in state_by_client.items():
             # Store in unified states object
+            pct_val = round(state.percentage * 100, 1) if state.percentage is not None else 0
+            
             mapping['states'][client_name] = {
                 'timestamp': state.timestamp or 0,
-                'percentage': state.percentage or 0,
+                'percentage': pct_val,
                 'xpath': getattr(state, 'xpath', None),
                 'last_updated': state.last_updated
             }
 
             # Maintain backward compatibility with old field names
             if client_name == 'kosync':
-                mapping['kosync_pct'] = state.percentage
+                mapping['kosync_pct'] = pct_val
                 mapping['kosync_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'abs':
-                mapping['abs_pct'] = state.percentage
+                mapping['abs_pct'] = pct_val
                 mapping['abs_ts'] = state.timestamp
             elif client_name == 'storyteller':
-                mapping['storyteller_pct'] = state.percentage
+                mapping['storyteller_pct'] = pct_val
                 mapping['storyteller_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'booklore':
-                mapping['booklore_pct'] = state.percentage
+                mapping['booklore_pct'] = pct_val
                 mapping['booklore_xpath'] = getattr(state, 'xpath', None)
 
         mappings.append(mapping)
@@ -1222,13 +1354,11 @@ def api_status():
     return jsonify({"mappings": mappings})
 
 
-@app.route('/logs')
 def logs_view():
     """Display logs frontend with filtering capabilities."""
     return render_template('logs.html')
 
 
-@app.route('/api/logs')
 def api_logs():
     """API endpoint for fetching logs with filtering and pagination."""
     try:
@@ -1244,7 +1374,6 @@ def api_logs():
         # Read log files (current and backups)
         all_lines = []
 
-        # Read current log file
         # Read current log file
         if LOG_PATH and LOG_PATH.exists():
             with open(LOG_PATH, 'r', encoding='utf-8') as f:
@@ -1355,7 +1484,6 @@ def api_logs():
         return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
 
 
-@app.route('/api/logs/live')
 def api_logs_live():
     """API endpoint for fetching recent live logs from memory."""
     try:
@@ -1398,14 +1526,121 @@ def api_logs_live():
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
 
 
-@app.route('/view_log')
 def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
 
+
+# ---------------- SUGGESTION API ROUTES ----------------
+def get_suggestions():
+    suggestions = database_service.get_all_pending_suggestions()
+    result = []
+    for s in suggestions:
+        try:
+            matches = json.loads(s.matches_json) if s.matches_json else []
+        except:
+            matches = []
+            
+        result.append({
+            "id": s.id,
+            "source_id": s.source_id,
+            "title": s.title,
+            "author": s.author,
+            "cover_url": s.cover_url,
+            "matches": matches,
+            "created_at": s.created_at.isoformat()
+        })
+    return jsonify(result)
+
+
+def dismiss_suggestion(source_id):
+    if database_service.dismiss_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+def ignore_suggestion(source_id):
+    if database_service.ignore_suggestion(source_id):
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Not found"}), 404
+
+
+def proxy_cover(abs_id):
+    """Proxy cover access to allow loading covers from local network ABS instances."""
+    try:
+        token = container.abs_client().token
+        base_url = container.abs_client().base_url
+        if not token or not base_url:
+            return "ABS not configured", 500
+
+        url = f"{base_url.rstrip('/')}/api/items/{abs_id}/cover?token={token}"
+        
+        # Stream the response to avoid loading large images into memory
+        req = requests.get(url, stream=True, timeout=10)
+        if req.status_code == 200:
+            from flask import Response
+            return Response(req.iter_content(chunk_size=1024), content_type=req.headers.get('content-type', 'image/jpeg'))
+        else:
+            return "Cover not found", 404
+    except Exception as e:
+        logger.error(f"Error proxying cover for {abs_id}: {e}")
+        return "Error loading cover", 500
+
+
+# --- Logger setup (already present) ---
+logger = logging.getLogger(__name__)
+
+# --- Application Factory ---
+def create_app(test_container=None):
+    STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
+    TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/app/templates')
+    app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static', template_folder=TEMPLATE_DIR)
+    app.secret_key = "kosync-queue-secret-unified-app"
+
+    # Setup dependencies and inject into app context
+    setup_dependencies(app, test_container=test_container)
+
+    # Register context processors, jinja globals, etc.
+    @app.context_processor
+    def inject_global_vars():
+        return dict(
+            shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
+            abs_server=os.environ.get("ABS_SERVER", ""),
+            booklore_server=os.environ.get("BOOKLORE_SERVER", "")
+        )
+    app.jinja_env.globals['safe_folder_name'] = safe_folder_name
+
+    # Register all routes here
+    app.add_url_rule('/', 'index', index)
+    app.add_url_rule('/shelfmark', 'shelfmark', shelfmark)
+    app.add_url_rule('/book-linker', 'book_linker', book_linker, methods=['GET', 'POST'])
+    app.add_url_rule('/book-linker/process', 'book_linker_process', book_linker_process, methods=['POST'])
+    app.add_url_rule('/book-linker/trigger-monitor', 'trigger_monitor', trigger_monitor, methods=['POST'])
+    app.add_url_rule('/match', 'match', match, methods=['GET', 'POST'])
+    app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
+    app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
+    app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
+    app.add_url_rule('/link-hardcover/<abs_id>', 'link_hardcover', link_hardcover, methods=['POST'])
+    app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
+    app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
+    app.add_url_rule('/api/status', 'api_status', api_status)
+    app.add_url_rule('/logs', 'logs_view', logs_view)
+    app.add_url_rule('/api/logs', 'api_logs', api_logs)
+    app.add_url_rule('/api/logs/live', 'api_logs_live', api_logs_live)
+    app.add_url_rule('/view_log', 'view_log', view_log)
+    app.add_url_rule('/settings', 'settings', settings, methods=['GET', 'POST'])
+    
+    # Suggestion routes
+    app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])
+    app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
+    app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
+    app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
+
+    # Return both app and container for external reference
+    return app, container
+
+# ---------------- MAIN ----------------
 if __name__ == '__main__':
-    # Initialize dependencies for production mode
-    setup_dependencies()
 
     # Setup signal handlers to catch unexpected kills
     import signal
@@ -1422,6 +1657,8 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, handle_exit_signal)
     signal.signal(signal.SIGINT, handle_exit_signal)
 
+    app, container = create_app()
+
     logger.info("=== Unified ABS Manager Started (Integrated Mode) ===")
 
     # Start sync daemon in background thread
@@ -1435,14 +1672,14 @@ if __name__ == '__main__':
 
     # Check ebook source configuration
     booklore_configured = container.booklore_client().is_configured()
-    books_volume_exists = EBOOK_DIR.exists()
+    books_volume_exists = container.books_dir().exists()
 
     if booklore_configured:
         logger.info(f"✅ Booklore integration enabled - ebooks sourced from API")
     elif books_volume_exists:
-        logger.info(f"✅ Ebooks directory mounted at {EBOOK_DIR}")
+        logger.info(f"✅ Ebooks directory mounted at {container.books_dir()}")
     else:
-        logger.warning(
+        logger.info(
             "⚠️  NO EBOOK SOURCE CONFIGURED: Neither Booklore integration nor /books volume is available. "
             "New book matches will fail. Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
             "or mount the ebooks directory to /books."
@@ -1452,4 +1689,5 @@ if __name__ == '__main__':
     logger.info(f"🌐 Web interface starting on port 5757")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
-# [END FILE]
+
+

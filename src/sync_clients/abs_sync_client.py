@@ -26,10 +26,25 @@ class ABSSyncClient(SyncClient):
     def check_connection(self):
         return self.abs_client.check_connection()
 
-    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "") -> Optional[ServiceState]:
+    def fetch_bulk_state(self):
+        """Pre-fetch all ABS progress data at once."""
+        return self.abs_client.get_all_progress_raw()
+
+    def get_supported_sync_types(self) -> set:
+        """ABS audiobook client only syncs audiobooks."""
+        return {'audiobook'}
+
+    def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         abs_id = book.abs_id
-        response = self.abs_client.get_progress(abs_id)
-        abs_ts = response.get('currentTime') if response is not None else None
+
+        # Use bulk context if available, otherwise fetch individually
+        if bulk_context and abs_id in bulk_context:
+            item_data = bulk_context[abs_id]
+            abs_ts = item_data.get('currentTime', 0)
+            # Note: Still need to convert to percentage using transcript
+        else:
+            response = self.abs_client.get_progress(abs_id)
+            abs_ts = response.get('currentTime') if response is not None else None
 
         if abs_ts is None:
             logger.info("ABS timestamp is None, probably not started the book yet.")
@@ -39,7 +54,7 @@ class ABSSyncClient(SyncClient):
         abs_pct = self._abs_to_percentage(abs_ts, book.transcript_file)
         if abs_ts > 0 and abs_pct is None:
             # Invalid transcript
-            logger.warning("⚠️ Unable to convert ABS timestamp to percentage - invalid transcript?")
+            logger.debug("⚠️ Unable to convert ABS timestamp to percentage - invalid transcript?")
             return None
 
         # Get previous ABS state values

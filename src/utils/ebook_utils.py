@@ -2,18 +2,13 @@
 """
 Ebook Utilities for abs-kosync-bridge
 
-ULTIMATE HYBRID VERSION:
-- [Engine A] BeautifulSoup: For fuzzy matching, Storyteller/Readium support, and rich locators.
-- [Engine B] LXML: For "Perfect" KOReader sync (precise /text().OFFSET handling).
-- Robustness: Prefers ID anchors when available, falls back to positional indexing.
-- Complete Storyteller/Readium locator support with href + #id resolution.
 """
 from typing import Optional
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, Tag
-from lxml import html  # Engine B: LXML for precise sync
+from lxml import html
 import hashlib
 import logging
 import os
@@ -86,9 +81,21 @@ class EbookParser:
         filepath = Path(filepath)
         if self.hash_method == "filename":
             return hashlib.md5(filepath.name.encode('utf-8')).hexdigest()
+        
+        md5 = hashlib.md5()
         try:
+            file_size = os.path.getsize(filepath)
             with open(filepath, 'rb') as f:
-                return hashlib.md5(f.read(4096)).hexdigest()
+                for i in range(-1, 11):
+                    offset = 0 if i == -1 else 1024 * (4 ** i)
+                    if offset >= file_size:
+                        break
+                    f.seek(offset)
+                    chunk = f.read(1024)
+                    if not chunk:
+                        break
+                    md5.update(chunk)
+            return md5.hexdigest()
         except Exception as e:
             logger.error(f"Error computing hash for {filepath}: {e}")
             return None
@@ -114,10 +121,55 @@ class EbookParser:
             return hashlib.md5(filename.encode('utf-8')).hexdigest()
         return self._compute_koreader_hash_from_bytes(content)
 
+    def extract_cover(self, filepath, output_path):
+        """
+        Extract cover image from EPUB to output_path.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            filepath = Path(filepath)
+            # 1. Try to get cover from metadata using ebooklib
+            try:
+                book = epub.read_epub(str(filepath))
+                # Check for cover item
+                cover_item = None
+
+                # Method A: get_item_with_id('cover') or similar
+                # ebooklib doesn't have a standard 'get_cover' but often it's in the manifest
+
+                # Method B: Iterate items
+                for item in book.get_items():
+                    if item.get_type() == ebooklib.ITEM_IMAGE:
+                        # naive check: is it named "cover"?
+                        if 'cover' in item.get_name().lower():
+                            cover_item = item
+                            break
+                    if item.get_type() == ebooklib.ITEM_COVER:
+                        cover_item = item
+                        break
+
+                if cover_item:
+                    with open(output_path, 'wb') as f:
+                        f.write(cover_item.get_content())
+                    logger.debug(f"Extracted cover for {filepath.name}")
+                    return True
+            except Exception as e:
+                logger.debug(f"ebooklib cover extraction failed for {filepath.name}: {e}")
+
+            # 2. Fallback: ZipFile (if ebooklib fails or returns nothing)
+            # (ebooklib is basically a zip wrapper anyway, but sometimes direct zip access is easier if we just want the file)
+            # For now, let's stick to the attempt above. If valid EPUB, ebooklib should handle it.
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error extracting cover from {filepath}: {e}")
+            return False
+
     def extract_text_and_map(self, filepath, progress_callback=None):
         """
         Used for fuzzy matching and general content extraction.
-        Uses BeautifulSoup (Engine A).
+        Uses BeautifulSoup.
         """
         filepath = Path(filepath)
         if not filepath.exists():
@@ -136,13 +188,13 @@ class EbookParser:
             full_text_parts = []
             spine_map = []
             current_idx = 0
-            
+
             total_spine = len(book.spine)
 
             for i, item_ref in enumerate(book.spine):
                 if progress_callback:
                     progress_callback(i / total_spine)
-                
+
                 item = book.get_item_with_id(item_ref[0])
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
@@ -204,7 +256,7 @@ class EbookParser:
             return None
 
     # =========================================================================
-    # [ENGINE A] STORYTELLER / READIUM / GENERAL UTILS
+    # STORYTELLER / READIUM / GENERAL UTILS
     # Uses BeautifulSoup for broad compatibility
     # =========================================================================
 
@@ -445,7 +497,7 @@ class EbookParser:
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
     # =========================================================================
-    # [ENGINE B] KOREADER PERFECT SYNC
+    # KOREADER PERFECT SYNC
     # Uses LXML and "Hybrid" Logic (ID + Text Offset)
     # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
     # =========================================================================
@@ -489,7 +541,7 @@ class EbookParser:
                         'end_pos': current_count + text_len + SEPARATOR_LEN,
                         'text_len': text_len
                     })
-                    current_count += text_len + SEPARATOR_LEN
+                    current_count += (text_len + SEPARATOR_LEN)
 
                 if element.tail and element.tail.strip():
                     tail_len = len(element.tail.strip())
@@ -500,7 +552,7 @@ class EbookParser:
                         'text_len': tail_len,
                         'is_tail': True
                     })
-                    current_count += tail_len + SEPARATOR_LEN
+                    current_count += (tail_len + SEPARATOR_LEN)
 
             # Find the element that contains our target position
             target_element = None
@@ -574,7 +626,7 @@ class EbookParser:
 
     def resolve_xpath(self, filename, xpath_str):
         """
-        HYBRID RESOLVER:
+        RESOLVER:
         Uses LXML to handle KOReader's /text().123 format accurately.
         Includes WHITESPACE STRIPPING to align with get_xpath_and_percentage.
         """
@@ -651,9 +703,9 @@ class EbookParser:
                     break
 
                 if node.text and node.text.strip():
-                    preceding_len += len(node.text.strip()) + SEPARATOR_LEN
+                    preceding_len += (len(node.text.strip()) + SEPARATOR_LEN)
                 if node.tail and node.tail.strip():
-                    preceding_len += len(node.tail.strip()) + SEPARATOR_LEN
+                    preceding_len += (len(node.tail.strip()) + SEPARATOR_LEN)
 
             if not found_target:
                 logger.warning(f"❌ Target node not found in iteration")

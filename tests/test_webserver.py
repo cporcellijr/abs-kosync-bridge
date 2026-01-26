@@ -23,7 +23,9 @@ class MockContainer:
         self.mock_booklore_client = Mock()
         self.mock_storyteller_client = Mock()
         self.mock_database_service = Mock()
+        self.mock_database_service.get_all_settings.return_value = {}  # Default empty settings
         self.mock_ebook_parser = Mock()
+        self.mock_sync_clients = Mock()
 
         # Configure the sync manager to return our mock clients
         self.mock_sync_manager.abs_client = self.mock_abs_client
@@ -65,6 +67,9 @@ class MockContainer:
     def books_dir(self):
         return Path(tempfile.gettempdir()) / 'test_books'
 
+    def sync_clients(self):
+        return self.mock_sync_clients
+
 
 class CleanFlaskIntegrationTest(unittest.TestCase):
     """Clean Flask integration test using proper dependency injection."""
@@ -90,17 +95,14 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.original_init_db = src.db.migration_utils.initialize_database
         src.db.migration_utils.initialize_database = mock_initialize_database
 
-        # Now import and setup the web server with our mock container
-        from src.web_server import app, setup_dependencies
-        setup_dependencies(test_container=self.mock_container)
-
-        # Configure Flask for testing
-        app.config['TESTING'] = True
-        app.config['WTF_CSRF_ENABLED'] = False
-        self.client = app.test_client()
+        # Use the app factory to get a fresh app instance for each test
+        from src.web_server import create_app, setup_dependencies
+        self.app, _ = create_app(test_container=self.mock_container)
+        self.app.config['TESTING'] = True
+        self.app.config['WTF_CSRF_ENABLED'] = False
+        self.client = self.app.test_client()
 
         # Store references for easy access
-        self.app = app
         self.mock_manager = self.mock_container.mock_sync_manager
         self.mock_abs_client = self.mock_container.mock_abs_client
         self.mock_booklore_client = self.mock_container.mock_booklore_client
@@ -126,7 +128,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIs(manager, self.mock_container.mock_sync_manager)
         self.assertIs(database_service, self.mock_container.mock_database_service)
 
-        print("✅ Dependency injection working correctly")
+        print("[OK] Dependency injection working correctly")
 
     def test_index_endpoint_with_mocked_dependencies(self):
         """Test index endpoint using clean dependency injection."""
@@ -176,16 +178,21 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         self.mock_database_service.get_all_books.return_value = [test_book]
         self.mock_database_service.get_states_for_book.return_value = mock_states
+        self.mock_database_service.get_all_states.return_value = mock_states
         self.mock_database_service.get_hardcover_details.return_value = None
+        self.mock_database_service.get_all_hardcover_details.return_value = []
+        self.mock_database_service.get_all_pending_suggestions.return_value = []
 
         # Mock the sync_clients call for integrations
-        def mock_sync_clients():
-            return {
+        # Mock the sync_clients call for integrations
+        # Mock the sync_clients call for integrations
+        # Since container.sync_clients() returns the mock object, we need to mock .items()
+        clients_dict = {
                 'ABS': Mock(is_configured=Mock(return_value=True)),
                 'KoSync': Mock(is_configured=Mock(return_value=True)),
                 'Storyteller': Mock(is_configured=Mock(return_value=False))
-            }
-        self.mock_container.sync_clients = mock_sync_clients
+        }
+        self.mock_container.mock_sync_clients.items.return_value = clients_dict.items()
 
         # Mock render_template to capture arguments
         import src.web_server
@@ -203,8 +210,8 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
             # Verify database was called
             self.mock_database_service.get_all_books.assert_called_once()
-            self.mock_database_service.get_states_for_book.assert_called_once_with('test-book-123')
-            self.mock_database_service.get_hardcover_details.assert_called_once_with('test-book-123')
+            self.mock_database_service.get_all_states.assert_called_once()
+            self.mock_database_service.get_all_hardcover_details.assert_called_once()
 
             # Verify render_template was called with correct arguments
             mock_render.assert_called_once()
@@ -278,7 +285,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.assertGreater(overall_progress, 0)  # Should be > 0 now that we have progress data
             self.assertLessEqual(overall_progress, 100)  # Should be a valid percentage
 
-            print("✅ Index endpoint test passed with correct response verification")
+            print("[OK] Index endpoint test passed with correct response verification")
 
         finally:
             src.web_server.render_template = original_render
@@ -310,8 +317,61 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIn('mappings', data)
         self.assertEqual(len(data['mappings']), 1)
         self.assertEqual(data['mappings'][0]['abs_id'], 'api-test-book-123')
+        
+        # Verify percentage scaling (should be 0 because states mock returned empty list)
+        # But let's verify structure
+        self.assertIn('states', data['mappings'][0])
 
-        print("✅ API status endpoint test passed with clean DI")
+        print("[OK] API status endpoint test passed with clean DI")
+
+    def test_api_status_percentage_scaling(self):
+        """Test that API status scales percentages correctly (0.45 -> 45.0)."""
+        # Setup mock data
+        from src.db.models import Book, State
+        test_book = Book(
+            abs_id='scale-test-123',
+            abs_title='Scale Test',
+            ebook_filename='scale.epub',
+            kosync_doc_id='scale-doc',
+            status='active'
+        )
+
+        # Mock states with decimal percentages
+        mock_states = [
+            State(
+                abs_id='scale-test-123',
+                client_name='kosync',
+                percentage=0.455,  # Should become 45.5
+                last_updated=1000
+            ),
+            State(
+                abs_id='scale-test-123',
+                client_name='storyteller',
+                percentage=0.1,    # Should become 10.0
+                last_updated=2000
+            )
+        ]
+
+        self.mock_database_service.get_all_books.return_value = [test_book]
+        self.mock_database_service.get_states_for_book.return_value = mock_states
+        self.mock_database_service.get_all_states.return_value = mock_states
+
+        # Make HTTP request
+        response = self.client.get('/api/status')
+        data = response.get_json()
+
+        # Verify mappings
+        mapping = data['mappings'][0]
+        
+        # Check nested states
+        self.assertEqual(mapping['states']['kosync']['percentage'], 45.5)
+        self.assertEqual(mapping['states']['storyteller']['percentage'], 10.0)
+
+        # Check legacy flat fields
+        self.assertEqual(mapping['kosync_pct'], 45.5)
+        self.assertEqual(mapping['storyteller_pct'], 10.0)
+
+        print("[OK] API status percentage scaling test passed")
 
     def test_match_endpoint_with_clean_di(self):
         """Test match endpoint using clean dependency injection."""
@@ -365,11 +425,11 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.assertEqual(saved_book.duration, 3600)
             self.assertIsNone(saved_book.transcript_file)
 
-            self.mock_abs_client.add_to_collection.assert_called_once_with('test-audiobook-123')
-            self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub')
+            self.mock_abs_client.add_to_collection.assert_called_once_with('test-audiobook-123', 'Synced with KOReader')
+            self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub', 'Kobo')
             self.mock_storyteller_client.add_to_collection.assert_called_once_with('test-book.epub')
 
-            print("✅ Match endpoint test passed with clean DI")
+            print("[OK] Match endpoint test passed with clean DI")
 
         finally:
             src.web_server.get_kosync_id_for_ebook = original_get_kosync
@@ -398,17 +458,56 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         # Verify clear_progress was called on manager
         self.mock_manager.clear_progress.assert_called_once_with('clear-test-book')
 
-        print("✅ Clear progress endpoint test passed with clean DI")
+        print("[OK] Clear progress endpoint test passed with clean DI")
+
+    def test_settings_endpoint_clean_di(self):
+        """Test settings endpoint with clean dependency injection."""
+        # Mock database settings
+        self.mock_database_service.get_all_settings.return_value = {
+            'KOSYNC_ENABLED': 'true',
+            'SYNC_PERIOD_MINS': '10'
+        }
+
+        # Mock render_template
+        import src.web_server
+        original_render = src.web_server.render_template
+        mock_render = Mock(return_value="Settings Page HTML")
+        src.web_server.render_template = mock_render
+
+        try:
+            # Make HTTP request
+            response = self.client.get('/settings')
+
+            # Verify response
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, b"Settings Page HTML")
+
+            # Verify database was called to load settings
+            # Note: settings() function calls database_service.get_all_settings() implicitly 
+            # via ConfigLoader or os.environ?
+            # Actually, looking at the code, settings() calls database_service.get_all_settings() 
+            # only on POST. On GET it just renders template.
+            # But the template rendering uses `get_val` helper which reads from os.environ.
+            # So we just verify it renders successfully.
+            
+            mock_render.assert_called_once()
+            args, _ = mock_render.call_args
+            self.assertEqual(args[0], 'settings.html')
+
+            print("[OK] Settings endpoint test passed")
+
+        finally:
+            src.web_server.render_template = original_render
 
 
 if __name__ == '__main__':
-    print("🧪 Clean Flask Integration Testing with Dependency Injection")
+    print("TEST Clean Flask Integration Testing with Dependency Injection")
     print("=" * 70)
-    print("✓ No patches required")
-    print("✓ Clean dependency injection")
-    print("✓ Real HTTP requests via test_client()")
-    print("✓ Mocked external services")
-    print("✓ Easy to understand and maintain")
+    print("- No patches required")
+    print("- Clean dependency injection")
+    print("- Real HTTP requests via test_client()")
+    print("- Mocked external services")
+    print("- Easy to understand and maintain")
     print("=" * 70)
 
     unittest.main(verbosity=2)

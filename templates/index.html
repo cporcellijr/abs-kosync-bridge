@@ -7,9 +7,14 @@
     {# Macro for rendering a book card - used by both currently-reading and all-books grids #}
     {% macro render_book_card(mapping, integrations) %}
     <div class="book-card" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
-        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}">
+        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}" data-sync-mode="{{ mapping.sync_mode }}"
+        data-abs-id="{{ mapping.abs_id }}">
         <div class="book-cover-container">
-            {% if mapping.cover_url %}
+            {% if mapping.sync_mode == 'ebook_only' %}
+            <img src="/covers/{{ mapping.kosync_doc_id }}.jpg" alt="Cover" class="book-cover"
+                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+            <div class="book-cover-placeholder hidden">📖</div>
+            {% elif mapping.cover_url %}
             <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
             <div class="book-cover-placeholder hidden">📖</div>
@@ -51,7 +56,10 @@
                 </a>
                 {% endif %}
                 {% if integrations.kosync %}
-                <div class="progress-item" title="KOReader">
+                <div class="progress-item cursor-pointer"
+                    title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
+                    data-abs-id="{{ mapping.abs_id }}" data-title="{{ mapping.abs_title|escape }}"
+                    data-hash="{{ mapping.kosync_doc_id }}" onclick="updateKoSyncHash(event)">
                     <span>📖</span>
                     {% if mapping.states.kosync is defined %}
                     <span>{{ '%.1f' | format(mapping.states.kosync.percentage|default(0)) }}%</span>
@@ -95,9 +103,9 @@
                             onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
                         <span class="hidden fs-12 {% if not mapping.hardcover_book_id %}opacity-50{% endif %}">📚</span>
                     </a>
-                    <span
-                        onclick="linkHardcover(event, '{{ mapping.abs_id }}', '{{ mapping.hardcover_title|default('')|escape }}')"
-                        class="cursor-pointer color-inherit" title="Click to edit Hardcover link">
+                    <span class="cursor-pointer color-inherit" title="Click to edit Hardcover link"
+                        data-abs-id="{{ mapping.abs_id }}" data-title="{{ mapping.hardcover_title|default('')|escape }}"
+                        onclick="linkHardcover(event)">
                         {% if mapping.hardcover_book_id %}
                         {% if mapping.states.hardcover is defined %}
                         {{ '%.0f' | format(mapping.states.hardcover.percentage|default(0)) }}%
@@ -138,8 +146,10 @@
     {% endmacro %}
 
     <head>
-        <title>ABS-KoSync Manager</title>
+        <title>ABS-KoSync Bridge</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="icon" type="image/jpeg" href="/static/icon.jpg">
+        <link rel="apple-touch-icon" href="/static/icon.jpg">
         <style>
             * {
                 box-sizing: border-box;
@@ -542,9 +552,11 @@
                 flex-shrink: 0;
             }
 
+            .progress-item.cursor-pointer:hover,
             a.progress-item:hover {
                 background: rgba(255, 255, 255, 0.1);
                 border-radius: 4px;
+                color: #ffffff;
             }
 
             .progress-bar-mini {
@@ -765,8 +777,10 @@
 <body>
     <div class="top-nav">
         <div class="logo-section">
-            <a href="/">
-                <h1>📚 ABS-KoSync</h1>
+            <a href="/" style="display: flex; align-items: center; gap: 12px; text-decoration: none;">
+                <img src="/static/icon.jpg" alt="ABS-KoSync" class="app-icon"
+                    style="height: 32px; width: 32px; border-radius: 6px;">
+                <h1 style="font-size: 22px; margin: 0;">ABS-KoSync</h1>
             </a>
 
             <div class="library-links">
@@ -813,6 +827,69 @@
     </div>
 
     <div class="container">
+        {% if suggestions %}
+        <div class="suggestions-container"
+            style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <h2
+                style="font-size: 1.1rem; color: #a0a0a0; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px;">
+                💡 Pending Suggestions
+            </h2>
+            <div class="suggestions-grid"
+                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+                {% for suggestion in suggestions %}
+                <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
+                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
+                    <div class="suggestion-details">
+                        <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                            title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
+                        <div
+                            style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            {{ suggestion.author }}</div>
+
+                        <div
+                            style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
+                            <span>📚</span> Found {{ suggestion.matches|length }} potential match(es)
+                        </div>
+
+                        <div class="suggestion-actions" style="display: flex; gap: 8px;">
+                            <a href="/match?search={{ suggestion.title|urlencode }}" class="btn btn-sm btn-primary"
+                                style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
+                            <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')" class="btn btn-sm"
+                                style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <script>
+                function dismissSuggestion(e, id) {
+                    e.preventDefault();
+                    console.log('Dismissing suggestion:', id);
+                    fetch(`/api/suggestions/${id}/dismiss`, { method: 'POST' })
+                        .then(r => {
+                            console.log('Response status:', r.status);
+                            return r.json();
+                        })
+                        .then(data => {
+                            console.log('Response data:', data);
+                            if (data.success) {
+                                const card = document.getElementById(`suggestion-${id}`);
+                                if (card) {
+                                    card.style.transition = 'opacity 0.3s';
+                                    card.style.opacity = '0';
+                                    setTimeout(() => { card.remove(); }, 300);
+                                }
+                            } else {
+                                console.error('Dismiss failed:', data.error);
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Fetch error:', err);
+                        });
+                }
+            </script>
+        </div>
+        {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         <div class="flash-messages mb-16">
@@ -826,6 +903,14 @@
         {% endwith %}
         {% if mappings %}
         <div class="controls-bar">
+            <div class="control-group">
+                <label for="filter-select">Show:</label>
+                <select id="filter-select">
+                    <option value="all">All Books</option>
+                    <option value="audiobook">Audiobooks</option>
+                    <option value="ebook_only">Ebooks Only</option>
+                </select>
+            </div>
             <div class="control-group">
                 <label for="sort-select">Sort by:</label>
                 <select id="sort-select">
@@ -872,10 +957,43 @@
             const currentlyReadingGrid = document.getElementById('currently-reading-grid');
             const allBooksGrid = document.getElementById('all-books-grid');
             const sortSelect = document.getElementById('sort-select');
+            const filterSelect = document.getElementById('filter-select');
             const directionBtn = document.getElementById('sort-direction');
 
-            function linkHardcover(event, absId, currentTitle) {
+            function filterBooks() {
+                const filterValue = filterSelect.value;
+                const cards = document.querySelectorAll('.book-card');
+
+                cards.forEach(card => {
+                    // Default to 'audiobook' if not specified
+                    const syncMode = card.dataset.syncMode || 'audiobook';
+
+                    let isVisible = true;
+                    if (filterValue === 'audiobook' && syncMode !== 'audiobook') {
+                        isVisible = false;
+                    } else if (filterValue === 'ebook_only' && syncMode !== 'ebook_only') {
+                        isVisible = false;
+                    }
+
+                    if (isVisible) {
+                        card.classList.remove('hidden');
+                        card.style.display = ''; // Ensure display is reset if it was hidden inline
+                    } else {
+                        card.classList.add('hidden');
+                        card.style.display = 'none'; // Force hide
+                    }
+                });
+
+                // Persist choice
+                localStorage.setItem('abs_kosync_filter', filterValue);
+            }
+
+            function linkHardcover(event) {
                 event.stopPropagation();
+                const item = event.currentTarget;
+                const absId = item.dataset.absId;
+                const currentTitle = item.dataset.title;
+
                 let promptText = "Enter Hardcover URL or ID:";
                 if (currentTitle) {
                     promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
@@ -889,6 +1007,32 @@
                     inputField.type = 'hidden';
                     inputField.name = 'hardcover_url';
                     inputField.value = input;
+                    form.appendChild(inputField);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            }
+
+            function updateKoSyncHash(event) {
+                event.stopPropagation();
+                const item = event.currentTarget;
+                const absId = item.dataset.absId;
+                const title = item.dataset.title;
+                const currentHash = item.dataset.hash;
+
+                const msg = `Enter new KoSync MD5 Hash for '${title}'\n\nCurrent: ${currentHash}\n\n(Leave empty to automatically recalculate from the ebook file)`;
+                const input = prompt(msg);
+
+                if (input !== null) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = `/update-hash/${absId}`;
+
+                    const inputField = document.createElement('input');
+                    inputField.type = 'hidden';
+                    inputField.name = 'new_hash';
+                    inputField.value = input.trim();
+
                     form.appendChild(inputField);
                     document.body.appendChild(form);
                     form.submit();
@@ -1029,8 +1173,88 @@
                 applySorting(savedSort);
             }
 
-            // Auto-refresh every 30 seconds
-            setTimeout(() => location.reload(), 30000);
+            // Filter Logic initialization
+            if (filterSelect) {
+                filterSelect.addEventListener('change', filterBooks);
+                const savedFilter = localStorage.getItem('abs_kosync_filter') || 'all';
+                filterSelect.value = savedFilter;
+                // Apply filter initially
+                filterBooks();
+            }
+
+            let refreshPaused = false;
+
+            function refreshDashboard() {
+                if (refreshPaused) {
+                    setTimeout(refreshDashboard, 30000);
+                    return;
+                }
+
+                fetch('/api/status')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data || !data.mappings) return;
+                        data.mappings.forEach(book => {
+                            const card = document.querySelector(`.book-card[data-abs-id="${book.abs_id}"]`);
+                            if (!card) return;
+
+                            // Update progress ring if it exists
+                            const ring = card.querySelector('.progress-ring.reading');
+                            if (ring && book.unified_progress > 0 && book.unified_progress < 100) {
+                                ring.textContent = `${Math.round(book.unified_progress)}%`;
+                            }
+
+                            // Update progress bar
+                            const barFill = card.querySelector('.progress-bar-fill');
+                            if (barFill) {
+                                barFill.style.width = `${book.unified_progress}%`;
+                            }
+
+                            // Update individual progress items
+                            const absProgress = card.querySelector('.progress-item[title="Open in Audiobookshelf"] span');
+                            if (absProgress && book.states && book.states.abs) {
+                                const ts = book.states.abs.timestamp || 0;
+                                const h = Math.floor(ts / 3600);
+                                const m = Math.floor((ts % 3600) / 60);
+                                const s = Math.floor(ts % 60);
+                                absProgress.textContent = `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                            }
+
+                            const kosyncProgress = card.querySelector('.progress-item[title^="Update KoReader Hash"] span:last-child');
+                            if (kosyncProgress && book.states && book.states.kosync) {
+                                kosyncProgress.textContent = `${book.states.kosync.percentage.toFixed(1)}%`;
+                            }
+
+                            const stProgress = card.querySelector('.progress-item[title="Storyteller"] span:last-child');
+                            if (stProgress && book.states && book.states.storyteller) {
+                                stProgress.textContent = `${book.states.storyteller.percentage.toFixed(1)}%`;
+                            }
+
+                            // Update last sync text
+                            const lastSync = card.querySelector('.last-sync');
+                            if (lastSync && book.last_sync) {
+                                lastSync.textContent = `Synced ${book.last_sync}`;
+                            }
+                        });
+                    })
+                    .catch(() => { })
+                    .finally(() => setTimeout(refreshDashboard, 30000));
+            }
+
+            // Pause on modal open
+            document.addEventListener('click', e => {
+                if (e.target.closest('[data-modal], .modal-trigger, button[onclick*="modal"]')) {
+                    refreshPaused = true;
+                }
+            });
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape') refreshPaused = false;
+            });
+            document.body.addEventListener('click', e => {
+                if (e.target.classList.contains('modal-overlay')) refreshPaused = false;
+            });
+
+            setTimeout(refreshDashboard, 30000);
         </script>
 </body>
 

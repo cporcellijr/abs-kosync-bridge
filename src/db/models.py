@@ -2,13 +2,52 @@
 SQLAlchemy ORM models for abs-kosync-bridge database.
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text, DateTime, ForeignKey, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from typing import Optional
 
 Base = declarative_base()
+
+
+class KosyncDocument(Base):
+    """
+    Model for raw KOSync documents (mirroring the official server's schema).
+    This allows syncing unlinked documents between devices.
+    """
+    __tablename__ = 'kosync_documents'
+
+    document_hash = Column(String(32), primary_key=True)  # MD5 Hash from KOReader
+    progress = Column(String(512), nullable=True)         # XPath / CFI
+    percentage = Column(Numeric(10, 6), default=0)        # Decimal precision
+    device = Column(String(128), nullable=True)
+    device_id = Column(String(64), nullable=True)
+    timestamp = Column(DateTime, nullable=True)
+    
+    # Bridge specific fields
+    linked_abs_id = Column(String(255), ForeignKey('books.abs_id'), nullable=True, index=True)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship to Book (optional)
+    linked_book = relationship("Book", backref="kosync_documents")
+
+    def __init__(self, document_hash: str, progress: str = None, percentage: float = 0,
+                 device: str = None, device_id: str = None, timestamp: datetime = None,
+                 linked_abs_id: str = None):
+        self.document_hash = document_hash
+        self.progress = progress
+        self.percentage = percentage
+        self.device = device
+        self.device_id = device_id
+        self.timestamp = timestamp
+        self.linked_abs_id = linked_abs_id
+        self.first_seen = datetime.utcnow()
+        self.last_updated = datetime.utcnow()
+
+    def __repr__(self):
+        return f"<KosyncDocument(hash='{self.document_hash}', pct={self.percentage})>"
 
 
 class Book(Base):
@@ -20,10 +59,11 @@ class Book(Base):
     abs_id = Column(String(255), primary_key=True)
     abs_title = Column(String(500))
     ebook_filename = Column(String(500))
-    kosync_doc_id = Column(String(255))
+    kosync_doc_id = Column(String(255), index=True)
     transcript_file = Column(String(500))
     status = Column(String(50), default='active')
     duration = Column(Float)  # Duration in seconds from AudioBookShelf
+    sync_mode = Column(String(20), default='audiobook')  # 'audiobook' or 'ebook_only'
 
     # Relationships
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
@@ -32,7 +72,7 @@ class Book(Base):
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
                  kosync_doc_id: str = None, transcript_file: str = None,
-                 status: str = 'active', duration: float = None):
+                 status: str = 'active', duration: float = None, sync_mode: str = 'audiobook'):
         self.abs_id = abs_id
         self.abs_title = abs_title
         self.ebook_filename = ebook_filename
@@ -40,6 +80,7 @@ class Book(Base):
         self.transcript_file = transcript_file
         self.status = status
         self.duration = duration
+        self.sync_mode = sync_mode
 
     def __repr__(self):
         return f"<Book(abs_id='{self.abs_id}', title='{self.abs_title}')>"
@@ -141,6 +182,45 @@ class Job(Base):
 
 
 
+
+class PendingSuggestion(Base):
+    """
+    Model for progress-triggered ebook suggestions.
+    """
+    __tablename__ = 'pending_suggestions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String(50), default='abs')
+    source_id = Column(String(255))
+    title = Column(String(500))
+    author = Column(String(500))
+    cover_url = Column(String(500))
+    matches_json = Column(Text)
+    status = Column(String(20), default='pending')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __init__(self, source_id: str, title: str, author: str = None, 
+                 cover_url: str = None, matches_json: str = "[]", status: str = 'pending'):
+        self.source_id = source_id
+        self.title = title
+        self.author = author
+        self.cover_url = cover_url
+        self.matches_json = matches_json
+        self.status = status
+        self.created_at = datetime.utcnow()
+
+    @property
+    def matches(self):
+        import json
+        try:
+            return json.loads(self.matches_json) if self.matches_json else []
+        except:
+            return []
+
+    def __repr__(self):
+        return f"<PendingSuggestion(id={self.id}, title='{self.title}', status='{self.status}')>"
+
+
 class Setting(Base):
     """
     Setting model storing application configuration.
@@ -166,7 +246,21 @@ class DatabaseManager:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
+        # Increase timeout to reduce lock errors, enable WAL mode for concurrency, allow multi-thread access
+        self.engine = create_engine(
+            f'sqlite:///{db_path}', 
+            echo=False, 
+            connect_args={'timeout': 30, 'check_same_thread': False}
+        )
+        
+        from sqlalchemy import event
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
         self.SessionLocal = sessionmaker(bind=self.engine)
 
         # Note: Schema creation is handled by Alembic migrations

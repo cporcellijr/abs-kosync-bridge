@@ -39,3 +39,33 @@ def calculate_similarity(a: str, b: str) -> float:
     b = b.lower().strip()
     
     return difflib.SequenceMatcher(None, a, b).ratio()
+
+def fuzzy_match_title(query: str, target: str, threshold: float = 0.6) -> bool:
+    """
+    Check if query title fuzzy matches the target title.
+    Uses word-overlap logic with a strict threshold.
+    
+    Args:
+        query: The search term (e.g. from filename)
+        target: The target title (e.g. from ABS)
+        threshold: Required match percentage (default 0.6 / 60%)
+        
+    Returns:
+        True if it's a match, False otherwise.
+    """
+    if not query or not target:
+        return False
+        
+    query_lower = query.lower()
+    target_lower = target.lower()
+    
+    # Check for title match (fuzzy - title words in audiobook title)
+    title_words = [w for w in query_lower.split() if len(w) > 3]
+    
+    if not title_words:
+        # Fallback for short titles: exact match only
+        return query_lower in target_lower
+    else:
+        matches = sum(1 for w in title_words if w in target_lower)
+        # Stricter threshold check
+        return (matches / len(title_words) > threshold) or (query_lower in target_lower)
