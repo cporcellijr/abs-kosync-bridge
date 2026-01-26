@@ -1339,25 +1339,27 @@ def api_status():
         # Add progress information from states
         for client_name, state in state_by_client.items():
             # Store in unified states object
+            pct_val = round(state.percentage * 100, 1) if state.percentage is not None else 0
+            
             mapping['states'][client_name] = {
                 'timestamp': state.timestamp or 0,
-                'percentage': state.percentage or 0,
+                'percentage': pct_val,
                 'xpath': getattr(state, 'xpath', None),
                 'last_updated': state.last_updated
             }
 
             # Maintain backward compatibility with old field names
             if client_name == 'kosync':
-                mapping['kosync_pct'] = state.percentage
+                mapping['kosync_pct'] = pct_val
                 mapping['kosync_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'abs':
-                mapping['abs_pct'] = state.percentage
+                mapping['abs_pct'] = pct_val
                 mapping['abs_ts'] = state.timestamp
             elif client_name == 'storyteller':
-                mapping['storyteller_pct'] = state.percentage
+                mapping['storyteller_pct'] = pct_val
                 mapping['storyteller_xpath'] = getattr(state, 'xpath', None)
             elif client_name == 'booklore':
-                mapping['booklore_pct'] = state.percentage
+                mapping['booklore_pct'] = pct_val
                 mapping['booklore_xpath'] = getattr(state, 'xpath', None)
 
         mappings.append(mapping)

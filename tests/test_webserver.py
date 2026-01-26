@@ -317,8 +317,61 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIn('mappings', data)
         self.assertEqual(len(data['mappings']), 1)
         self.assertEqual(data['mappings'][0]['abs_id'], 'api-test-book-123')
+        
+        # Verify percentage scaling (should be 0 because states mock returned empty list)
+        # But let's verify structure
+        self.assertIn('states', data['mappings'][0])
 
         print("[OK] API status endpoint test passed with clean DI")
+
+    def test_api_status_percentage_scaling(self):
+        """Test that API status scales percentages correctly (0.45 -> 45.0)."""
+        # Setup mock data
+        from src.db.models import Book, State
+        test_book = Book(
+            abs_id='scale-test-123',
+            abs_title='Scale Test',
+            ebook_filename='scale.epub',
+            kosync_doc_id='scale-doc',
+            status='active'
+        )
+
+        # Mock states with decimal percentages
+        mock_states = [
+            State(
+                abs_id='scale-test-123',
+                client_name='kosync',
+                percentage=0.455,  # Should become 45.5
+                last_updated=1000
+            ),
+            State(
+                abs_id='scale-test-123',
+                client_name='storyteller',
+                percentage=0.1,    # Should become 10.0
+                last_updated=2000
+            )
+        ]
+
+        self.mock_database_service.get_all_books.return_value = [test_book]
+        self.mock_database_service.get_states_for_book.return_value = mock_states
+        self.mock_database_service.get_all_states.return_value = mock_states
+
+        # Make HTTP request
+        response = self.client.get('/api/status')
+        data = response.get_json()
+
+        # Verify mappings
+        mapping = data['mappings'][0]
+        
+        # Check nested states
+        self.assertEqual(mapping['states']['kosync']['percentage'], 45.5)
+        self.assertEqual(mapping['states']['storyteller']['percentage'], 10.0)
+
+        # Check legacy flat fields
+        self.assertEqual(mapping['kosync_pct'], 45.5)
+        self.assertEqual(mapping['storyteller_pct'], 10.0)
+
+        print("[OK] API status percentage scaling test passed")
 
     def test_match_endpoint_with_clean_di(self):
         """Test match endpoint using clean dependency injection."""
