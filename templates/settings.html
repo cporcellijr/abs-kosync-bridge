@@ -734,8 +734,8 @@
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="toggle_suggestions" name="SUGGESTIONS_ENABLED"
-                                {% if get_bool('SUGGESTIONS_ENABLED') %}checked{% endif %}>
+                            <input type="checkbox" id="toggle_suggestions" name="SUGGESTIONS_ENABLED" {% if
+                                get_bool('SUGGESTIONS_ENABLED') %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -743,7 +743,8 @@
                 <div class="section-body">
                     <div class="full-width">
                         <p class="help-text">
-                            When enabled, the system will look for unmapped audiobooks with progress and suggest matching ebooks from your library.
+                            When enabled, the system will look for unmapped audiobooks with progress and suggest
+                            matching ebooks from your library.
                         </p>
                     </div>
                 </div>
@@ -772,6 +773,11 @@
                         <label>Client Diff Threshold (%)</label>
                         <input type="number" step="0.1" name="SYNC_DELTA_BETWEEN_CLIENTS_PERCENT"
                             value="{{ get_val('SYNC_DELTA_BETWEEN_CLIENTS_PERCENT') }}">
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="xpath_fallback" name="XPATH_FALLBACK_TO_PREVIOUS_SEGMENT" {% if
+                            get_bool('XPATH_FALLBACK_TO_PREVIOUS_SEGMENT') %}checked{% endif %}>
+                        <label for="xpath_fallback">XPath Fallback (Try previous segment if match fails)</label>
                     </div>
                     <div class="checkbox-wrapper full-width">
                         <input type="checkbox" id="abs_ebook" name="SYNC_ABS_EBOOK" {% if get_bool('SYNC_ABS_EBOOK')
