@@ -14,3 +14,5 @@ lxml
 dependency-injector
 sqlalchemy
 alembic
+selenium
+webdriver-manager

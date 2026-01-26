@@ -145,6 +145,45 @@ class Container(containers.DeclarativeContainer):
         database_service
     )
 
+    # [ADDED] StoryGraph integration
+    def _create_storygraph_client():
+        # Lazy load credentials from env (env is updated by DB settings)
+        email = os.environ.get("STORYGRAPH_EMAIL")
+        password = os.environ.get("STORYGRAPH_PASSWORD")
+        enabled_str = os.environ.get("STORYGRAPH_ENABLED", "false")
+        
+        logger.info(f"Checking StoryGraph init: Email set? {bool(email)}, Password set? {bool(password)}, Enabled? {enabled_str}")
+        
+        # NOTE: We can't strictly enforce existence here because
+        # user might enable it at runtime. We return None if not ready.
+        if not email or not password:
+            logger.info("❌ StoryGraph credentials missing in environment.")
+            return None
+            
+        try:
+            from src.api.storygraph_client import StoryGraphClient
+            client = StoryGraphClient(email, password)
+            return client
+        except Exception as e:
+            logger.error(f"Failed to create StoryGraph client: {e}")
+            return None
+
+    storygraph_client = providers.Factory(_create_storygraph_client)
+
+    def _create_storygraph_sync_client(storygraph_client, ebook_parser, abs_client, database_service):
+        if storygraph_client is None:
+            return None
+        from src.sync_clients.storygraph_sync_client import StoryGraphSyncClient
+        return StoryGraphSyncClient(storygraph_client, ebook_parser, abs_client, database_service)
+
+    storygraph_sync_client = providers.Factory(
+        _create_storygraph_sync_client,
+        storygraph_client=storygraph_client,
+        ebook_parser=ebook_parser,
+        abs_client=abs_client,
+        database_service=database_service
+    )
+
     # Sync clients dictionary for reuse
     sync_clients = providers.Dict(
         ABS=abs_sync_client,
@@ -152,7 +191,8 @@ class Container(containers.DeclarativeContainer):
         KoSync=kosync_sync_client,
         Storyteller=storyteller_sync_client,
         BookLore=booklore_sync_client,
-        Hardcover=hardcover_sync_client
+        Hardcover=hardcover_sync_client,
+        StoryGraph=storygraph_sync_client
     )
 
     # Sync Manager

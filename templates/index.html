@@ -118,6 +118,33 @@
                     </span>
                 </div>
                 {% endif %}
+
+                {% if integrations.storygraph %}
+                <div class="progress-item progress-item-sg">
+                    <a href="{{ mapping.storygraph_url|default('https://thestorygraph.com') }}" target="_blank"
+                        rel="noopener"
+                        title="{% if mapping.storygraph_id %}Open {{ mapping.storygraph_title }} in StoryGraph{% else %}Not linked to StoryGraph{% endif %}"
+                        class="sg-link {% if not mapping.storygraph_id %}pe-none{% endif %}">
+                        <img src="/static/storygraph.png" alt="SG"
+                            class="icon-14 {% if not mapping.storygraph_id %}grayscale-muted{% endif %}"
+                            onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                        <span class="hidden fs-12 {% if not mapping.storygraph_id %}opacity-50{% endif %}">📈</span>
+                    </a>
+                    <span class="cursor-pointer color-inherit" title="Click to edit StoryGraph link"
+                        data-abs-id="{{ mapping.abs_id }}"
+                        data-title="{{ mapping.storygraph_title|default('')|escape }}" onclick="linkStoryGraph(event)">
+                        {% if mapping.storygraph_id %}
+                        {% if mapping.states.storygraph is defined %}
+                        {{ '%.0f' | format(mapping.states.storygraph.percentage|default(0)) }}%
+                        {% else %}
+                        0%
+                        {% endif %}
+                        {% else %}
+                        <span class="fs-10 opacity-50">+</span>
+                        {% endif %}
+                    </span>
+                </div>
+                {% endif %}
             </div>
 
             <div class="progress-bar-mini">
@@ -715,14 +742,16 @@
                 height: 14px;
             }
 
-            .progress-item-hc {
+            .progress-item-hc,
+            .progress-item-sg {
                 position: relative;
                 display: flex;
                 align-items: center;
                 gap: 2px;
             }
 
-            .hc-link {
+            .hc-link,
+            .sg-link {
                 text-decoration: none !important;
                 display: flex !important;
                 align-items: center !important;
@@ -1006,6 +1035,31 @@
                     const inputField = document.createElement('input');
                     inputField.type = 'hidden';
                     inputField.name = 'hardcover_url';
+                    inputField.value = input;
+                    form.appendChild(inputField);
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            }
+
+            function linkStoryGraph(event) {
+                event.stopPropagation();
+                const item = event.currentTarget;
+                const absId = item.dataset.absId;
+                const currentTitle = item.dataset.title;
+
+                let promptText = "Enter StoryGraph URL, Book ID, ISBN, or Search Term:";
+                if (currentTitle) {
+                    promptText = `Current Match: ${currentTitle}\n\nEnter new StoryGraph URL, ID, ISBN, or Search Term to change:`;
+                }
+                const input = prompt(promptText);
+                if (input) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = `/link-storygraph/${absId}`;
+                    const inputField = document.createElement('input');
+                    inputField.type = 'hidden';
+                    inputField.name = 'storygraph_url';
                     inputField.value = input;
                     form.appendChild(inputField);
                     document.body.appendChild(form);

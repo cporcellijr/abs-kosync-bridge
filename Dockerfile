@@ -15,6 +15,8 @@ RUN apt-get update && \
     ffmpeg \
     libavcodec-extra \
     curl \
+    chromium \
+    chromium-driver \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -40,7 +42,7 @@ RUN chmod +x /app/start.sh
 EXPOSE 5757
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:5757/ || exit 1
+    CMD curl -f http://localhost:5757/ || exit 1
 
 CMD ["/app/start.sh"]
 # [END FILE]

@@ -713,6 +713,41 @@
                 </div>
             </div>
 
+            <!-- StoryGraph (Optional) -->
+            <div class="settings-section">
+                {% set storygraph_configured = get_val('STORYGRAPH_EMAIL') != '' %}
+                {% set storygraph_enabled = get_bool('STORYGRAPH_ENABLED') or (storygraph_configured and
+                get_val('STORYGRAPH_ENABLED') == '') %}
+                <div class="section-header">
+                    <h3>StoryGraph Integration</h3>
+                    <div class="toggle-switch-wrapper">
+                        <span class="toggle-label">Enable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle_storygraph" name="STORYGRAPH_ENABLED"
+                                onchange="toggleSection('storygraph_body', this.checked)" {% if storygraph_enabled
+                                %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div id="storygraph_body" class="section-body {% if not storygraph_enabled %}collapsed{% endif %}">
+                    <div class="full-width" style="margin-bottom: 10px;">
+                        <p class="help-text">
+                            Enabling this will automatically install Chromium (~150MB) if not present. Syncing happens
+                            via browser automation.
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="STORYGRAPH_EMAIL" value="{{ get_val('STORYGRAPH_EMAIL') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="STORYGRAPH_PASSWORD" value="{{ get_val('STORYGRAPH_PASSWORD') }}">
+                    </div>
+                </div>
+            </div>
+
             <!-- Shelfmark (Optional) -->
             <div class="settings-section">
                 <div class="section-header">

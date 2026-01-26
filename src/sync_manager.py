@@ -79,6 +79,10 @@ class SyncManager:
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
         self.sync_clients = {}
         for name, client in clients.items():
+            if client is None:
+                logger.info(f"🚫 Sync client disabled/unconfigured (None): {name}")
+                continue
+                
             if client.is_configured():
                 self.sync_clients[name] = client
                 logger.info(f"✅ Sync client enabled: {name}")
@@ -620,250 +624,272 @@ class SyncManager:
             if 'ABS' in bulk_states_per_client:
                 self.check_for_suggestions(bulk_states_per_client['ABS'], active_books)
                 
-        # Main sync loop - process each active book
-        for book in active_books:
-            abs_id = book.abs_id
-            logger.info(f"🔄 [{abs_id}] Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
-            title_snip = sanitize_log_data(book.abs_title or 'Unknown')
+        # Main sync loop - process each active book in parallel
+        # Max 3 concurrent books to avoid overloading regular CPU/Memory
+        max_workers = min(len(active_books), 3)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for book in active_books:
+                futures.append(executor.submit(self._sync_single_book, book, bulk_states_per_client))
+            
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Error in parallel book sync: {e}")
+                    logger.error(traceback.format_exc())
 
-            try:
-                # Get previous state for this book from database
-                previous_states = self.database_service.get_states_for_book(abs_id)
+    def _sync_single_book(self, book, bulk_states_per_client):
+        """Helper to sync a single book, used for parallel execution."""
+        abs_id = book.abs_id
+        logger.info(f"🔄 [{abs_id}] Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
+        title_snip = sanitize_log_data(book.abs_title or 'Unknown')
 
-                # Create a mapping of client names to their previous states
-                prev_states_by_client = {}
-                last_updated = 0
-                for state in previous_states:
-                    prev_states_by_client[state.client_name] = state
-                    if state.last_updated and state.last_updated > last_updated:
-                        last_updated = state.last_updated
+        try:
+            # Get previous state for this book from database
+            previous_states = self.database_service.get_states_for_book(abs_id)
 
-                # Determine active clients based on sync_mode using interface method
-                sync_type = 'ebook' if (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only') else 'audiobook'
-                active_clients = {
-                    name: client for name, client in self.sync_clients.items()
-                    if sync_type in client.get_supported_sync_types()
-                }
-                if sync_type == 'ebook':
-                    logger.debug(f"[{abs_id}] [{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
+            # Create a mapping of client names to their previous states
+            prev_states_by_client = {}
+            last_updated = 0
+            for state in previous_states:
+                prev_states_by_client[state.client_name] = state
+                if state.last_updated and state.last_updated > last_updated:
+                    last_updated = state.last_updated
 
-                # Build config using active_clients - parallel fetch
-                config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, bulk_states_per_client, active_clients)
+            # Determine active clients based on sync_mode using interface method
+            sync_type = 'ebook' if (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only') else 'audiobook'
+            active_clients = {
+                name: client for name, client in self.sync_clients.items()
+                if sync_type in client.get_supported_sync_types()
+            }
+            if sync_type == 'ebook':
+                logger.debug(f"[{abs_id}] [{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
 
-                # Filtered config now only contains non-None states
-                if not config:
-                    continue  # No valid states to process
+            # Build config using active_clients - parallel fetch
+            config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, bulk_states_per_client, active_clients)
 
-                # Check for ABS offline condition (only for audiobook mode)
-                if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
-                    abs_state = config.get('ABS')
-                    if abs_state is None:
-                        logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
-                        continue  # ABS offline
+            # Filtered config now only contains non-None states
+            if not config:
+                return  # No valid states to process
 
+            # Check for ABS offline condition (only for audiobook mode)
+            if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
+                abs_state = config.get('ABS')
+                if abs_state is None:
+                    logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
+                    return  # ABS offline
 
+            # Check for sync delta threshold between clients
+            progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
+            significant_diff = False
 
-                # Check for sync delta threshold between clients
-                progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]
-                significant_diff = False
+            if len(progress_values) >= 2:
+                max_progress = max(progress_values)
+                min_progress = min(progress_values)
+                progress_diff = max_progress - min_progress
 
-                if len(progress_values) >= 2:
-                    max_progress = max(progress_values)
-                    min_progress = min(progress_values)
-                    progress_diff = max_progress - min_progress
+                if progress_diff >= self.sync_delta_between_clients:
+                    significant_diff = True
+                    # If we have a significant diff, we verify it's not just noise
+                    # by checking if we have at least one valid state
+                    logger.debug(f"[{abs_id}] [{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
+                else:
+                    logger.debug(f"[{abs_id}] [{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
+                    # Do not continue here, let the consolidated check handle it
 
-                    if progress_diff >= self.sync_delta_between_clients:
-                        significant_diff = True
-                        # If we have a significant diff, we verify it's not just noise
-                        # by checking if we have at least one valid state
-                        logger.debug(f"[{abs_id}] [{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
-                        logger.debug(f"[{abs_id}] [{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
-                    else:
-                        logger.debug(f"[{abs_id}] [{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
-                        # Do not continue here, let the consolidated check handle it
+            # Check for Character Delta Threshold (Fix 2B)
+            # Loop through ebook clients (KoSync, Storyteller, BookLore, ABS_Ebook)
+            # If state.delta > 0 and book has epub, get total chars via extract_text_and_map
+            # Calculate char_delta = int(state.delta * total_chars)
+            # If char_delta >= self.delta_chars_thresh, log it and set significant_diff = True
+            if not significant_diff and hasattr(book, 'ebook_filename') and book.ebook_filename:
+                for client_name_key, client_state in config.items():
+                     if client_state.delta > 0:
+                         try:
+                             # Use existing ebook_parser which has caching
+                             full_text, _ = self.ebook_parser.extract_text_and_map(book.ebook_filename)
+                             if full_text:
+                                 total_chars = len(full_text)
+                                 char_delta = int(client_state.delta * total_chars)
 
-                # Check for Character Delta Threshold (Fix 2B)
-                # Loop through ebook clients (KoSync, Storyteller, BookLore, ABS_Ebook)
-                # If state.delta > 0 and book has epub, get total chars via extract_text_and_map
-                # Calculate char_delta = int(state.delta * total_chars)
-                # If char_delta >= self.delta_chars_thresh, log it and set significant_diff = True
-                if not significant_diff and hasattr(book, 'ebook_filename') and book.ebook_filename:
-                    for client_name_key, client_state in config.items():
-                         if client_state.delta > 0:
-                             try:
-                                 # Use existing ebook_parser which has caching
-                                 full_text, _ = self.ebook_parser.extract_text_and_map(book.ebook_filename)
-                                 if full_text:
-                                     total_chars = len(full_text)
-                                     char_delta = int(client_state.delta * total_chars)
+                                 if char_delta >= self.delta_chars_thresh:
+                                     logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
+                                     significant_diff = True
+                                     break
+                         except Exception as e:
+                             logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
 
-                                     if char_delta >= self.delta_chars_thresh:
-                                         logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
-                                         significant_diff = True
-                                         break
-                             except Exception as e:
-                                 logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
+            # Check if all 'delta' fields in config are zero
+            # We typically skip if nothing changed, BUT if there is a significant discrepancy
+            # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
+            deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
 
-                # Check if all 'delta' fields in config are zero
-                # We typically skip if nothing changed, BUT if there is a significant discrepancy
-                # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
-                deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
+            # If nothing changed AND clients are effectively in sync, skip
+            if deltas_zero and not significant_diff:
+                logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
+                return
 
-                # If nothing changed AND clients are effectively in sync, skip
-                if deltas_zero and not significant_diff:
-                    logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
-                    continue
+            if significant_diff:
+                logger.debug(f"[{abs_id}] [{title_snip}] Proceeding due to client discrepancy")
 
+            # Small changes (below thresholds) should be noisy-reduced
+            small_changes = []
+            for key, cfg in config.items():
+                delta = cfg.delta
+                threshold = cfg.threshold
+
+                # Debug logging for potential None values
+                if delta is None or threshold is None:
+                     logger.debug(f"[{title_snip}] {key} delta={delta}, threshold={threshold}")
+
+                if delta is not None and threshold is not None and 0 < delta < threshold:
+                    label, fmt = cfg.display
+                    delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
+                    small_changes.append(f"✋ [{abs_id}] [{title_snip}] {label} delta {delta_str} (Below threshold)")
+
+            if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
+                # If we have significant discrepancies between clients, we MUST NOT skip,
+                # even if individual deltas are small (e.g. from DB pre-update).
                 if significant_diff:
-                    logger.debug(f"[{abs_id}] [{title_snip}] Proceeding due to client discrepancy")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
+                else:
+                    for s in small_changes:
+                        logger.info(s)
+                    # No further action for only-small changes
+                    return
 
-                # Small changes (below thresholds) should be noisy-reduced
-                small_changes = []
-                for key, cfg in config.items():
-                    delta = cfg.delta
-                    threshold = cfg.threshold
+            # At this point we have a significant change to act on
+            logger.info(f"🔄 [{abs_id}] [{title_snip}] Change detected")
 
-                    # Debug logging for potential None values
-                    if delta is None or threshold is None:
-                         logger.debug(f"[{title_snip}] {key} delta={delta}, threshold={threshold}")
+            # Status block - show only changed lines
+            status_lines = []
+            for key, cfg in config.items():
+                if cfg.delta > 0:
+                    prev = cfg.previous_pct
+                    curr = cfg.current.get('pct')
+                    label, fmt = cfg.display
+                    status_lines.append(f"📊 {label}: {fmt.format(prev=prev, curr=curr)}")
 
-                    if delta is not None and threshold is not None and 0 < delta < threshold:
-                        label, fmt = cfg.display
-                        delta_str = cfg.value_seconds_formatter(delta) if cfg.value_seconds_formatter else cfg.value_formatter(delta)
-                        small_changes.append(f"✋ [{abs_id}] [{title_snip}] {label} delta {delta_str} (Below threshold)")
+            for line in status_lines:
+                logger.info(line)
 
-                if small_changes and not any(cfg.delta >= cfg.threshold for cfg in config.values()):
-                    # If we have significant discrepancies between clients, we MUST NOT skip,
-                    # even if individual deltas are small (e.g. from DB pre-update).
-                    if significant_diff:
-                        logger.debug(f"[{abs_id}] [{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
-                    else:
-                        for s in small_changes:
-                            logger.info(s)
-                        # No further action for only-small changes
-                        continue
+            # Build vals from config - only include clients that can be leaders
+            vals = {}
+            for k, v in config.items():
+                client = self.sync_clients[k]
+                if client.can_be_leader():
+                    vals[k] = v.current.get('pct')
 
-                # At this point we have a significant change to act on
-                logger.info(f"🔄 [{abs_id}] [{title_snip}] Change detected")
+            # Ensure we have at least one potential leader
+            if not vals:
+                logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
+                return
 
-                # Status block - show only changed lines
-                status_lines = []
-                for key, cfg in config.items():
-                    if cfg.delta > 0:
-                        prev = cfg.previous_pct
-                        curr = cfg.current.get('pct')
-                        label, fmt = cfg.display
-                        status_lines.append(f"📊 {label}: {fmt.format(prev=prev, curr=curr)}")
+            leader = max(vals, key=vals.get)
+            leader_formatter = config[leader].value_formatter
+            leader_pct = vals[leader]
+            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
 
-                for line in status_lines:
-                    logger.info(line)
+            leader_client = self.sync_clients[leader]
+            leader_state = config[leader]
 
-                # Build vals from config - only include clients that can be leaders
-                vals = {}
-                for k, v in config.items():
-                    client = self.sync_clients[k]
-                    if client.can_be_leader():
-                        vals[k] = v.current.get('pct')
+            # Get canonical text from leader
+            txt = leader_client.get_text_from_current_state(book, leader_state)
+            if not txt:
+                logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not get text from leader {leader}")
+                return
 
-                # Ensure we have at least one potential leader
-                if not vals:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
-                    continue
+            # Get locator (percentage, xpath, etc) from text
+            epub = book.ebook_filename
+            locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+            if not locator:
+                # Try fallback if enabled (e.g. look at previous segment)
+                if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
+                    fallback_txt = leader_client.get_fallback_text(book, leader_state)
+                    if fallback_txt and fallback_txt != txt:
+                        logger.info(f"🔄 [{abs_id}] [{title_snip}] Primary text match failed. Trying previous segment fallback...")
+                        locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
 
-                leader = max(vals, key=vals.get)
-                leader_formatter = config[leader].value_formatter
-                leader_pct = vals[leader]
-                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
+            if not locator:
+                logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No match found in EPUB for leader's current position.")
+                return
 
-                leader_client = self.sync_clients[leader]
-                leader_state = config[leader]
+            # Success! Update all other clients
+            logger.info(f"📍 [{abs_id}] [{title_snip}] Canonical position found: {locator.percentage:.1%} (XPath: {locator.xpath})")
 
-                # Get canonical text from leader
-                txt = leader_client.get_text_from_current_state(book, leader_state)
-                if not txt:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not get text from leader {leader}")
-                    continue
-
-                # Get locator (percentage, xpath, etc) from text
-                epub = book.ebook_filename
-                locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
-                if not locator:
-                    # Try fallback if enabled (e.g. look at previous segment)
-                    if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
-                        fallback_txt = leader_client.get_fallback_text(book, leader_state)
-                        if fallback_txt and fallback_txt != txt:
-                            logger.info(f"🔄 [{abs_id}] [{title_snip}] Primary text match failed. Trying previous segment fallback...")
-                            locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
-                            if locator:
-                                logger.info(f"✅ [{abs_id}] [{title_snip}] Fallback successful!")
-
-                if not locator:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
-                    locator = LocatorResult(percentage=leader_pct)
-
-                # Update all other clients and store results
-                results: dict[str, SyncResult] = {}
+            update_req = UpdateProgressRequest(
+                locator, 
+                txt, 
+                previous_location=config.get(leader).previous_pct if config.get(leader) else None
+            )
+            
+            # Update all other clients in parallel as well for maximum efficiency
+            with ThreadPoolExecutor(max_workers=len(config)) as executor:
+                sync_futures = {}
                 for client_name, client in self.sync_clients.items():
+                    # Skip the leader
                     if client_name == leader:
                         continue
-
-                    # Skip ABS update if in ebook-only mode
-                    if client_name == 'ABS' and hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
+                    
+                    # Skip clients that don't support this sync type
+                    if sync_type not in client.get_supported_sync_types():
                         continue
+                        
+                    future = executor.submit(client.update_progress, book, update_req)
+                    sync_futures[future] = client_name
+                    
+                for future in as_completed(sync_futures):
+                    client_name = sync_futures[future]
                     try:
-                        request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
-                        result = client.update_progress(book, request)
-                        results[client_name] = result
+                        res = future.result()
+                        if res.success:
+                            # Use updated_state if provided, otherwise fall back to basic state
+                            state_data = res.updated_state if res.updated_state else {
+                                'pct': res.location,
+                                'ts': time.time(),
+                                'xpath': locator.xpath if locator else None
+                            }
+                            
+                            current_time = time.time()
+                            
+                            # Using save_state which handles both insert and update
+                            client_state_model = State(
+                                abs_id=abs_id,
+                                client_name=client_name.lower(),
+                                last_updated=current_time,
+                                percentage=state_data.get('pct'),
+                                timestamp=state_data.get('ts'),
+                                xpath=state_data.get('xpath'),
+                                cfi=state_data.get('cfi')
+                            )
+                            self.database_service.save_state(client_state_model)
+                            logger.info(f"✅ [{abs_id}] [{title_snip}] {client_name} updated.")
+                        else:
+                            logger.warning(f"❌ [{abs_id}] [{title_snip}] {client_name} update failed.")
                     except Exception as e:
-                        logger.error(f"⚠️ Failed to update {client_name}: {e}")
-                        results[client_name] = SyncResult(None, False)
+                        logger.error(f"⚠️ [{abs_id}] [{title_snip}] {client_name} update error: {e}")
 
-                # Save states directly to database service using State models
-                current_time = time.time()
+            # Also update leader state in DB to finalize cycle
+            leader_state_model = State(
+                abs_id=abs_id,
+                client_name=leader.lower(),
+                last_updated=time.time(),
+                percentage=leader_pct,
+                timestamp=leader_state.current.get('ts'),
+                xpath=leader_state.current.get('xpath'),
+                cfi=leader_state.current.get('cfi')
+            )
+            self.database_service.save_state(leader_state_model)
+            logger.info(f"💾 [{abs_id}] [{title_snip}] States saved to database")
 
-                # Save leader state
-                leader_state_data = leader_state.current
+        except Exception as e:
+            logger.error(f"Error syncing single book {abs_id}: {e}")
+            logger.error(traceback.format_exc())
 
-                leader_state_model = State(
-                    abs_id=book.abs_id,
-                    client_name=leader.lower(),
-                    last_updated=current_time,
-                    percentage=leader_state_data.get('pct'),
-                    timestamp=leader_state_data.get('ts'),
-                    xpath=leader_state_data.get('xpath'),
-                    cfi=leader_state_data.get('cfi')
-                )
-                self.database_service.save_state(leader_state_model)
-
-                # Save sync results from other clients
-                for client_name, result in results.items():
-                    if result.success:
-                        # Use updated_state if provided, otherwise fall back to basic state
-                        state_data = result.updated_state if result.updated_state else {'pct': result.location}
-                        logger.info(f"[{abs_id}] [{title_snip}] Updated state data for {client_name}: " + str(state_data))
-                        client_state_model = State(
-                            abs_id=book.abs_id,
-                            client_name=client_name.lower(),
-                            last_updated=current_time,
-                            percentage=state_data.get('pct'),
-                            timestamp=state_data.get('ts'),
-                            xpath=state_data.get('xpath'),
-                            cfi=state_data.get('cfi')
-                        )
-                        self.database_service.save_state(client_state_model)
-
-                logger.info(f"💾 [{abs_id}] [{title_snip}] States saved to database")
-
-                # Debugging crash: Flush logs to ensure we see this before any potential hard crash
-                for handler in logger.handlers:
-                    handler.flush()
-                if hasattr(root_logger, 'handlers'):
-                    for handler in root_logger.handlers:
-                        handler.flush()
-
-            except Exception as e:
-                logger.error(traceback.format_exc())
-                logger.error(f"Sync error: {e}")
+        logger.debug(f"End of sync cycle for book {abs_id}")
 
         logger.debug(f"End of sync cycle for active books")
 

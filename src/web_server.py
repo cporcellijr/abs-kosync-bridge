@@ -417,29 +417,30 @@ def monitor_readaloud_files():
 
 def sync_daemon():
     """Background sync daemon running in a separate thread."""
+    def run_threaded(job_func, *args, **kwargs):
+        job_thread = threading.Thread(target=job_func, args=args, kwargs=kwargs)
+        job_thread.daemon = True
+        job_thread.start()
+
     try:
         # Setup schedule for sync operations
         # Use the global SYNC_PERIOD_MINS which is validated
-        schedule.every(int(SYNC_PERIOD_MINS)).minutes.do(manager.sync_cycle)
-        schedule.every(1).minutes.do(manager.check_pending_jobs)
+        schedule.every(int(SYNC_PERIOD_MINS)).minutes.do(run_threaded, manager.sync_cycle)
+        schedule.every(1).minutes.do(run_threaded, manager.check_pending_jobs)
 
         logger.info(f"🔄 Sync daemon started (period: {SYNC_PERIOD_MINS} minutes)")
 
-        # Run initial sync cycle
-        try:
-            manager.sync_cycle()
-        except Exception as e:
-            logger.error(f"Initial sync cycle failed: {e}")
+        # Run initial sync cycle in background immediately
+        run_threaded(manager.sync_cycle)
 
         # Main daemon loop
         while True:
             try:
-                # logger.debug("Running pending schedule jobs...")
                 schedule.run_pending()
-                time.sleep(30)  # Check every 30 seconds
+                time.sleep(10)  # Check more frequently for pending jobs
             except Exception as e:
-                logger.error(f"Sync daemon error: {e}")
-                time.sleep(60)  # Wait longer on error
+                logger.error(f"Sync daemon loop error: {e}")
+                time.sleep(60) 
 
     except Exception as e:
         logger.error(f"Sync daemon crashed: {e}")
@@ -608,7 +609,10 @@ def settings():
         'BOOKLORE_ENABLED': 'false',
         'HARDCOVER_ENABLED': 'false',
         'TELEGRAM_ENABLED': 'false',
-        'SUGGESTIONS_ENABLED': 'true'
+        'SUGGESTIONS_ENABLED': 'true',
+        'STORYGRAPH_ENABLED': 'false',
+        'STORYGRAPH_EMAIL': '',
+        'STORYGRAPH_PASSWORD': ''
     }
 
     if request.method == 'POST':
@@ -621,7 +625,8 @@ def settings():
             'BOOKLORE_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
-            'SUGGESTIONS_ENABLED'
+            'SUGGESTIONS_ENABLED',
+            'STORYGRAPH_ENABLED'
         ]
 
         # Current settings in DB
@@ -728,12 +733,16 @@ def index():
     all_hardcover = database_service.get_all_hardcover_details()
     hardcover_by_book = {h.abs_id: h for h in all_hardcover}
 
+    # [OPTIMIZATION] Fetch all storygraph details at once
+    all_storygraph = database_service.get_all_storygraph_details()
+    storygraph_by_book = {s.abs_id: s for s in all_storygraph}
+
     integrations = {}
 
     # Dynamically check all configured sync clients
     sync_clients = container.sync_clients()
     for client_name, client in sync_clients.items():
-        if client.is_configured():
+        if client and client.is_configured():
             integrations[client_name.lower()] = True
         else:
             integrations[client_name.lower()] = False
@@ -817,6 +826,27 @@ def index():
                 'matched_by': None,
                 'hardcover_linked': False,
                 'hardcover_title': None
+            })
+
+        # Add StoryGraph details
+        sg_details = storygraph_by_book.get(book.abs_id)
+        if sg_details:
+            mapping.update({
+                'storygraph_id': sg_details.storygraph_id,
+                'storygraph_title': sg_details.storygraph_title,
+                'storygraph_author': sg_details.storygraph_author,
+                'storygraph_pages': sg_details.storygraph_pages,
+                'storygraph_url': sg_details.storygraph_url,
+                'sg_matched_by': sg_details.matched_by
+            })
+        else:
+            mapping.update({
+                'storygraph_id': None,
+                'storygraph_title': None,
+                'storygraph_author': None,
+                'storygraph_pages': None,
+                'storygraph_url': None,
+                'sg_matched_by': None
             })
 
         # Platform deep links for dashboard
@@ -1170,6 +1200,35 @@ def clear_progress(abs_id):
     return redirect(url_for('index'))
 
 
+def clear_storygraph_cache():
+    """Clear StoryGraph 'not_found' entries to force re-search."""
+    try:
+        all_entries = database_service.get_all_storygraph_details()
+        cleared = 0
+        for entry in all_entries:
+            if entry.matched_by == 'not_found':
+                database_service.delete_storygraph_details(entry.abs_id)
+                cleared += 1
+        logger.info(f"🗑️ Cleared {cleared} StoryGraph 'not_found' entries")
+        return jsonify({'success': True, 'cleared': cleared})
+    except Exception as e:
+        logger.error(f"Failed to clear StoryGraph cache: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def trigger_manual_sync():
+    """Manually trigger a sync cycle."""
+    try:
+        logger.info("⚡ Manually triggering sync cycle...")
+        # Run in a separate thread to avoid blocking the web response
+        thread = threading.Thread(target=manager.sync_cycle)
+        thread.start()
+        return jsonify({'success': True, 'message': 'Sync cycle triggered in background'})
+    except Exception as e:
+        logger.error(f"Failed to trigger sync: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def link_hardcover(abs_id):
     from flask import flash
     url = request.form.get('hardcover_url', '').strip()
@@ -1209,6 +1268,63 @@ def link_hardcover(abs_id):
         flash("❌ Database update failed", "error")
 
     return redirect(url_for('index'))
+
+
+def link_storygraph(abs_id):
+    from flask import flash
+    query = request.form.get('storygraph_url', '').strip()
+    if not query:
+        return redirect(url_for('index'))
+
+    # Resolve book
+    client = container.storygraph_client()
+    if not client:
+        flash("❌ StoryGraph client not initialized", "error")
+        return redirect(url_for('index'))
+        
+    book_data = client.resolve_book_from_input(query)
+    if not book_data:
+        flash(f"❌ Could not find/match book for: {query}", "error")
+        return redirect(url_for('index'))
+
+    # Create or update StoryGraph details using database service
+    from src.db.models import StoryGraphDetails
+
+    try:
+        details = StoryGraphDetails(
+            abs_id=abs_id,
+            storygraph_id=book_data['book_id'],
+            storygraph_title=book_data.get('title'),
+            storygraph_author=book_data.get('author'),
+            storygraph_pages=book_data.get('pages', 0),
+            storygraph_url=book_data.get('url'),
+            matched_by='manual'
+        )
+
+        database_service.save_storygraph_details(details)
+        flash(f"✅ Linked StoryGraph: {book_data.get('title')}", "success")
+    except Exception as e:
+        logger.error(f"Failed to save StoryGraph details: {e}")
+        flash("❌ Database update failed", "error")
+
+    return redirect(url_for('index'))
+
+
+def debug_logs():
+    """Debug route to view unified app logs."""
+    try:
+        from src.utils.logging_utils import LOG_PATH
+        if not LOG_PATH or not Path(LOG_PATH).exists():
+            return "Log file not found", 404
+            
+        lines = int(request.args.get('lines', 200))
+        with open(LOG_PATH, 'r', encoding='utf-8', errors='replace') as f:
+            all_lines = f.readlines()
+            log_content = "".join(all_lines[-lines:])
+            
+        return f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{log_content}</pre>"
+    except Exception as e:
+        return str(e), 500
 
 
 def update_hash(abs_id):
@@ -1626,7 +1742,10 @@ def create_app(test_container=None):
     app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
     app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
     app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
+    app.add_url_rule('/clear-storygraph-cache', 'clear_storygraph_cache', clear_storygraph_cache, methods=['POST'])
+    app.add_url_rule('/trigger-sync', 'trigger_manual_sync', trigger_manual_sync, methods=['POST'])
     app.add_url_rule('/link-hardcover/<abs_id>', 'link_hardcover', link_hardcover, methods=['POST'])
+    app.add_url_rule('/link-storygraph/<abs_id>', 'link_storygraph', link_storygraph, methods=['POST'])
     app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
     app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
     app.add_url_rule('/api/status', 'api_status', api_status)

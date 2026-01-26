@@ -69,6 +69,7 @@ class Book(Base):
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="book", cascade="all, delete-orphan")
     hardcover_details = relationship("HardcoverDetails", back_populates="book", cascade="all, delete-orphan", uselist=False)
+    storygraph_details = relationship("StoryGraphDetails", back_populates="book", cascade="all, delete-orphan", uselist=False)
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
                  kosync_doc_id: str = None, transcript_file: str = None,
@@ -119,6 +120,32 @@ class HardcoverDetails(Base):
     def __repr__(self):
         return f"<HardcoverDetails(abs_id='{self.abs_id}', hardcover_book_id='{self.hardcover_book_id}')>"
 
+
+
+class StoryGraphDetails(Base):
+    """StoryGraph book matching information."""
+    __tablename__ = 'storygraph_details'
+
+    abs_id = Column(String(255), ForeignKey('books.abs_id', ondelete='CASCADE'), primary_key=True)
+    storygraph_id = Column(String(255))
+    storygraph_title = Column(String(500))
+    storygraph_author = Column(String(500))
+    storygraph_pages = Column(Integer)
+    storygraph_url = Column(String(500))
+    matched_by = Column(String(50))  # 'title_author', 'manual', 'not_found'
+
+    book = relationship("Book", back_populates="storygraph_details")
+
+    def __init__(self, abs_id: str, storygraph_id: str = None, storygraph_title: str = None,
+                 storygraph_author: str = None, storygraph_pages: int = None,
+                 storygraph_url: str = None, matched_by: str = None):
+        self.abs_id = abs_id
+        self.storygraph_id = storygraph_id
+        self.storygraph_title = storygraph_title
+        self.storygraph_author = storygraph_author
+        self.storygraph_pages = storygraph_pages
+        self.storygraph_url = storygraph_url
+        self.matched_by = matched_by
 
 class State(Base):
     """

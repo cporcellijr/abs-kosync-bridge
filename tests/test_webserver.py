@@ -24,6 +24,10 @@ class MockContainer:
         self.mock_storyteller_client = Mock()
         self.mock_database_service = Mock()
         self.mock_database_service.get_all_settings.return_value = {}  # Default empty settings
+        self.mock_database_service.get_all_states.return_value = []
+        self.mock_database_service.get_all_pending_suggestions.return_value = []
+        self.mock_database_service.get_all_hardcover_details.return_value = []
+        self.mock_database_service.get_all_storygraph_details.return_value = []
         self.mock_ebook_parser = Mock()
         self.mock_sync_clients = Mock()
 

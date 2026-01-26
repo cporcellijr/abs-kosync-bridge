@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, Base
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, StoryGraphDetails, Setting, KosyncDocument, PendingSuggestion, Base
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -573,6 +573,52 @@ class DatabaseService:
             return False
 
 
+
+    def get_storygraph_details(self, abs_id: str) -> Optional[StoryGraphDetails]:
+        """Get StoryGraph details by ABS ID."""
+        with self.get_session() as session:
+            details = session.query(StoryGraphDetails).filter(StoryGraphDetails.abs_id == abs_id).first()
+            if details:
+                session.expunge(details)
+            return details
+
+    def save_storygraph_details(self, details: StoryGraphDetails) -> StoryGraphDetails:
+        """Save StoryGraph details."""
+        with self.get_session() as session:
+            existing = session.query(StoryGraphDetails).filter(StoryGraphDetails.abs_id == details.abs_id).first()
+            if existing:
+                for attr in ['storygraph_id', 'storygraph_title', 'storygraph_author', 'storygraph_pages', 'storygraph_url', 'matched_by']:
+                    if hasattr(details, attr):
+                        setattr(existing, attr, getattr(details, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                session.add(details)
+                session.flush()
+                session.refresh(details)
+                session.expunge(details)
+                return details
+
+    def get_all_storygraph_details(self) -> List[StoryGraphDetails]:
+        """Get all StoryGraph details."""
+        with self.get_session() as session:
+            all_details = session.query(StoryGraphDetails).all()
+            for details in all_details:
+                session.expunge(details)
+            return all_details
+
+    def delete_storygraph_details(self, abs_id: str) -> bool:
+        """Delete StoryGraph details for a book."""
+        with self.get_session() as session:
+            details = session.query(StoryGraphDetails).filter(StoryGraphDetails.abs_id == abs_id).first()
+            if details:
+                session.delete(details)
+                return True
+            return False
+
+
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
 
@@ -734,3 +780,11 @@ class DatabaseMigrator:
 
 
 
+
+
+        with self.get_session() as session:
+            details = session.query(StoryGraphDetails).filter(StoryGraphDetails.abs_id == abs_id).first()
+            if details:
+                session.delete(details)
+                return True
+            return False
