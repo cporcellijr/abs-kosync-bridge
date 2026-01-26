@@ -2,18 +2,13 @@
 """
 Ebook Utilities for abs-kosync-bridge
 
-ULTIMATE HYBRID VERSION:
-- [Engine A] BeautifulSoup: For fuzzy matching, Storyteller/Readium support, and rich locators.
-- [Engine B] LXML: For "Perfect" KOReader sync (precise /text().OFFSET handling).
-- Robustness: Prefers ID anchors when available, falls back to positional indexing.
-- Complete Storyteller/Readium locator support with href + #id resolution.
 """
 from typing import Optional
 
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, Tag
-from lxml import html  # Engine B: LXML for precise sync
+from lxml import html
 import hashlib
 import logging
 import os
@@ -174,7 +169,7 @@ class EbookParser:
     def extract_text_and_map(self, filepath, progress_callback=None):
         """
         Used for fuzzy matching and general content extraction.
-        Uses BeautifulSoup (Engine A).
+        Uses BeautifulSoup.
         """
         filepath = Path(filepath)
         if not filepath.exists():
@@ -261,7 +256,7 @@ class EbookParser:
             return None
 
     # =========================================================================
-    # [ENGINE A] STORYTELLER / READIUM / GENERAL UTILS
+    # STORYTELLER / READIUM / GENERAL UTILS
     # Uses BeautifulSoup for broad compatibility
     # =========================================================================
 
@@ -502,7 +497,7 @@ class EbookParser:
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
     # =========================================================================
-    # [ENGINE B] KOREADER PERFECT SYNC
+    # KOREADER PERFECT SYNC
     # Uses LXML and "Hybrid" Logic (ID + Text Offset)
     # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
     # =========================================================================
@@ -631,7 +626,7 @@ class EbookParser:
 
     def resolve_xpath(self, filename, xpath_str):
         """
-        HYBRID RESOLVER:
+        RESOLVER:
         Uses LXML to handle KOReader's /text().123 format accurately.
         Includes WHITESPACE STRIPPING to align with get_xpath_and_percentage.
         """

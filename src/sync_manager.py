@@ -44,7 +44,7 @@ class SyncManager:
                  data_dir=None,
                  books_dir=None):
 
-        logger.info("=== Sync Manager Starting (Release 6.0 - Precision XPath with DI) ===")
+        logger.info("=== Sync Manager Starting ===")
         # Use dependency injection
         self.abs_client = abs_client
         self.booklore_client = booklore_client
@@ -73,7 +73,7 @@ class SyncManager:
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
-        # [NEW] Scan for corrupted transcripts
+        # Scan for corrupted transcripts
         self.scan_and_fix_legacy_transcripts()
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
@@ -252,7 +252,7 @@ class SyncManager:
 
         return None
 
-    # [NEW] Suggestion Logic
+    # Suggestion Logic
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
         try:
@@ -575,7 +575,7 @@ class SyncManager:
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
                 
-        # [NEW] Refresh Booklore cache in background
+        # Refresh Booklore cache in background
         if self.booklore_client and self.booklore_client.is_configured():
             # This triggers a refresh if needed (older than 1h), or can be forced if desired
             # Pass allow_refresh=True (default) implicitly by just checking cache
@@ -613,7 +613,7 @@ class SyncManager:
                     bulk_states_per_client[client_name] = bulk_data
                     logger.debug(f"📊 Pre-fetched bulk state for {client_name}")
             
-            # [NEW] Check for suggestions
+            # Check for suggestions
             if 'ABS' in bulk_states_per_client:
                 self.check_for_suggestions(bulk_states_per_client['ABS'], active_books)
                 
@@ -658,10 +658,7 @@ class SyncManager:
                         logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
                         continue  # ABS offline
 
-                # Check if all 'delta' fields in config are zero
-                # We typically skip if nothing changed, BUT if there is a significant discrepancy
-                # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
-                deltas_zero = all(round(cfg.delta, 2) == 0 for cfg in config.values())
+
 
                 # Check for sync delta threshold between clients
                 progress_values = [cfg.current.get('pct', 0) for cfg in config.values() if cfg.current.get('pct') is not None]

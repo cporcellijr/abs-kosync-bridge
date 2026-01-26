@@ -35,15 +35,12 @@ def setup_dependencies(app, test_container=None):
     """
     global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR, hash_cache
 
-    # 1. Initialize Database Service FIRST (needed to load settings)
-    # We use a temporary DATA_DIR for this initial connection, usually defaults to /data
-    # If the user changed DATA_DIR in settings, we might need a two-stage init, but
-    # for now we assume the DB location itself doesn't move dynamically based on DB settings
-    # (chicken and egg).
+    # Initialize Database Service
     from src.db.migration_utils import initialize_database
     database_service = initialize_database(os.environ.get("DATA_DIR", "/data"))
 
-    # 2. LOAD SETTINGS FROM DB (Priority Level 1)
+    # Load settings from DB
+
     # This updates os.environ with values from the database
     if database_service:
         ConfigLoader.load_settings(database_service)
@@ -83,10 +80,6 @@ def setup_dependencies(app, test_container=None):
     SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
-
-    # DEBUG: Log all critical env vars to debug priority issues
-    logger.debug(f"DEBUG ENV VARS: ABS_SERVER={os.environ.get('ABS_SERVER')}, ABS_KEY={'*' * 5 if os.environ.get('ABS_KEY') else 'None'}")
-
 
     if test_container is not None:
         # Use injected test container
@@ -583,7 +576,7 @@ def restart_server():
     sys.exit(0)
 
 def settings():
-    # Priority Level 3: Application Defaults
+    # Application Defaults
     DEFAULTS = {
         'TZ': 'America/New_York',
         'LOG_LEVEL': 'INFO',
@@ -718,7 +711,7 @@ def index():
     # Load books from database service
     books = database_service.get_all_books()
     
-    # [OPTIMIZATION] Fetch all states at once to avoid N+1 queries with NullPool
+    # Fetch all states at once to avoid N+1 queries with NullPool
     all_states = database_service.get_all_states()
     states_by_book = {}
     for state in all_states:
@@ -726,7 +719,7 @@ def index():
             states_by_book[state.abs_id] = []
         states_by_book[state.abs_id].append(state)
 
-    # [NEW] Fetch pending suggestions
+    # Fetch pending suggestions
     suggestions = database_service.get_all_pending_suggestions()
     
     # [OPTIMIZATION] Fetch all hardcover details at once
@@ -828,7 +821,6 @@ def index():
         mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
 
         # Booklore deep link (if configured and book found)
-        # Optimization: BookloreClient.find_book_by_filename called with allow_refresh=False to prevent UI blocking
         if manager.booklore_client.is_configured():
             bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
         else:
@@ -1133,11 +1125,6 @@ def delete_mapping(abs_id):
         collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
         try:
             container.abs_client().remove_from_collection(abs_id, collection_name)
-            # Log is handled inside the method, but user asked for log here?
-            # User instruction: "logger.info(f'📚 Removed from ABS collection: {collection_name}')"
-            # My implementation of remove_from_collection DOES log info.
-            # But I will follow the snippets and keep the try/except block structure,
-            # trusting the method to log or logging here if requested.
         except Exception as e:
             logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
 
@@ -1388,7 +1375,6 @@ def api_logs():
         all_lines = []
 
         # Read current log file
-        # Read current log file
         if LOG_PATH and LOG_PATH.exists():
             with open(LOG_PATH, 'r', encoding='utf-8') as f:
                 all_lines.extend(f.readlines())
@@ -1544,7 +1530,6 @@ def view_log():
     """Legacy endpoint - redirect to new logs page."""
     return redirect(url_for('logs_view'))
 
-# Note: KoSync endpoints moved to src/api/kosync_server.py Blueprint
 
 # ---------------- SUGGESTION API ROUTES ----------------
 def get_suggestions():
