@@ -43,6 +43,7 @@ def setup_dependencies(app, test_container=None):
 
     # This updates os.environ with values from the database
     if database_service:
+        ConfigLoader.bootstrap_config(database_service)
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
 
@@ -634,7 +635,9 @@ def settings():
             'BOOKLORE_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
-            'SUGGESTIONS_ENABLED'
+            'TELEGRAM_ENABLED',
+            'SUGGESTIONS_ENABLED',
+            'ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID'
         ]
 
         # Current settings in DB

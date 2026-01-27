@@ -489,6 +489,11 @@
                             value="{{ get_val('ABS_PROGRESS_OFFSET_SECONDS') }}">
                         <div class="help-text">Rewind progress sent to ABS (e.g. -60)</div>
                     </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="abs_only_lib" name="ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID" {% if
+                            get_bool('ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID') %}checked{% endif %}>
+                        <label for="abs_only_lib">Limit Search to Configured Library</label>
+                    </div>
                 </div>
             </div>
 
@@ -783,6 +788,74 @@
                         <input type="checkbox" id="abs_ebook" name="SYNC_ABS_EBOOK" {% if get_bool('SYNC_ABS_EBOOK')
                             %}checked{% endif %}>
                         <label for="abs_ebook">Enable ABS Ebook Sync (Bi-directional)</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Paths -->
+            <div class="settings-section">
+                <div class="section-header">
+                    <h3>System Paths</h3>
+                </div>
+                <div class="section-body">
+                    <div class="form-group">
+                        <label>Data Directory</label>
+                        <input type="text" name="DATA_DIR" value="{{ get_val('DATA_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Books Directory</label>
+                        <input type="text" name="BOOKS_DIR" value="{{ get_val('BOOKS_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Linker Books</label>
+                        <input type="text" name="LINKER_BOOKS_DIR" value="{{ get_val('LINKER_BOOKS_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Processing Dir</label>
+                        <input type="text" name="PROCESSING_DIR" value="{{ get_val('PROCESSING_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Ingest Dir</label>
+                        <input type="text" name="STORYTELLER_INGEST_DIR"
+                            value="{{ get_val('STORYTELLER_INGEST_DIR') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Audiobooks Dir</label>
+                        <input type="text" name="AUDIOBOOKS_DIR" value="{{ get_val('AUDIOBOOKS_DIR') }}">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced -->
+            <div class="settings-section">
+                <div class="section-header">
+                    <h3>Advanced Options</h3>
+                </div>
+                <div class="section-body">
+                    <div class="form-group">
+                        <label>Ebook Cache Size</label>
+                        <input type="number" name="EBOOK_CACHE_SIZE" value="{{ get_val('EBOOK_CACHE_SIZE') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Whisper Model</label>
+                        <input type="text" name="WHISPER_MODEL" value="{{ get_val('WHISPER_MODEL') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Job Max Retries</label>
+                        <input type="number" name="JOB_MAX_RETRIES" value="{{ get_val('JOB_MAX_RETRIES') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Job Retry Delay (Mins)</label>
+                        <input type="number" name="JOB_RETRY_DELAY_MINS" value="{{ get_val('JOB_RETRY_DELAY_MINS') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Monitor Interval (Sec)</label>
+                        <input type="number" name="MONITOR_INTERVAL" value="{{ get_val('MONITOR_INTERVAL') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Fuzzy Match Threshold</label>
+                        <input type="number" step="0.1" name="FUZZY_MATCH_THRESHOLD"
+                            value="{{ get_val('FUZZY_MATCH_THRESHOLD') }}">
                     </div>
                 </div>
             </div>
