@@ -143,8 +143,9 @@ class TestSuggestionsFeature(unittest.TestCase):
                 'ebook_filename': 'test.epub'
             })
 
-            # Verify dismiss was called
-            self.mock_container.mock_database_service.dismiss_suggestion.assert_called_with('abc-123')
+            # Verify dismiss was called for both abs_id AND kosync_doc_id
+            self.mock_container.mock_database_service.dismiss_suggestion.assert_any_call('abc-123')
+            self.mock_container.mock_database_service.dismiss_suggestion.assert_any_call('test-kosync-id')
             
         finally:
             src.web_server.get_kosync_id_for_ebook = original_get_kosync
