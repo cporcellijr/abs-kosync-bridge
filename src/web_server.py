@@ -520,46 +520,59 @@ class EbookResult:
 
 
 def get_searchable_ebooks(search_term):
-    """Get ebooks from Booklore API if available, otherwise filesystem.
+    """Get ebooks from Booklore API and filesystem.
     Returns list of EbookResult objects for consistent interface."""
+    
+    results = []
+    found_filenames = set()
 
     # Try Booklore first if configured
     if container.booklore_client().is_configured():
         try:
             books = container.booklore_client().search_books(search_term)
             if books:
-                return [
-                    EbookResult(
-                        name=b.get('fileName', ''),
-                        title=b.get('title'),
-                        subtitle=b.get('subtitle'),
-                        authors=b.get('authors'),
-                        booklore_id=b.get('id')
-                    )
-                    for b in books if b.get('fileName', '').lower().endswith('.epub')
-                ]
+                for b in books:
+                    fname = b.get('fileName', '')
+                    if fname.lower().endswith('.epub'):
+                        found_filenames.add(fname)
+                        results.append(EbookResult(
+                            name=fname,
+                            title=b.get('title'),
+                            subtitle=b.get('subtitle'),
+                            authors=b.get('authors'),
+                            booklore_id=b.get('id')
+                        ))
         except Exception as e:
-            logger.warning(f"Booklore search failed, falling back to filesystem: {e}")
+            logger.warning(f"Booklore search failed: {e}")
 
-    # Fallback to filesystem
-    if not EBOOK_DIR.exists():
-        if not container.booklore_client().is_configured():
-            logger.warning(
-                "No ebooks available: Neither Booklore integration nor /books volume is configured. "
-                "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
-                "or mount the ebooks directory to /books."
-            )
-        return []
+    # Search filesystem
+    if EBOOK_DIR.exists():
+        try:
+            all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
+            if not search_term:
+                # If no search term, list all (filtering done below)
+                pass 
+            
+            # Combine logic: if search_term, filter. always check duplicates
+            for eb in all_epubs:
+                 if eb.name in found_filenames:
+                     continue
+                 
+                 if not search_term or search_term.lower() in eb.name.lower():
+                     results.append(EbookResult(name=eb.name, path=eb))
 
-    all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
-    if not search_term:
-        return [EbookResult(name=eb.name, path=eb) for eb in all_epubs]
+        except Exception as e:
+            logger.warning(f"Filesystem search failed: {e}")
+            
+    # Check if we have no sources at all
+    if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
+        logger.warning(
+            "No ebooks available: Neither Booklore integration nor /books volume is configured. "
+            "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "or mount the ebooks directory to /books."
+        )
 
-    return [
-        EbookResult(name=eb.name, path=eb)
-        for eb in all_epubs
-        if search_term.lower() in eb.name.lower()
-    ]
+    return results
 
 
 
@@ -608,7 +621,7 @@ def settings():
         'BOOKLORE_ENABLED': 'false',
         'HARDCOVER_ENABLED': 'false',
         'TELEGRAM_ENABLED': 'false',
-        'SUGGESTIONS_ENABLED': 'true'
+        'SUGGESTIONS_ENABLED': 'false'
     }
 
     if request.method == 'POST':
@@ -722,7 +735,15 @@ def index():
         states_by_book[state.abs_id].append(state)
 
     # Fetch pending suggestions
-    suggestions = database_service.get_all_pending_suggestions()
+    suggestions_raw = database_service.get_all_pending_suggestions()
+    
+    # Filter suggestions: Hide those with 0 matches
+    suggestions = []
+    
+    for s in suggestions_raw:
+        if len(s.matches) == 0:
+            continue
+        suggestions.append(s)
     
     # [OPTIMIZATION] Fetch all hardcover details at once
     all_hardcover = database_service.get_all_hardcover_details()

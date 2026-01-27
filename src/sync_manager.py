@@ -300,18 +300,22 @@ class SyncManager:
             
             matches = []
             
+            found_filenames = set()
+            
             # 2a. Search Booklore
             if self.booklore_client and self.booklore_client.is_configured():
                 try:
                     bl_results = self.booklore_client.search_books(title)
                     for b in bl_results:
                          # Filter for EPUBs
-                         if b.get('fileName', '').lower().endswith('.epub'):
+                         fname = b.get('fileName', '')
+                         if fname.lower().endswith('.epub'):
+                             found_filenames.add(fname)
                              matches.append({
                                  "source": "booklore",
                                  "title": b.get('title'),
                                  "author": b.get('authors'),
-                                 "filename": b.get('fileName'), # Important for auto-linking
+                                 "filename": fname, # Important for auto-linking
                                  "id": str(b.get('id')),
                                  "confidence": "high" if title.lower() in b.get('title', '').lower() else "medium"
                              })
@@ -323,6 +327,8 @@ class SyncManager:
                 try:
                     clean_title = title.lower()
                     for epub in self.books_dir.rglob("*.epub"):
+                         if epub.name in found_filenames:
+                             continue
                          if clean_title in epub.name.lower():
                              matches.append({
                                  "source": "filesystem",
@@ -334,6 +340,10 @@ class SyncManager:
                     logger.warning(f"Filesystem search failed during suggestion: {e}")
             
             # 3. Save to DB
+            if not matches:
+                logger.debug(f"ℹ️ No matches found for '{title}', skipping suggestion creation.")
+                return
+
             suggestion = PendingSuggestion(
                 source_id=abs_id,
                 title=title,
@@ -655,11 +665,17 @@ class SyncManager:
                     continue  # No valid states to process
 
                 # Check for ABS offline condition (only for audiobook mode)
+                # Check for ABS offline condition (only for audiobook mode)
                 if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
                     abs_state = config.get('ABS')
                     if abs_state is None:
-                        logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
-                        continue  # ABS offline
+                        # Fallback logic: If ABS is missing but we have ebook clients, try to sync them as ebook-only
+                        ebook_clients_active = [k for k in config.keys() if k != 'ABS']
+                        if ebook_clients_active:
+                             logger.info(f"[{abs_id}] [{title_snip}] ABS audiobook not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
+                        else:
+                             logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline and no other clients, skipping")
+                             continue  # ABS offline and no fallback possible
 
 
 
