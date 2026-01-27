@@ -266,6 +266,8 @@ def kosync_put_progress():
                                 audiobooks = _container.abs_client().get_all_audiobooks()
                                 search_term = title
                                 
+                                logger.debug(f"Auto-discovery: Searching for audiobook matching '{search_term}' in {len(audiobooks)} audiobooks")
+                                
                                 for ab in audiobooks:
                                     media = ab.get('media', {})
                                     metadata = media.get('metadata', {})

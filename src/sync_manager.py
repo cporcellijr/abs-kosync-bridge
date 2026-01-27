@@ -255,16 +255,22 @@ class SyncManager:
     # Suggestion Logic
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
-        if os.environ.get("SUGGESTIONS_ENABLED", "true").lower() != "true":
+        suggestions_enabled_val = os.environ.get("SUGGESTIONS_ENABLED", "true")
+        logger.debug(f"DEBUG: SUGGESTIONS_ENABLED env var is: '{suggestions_enabled_val}'")
+        
+        if suggestions_enabled_val.lower() != "true":
             return
 
         try:
             # optimization: get all mapped IDs to avoid suggesting existing books (even if inactive)
             all_books = self.database_service.get_all_books()
             mapped_ids = {b.abs_id for b in all_books}
+            
+            logger.debug(f"Checking for suggestions: {len(abs_progress_map)} books with progress, {len(mapped_ids)} already mapped")
 
             for abs_id, item_data in abs_progress_map.items():
                 if abs_id in mapped_ids:
+                    logger.debug(f"Skipping {abs_id}: already mapped")
                     continue
 
                 duration = item_data.get('duration', 0)
@@ -275,9 +281,15 @@ class SyncManager:
                     if pct > 0.01:
                         # Check existing pending suggestion
                         if self.database_service.get_pending_suggestion(abs_id):
+                            logger.debug(f"Skipping {abs_id}: suggestion already exists")
                             continue
-                            
+                        
+                        logger.debug(f"Creating suggestion for {abs_id} (progress: {pct:.1%})")    
                         self._create_suggestion(abs_id, item_data)
+                    else:
+                        logger.debug(f"Skipping {abs_id}: progress {pct:.1%} below 1% threshold")
+                else:
+                    logger.debug(f"Skipping {abs_id}: no duration")
         except Exception as e:
             logger.error(f"Error checking suggestions: {e}")
 
@@ -289,6 +301,7 @@ class SyncManager:
             # 1. Get Details from ABS
             item = self.abs_client.get_item_details(abs_id)
             if not item:
+                logger.debug(f"Suggestion failed: Could not get details for {abs_id}")
                 return
 
             media = item.get('media', {})
@@ -298,6 +311,8 @@ class SyncManager:
             # Use local proxy for cover image to ensure accessibility
             cover = f"/api/cover-proxy/{abs_id}"
             
+            logger.debug(f"Checking suggestions for '{title}' (Author: {author})")
+            
             matches = []
             
             found_filenames = set()
@@ -306,6 +321,7 @@ class SyncManager:
             if self.booklore_client and self.booklore_client.is_configured():
                 try:
                     bl_results = self.booklore_client.search_books(title)
+                    logger.debug(f"Booklore returned {len(bl_results)} results for '{title}'")
                     for b in bl_results:
                          # Filter for EPUBs
                          fname = b.get('fileName', '')
@@ -326,16 +342,19 @@ class SyncManager:
             if self.books_dir and self.books_dir.exists():
                 try:
                     clean_title = title.lower()
+                    fs_matches = 0
                     for epub in self.books_dir.rglob("*.epub"):
                          if epub.name in found_filenames:
                              continue
                          if clean_title in epub.name.lower():
+                             fs_matches += 1
                              matches.append({
                                  "source": "filesystem",
                                  "filename": epub.name,
                                  "path": str(epub),
                                  "confidence": "high"
                              })
+                    logger.debug(f"Filesystem found {fs_matches} matches")
                 except Exception as e:
                     logger.warning(f"Filesystem search failed during suggestion: {e}")
             

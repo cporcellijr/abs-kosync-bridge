@@ -23,6 +23,23 @@ from src.utils.logging_utils import sanitize_log_data
 from src.utils.hash_cache import HashCache
 from src.api.kosync_server import kosync_bp, init_kosync_server
 
+def _reconfigure_logging():
+    """Force update of root logger level based on env var."""
+    try:
+            new_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+            new_level = getattr(logging, new_level_str, logging.INFO)
+            
+            root = logging.getLogger()
+            root.setLevel(new_level)
+            
+            # Also update all handlers
+            for handler in root.handlers:
+                handler.setLevel(new_level)
+                
+            logger.info(f"📝 Logging level updated to {new_level_str}")
+    except Exception as e:
+            logger.warning(f"Failed to reconfigure logging: {e}")
+
 # ---------------- APP SETUP ----------------
 
 def setup_dependencies(app, test_container=None):
@@ -46,6 +63,9 @@ def setup_dependencies(app, test_container=None):
         ConfigLoader.bootstrap_config(database_service)
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
+        
+        # Force reconfigure logging level based on new settings
+        _reconfigure_logging()
 
     # RELOAD GLOBALS from updated os.environ
 
@@ -718,9 +738,17 @@ def get_abs_author(ab):
 
 def audiobook_matches_search(ab, search_term):
     """Check if audiobook matches search term (searches title AND author)."""
-    title = manager.get_abs_title(ab).lower()
-    author = get_abs_author(ab).lower()
-    return search_term in title or search_term in author
+    import re
+    
+    # Normalize: remove punctuation
+    def normalize(s):
+        return re.sub(r'[^\w\s]', '', s.lower())
+    
+    title = normalize(manager.get_abs_title(ab))
+    author = normalize(get_abs_author(ab))
+    search_norm = normalize(search_term)
+    
+    return search_norm in title or search_norm in author
 
 # ---------------- ROUTES ----------------
 def index():
@@ -1027,7 +1055,9 @@ def match():
             container.storyteller_client().add_to_collection(ebook_filename)
         
         # Auto-dismiss any pending suggestion for this book
+        # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
         database_service.dismiss_suggestion(abs_id)
+        database_service.dismiss_suggestion(kosync_doc_id)
 
         return redirect(url_for('index'))
 

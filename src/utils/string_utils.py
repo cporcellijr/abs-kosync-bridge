@@ -43,7 +43,7 @@ def calculate_similarity(a: str, b: str) -> float:
 def fuzzy_match_title(query: str, target: str, threshold: float = 0.6) -> bool:
     """
     Check if query title fuzzy matches the target title.
-    Uses word-overlap logic with a strict threshold.
+    Uses word-overlap logic with normalization to handle punctuation differences.
     
     Args:
         query: The search term (e.g. from filename)
@@ -55,17 +55,21 @@ def fuzzy_match_title(query: str, target: str, threshold: float = 0.6) -> bool:
     """
     if not query or not target:
         return False
-        
-    query_lower = query.lower()
-    target_lower = target.lower()
+    
+    # Normalize: lowercase and remove punctuation except spaces
+    def normalize(s):
+        return re.sub(r'[^\w\s]', '', s.lower())
+    
+    query_norm = normalize(query)
+    target_norm = normalize(target)
     
     # Check for title match (fuzzy - title words in audiobook title)
-    title_words = [w for w in query_lower.split() if len(w) > 3]
+    title_words = [w for w in query_norm.split() if len(w) > 3]
     
     if not title_words:
-        # Fallback for short titles: exact match only
-        return query_lower in target_lower
+        # Fallback for short titles: exact normalized match
+        return query_norm in target_norm
     else:
-        matches = sum(1 for w in title_words if w in target_lower)
+        matches = sum(1 for w in title_words if w in target_norm)
         # Stricter threshold check
-        return (matches / len(title_words) > threshold) or (query_lower in target_lower)
+        return (matches / len(title_words) > threshold) or (query_norm in target_norm)

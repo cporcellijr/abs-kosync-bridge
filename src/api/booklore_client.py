@@ -301,13 +301,17 @@ class BookloreClient:
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
 
+        return None
+
+    def _normalize_string(self, s):
+        """Remove non-alphanumeric characters and lowercase."""
+        import re
+        if not s: return ""
+        return re.sub(r'[\W_]+', '', s.lower())
+
     def find_book_by_filename(self, ebook_filename, allow_refresh=True):
         """
-        Find a book by its filename.
-        Args:
-            ebook_filename: The filename to search for.
-            allow_refresh: If True, allows triggering a network refresh of the cache.
-                           Set to False for blocking UI threads to ensure instant return.
+        Find a book by its filename using exact, stem, or normalized matching.
         """
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
         if not self._book_cache and allow_refresh: 
@@ -317,30 +321,49 @@ class BookloreClient:
         if allow_refresh and time.time() - self._cache_timestamp > 3600:
             self._refresh_book_cache()
 
-        filename = Path(ebook_filename).name.lower()
-        if filename in self._book_cache: return self._book_cache[filename]
+        target_name = Path(ebook_filename).name.lower()
+        
+        # 1. Exact Filename Match
+        if target_name in self._book_cache: return self._book_cache[target_name]
 
-        stem = Path(filename).stem.lower()
+        target_stem = Path(ebook_filename).stem.lower()
+        
+        # 2. Strict Stem Match
         for cached_name, book_info in list(self._book_cache.items()):
-            if Path(cached_name).stem.lower() == stem: return book_info
+            if Path(cached_name).stem.lower() == target_stem: return book_info
 
+        # 3. Partial Stem Match
         for cached_name, book_info in list(self._book_cache.items()):
-            if stem in cached_name or cached_name.replace('.epub', '') in stem:
+            if target_stem in cached_name or cached_name.replace('.epub', '') in target_stem:
+                # High confidence check: ensure significant overlap
                 return book_info
 
-        # If not found, try refreshing cache once (in case Booklore updated externally)
-        # But ONLY if allow_refresh is True AND we haven't refreshed recently (e.g. last 60 seconds)
+        # 4. Fuzzy / Normalized Match (Handling "Dragon's" vs "Dragons")
+        # Use similarity ratio instead of substring to avoid false positives
+        target_norm = self._normalize_string(target_stem)
+        if len(target_norm) > 5:
+            from difflib import SequenceMatcher
+            best_match = None
+            best_ratio = 0.0
+            
+            for cached_name, book_info in list(self._book_cache.items()):
+                cached_norm = self._normalize_string(Path(cached_name).stem)
+                # Calculate similarity ratio
+                ratio = SequenceMatcher(None, target_norm, cached_norm).ratio()
+                
+                # Require high similarity (90%+) to avoid matching sequels
+                if ratio > 0.90 and ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = (cached_name, book_info)
+            
+            if best_match:
+                logger.debug(f"Fuzzy match: '{target_stem}' ~= '{best_match[0]}' (similarity: {best_ratio:.1%})")
+                return best_match[1]
+
+        # If not found, try refreshing cache once
         if allow_refresh and time.time() - self._cache_timestamp > 60:
             if self._refresh_book_cache():
-                # Re-check after refresh
-                filename = Path(ebook_filename).name.lower()
-                if filename in self._book_cache: return self._book_cache[filename]
-                stem = Path(filename).stem.lower()
-                for cached_name, book_info in self._book_cache.items():
-                    if Path(cached_name).stem.lower() == stem: return book_info
-                for cached_name, book_info in self._book_cache.items():
-                    if stem in cached_name or cached_name.replace('.epub', '') in stem:
-                        return book_info
+                return self.find_book_by_filename(ebook_filename, allow_refresh=False)
 
         return None
 
@@ -360,15 +383,31 @@ class BookloreClient:
             return list(self._book_cache.values())
 
         search_lower = search_term.lower()
+        search_norm = self._normalize_string(search_term)
+        
         results = []
         for book_info in list(self._book_cache.values()):
             title = (book_info.get('title') or '').lower()
             authors = (book_info.get('authors') or '').lower()
             filename = (book_info.get('fileName') or '').lower()
 
+            # 1. Standard substring match
             if search_lower in title or search_lower in authors or search_lower in filename:
                 results.append(book_info)
-
+                continue
+            
+            # 2. Normalized match (for "Dragon's" vs "Dragons")
+            # Only perform if standard match failed
+            title_norm = self._normalize_string(title)
+            authors_norm = self._normalize_string(authors)
+            filename_norm = self._normalize_string(filename)
+            
+            if len(search_norm) > 3: # Avoid extremely short noisy matches
+                if (search_norm in title_norm or 
+                    search_norm in authors_norm or 
+                    search_norm in filename_norm):
+                    results.append(book_info)
+        
         return results
 
     def download_book(self, book_id):
