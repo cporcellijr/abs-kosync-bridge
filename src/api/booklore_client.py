@@ -178,19 +178,49 @@ class BookloreClient:
 
     def _refresh_book_cache(self):
         """
-        Refresh the book cache. Booklore v1.17+ requires fetching individual
-        book details to get fileName, so we do a two-step process:
-        1. Get list of all book IDs
-        2. Fetch details for books we don't have cached yet
+        Refresh the book cache using robust pagination.
+        Fetches books in batches to ensure complete library sync.
         """
-        # Step 1: Get all books (lightweight list)
-        response = self._make_request("GET", "/api/v1/books")
-        if not response or response.status_code != 200:
-            logger.error(f"Booklore: Failed to fetch book list")
-            return False
+        all_books_list = []
+        page = 0
+        batch_size = 200  # Reasonable chunk size
+        
+        logger.info("📚 Booklore: Starting full library scan...")
+        
+        while True:
+            # Request specific page and size
+            # Note: Booklore/Spring usually expects 'page' (0-indexed) and 'size'
+            endpoint = f"/api/v1/books?page={page}&size={batch_size}"
+            response = self._make_request("GET", endpoint)
+            
+            if not response or response.status_code != 200:
+                logger.error(f"Booklore: Failed to fetch page {page}")
+                return False
 
-        books_list = response.json()
-        if not books_list:
+            data = response.json()
+            
+            # Handle different response shapes (List vs Page Object)
+            current_batch = []
+            if isinstance(data, list):
+                current_batch = data
+            elif isinstance(data, dict) and 'content' in data:
+                # Spring Data Page object wrapper
+                current_batch = data['content']
+            
+            if not current_batch:
+                break  # No more books, we are done
+                
+            all_books_list.extend(current_batch)
+            logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
+            
+            # If we got fewer items than requested, we are on the last page
+            # Also break if we got MORE items than requested (server ignored size param)
+            if len(current_batch) != batch_size:
+                break
+                
+            page += 1
+
+        if not all_books_list:
             logger.debug("Booklore: No books found in library")
             self._book_cache = {}
             self._book_id_cache = {}
@@ -198,20 +228,18 @@ class BookloreClient:
             self._save_cache()
             return True
 
+        logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+
+        # --- Proceed with Step 2: Detail Fetching (Same as before) ---
+        
         # Step 2: For books not in cache, fetch details to get fileName
-        # Use parallel fetching for speed
-        new_book_ids = [b['id'] for b in books_list if b['id'] not in self._book_id_cache]
+        new_book_ids = [b['id'] for b in all_books_list if b['id'] not in self._book_id_cache]
 
         if new_book_ids:
             logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
-
-            # Get token ONCE before parallel fetching to avoid race conditions
             token = self._get_fresh_token()
-            if not token:
-                logger.error("Booklore: Could not get token for parallel fetch")
-                return False
+            if not token: return False
 
-            # Fetch in parallel with limited concurrency
             def fetch_one(book_id):
                 return book_id, self._fetch_book_detail(book_id, token)
 
@@ -222,22 +250,16 @@ class BookloreClient:
                         book_id, detail = future.result()
                         if detail and isinstance(detail, dict):
                             self._process_book_detail(detail)
-                        elif detail:
-                            logger.debug(f"Booklore: Unexpected response type for book {book_id}: {type(detail)}")
                     except Exception as e:
-                        logger.debug(f"Booklore: Error fetching book detail: {e}")
+                        logger.debug(f"Booklore: Error fetching details: {e}")
 
-        # Update books that were already in cache with fresh progress data
-        existing_ids = [b['id'] for b in books_list if b['id'] in self._book_id_cache]
-        for book in books_list:
-            if book['id'] in self._book_id_cache:
-                # Update progress fields from the list response if available
-                cached = self._book_id_cache[book['id']]
-                # The list endpoint doesn't have progress, so we keep cached values
-                # Progress is fetched fresh in get_progress() anyway
+        # Refresh existing items from the new list
+        for book in all_books_list:
+             if book['id'] in self._book_id_cache:
+                 # Optional: Update shallow fields if needed
+                 pass
 
         self._cache_timestamp = time.time()
-        logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
         self._save_cache()
         return True
 
