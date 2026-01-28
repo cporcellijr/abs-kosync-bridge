@@ -515,6 +515,41 @@ class AudioTranscriber:
             logger.error(f"Error reading transcript {transcript_path}: {e}")
         return None
 
+    def get_previous_segment_text(self, transcript_path, timestamp):
+        """
+        Get the text of the segment immediately preceding the one at timestamp.
+        """
+        try:
+            data = self._get_cached_transcript(transcript_path)
+            if not data:
+                return None
+
+            # Find segment containing timestamp
+            target_idx = -1
+            for i, seg in enumerate(data):
+                if seg['start'] <= timestamp <= seg['end']:
+                    target_idx = i
+                    break
+            
+            # If explicit match not found, find closest
+            if target_idx == -1:
+                closest_dist = float('inf')
+                for i, seg in enumerate(data):
+                    dist = min(abs(timestamp - seg['start']), abs(timestamp - seg['end']))
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        target_idx = i
+
+            if target_idx > 0:
+                prev_text = data[target_idx - 1]['text']
+                return self._clean_text(prev_text)
+            
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting previous segment {transcript_path}: {e}")
+            return None
+
     @time_execution
     def find_time_for_text(self, transcript_path, search_text, hint_percentage=None, book_title=None) -> Optional[float]:
         """

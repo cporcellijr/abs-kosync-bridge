@@ -266,6 +266,8 @@ def kosync_put_progress():
                                 audiobooks = _container.abs_client().get_all_audiobooks()
                                 search_term = title
                                 
+                                logger.debug(f"Auto-discovery: Searching for audiobook matching '{search_term}' in {len(audiobooks)} audiobooks")
+                                
                                 for ab in audiobooks:
                                     media = ab.get('media', {})
                                     metadata = media.get('metadata', {})
@@ -274,6 +276,7 @@ def kosync_put_progress():
                                     
                                     # Use shared fuzzy matching logic
                                     if fuzzy_match_title(search_term, ab_title):
+                                        logger.debug(f"Auto-discovery: Matched '{ab_title}' by {ab_author} for search term '{search_term}'")
                                         audiobook_matches.append({
                                             "source": "abs",
                                             "abs_id": ab['id'],

@@ -23,6 +23,23 @@ from src.utils.logging_utils import sanitize_log_data
 from src.utils.hash_cache import HashCache
 from src.api.kosync_server import kosync_bp, init_kosync_server
 
+def _reconfigure_logging():
+    """Force update of root logger level based on env var."""
+    try:
+            new_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+            new_level = getattr(logging, new_level_str, logging.INFO)
+            
+            root = logging.getLogger()
+            root.setLevel(new_level)
+            
+            # Also update all handlers
+            for handler in root.handlers:
+                handler.setLevel(new_level)
+                
+            logger.info(f"📝 Logging level updated to {new_level_str}")
+    except Exception as e:
+            logger.warning(f"Failed to reconfigure logging: {e}")
+
 # ---------------- APP SETUP ----------------
 
 def setup_dependencies(app, test_container=None):
@@ -43,8 +60,12 @@ def setup_dependencies(app, test_container=None):
 
     # This updates os.environ with values from the database
     if database_service:
+        ConfigLoader.bootstrap_config(database_service)
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
+        
+        # Force reconfigure logging level based on new settings
+        _reconfigure_logging()
 
     # RELOAD GLOBALS from updated os.environ
 
@@ -520,46 +541,59 @@ class EbookResult:
 
 
 def get_searchable_ebooks(search_term):
-    """Get ebooks from Booklore API if available, otherwise filesystem.
+    """Get ebooks from Booklore API and filesystem.
     Returns list of EbookResult objects for consistent interface."""
+    
+    results = []
+    found_filenames = set()
 
     # Try Booklore first if configured
     if container.booklore_client().is_configured():
         try:
             books = container.booklore_client().search_books(search_term)
             if books:
-                return [
-                    EbookResult(
-                        name=b.get('fileName', ''),
-                        title=b.get('title'),
-                        subtitle=b.get('subtitle'),
-                        authors=b.get('authors'),
-                        booklore_id=b.get('id')
-                    )
-                    for b in books if b.get('fileName', '').lower().endswith('.epub')
-                ]
+                for b in books:
+                    fname = b.get('fileName', '')
+                    if fname.lower().endswith('.epub'):
+                        found_filenames.add(fname)
+                        results.append(EbookResult(
+                            name=fname,
+                            title=b.get('title'),
+                            subtitle=b.get('subtitle'),
+                            authors=b.get('authors'),
+                            booklore_id=b.get('id')
+                        ))
         except Exception as e:
-            logger.warning(f"Booklore search failed, falling back to filesystem: {e}")
+            logger.warning(f"Booklore search failed: {e}")
 
-    # Fallback to filesystem
-    if not EBOOK_DIR.exists():
-        if not container.booklore_client().is_configured():
-            logger.warning(
-                "No ebooks available: Neither Booklore integration nor /books volume is configured. "
-                "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
-                "or mount the ebooks directory to /books."
-            )
-        return []
+    # Search filesystem
+    if EBOOK_DIR.exists():
+        try:
+            all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
+            if not search_term:
+                # If no search term, list all (filtering done below)
+                pass 
+            
+            # Combine logic: if search_term, filter. always check duplicates
+            for eb in all_epubs:
+                 if eb.name in found_filenames:
+                     continue
+                 
+                 if not search_term or search_term.lower() in eb.name.lower():
+                     results.append(EbookResult(name=eb.name, path=eb))
 
-    all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
-    if not search_term:
-        return [EbookResult(name=eb.name, path=eb) for eb in all_epubs]
+        except Exception as e:
+            logger.warning(f"Filesystem search failed: {e}")
+            
+    # Check if we have no sources at all
+    if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
+        logger.warning(
+            "No ebooks available: Neither Booklore integration nor /books volume is configured. "
+            "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "or mount the ebooks directory to /books."
+        )
 
-    return [
-        EbookResult(name=eb.name, path=eb)
-        for eb in all_epubs
-        if search_term.lower() in eb.name.lower()
-    ]
+    return results
 
 
 
@@ -607,7 +641,8 @@ def settings():
         'STORYTELLER_ENABLED': 'false',
         'BOOKLORE_ENABLED': 'false',
         'HARDCOVER_ENABLED': 'false',
-        'TELEGRAM_ENABLED': 'false'
+        'TELEGRAM_ENABLED': 'false',
+        'SUGGESTIONS_ENABLED': 'false'
     }
 
     if request.method == 'POST':
@@ -619,7 +654,10 @@ def settings():
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
             'HARDCOVER_ENABLED',
-            'TELEGRAM_ENABLED'
+            'TELEGRAM_ENABLED',
+            'TELEGRAM_ENABLED',
+            'SUGGESTIONS_ENABLED',
+            'ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID'
         ]
 
         # Current settings in DB
@@ -700,9 +738,17 @@ def get_abs_author(ab):
 
 def audiobook_matches_search(ab, search_term):
     """Check if audiobook matches search term (searches title AND author)."""
-    title = manager.get_abs_title(ab).lower()
-    author = get_abs_author(ab).lower()
-    return search_term in title or search_term in author
+    import re
+    
+    # Normalize: remove punctuation
+    def normalize(s):
+        return re.sub(r'[^\w\s]', '', s.lower())
+    
+    title = normalize(manager.get_abs_title(ab))
+    author = normalize(get_abs_author(ab))
+    search_norm = normalize(search_term)
+    
+    return search_norm in title or search_norm in author
 
 # ---------------- ROUTES ----------------
 def index():
@@ -720,7 +766,15 @@ def index():
         states_by_book[state.abs_id].append(state)
 
     # Fetch pending suggestions
-    suggestions = database_service.get_all_pending_suggestions()
+    suggestions_raw = database_service.get_all_pending_suggestions()
+    
+    # Filter suggestions: Hide those with 0 matches
+    suggestions = []
+    
+    for s in suggestions_raw:
+        if len(s.matches) == 0:
+            continue
+        suggestions.append(s)
     
     # [OPTIMIZATION] Fetch all hardcover details at once
     all_hardcover = database_service.get_all_hardcover_details()
@@ -999,6 +1053,12 @@ def match():
             container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
+        
+        # Auto-dismiss any pending suggestion for this book
+        # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
+        database_service.dismiss_suggestion(abs_id)
+        database_service.dismiss_suggestion(kosync_doc_id)
+
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()

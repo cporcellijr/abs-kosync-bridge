@@ -87,10 +87,30 @@ def test_syncmanager_di_paths():
         return False
 
     finally:
+        # Close logging handlers to release file locks on Windows
+        import logging
+        logging.shutdown()
+        for handler in logging.root.handlers[:]:
+            handler.close()
+            logging.root.removeHandler(handler)
+            
+        if 'container' in locals():
+            try:
+                # Retrieve the database service singleton (if initialized)
+                db_service = container.database_service()
+                if hasattr(db_service, 'db_manager'):
+                    print("🔒 Closing database connection...")
+                    db_service.db_manager.close()
+            except Exception as e:
+                print(f"⚠️ Failed to close database: {e}")
+                
         # Clean up temporary directories
         if os.path.exists(temp_base_dir):
-            shutil.rmtree(temp_base_dir)
-            print(f"🧹 Cleaned up temp directory: {temp_base_dir}")
+            try:
+                shutil.rmtree(temp_base_dir)
+                print(f"🧹 Cleaned up temp directory: {temp_base_dir}")
+            except Exception as e:
+                 print(f"⚠️ Failed to cleanup temp dir: {e}")
 
 if __name__ == "__main__":
     success = test_syncmanager_di_paths()
