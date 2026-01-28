@@ -2,7 +2,7 @@ name: Build and publish Docker image
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "dev"]
     tags: ["v*.*.*"]  # Trigger on version tags like v1.0.0
   workflow_dispatch:
 
@@ -16,6 +16,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for commit count
+
+      - name: Generate Build Number
+        id: build_num
+        run: echo "value=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -40,6 +46,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,enable={{is_default_branch}}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=dev-${{ steps.build_num.outputs.value }},enable=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -51,3 +59,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            APP_VERSION=${{ github.ref == 'refs/heads/dev' && format('dev-{0}', steps.build_num.outputs.value) || steps.meta.outputs.version }}
