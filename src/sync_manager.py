@@ -133,6 +133,79 @@ class SyncManager:
         media = ab.get('media', {})
         return media.get('duration', 0)
 
+    def _normalize_for_cross_format_comparison(self, book, config):
+        """
+        Normalize positions for cross-format comparison (audiobook vs ebook).
+        
+        When syncing between audiobook (ABS) and ebook clients (KoSync, etc.),
+        raw percentages are not comparable because:
+        - Audiobook % = time position / total duration
+        - Ebook % = text position / total text
+        
+        These don't correlate linearly. This method converts ebook positions
+        to equivalent audiobook timestamps using text-matching, enabling
+        accurate comparison of "who is further in the story".
+        
+        Returns:
+            dict: {client_name: normalized_timestamp} for comparison,
+                  or None if normalization not possible/needed
+        """
+        # Check if we have both ABS and ebook clients in the mix
+        has_abs = 'ABS' in config
+        ebook_clients = [k for k in config.keys() if k != 'ABS']
+        
+        if not has_abs or not ebook_clients:
+            # Same-format sync, raw percentages are fine
+            return None
+            
+        if not book.transcript_file:
+            logger.debug(f"[{book.abs_id}] No transcript available for cross-format normalization")
+            return None
+            
+        normalized = {}
+        
+        # ABS already has timestamp
+        abs_state = config['ABS']
+        abs_ts = abs_state.current.get('ts', 0)
+        normalized['ABS'] = abs_ts
+        
+        # For each ebook client, get their text and find equivalent timestamp
+        for client_name in ebook_clients:
+            client = self.sync_clients.get(client_name)
+            if not client:
+                continue
+                
+            client_state = config[client_name]
+            client_pct = client_state.current.get('pct', 0)
+            
+            try:
+                # Get the text at the ebook's current position
+                txt = client.get_text_from_current_state(book, client_state)
+                if not txt:
+                    logger.debug(f"[{book.abs_id}] Could not get text from {client_name} for normalization")
+                    continue
+                    
+                # Find equivalent timestamp in audiobook
+                ts_for_text = self.transcriber.find_time_for_text(
+                    book.transcript_file, txt,
+                    hint_percentage=client_pct,
+                    book_title=book.abs_title
+                )
+                
+                if ts_for_text is not None:
+                    normalized[client_name] = ts_for_text
+                    logger.debug(f"[{book.abs_id}] Normalized {client_name} {client_pct:.2%} -> {ts_for_text:.1f}s")
+                else:
+                    logger.debug(f"[{book.abs_id}] Could not find timestamp for {client_name} text")
+            except Exception as e:
+                logger.warning(f"[{book.abs_id}] Cross-format normalization failed for {client_name}: {e}")
+                
+        # Only return if we successfully normalized at least one ebook client
+        if len(normalized) > 1:
+            return normalized
+        return None
+
+
     def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, bulk_states_per_client=None, clients_to_use=None):
         """Fetch states from specified clients (or all if not specified) in parallel."""
         clients_to_use = clients_to_use or self.sync_clients
@@ -805,10 +878,33 @@ class SyncManager:
                     logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
                     continue
 
-                leader = max(vals, key=vals.get)
+                # Determine leader - use cross-format normalization if needed
+                # For cross-format sync (audiobook vs ebook), we need to compare
+                # using normalized timestamps, not raw percentages
+                normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+                
+                if normalized_positions and len(normalized_positions) > 1:
+                    # Use normalized timestamps to determine leader
+                    # Filter to only include clients that can lead
+                    normalized_leaders = {k: v for k, v in normalized_positions.items() 
+                                         if k in vals}
+                    if normalized_leaders:
+                        leader = max(normalized_leaders, key=normalized_leaders.get)
+                        leader_ts = normalized_leaders[leader]
+                        leader_pct = vals[leader]
+                        logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                    else:
+                        # Fallback to percentage-based comparison
+                        leader = max(vals, key=vals.get)
+                        leader_pct = vals[leader]
+                        logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                else:
+                    # Same-format sync or normalization failed - use raw percentages
+                    leader = max(vals, key=vals.get)
+                    leader_pct = vals[leader]
+                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+
                 leader_formatter = config[leader].value_formatter
-                leader_pct = vals[leader]
-                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
 
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]

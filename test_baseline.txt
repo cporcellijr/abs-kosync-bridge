@@ -1,0 +1,16 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\cporc\docker-utils\stacks\abs-kosync-enhanced
+plugins: anyio-4.11.0
+collected 2 items
+
+tests\test_booklore_unittest.py .                                        [ 50%]
+tests\test_storyteller_unittest.py .                                     [100%]
+
+============================== warnings summary ===============================
+src\db\models.py:11
+  C:\Users\cporc\docker-utils\stacks\abs-kosync-enhanced\src\db\models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 2 passed, 1 warning in 0.82s =========================
