@@ -261,8 +261,6 @@ def kosync_put_progress():
                         audiobook_matches = []
                         if _container.abs_client().is_configured():
                             try:
-                                from src.utils.string_utils import fuzzy_match_title
-                                
                                 audiobooks = _container.abs_client().get_all_audiobooks()
                                 search_term = title
                                 
@@ -274,16 +272,40 @@ def kosync_put_progress():
                                     ab_title = (metadata.get('title') or ab.get('name', ''))
                                     ab_author = metadata.get('authorName', '')
                                     
-                                    # Use shared fuzzy matching logic
-                                    if fuzzy_match_title(search_term, ab_title):
+                                    # Use same simple matching as UI search (normalized substring)
+                                    def normalize(s):
+                                        import re
+                                        return re.sub(r'[^\w\s]', '', s.lower())
+                                    
+                                    search_norm = normalize(search_term)
+                                    title_norm = normalize(ab_title)
+                                    author_norm = normalize(ab_author)
+                                    
+                                    if search_norm in title_norm or search_norm in author_norm:
+                                        # Skip books with high progress (>75%) - they're already mostly done
+                                        duration = media.get('duration', 0)
+                                        progress_pct = 0
+                                        if duration > 0:
+                                            # Get progress from ABS for this audiobook
+                                            try:
+                                                ab_progress = _container.abs_client().get_progress(ab['id'])
+                                                if ab_progress:
+                                                    progress_pct = ab_progress.get('progress', 0) * 100
+                                            except:
+                                                pass
+                                        
+                                        if progress_pct > 75:
+                                            logger.debug(f"Auto-discovery: Skipping '{ab_title}' - already {progress_pct:.0f}% complete")
+                                            continue
+                                        
                                         logger.debug(f"Auto-discovery: Matched '{ab_title}' by {ab_author} for search term '{search_term}'")
                                         audiobook_matches.append({
                                             "source": "abs",
                                             "abs_id": ab['id'],
                                             "title": ab_title,
                                             "author": ab_author,
-                                            "duration": media.get('duration', 0),
-                                            "confidence": "high" if search_term.lower() in ab_title.lower() else "medium"
+                                            "duration": duration,
+                                            "confidence": "high"
                                         })
                                         
                             except Exception as e:
@@ -291,9 +313,8 @@ def kosync_put_progress():
                         
                         # Step 2: If audiobook matches found, create a suggestion for user review
                         if audiobook_matches:
-                            # Check if suggestion already exists
-                            existing = _database_service.get_pending_suggestion(doc_hash_val)
-                            if not existing:
+                            # Check if suggestion already exists (pending OR dismissed - don't re-suggest)
+                            if not _database_service.suggestion_exists(doc_hash_val):
                                 suggestion = PendingSuggestion(
                                     source_id=doc_hash_val,
                                     title=title,
