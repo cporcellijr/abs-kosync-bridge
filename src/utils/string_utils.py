@@ -63,13 +63,29 @@ def fuzzy_match_title(query: str, target: str, threshold: float = 0.6) -> bool:
     query_norm = normalize(query)
     target_norm = normalize(target)
     
-    # Check for title match (fuzzy - title words in audiobook title)
-    title_words = [w for w in query_norm.split() if len(w) > 3]
+    # First check: exact substring match (handles "We Spread" == "We Spread: A Novel")
+    if query_norm in target_norm:
+        return True
     
-    if not title_words:
-        # Fallback for short titles: exact normalized match
-        return query_norm in target_norm
-    else:
-        matches = sum(1 for w in title_words if w in target_norm)
-        # Stricter threshold check
-        return (matches / len(title_words) > threshold) or (query_norm in target_norm)
+    # Second check: ALL words from query must appear in target
+    # This prevents "We Spread" from matching "Spread Me"
+    query_words = query_norm.split()
+    target_words = target_norm.split()
+    
+    # Require ALL query words to be present
+    all_words_present = all(word in target_words for word in query_words)
+    
+    if not all_words_present:
+        return False
+    
+    # Third check: Reject if target has extra words that look like sequel numbers
+    # (e.g., reject "Dragons Justice 2" when searching for "Dragons Justice")
+    extra_words = [w for w in target_words if w not in query_words]
+    sequel_indicators = {'2', '3', '4', '5', '6', '7', '8', '9', 'ii', 'iii', 'iv', 'two', 'three', 'four', 'five'}
+    has_sequel_number = any(word in sequel_indicators for word in extra_words)
+    
+    if has_sequel_number:
+        # If target looks like a sequel, require exact substring match (which we already checked above)
+        return False
+    
+    return True

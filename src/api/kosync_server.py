@@ -276,6 +276,7 @@ def kosync_put_progress():
                                     
                                     # Use shared fuzzy matching logic
                                     if fuzzy_match_title(search_term, ab_title):
+                                        logger.debug(f"Auto-discovery: Matched '{ab_title}' by {ab_author} for search term '{search_term}'")
                                         audiobook_matches.append({
                                             "source": "abs",
                                             "abs_id": ab['id'],
