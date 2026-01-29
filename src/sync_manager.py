@@ -641,6 +641,99 @@ class SyncManager:
 
             self.database_service.save_book(book)
 
+    def _has_significant_delta(self, client_name, config, book):
+        """
+        Check if a client has a significant delta using hybrid time/percentage logic.
+        
+        Returns True if:
+        - Percentage delta > 0.05% (catches large jumps)
+        - OR absolute time delta > 30 seconds (catches small but real progress)
+        
+        This prevents:
+        - API noise on short books (0.3s changes don't count)
+        - API noise on long books (BookLore's 20s rounding errors filtered)
+        - Missing real progress on all books (30s+ changes do count)
+        """
+        delta_pct = config[client_name].delta
+        
+        # Quick check: percentage threshold
+        MIN_PCT_THRESHOLD = 0.0005  # 0.05%
+        if delta_pct > MIN_PCT_THRESHOLD:
+            return True
+        
+        # Time-based check (if we have duration info)
+        if hasattr(book, 'duration') and book.duration:
+            delta_seconds = delta_pct * book.duration
+            MIN_TIME_THRESHOLD = 30  # seconds
+            if delta_seconds > MIN_TIME_THRESHOLD:
+                return True
+                
+        return False
+
+    def _determine_leader(self, config, book, abs_id, title_snip):
+        """
+        Determines which client should be the leader based on:
+        1. Most recent change (delta > threshold)
+        2. Furthest progress (fallback)
+        3. Cross-format normalization (if needed)
+        
+        Returns:
+            tuple: (leader_client_name, leader_percentage) or (None, None)
+        """
+        # Build vals from config - only include clients that can be leaders
+        vals = {}
+        for k, v in config.items():
+            client = self.sync_clients[k]
+            if client.can_be_leader():
+                vals[k] = v.current.get('pct')
+
+        # Ensure we have at least one potential leader
+        if not vals:
+            logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
+            return None, None
+
+        # Check which clients have changed (delta > minimum threshold)
+        # "Most recent change wins" - if only one client changed, it becomes the leader
+        # Use hybrid time/percentage logic to filter out phantom API noise
+        clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
+
+        leader = None
+        leader_pct = None
+
+        if len(clients_with_delta) == 1:
+            # Only one client changed - that client is the leader (most recent change wins)
+            leader = list(clients_with_delta.keys())[0]
+            leader_pct = vals[leader]
+            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
+        else:
+            # Multiple clients changed or this is a discrepancy resolution
+            # Use "furthest wins" logic among changed clients (or all if none changed)
+            candidates = clients_with_delta if clients_with_delta else vals
+            
+            # For cross-format sync (audiobook vs ebook), use normalized timestamps
+            normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+            
+            if normalized_positions and len(normalized_positions) > 1:
+                # Filter normalized positions to only include candidates
+                normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
+                if normalized_candidates:
+                    leader = max(normalized_candidates, key=normalized_candidates.get)
+                    leader_ts = normalized_candidates[leader]
+                    leader_pct = vals[leader]
+                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                else:
+                    # Fallback to percentage-based comparison among candidates
+                    leader = max(candidates, key=candidates.get)
+                    leader_pct = vals[leader]
+                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+            else:
+                # Same-format sync or normalization failed - use raw percentages
+                leader = max(candidates, key=candidates.get)
+                leader_pct = vals[leader]
+                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                
+        return leader, leader_pct
+
     def sync_cycle(self, target_abs_id=None):
         """
         Run a sync cycle.
@@ -795,6 +888,7 @@ class SyncManager:
                 # If state.delta > 0 and book has epub, get total chars via extract_text_and_map
                 # Calculate char_delta = int(state.delta * total_chars)
                 # If char_delta >= self.delta_chars_thresh, log it and set significant_diff = True
+                char_delta_triggered = False  # Track if character delta triggered significance
                 if not significant_diff and hasattr(book, 'ebook_filename') and book.ebook_filename:
                     for client_name_key, client_state in config.items():
                          if client_state.delta > 0:
@@ -808,6 +902,7 @@ class SyncManager:
                                      if char_delta >= self.delta_chars_thresh:
                                          logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
                                          significant_diff = True
+                                         char_delta_triggered = True  # Mark that this came from char delta
                                          break
                              except Exception as e:
                                  logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
@@ -816,10 +911,23 @@ class SyncManager:
                 # We typically skip if nothing changed, BUT if there is a significant discrepancy
                 # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
                 deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
+                
+                # Check if any client has a significant delta (using time-based threshold)
+                any_significant_delta = any(
+                    self._has_significant_delta(k, config, book) 
+                    for k in config.keys()
+                )
 
                 # If nothing changed AND clients are effectively in sync, skip
                 if deltas_zero and not significant_diff:
                     logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
+                    continue
+                
+                # If there's a discrepancy but no client actually changed, skip
+                # (discrepancy will resolve next time someone reads)
+                # Exception: if character delta triggered, we have a real change
+                if significant_diff and not any_significant_delta and not char_delta_triggered:
+                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists but no significant changes, skipping until next read")
                     continue
 
                 if significant_diff:
@@ -866,53 +974,10 @@ class SyncManager:
                 for line in status_lines:
                     logger.info(line)
 
-                # Build vals from config - only include clients that can be leaders
-                vals = {}
-                for k, v in config.items():
-                    client = self.sync_clients[k]
-                    if client.can_be_leader():
-                        vals[k] = v.current.get('pct')
-
-                # Ensure we have at least one potential leader
-                if not vals:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
+                # Determine leader
+                leader, leader_pct = self._determine_leader(config, book, abs_id, title_snip)
+                if not leader:
                     continue
-
-                # Check which clients have changed (delta > 0)
-                # "Most recent change wins" - if only one client changed, it becomes the leader
-                clients_with_delta = {k: v for k, v in vals.items() if config[k].delta > 0}
-
-                if len(clients_with_delta) == 1:
-                    # Only one client changed - that client is the leader (most recent change wins)
-                    leader = list(clients_with_delta.keys())[0]
-                    leader_pct = vals[leader]
-                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
-                else:
-                    # Multiple clients changed or this is a discrepancy resolution
-                    # Use "furthest wins" logic among changed clients (or all if none changed)
-                    candidates = clients_with_delta if clients_with_delta else vals
-                    
-                    # For cross-format sync (audiobook vs ebook), use normalized timestamps
-                    normalized_positions = self._normalize_for_cross_format_comparison(book, config)
-                    
-                    if normalized_positions and len(normalized_positions) > 1:
-                        # Filter normalized positions to only include candidates
-                        normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
-                        if normalized_candidates:
-                            leader = max(normalized_candidates, key=normalized_candidates.get)
-                            leader_ts = normalized_candidates[leader]
-                            leader_pct = vals[leader]
-                            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
-                        else:
-                            # Fallback to percentage-based comparison among candidates
-                            leader = max(candidates, key=candidates.get)
-                            leader_pct = vals[leader]
-                            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
-                    else:
-                        # Same-format sync or normalization failed - use raw percentages
-                        leader = max(candidates, key=candidates.get)
-                        leader_pct = vals[leader]
-                        logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
 
                 leader_formatter = config[leader].value_formatter
 
