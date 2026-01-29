@@ -878,31 +878,41 @@ class SyncManager:
                     logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
                     continue
 
-                # Determine leader - use cross-format normalization if needed
-                # For cross-format sync (audiobook vs ebook), we need to compare
-                # using normalized timestamps, not raw percentages
-                normalized_positions = self._normalize_for_cross_format_comparison(book, config)
-                
-                if normalized_positions and len(normalized_positions) > 1:
-                    # Use normalized timestamps to determine leader
-                    # Filter to only include clients that can lead
-                    normalized_leaders = {k: v for k, v in normalized_positions.items() 
-                                         if k in vals}
-                    if normalized_leaders:
-                        leader = max(normalized_leaders, key=normalized_leaders.get)
-                        leader_ts = normalized_leaders[leader]
-                        leader_pct = vals[leader]
-                        logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                # Check which clients have changed (delta > 0)
+                # "Most recent change wins" - if only one client changed, it becomes the leader
+                clients_with_delta = {k: v for k, v in vals.items() if config[k].delta > 0}
+
+                if len(clients_with_delta) == 1:
+                    # Only one client changed - that client is the leader (most recent change wins)
+                    leader = list(clients_with_delta.keys())[0]
+                    leader_pct = vals[leader]
+                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
+                else:
+                    # Multiple clients changed or this is a discrepancy resolution
+                    # Use "furthest wins" logic among changed clients (or all if none changed)
+                    candidates = clients_with_delta if clients_with_delta else vals
+                    
+                    # For cross-format sync (audiobook vs ebook), use normalized timestamps
+                    normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+                    
+                    if normalized_positions and len(normalized_positions) > 1:
+                        # Filter normalized positions to only include candidates
+                        normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
+                        if normalized_candidates:
+                            leader = max(normalized_candidates, key=normalized_candidates.get)
+                            leader_ts = normalized_candidates[leader]
+                            leader_pct = vals[leader]
+                            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                        else:
+                            # Fallback to percentage-based comparison among candidates
+                            leader = max(candidates, key=candidates.get)
+                            leader_pct = vals[leader]
+                            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
                     else:
-                        # Fallback to percentage-based comparison
-                        leader = max(vals, key=vals.get)
+                        # Same-format sync or normalization failed - use raw percentages
+                        leader = max(candidates, key=candidates.get)
                         leader_pct = vals[leader]
                         logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
-                else:
-                    # Same-format sync or normalization failed - use raw percentages
-                    leader = max(vals, key=vals.get)
-                    leader_pct = vals[leader]
-                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
 
                 leader_formatter = config[leader].value_formatter
 
