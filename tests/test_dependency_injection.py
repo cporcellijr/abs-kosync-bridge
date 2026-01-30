@@ -25,17 +25,17 @@ def test_dependency_injection():
     Path('test_books').mkdir(exist_ok=True)
 
     try:
-        print("🧪 Testing Dependency Injection")
+        print("[TEST] Testing Dependency Injection")
         print("=" * 50)
 
         # Test 1: Create DI container
-        print("📦 Creating DI container...")
+        print("[INIT] Creating DI container...")
         from src.utils.di_container import create_container
         container = create_container()
-        print("✅ DI container created successfully")
+        print("[OK] DI container created successfully")
 
         # Test 2: Test individual component creation
-        print("\n🔧 Testing individual components...")
+        print("\n[TEST] Testing individual components...")
 
         from src.api.api_clients import ABSClient, KoSyncClient
         from src.api.booklore_client import BookloreClient
@@ -43,28 +43,28 @@ def test_dependency_injection():
         from src.utils.ebook_utils import EbookParser
 
         abs_client = container.abs_client()
-        print(f"✅ ABSClient: {type(abs_client).__name__}")
+        print(f"[OK] ABSClient: {type(abs_client).__name__}")
 
         kosync_client = container.kosync_client()
-        print(f"✅ KoSyncClient: {type(kosync_client).__name__}")
+        print(f"[OK] KoSyncClient: {type(kosync_client).__name__}")
 
         booklore_client = container.booklore_client()
-        print(f"✅ BookloreClient: {type(booklore_client).__name__}")
+        print(f"[OK] BookloreClient: {type(booklore_client).__name__}")
 
         ebook_parser = container.ebook_parser()
-        print(f"✅ EbookParser: {type(ebook_parser).__name__}")
+        print(f"[OK] EbookParser: {type(ebook_parser).__name__}")
 
         # Test 3: Test factory-created components
-        print("\n🏭 Testing factory components...")
+        print("\n[TEST] Testing factory components...")
 
         storyteller_db = container.storyteller_client()
-        print(f"✅ Storyteller DB: {type(storyteller_db).__name__}")
+        print(f"[OK] Storyteller DB: {type(storyteller_db).__name__}")
 
         db = container.database_service()
-        print(f"✅ DB: {type(db).__name__}")
+        print(f"[OK] DB: {type(db).__name__}")
 
         # Test 4: Test sync clients
-        print("\n🔄 Testing sync clients...")
+        print("\n[TEST] Testing sync clients...")
 
         from src.sync_clients.abs_sync_client import ABSSyncClient
         from src.sync_clients.kosync_sync_client import KoSyncSyncClient
@@ -72,26 +72,26 @@ def test_dependency_injection():
         from src.sync_clients.booklore_sync_client import BookloreSyncClient
 
         abs_sync_client = container.abs_sync_client()
-        print(f"✅ ABSSyncClient: {type(abs_sync_client).__name__}")
+        print(f"[OK] ABSSyncClient: {type(abs_sync_client).__name__}")
 
         kosync_sync_client = container.kosync_sync_client()
-        print(f"✅ KoSyncSyncClient: {type(kosync_sync_client).__name__}")
+        print(f"[OK] KoSyncSyncClient: {type(kosync_sync_client).__name__}")
 
         storyteller_sync_client = container.storyteller_sync_client()
-        print(f"✅ StorytellerSyncClient: {type(storyteller_sync_client).__name__}")
+        print(f"[OK] StorytellerSyncClient: {type(storyteller_sync_client).__name__}")
 
         booklore_sync_client = container.booklore_sync_client()
-        print(f"✅ BookloreSyncClient: {type(booklore_sync_client).__name__}")
+        print(f"[OK] BookloreSyncClient: {type(booklore_sync_client).__name__}")
 
         # Test 5: Test SyncManager creation with DI
-        print("\n🎯 Testing SyncManager creation with DI...")
+        print("\n[TEST] Testing SyncManager creation with DI...")
 
         from src.sync_manager import SyncManager
         sync_manager = container.sync_manager()
-        print(f"✅ SyncManager created: {type(sync_manager).__name__}")
+        print(f"[OK] SyncManager created: {type(sync_manager).__name__}")
 
         # Test 6: Verify autowired dependencies
-        print("\n🔍 Verifying autowired dependencies...")
+        print("\n[VERIFY] Verifying autowired dependencies...")
 
         # Check that SyncManager has all the right clients
         assert hasattr(sync_manager, 'abs_client'), "SyncManager missing abs_client"
@@ -99,24 +99,41 @@ def test_dependency_injection():
         assert hasattr(sync_manager, 'ebook_parser'), "SyncManager missing ebook_parser"
         assert hasattr(sync_manager, 'sync_clients'), "SyncManager missing sync_clients"
 
-        print("✅ All dependencies properly autowired")
+        print("[OK] All dependencies properly autowired")
 
         # Test 7: Verify sync clients are configured properly
-        print("\n⚙️  Testing sync client configurations...")
+        print("\n[TEST] Testing sync client configurations...")
 
         configured_clients = [name for name, client in sync_manager.sync_clients.items()]
-        print(f"✅ Configured sync clients: {', '.join(configured_clients)}")
+        print(f"[OK] Configured sync clients: {', '.join(configured_clients)}")
 
-        print("\n🎉 All tests passed! Dependency injection is working correctly.")
+        print("\n[PASS] All tests passed! Dependency injection is working correctly.")
         return True
 
     except Exception as e:
-        print(f"\n❌ Test failed: {e}")
+        print(f"\n[FAIL] Test failed: {e}")
         import traceback
         traceback.print_exc()
         return False
 
     finally:
+        # Close database connection to prevent file locks
+        if 'container' in locals():
+            try:
+                db_service = container.database_service()
+                if hasattr(db_service, 'db_manager'):
+                    db_service.db_manager.close()
+                    # print("[INFO] Database connection closed.")
+            except Exception as e:
+                print(f"[WARN] Failed to close DB connection: {e}")
+
+        # Close logging handlers to prevent file locks on logs/unified_app.log
+        import logging
+        logging.shutdown()
+        for handler in logging.root.handlers[:]:
+            handler.close()
+            logging.root.removeHandler(handler)
+
         # Cleanup
         import shutil
         if Path('test_data').exists():

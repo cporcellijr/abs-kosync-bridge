@@ -508,14 +508,22 @@ class DatabaseService:
 
     # PendingSuggestion operations
     def get_pending_suggestion(self, source_id: str) -> Optional[PendingSuggestion]:
-        """Get a pending suggestion by source ID (e.g. ABS ID)."""
+        """Get a pending suggestion by source ID (e.g. ABS ID). Only returns pending, not dismissed."""
         with self.get_session() as session:
             suggestion = session.query(PendingSuggestion).filter(
-                PendingSuggestion.source_id == source_id
+                PendingSuggestion.source_id == source_id,
+                PendingSuggestion.status == 'pending'
             ).first()
             if suggestion:
                 session.expunge(suggestion)
             return suggestion
+
+    def suggestion_exists(self, source_id: str) -> bool:
+        """Check if any suggestion exists for source_id (pending or dismissed)."""
+        with self.get_session() as session:
+            return session.query(PendingSuggestion).filter(
+                PendingSuggestion.source_id == source_id
+            ).first() is not None
 
     def save_pending_suggestion(self, suggestion: PendingSuggestion) -> PendingSuggestion:
         """Save or update a pending suggestion."""

@@ -96,6 +96,10 @@ class SyncClient:
         ...
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         ...
+    def get_fallback_text(self, book: Book, state: ServiceState) -> Optional[str]:
+        """Optional method to return fallback text (e.g. previous segment) if primary match fails."""
+        return None
+
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         ...
 

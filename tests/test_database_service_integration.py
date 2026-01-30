@@ -47,6 +47,10 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
 
     def tearDown(self):
         """Clean up after each test."""
+        # Close database connection to release file lock on Windows
+        if hasattr(self, 'db_service') and hasattr(self.db_service, 'db_manager'):
+            self.db_service.db_manager.close()
+            
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -306,21 +310,24 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             migration_db_path = temp_path / "migration.db"
             migration_db_service = self.DatabaseService(str(migration_db_path))
 
-            migrator = self.DatabaseMigrator(
-                migration_db_service,
-                str(mapping_json),
-                str(state_json)
-            )
+            try:
+                migrator = self.DatabaseMigrator(
+                    migration_db_service,
+                    str(mapping_json),
+                    str(state_json)
+                )
 
-            # Should migrate when database is empty and JSON files exist
-            self.assertTrue(migrator.should_migrate())
+                # Should migrate when database is empty and JSON files exist
+                self.assertTrue(migrator.should_migrate())
 
-            # Add a book to database
-            book = self.Book(abs_id='existing-book', abs_title='Existing Book')
-            migration_db_service.save_book(book)
+                # Add a book to database
+                book = self.Book(abs_id='existing-book', abs_title='Existing Book')
+                migration_db_service.save_book(book)
 
-            # Should not migrate when database has data
-            self.assertFalse(migrator.should_migrate())
+                # Should not migrate when database has data
+                self.assertFalse(migrator.should_migrate())
+            finally:
+                migration_db_service.db_manager.close()
 
     def test_migration_mapping_json(self):
         """Test migration of mapping JSON data."""
@@ -359,33 +366,36 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             migration_db_path = temp_path / "migration.db"
             migration_db_service = self.DatabaseService(str(migration_db_path))
 
-            # Perform migration
-            migrator = self.DatabaseMigrator(
-                migration_db_service,
-                str(mapping_json_path),
-                str(state_json_path)
-            )
+            try:
+                # Perform migration
+                migrator = self.DatabaseMigrator(
+                    migration_db_service,
+                    str(mapping_json_path),
+                    str(state_json_path)
+                )
 
-            migrator.migrate()
+                migrator.migrate()
 
-            # Verify book was migrated
-            migrated_book = migration_db_service.get_book("migration-book-1")
-            self.assertIsNotNone(migrated_book)
-            self.assertEqual(migrated_book.abs_title, "Migration Test Book 1")
-            self.assertEqual(migrated_book.status, "active")
+                # Verify book was migrated
+                migrated_book = migration_db_service.get_book("migration-book-1")
+                self.assertIsNotNone(migrated_book)
+                self.assertEqual(migrated_book.abs_title, "Migration Test Book 1")
+                self.assertEqual(migrated_book.status, "active")
 
-            # Verify hardcover details were migrated
-            hardcover = migration_db_service.get_hardcover_details("migration-book-1")
-            self.assertIsNotNone(hardcover)
-            self.assertEqual(hardcover.hardcover_book_id, "hc-123")
-            self.assertEqual(hardcover.hardcover_pages, 350)
-            self.assertEqual(hardcover.isbn, "978-1234567890")
+                # Verify hardcover details were migrated
+                hardcover = migration_db_service.get_hardcover_details("migration-book-1")
+                self.assertIsNotNone(hardcover)
+                self.assertEqual(hardcover.hardcover_book_id, "hc-123")
+                self.assertEqual(hardcover.hardcover_pages, 350)
+                self.assertEqual(hardcover.isbn, "978-1234567890")
 
-            # Verify job data was migrated
-            job = migration_db_service.get_latest_job("migration-book-1")
-            self.assertIsNotNone(job)
-            self.assertEqual(job.retry_count, 2)
-            self.assertIn("Migration test error", job.last_error)
+                # Verify job data was migrated
+                job = migration_db_service.get_latest_job("migration-book-1")
+                self.assertIsNotNone(job)
+                self.assertEqual(job.retry_count, 2)
+                self.assertIn("Migration test error", job.last_error)
+            finally:
+                migration_db_service.db_manager.close()
 
     def test_migration_state_json(self):
         """Test migration of state JSON data."""
@@ -432,45 +442,48 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             migration_db_path = temp_path / "migration.db"
             migration_db_service = self.DatabaseService(str(migration_db_path))
 
-            # Perform migration
-            migrator = self.DatabaseMigrator(
-                migration_db_service,
-                str(mapping_json_path),
-                str(state_json_path)
-            )
+            try:
+                # Perform migration
+                migrator = self.DatabaseMigrator(
+                    migration_db_service,
+                    str(mapping_json_path),
+                    str(state_json_path)
+                )
 
-            migrator.migrate()
+                migrator.migrate()
 
-            # Verify states were migrated
-            states = migration_db_service.get_states_for_book("state-migration-book")
-            self.assertEqual(len(states), 5)  # kosync, abs, absebook, storyteller, booklore
+                # Verify states were migrated
+                states = migration_db_service.get_states_for_book("state-migration-book")
+                self.assertEqual(len(states), 5)  # kosync, abs, absebook, storyteller, booklore
 
-            state_by_client = {s.client_name: s for s in states}
+                state_by_client = {s.client_name: s for s in states}
 
-            # Check kosync state
-            kosync_state = state_by_client['kosync']
-            self.assertEqual(kosync_state.percentage, 0.45)
-            self.assertEqual(kosync_state.xpath, "/html/body/div[1]/p[12]")
+                # Check kosync state
+                kosync_state = state_by_client['kosync']
+                self.assertEqual(kosync_state.percentage, 0.45)
+                self.assertEqual(kosync_state.xpath, "/html/body/div[1]/p[12]")
 
-            # Check ABS state
-            abs_state = state_by_client['abs']
-            self.assertEqual(abs_state.percentage, 0.42)
-            self.assertEqual(abs_state.timestamp, 1250.5)
+                # Check ABS state
+                abs_state = state_by_client['abs']
+                self.assertEqual(abs_state.percentage, 0.42)
+                self.assertEqual(abs_state.timestamp, 1250.5)
 
-            # Check ABS eBook state
-            absebook_state = state_by_client['absebook']
-            self.assertEqual(absebook_state.percentage, 0.46)
-            self.assertEqual(absebook_state.cfi, "epubcfi(/6/10[chapter5]!/4/2/8/1:45)")
+                # Check ABS eBook state
+                absebook_state = state_by_client['absebook']
+                self.assertEqual(absebook_state.percentage, 0.46)
+                self.assertEqual(absebook_state.cfi, "epubcfi(/6/10[chapter5]!/4/2/8/1:45)")
 
-            # Check Storyteller state
-            storyteller_state = state_by_client['storyteller']
-            self.assertEqual(storyteller_state.percentage, 0.44)
-            self.assertEqual(storyteller_state.xpath, "/html/body/section[3]/p[8]")
+                # Check Storyteller state
+                storyteller_state = state_by_client['storyteller']
+                self.assertEqual(storyteller_state.percentage, 0.44)
+                self.assertEqual(storyteller_state.xpath, "/html/body/section[3]/p[8]")
 
-            # Check BookLore state
-            booklore_state = state_by_client['booklore']
-            self.assertEqual(booklore_state.percentage, 0.43)
-            self.assertEqual(booklore_state.xpath, "/html/body/article[2]/div[1]/p[15]")
+                # Check BookLore state
+                booklore_state = state_by_client['booklore']
+                self.assertEqual(booklore_state.percentage, 0.43)
+                self.assertEqual(booklore_state.xpath, "/html/body/article[2]/div[1]/p[15]")
+            finally:
+                migration_db_service.db_manager.close()
 
     def test_migration_idempotency(self):
         """Test that migration doesn't create duplicates when run multiple times."""
@@ -507,31 +520,34 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             migration_db_path = temp_path / "migration.db"
             migration_db_service = self.DatabaseService(str(migration_db_path))
 
-            migrator = self.DatabaseMigrator(
-                migration_db_service,
-                str(mapping_json_path),
-                str(state_json_path)
-            )
+            try:
+                migrator = self.DatabaseMigrator(
+                    migration_db_service,
+                    str(mapping_json_path),
+                    str(state_json_path)
+                )
 
-            # First migration
-            self.assertTrue(migrator.should_migrate())
-            migrator.migrate()
+                # First migration
+                self.assertTrue(migrator.should_migrate())
+                migrator.migrate()
 
-            # Check initial counts
-            stats_after_first = migration_db_service.get_statistics()
-            books_after_first = stats_after_first['total_books']
-            states_after_first = stats_after_first['total_states']
+                # Check initial counts
+                stats_after_first = migration_db_service.get_statistics()
+                books_after_first = stats_after_first['total_books']
+                states_after_first = stats_after_first['total_states']
 
-            # Second migration should not be needed
-            self.assertFalse(migrator.should_migrate())
+                # Second migration should not be needed
+                self.assertFalse(migrator.should_migrate())
 
-            # Force second migration anyway
-            migrator.migrate()
+                # Force second migration anyway
+                migrator.migrate()
 
-            # Check counts haven't changed (no duplicates)
-            stats_after_second = migration_db_service.get_statistics()
-            self.assertEqual(stats_after_second['total_books'], books_after_first)
-            self.assertEqual(stats_after_second['total_states'], states_after_first)
+                # Check counts haven't changed (no duplicates)
+                stats_after_second = migration_db_service.get_statistics()
+                self.assertEqual(stats_after_second['total_books'], books_after_first)
+                self.assertEqual(stats_after_second['total_states'], states_after_first)
+            finally:
+                migration_db_service.db_manager.close()
 
     def test_migration_partial_data(self):
         """Test migration with partial/missing data scenarios."""
@@ -576,33 +592,36 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             migration_db_path = temp_path / "migration.db"
             migration_db_service = self.DatabaseService(str(migration_db_path))
 
-            migrator = self.DatabaseMigrator(
-                migration_db_service,
-                str(mapping_json_path),
-                str(state_json_path)
-            )
+            try:
+                migrator = self.DatabaseMigrator(
+                    migration_db_service,
+                    str(mapping_json_path),
+                    str(state_json_path)
+                )
 
-            migrator.migrate()
+                migrator.migrate()
 
-            # Verify both books were migrated
-            book1 = migration_db_service.get_book("no-states-book")
-            self.assertIsNotNone(book1)
+                # Verify both books were migrated
+                book1 = migration_db_service.get_book("no-states-book")
+                self.assertIsNotNone(book1)
 
-            book2 = migration_db_service.get_book("partial-states-book")
-            self.assertIsNotNone(book2)
+                book2 = migration_db_service.get_book("partial-states-book")
+                self.assertIsNotNone(book2)
 
-            # Verify states
-            states1 = migration_db_service.get_states_for_book("no-states-book")
-            self.assertEqual(len(states1), 0)  # No states
+                # Verify states
+                states1 = migration_db_service.get_states_for_book("no-states-book")
+                self.assertEqual(len(states1), 0)  # No states
 
-            states2 = migration_db_service.get_states_for_book("partial-states-book")
-            self.assertEqual(len(states2), 2)  # Only kosync and abs
+                states2 = migration_db_service.get_states_for_book("partial-states-book")
+                self.assertEqual(len(states2), 2)  # Only kosync and abs
 
-            state_clients = [s.client_name for s in states2]
-            self.assertIn('kosync', state_clients)
-            self.assertIn('abs', state_clients)
-            self.assertNotIn('storyteller', state_clients)
-            self.assertNotIn('booklore', state_clients)
+                state_clients = [s.client_name for s in states2]
+                self.assertIn('kosync', state_clients)
+                self.assertIn('abs', state_clients)
+                self.assertNotIn('storyteller', state_clients)
+                self.assertNotIn('booklore', state_clients)
+            finally:
+                migration_db_service.db_manager.close()
 
 
 if __name__ == '__main__':

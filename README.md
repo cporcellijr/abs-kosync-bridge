@@ -159,9 +159,29 @@ Access the UI at `http://your-ip:8080`.
 > [!TIP]
 > **Check the Logs**: Documentation and live logs are available directly in the Web UI, or via `docker compose logs -f`.
 
-- **Transcription taking too long?** Try setting `WHISPER_MODEL=tiny` in the Settings page.
+- **Transcription taking too long?** Try setting `WHISPER_MODEL=tiny` in the Settings page, or enable **GPU acceleration** (see below).
 - **Books not showing up?** Ensure your `/books` volume is correctly mounted and readable.
 - **Syncing backwards?** The system includes anti-regression, but you can "Clear Progress" for a book in the Dashboard to reset its state.
+
+### 🎮 GPU Acceleration (Optional)
+
+For faster transcription, you can enable NVIDIA GPU acceleration:
+
+1. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+2. Add the GPU deploy section to your `docker-compose.yml`:
+   ```yaml
+   deploy:
+     resources:
+       reservations:
+         devices:
+           - driver: nvidia
+             count: 1
+             capabilities: [gpu]
+   ```
+3. In the Settings page, set:
+   - **Whisper Device**: `cuda` (or `auto` to auto-detect)
+   - **Whisper Compute Type**: `float16` (optimal for GPU)
+   - **Whisper Model**: `small` or `medium` for better accuracy (GPU handles larger models faster)
 
 ---
 

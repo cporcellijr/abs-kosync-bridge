@@ -5,9 +5,14 @@
 
 services:
   abs-kosync-enhanced:
-    build: .
-    # Or use pre-built image:
-    # image: your-username/abs-kosync-enhanced:latest
+    image: cporcellijr/abs-kosync-enhanced:latest
+
+    # Optional: Build locally if you need specific modifications or GPU libraries included
+    # build:
+    #   context: .
+    #   args:
+    #     # Set to "true" to download NVIDIA CUDA libraries (adds ~800MB to image)
+    #     INSTALL_GPU: "false"
     container_name: abs_kosync_enhanced
     restart: unless-stopped
 
@@ -17,103 +22,11 @@ services:
       # ============================================
       - TZ=America/New_York
       - LOG_LEVEL=INFO
-
       # ============================================
-      # Audiobookshelf Configuration (REQUIRED)
+      # Configuration Note
       # ============================================
-      # Your ABS server URL
-      - ABS_SERVER=https://your-audiobookshelf-server.com
-      # API key from ABS: Settings -> Users -> Your User -> API Token
-      - ABS_KEY=your_abs_api_key_here
-      # Library ID from URL: /library/THIS_PART_HERE
-      - ABS_LIBRARY_ID=your_library_id
-      # Collection name for synced books (auto-created if missing)
-      - ABS_COLLECTION_NAME=Synced with KOReader
-      # Optionally, adjust progress offset in seconds, like -60 for 1 minute back
-      # - ABS_PROGRESS_OFFSET_SECONDS=-60
-      # Search only within the specified library ID above only (recommended)
-      #- ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID=false
-
-      # ============================================
-      # KOSync Configuration (REQUIRED)
-      # ============================================
-      # Your KOSync server (Calibre with KOSync plugin, or standalone)
-      - KOSYNC_SERVER=https://your-calibre-server.com/api/koreader
-      - KOSYNC_USER=your_username
-      - KOSYNC_KEY=your_password
-
-      # Hash method: 'content' (recommended) or 'filename'
-      - KOSYNC_HASH_METHOD=content
-      # Whether to use percentage progress from KOSync server instead of calculating from text matching when saving the previous state
-      - KOSYNC_USE_PERCENTAGE_FROM_SERVER=false
-
-      # ============================================
-      # Hardcover Integration (OPTIONAL)
-      # ============================================
-      # Get your token from: https://hardcover.app/account/api
-      # Leave empty or remove to disable Hardcover sync
-      - HARDCOVER_TOKEN=your_hardcover_api_token_here
-
-      # ============================================
-      # Storyteller Integration (OPTIONAL)
-      # ============================================
-      # Option 1: REST API (Recommended - prevents mobile app overwrites)
-      # Use host.docker.internal to reach host machine from container
-      - STORYTELLER_API_URL=http://host.docker.internal:8001
-      - STORYTELLER_USER=your_storyteller_username
-      - STORYTELLER_PASSWORD=your_storyteller_password
-
-      # Option 2: Direct SQLite (Legacy - may be overwritten by mobile app)
-      # Only used as fallback if API credentials not set
-      - STORYTELLER_DB_PATH=/storyteller_data/storyteller.db
-
-      # ============================================
-      # Booklore Integration (OPTIONAL)
-      # ============================================
-      # Auto-add synced books to a Booklore shelf
-      - BOOKLORE_SERVER=https://your-calibre-server.com
-      - BOOKLORE_USER=your_username
-      - BOOKLORE_PASSWORD=your_password
-      - BOOKLORE_SHELF_NAME=Kobo
-
-      # ============================================
-      # Sync Behavior Settings
-      # ============================================
-      # How often to check for progress changes (minutes)
-      - SYNC_PERIOD_MINS=5
-      # Minimum audiobook progress change to trigger sync (seconds)
-      - SYNC_DELTA_ABS_SECONDS=60
-      # Minimum ebook progress change to trigger sync (percentage, 0-100)
-      - SYNC_DELTA_KOSYNC_PERCENT=0.5
-      # Minimum word count change to trigger sync
-      - SYNC_DELTA_KOSYNC_WORDS=400
-      # Minimum progress difference between clients to trigger sync (percentage, 0-100)
-      - SYNC_DELTA_BETWEEN_CLIENTS_PERCENT=0.5
-      # Fuzzy text matching threshold (0-100, higher = stricter)
-      - FUZZY_MATCH_THRESHOLD=88
-      # Enable ABS ebook sync (for EPUB progress synchronization). Still work in progress.
-      - SYNC_ABS_EBOOK=false
-      # Allow ABS ebook to be the leader for the sync cycle
-      - SYNC_ABS_EBOOK_CAN_BE_LEADER=true
-
-      # ============================================
-      # Book Linker Settings (OPTIONAL)
-      # ============================================
-      # For Storyteller automated processing workflow
-      - MONITOR_INTERVAL=3600
-      - LINKER_BOOKS_DIR=/linker_books
-      - PROCESSING_DIR=/processing
-      - AUDIOBOOKS_DIR=/audiobooks
-      - STORYTELLER_INGEST_DIR=/storyteller/library
-      # ============================================
-      # Telegram Logging Integration (OPTIONAL)
-      # ============================================
-      # Enable Telegram log forwarding for errors and above.
-      # Get your bot token from @BotFather and chat ID from @userinfobot or via API.
-      # Uncomment and fill in the following lines to enable:
-      # - TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
-      # - TELEGRAM_CHAT_ID=123456789
-      # - TELEGRAM_LOG_LEVEL=ERROR  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+      # All other configuration (ABS, KoSync, Providers, etc.) 
+      # is now managed via the Web UI variables at http://localhost:5757/settings
 
     volumes:
       # ============================================
@@ -142,6 +55,20 @@ services:
 
     networks:
       - your-network
+    # ============================================
+    # GPU SUPPORT (OPTIONAL)
+    # ============================================
+    # Uncomment below to enable NVIDIA GPU acceleration for Whisper.
+    # Requires: docker with nvidia-container-toolkit installed.
+    # See: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
 networks:
   your-network:
