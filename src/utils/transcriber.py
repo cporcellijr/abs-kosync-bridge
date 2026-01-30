@@ -302,9 +302,32 @@ class AudioTranscriber:
         # [NEW] Path for the alignment map
         alignment_file = self.transcripts_dir / f"{abs_id}_alignment.json"
 
+        # Check if we can skip the heavy lifting
         if output_file.exists():
-            logger.info(f"Transcript already exists for {abs_id}")
-            return output_file
+            # If we have the transcript AND the map (or no text to map against), we are truly done.
+            if not full_book_text or alignment_file.exists():
+                logger.info(f"Transcript and alignment already exist for {abs_id}")
+                return output_file
+            
+            # If we are here, we have the transcript but MISS the map.
+            # We can skip downloading/transcribing and jump straight to alignment!
+            logger.info(f"⚡ Transcript exists for {abs_id}, but alignment map is missing. Running alignment phase only.")
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    full_transcript = json.load(f)
+                
+                # Run Phase 3 (Alignment) immediately
+                alignment_map = self.align_transcript_to_text(full_transcript, full_book_text)
+                if alignment_map:
+                    with open(alignment_file, 'w', encoding='utf-8') as f:
+                        json.dump(alignment_map, f, ensure_ascii=False)
+                    logger.info(f"✅ Alignment complete: Saved {len(alignment_map)} sync points.")
+                
+                return output_file
+            except Exception as e:
+                logger.error(f"⚠️ Alignment update failed: {e}")
+                # If alignment fails, we still return the output_file so basic sync works
+                return output_file
 
         book_cache_dir = self.cache_root / str(abs_id)
         if book_cache_dir.exists():

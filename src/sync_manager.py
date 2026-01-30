@@ -1152,6 +1152,11 @@ class SyncManager:
                     'total_clients': len(reset_results)
                 }
 
+                # Force the background job to re-evaluate this book (e.g. to generate missing alignment maps)
+                book.status = 'pending'
+                self.database_service.save_book(book)
+                logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")
                 logger.info(f"   Client resets: {summary['successful_resets']}/{summary['total_clients']} successful")
