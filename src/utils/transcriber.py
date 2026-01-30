@@ -137,13 +137,6 @@ class AudioTranscriber:
                 logger.warning(f"⚠️ SMIL extraction failed validation: {overlap_ratio:.1%} overlap (threshold: 5%)")
                 logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
                 
-                # Delete output file if it exists to ensure clean state
-                if output_file.exists():
-                    try:
-                        os.remove(output_file)
-                    except:
-                        pass
-                        
                 return None
 
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -682,7 +675,7 @@ class AudioTranscriber:
             return None
 
         # 3. Identify Anchors (Unique N-grams, N=6)
-        N = 6
+        N = 12
         
         def get_n_grams(word_list, is_transcript=False):
             grams = {}
