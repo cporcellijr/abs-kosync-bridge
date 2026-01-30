@@ -131,7 +131,7 @@ class TestDeepgramProvider(unittest.TestCase):
                     segments = provider.transcribe(Path("test.mp3"))
                 
                 # Verify client init
-                mock_client_cls.assert_called_once_with("test_key")
+                mock_client_cls.assert_called_once_with(api_key="test_key")
                 
                 # Verify transcribe call args - ensure NO timeout and correct model
                 mock_transcribe.assert_called_once()
