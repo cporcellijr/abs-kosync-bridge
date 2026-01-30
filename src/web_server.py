@@ -28,14 +28,10 @@ def _reconfigure_logging():
     try:
             new_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
             new_level = getattr(logging, new_level_str, logging.INFO)
-            
+
             root = logging.getLogger()
             root.setLevel(new_level)
-            
-            # Also update all handlers
-            for handler in root.handlers:
-                handler.setLevel(new_level)
-                
+
             logger.info(f"📝 Logging level updated to {new_level_str}")
     except Exception as e:
             logger.warning(f"Failed to reconfigure logging: {e}")
@@ -63,7 +59,7 @@ def setup_dependencies(app, test_container=None):
         ConfigLoader.bootstrap_config(database_service)
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
-        
+
         # Force reconfigure logging level based on new settings
         _reconfigure_logging()
 
@@ -543,7 +539,7 @@ class EbookResult:
 def get_searchable_ebooks(search_term):
     """Get ebooks from Booklore API and filesystem.
     Returns list of EbookResult objects for consistent interface."""
-    
+
     results = []
     found_filenames = set()
 
@@ -572,19 +568,19 @@ def get_searchable_ebooks(search_term):
             all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
             if not search_term:
                 # If no search term, list all (filtering done below)
-                pass 
-            
+                pass
+
             # Combine logic: if search_term, filter. always check duplicates
             for eb in all_epubs:
                  if eb.name in found_filenames:
                      continue
-                 
+
                  if not search_term or search_term.lower() in eb.name.lower():
                      results.append(EbookResult(name=eb.name, path=eb))
 
         except Exception as e:
             logger.warning(f"Filesystem search failed: {e}")
-            
+
     # Check if we have no sources at all
     if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
         logger.warning(
@@ -739,15 +735,15 @@ def get_abs_author(ab):
 def audiobook_matches_search(ab, search_term):
     """Check if audiobook matches search term (searches title AND author)."""
     import re
-    
+
     # Normalize: remove punctuation
     def normalize(s):
         return re.sub(r'[^\w\s]', '', s.lower())
-    
+
     title = normalize(manager.get_abs_title(ab))
     author = normalize(get_abs_author(ab))
     search_norm = normalize(search_term)
-    
+
     return search_norm in title or search_norm in author
 
 # ---------------- ROUTES ----------------
@@ -756,7 +752,7 @@ def index():
 
     # Load books from database service
     books = database_service.get_all_books()
-    
+
     # Fetch all states at once to avoid N+1 queries with NullPool
     all_states = database_service.get_all_states()
     states_by_book = {}
@@ -767,15 +763,15 @@ def index():
 
     # Fetch pending suggestions
     suggestions_raw = database_service.get_all_pending_suggestions()
-    
+
     # Filter suggestions: Hide those with 0 matches
     suggestions = []
-    
+
     for s in suggestions_raw:
         if len(s.matches) == 0:
             continue
         suggestions.append(s)
-    
+
     # [OPTIMIZATION] Fetch all hardcover details at once
     all_hardcover = database_service.get_all_hardcover_details()
     hardcover_by_book = {h.abs_id: h for h in all_hardcover}
@@ -879,7 +875,7 @@ def index():
             bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
         else:
             bl_book = None
-            
+
         if bl_book:
             mapping['booklore_id'] = bl_book.get('id')
             mapping['booklore_url'] = f"{manager.booklore_client.base_url}/book/{bl_book.get('id')}?tab=view"
@@ -1053,7 +1049,7 @@ def match():
             container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
-        
+
         # Auto-dismiss any pending suggestion for this book
         # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
         database_service.dismiss_suggestion(abs_id)
@@ -1387,7 +1383,7 @@ def api_status():
         for client_name, state in state_by_client.items():
             # Store in unified states object
             pct_val = round(state.percentage * 100, 1) if state.percentage is not None else 0
-            
+
             mapping['states'][client_name] = {
                 'timestamp': state.timestamp or 0,
                 'percentage': pct_val,
@@ -1600,7 +1596,7 @@ def get_suggestions():
             matches = json.loads(s.matches_json) if s.matches_json else []
         except:
             matches = []
-            
+
         result.append({
             "id": s.id,
             "source_id": s.source_id,
@@ -1634,7 +1630,7 @@ def proxy_cover(abs_id):
             return "ABS not configured", 500
 
         url = f"{base_url.rstrip('/')}/api/items/{abs_id}/cover?token={token}"
-        
+
         # Stream the response to avoid loading large images into memory
         req = requests.get(url, stream=True, timeout=10)
         if req.status_code == 200:
@@ -1689,7 +1685,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/logs/live', 'api_logs_live', api_logs_live)
     app.add_url_rule('/view_log', 'view_log', view_log)
     app.add_url_rule('/settings', 'settings', settings, methods=['GET', 'POST'])
-    
+
     # Suggestion routes
     app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])
     app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
@@ -1749,5 +1745,7 @@ if __name__ == '__main__':
     logger.info(f"🌐 Web interface starting on port 5757")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
+
+
 
 
