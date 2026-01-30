@@ -81,18 +81,18 @@ class SyncManager:
         for name, client in clients.items():
             if client.is_configured():
                 self.sync_clients[name] = client
-                logger.info(f"✅ Sync client enabled: {name}")
+                logger.info(f"[INIT] Sync client enabled: {name}")
             else:
-                logger.info(f"🚫 Sync client disabled/unconfigured: {name}")
+                logger.info(f"[SKIP] Sync client disabled/unconfigured: {name}")
 
     def startup_checks(self):
         # Check configured sync clients
         for client_name, client in (self.sync_clients or {}).items():
             try:
                 client.check_connection()
-                logger.info(f"✅ {client_name} connection verified")
+                logger.info(f"[OK] {client_name} connection verified")
             except Exception as e:
-                logger.warning(f"⚠️ {client_name} connection failed: {e}")
+                logger.warning(f"[WARN] {client_name} connection failed: {e}")
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -240,7 +240,7 @@ class SyncManager:
         """
         One-time scan of active books to identify and purge corrupted SMIL transcripts.
         """
-        logger.info("🔍 Scanning for corrupted legacy transcripts...")
+        logger.info("[SCAN] Scanning for corrupted legacy transcripts...")
         active_books = self.database_service.get_books_by_status('active')
         count = 0
         
@@ -271,9 +271,9 @@ class SyncManager:
                     if current_file and os.path.exists(current_file):
                         try:
                             os.remove(current_file)
-                            logger.info(f"   🗑️ Deleted corrupted file: {current_file}")
+                            logger.info(f"   [DEL] Deleted corrupted file: {current_file}")
                         except Exception as e:
-                            logger.error(f"   ❌ Failed to delete file {current_file}: {e}")
+                            logger.error(f"   [FAIL] Failed to delete file {current_file}: {e}")
                             
                     count += 1
             except Exception as e:
@@ -281,7 +281,7 @@ class SyncManager:
                 pass
         
         if count > 0:
-            logger.info(f"♻️ Scheduled {count} corrupted transcripts for re-processing.")
+            logger.info(f"[JOB] Scheduled {count} corrupted transcripts for re-processing.")
 
 
 
@@ -293,14 +293,14 @@ class SyncManager:
         books_search_dir = self.books_dir or Path("/books")
         filesystem_matches = list(books_search_dir.glob(f"**/{ebook_filename}"))
         if filesystem_matches:
-            logger.info(f"📚 Found EPUB on filesystem: {filesystem_matches[0]}")
+            logger.info(f"[FS] Found EPUB on filesystem: {filesystem_matches[0]}")
             return filesystem_matches[0]
-
+        
         # Check persistent EPUB cache
         self.epub_cache_dir.mkdir(parents=True, exist_ok=True)
         cached_path = self.epub_cache_dir / ebook_filename
         if cached_path.exists():
-            logger.info(f"📚 Found EPUB in cache: {cached_path}")
+            logger.info(f"[CACHE] Found EPUB in cache: {cached_path}")
             return cached_path
 
         # Try to download from Booklore API
@@ -308,13 +308,13 @@ class SyncManager:
         if hasattr(self.booklore_client, 'is_configured') and self.booklore_client.is_configured():
             book = self.booklore_client.find_book_by_filename(ebook_filename)
             if book:
-                logger.info(f"📥 Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
+                logger.info(f"[DL] Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
                 if hasattr(self.booklore_client, 'download_book'):
                     content = self.booklore_client.download_book(book['id'])
                     if content:
                         with open(cached_path, 'wb') as f:
                             f.write(content)
-                        logger.info(f"✅ Downloaded EPUB to cache: {cached_path}")
+                        logger.info(f"[OK] Downloaded EPUB to cache: {cached_path}")
                         return cached_path
                     else:
                         logger.error(f"Failed to download EPUB content from Booklore")
@@ -368,7 +368,7 @@ class SyncManager:
 
     def _create_suggestion(self, abs_id, progress_data):
         """Create a new suggestion for an unmapped book."""
-        logger.info(f"💡 Found potential new book for suggestion: {abs_id}")
+        logger.info(f"[IDEA] Found potential new book for suggestion: {abs_id}")
         
         try:
             # 1. Get Details from ABS
@@ -433,7 +433,7 @@ class SyncManager:
             
             # 3. Save to DB
             if not matches:
-                logger.debug(f"ℹ️ No matches found for '{title}', skipping suggestion creation.")
+                logger.debug(f"[INFO] No matches found for '{title}', skipping suggestion creation.")
                 return
 
             suggestion = PendingSuggestion(
@@ -445,7 +445,7 @@ class SyncManager:
             )
             self.database_service.save_pending_suggestion(suggestion)
             match_count = len(matches)
-            logger.info(f"✅ Created suggestion for '{title}' with {match_count} matches")
+            logger.info(f"[OK] Created suggestion for '{title}' with {match_count} matches")
 
         except Exception as e:
             logger.error(f"Failed to create suggestion for {abs_id}: {e}")
@@ -579,7 +579,7 @@ class SyncManager:
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
             if not transcript_path:
-                logger.info("ℹ️ SMIL data not found or failed, falling back to Whisper transcription.")
+                logger.info("[INFO] SMIL data not found or failed, falling back to Whisper transcription.")
                 audio_files = self.abs_client.get_audio_files(abs_id)
                 transcript_path = self.transcriber.process_audio(
                     abs_id, audio_files,
@@ -689,7 +689,7 @@ class SyncManager:
 
         # Ensure we have at least one potential leader
         if not vals:
-            logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
+            logger.warning(f"[WARN] [{abs_id}] [{title_snip}] No clients available to be leader")
             return None, None
 
         # Check which clients have changed (delta > minimum threshold)
@@ -704,7 +704,7 @@ class SyncManager:
             # Only one client changed - that client is the leader (most recent change wins)
             leader = list(clients_with_delta.keys())[0]
             leader_pct = vals[leader]
-            logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
+            logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
         else:
             # Multiple clients changed or this is a discrepancy resolution
             # Use "furthest wins" logic among changed clients (or all if none changed)
@@ -720,17 +720,17 @@ class SyncManager:
                     leader = max(normalized_candidates, key=normalized_candidates.get)
                     leader_ts = normalized_candidates[leader]
                     leader_pct = vals[leader]
-                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
                 else:
                     # Fallback to percentage-based comparison among candidates
                     leader = max(candidates, key=candidates.get)
                     leader_pct = vals[leader]
-                    logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
             else:
                 # Same-format sync or normalization failed - use raw percentages
                 leader = max(candidates, key=candidates.get)
                 leader_pct = vals[leader]
-                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
                 
         return leader, leader_pct
 
@@ -748,7 +748,7 @@ class SyncManager:
              # Instant Sync: Block and wait for lock (up to 10s)
              acquired = self._sync_lock.acquire(timeout=10)
              if not acquired:
-                 logger.warning(f"⚠️ Sync lock timeout for {target_abs_id} - skipping")
+                 logger.warning(f"[WARN] Sync lock timeout for {target_abs_id} - skipping")
                  return
         else:
              # Daemon: Non-blocking attempt
@@ -789,7 +789,7 @@ class SyncManager:
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
-            logger.info(f"⚡ Instant Sync triggered for {target_abs_id}")
+            logger.info(f"[JOB] Instant Sync triggered for {target_abs_id}")
             book = self.database_service.get_book(target_abs_id)
             if book and book.status == 'active':
                 active_books = [book]
@@ -1095,7 +1095,7 @@ class SyncManager:
 
                 # Clear all states for this book from database
                 cleared_count = self.database_service.delete_states_for_book(abs_id)
-                logger.info(f"📊 Cleared {cleared_count} state records from database")
+                logger.info(f"💾 Cleared {cleared_count} state records from database")
 
                 # Delete KOSync document record to bypass "furthest wins" protection
                 # Without this, the integrated KOSync server will reject the 0% update

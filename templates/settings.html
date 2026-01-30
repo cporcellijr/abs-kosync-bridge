@@ -837,8 +837,75 @@
                         <input type="number" name="EBOOK_CACHE_SIZE" value="{{ get_val('EBOOK_CACHE_SIZE') }}">
                     </div>
                     <div class="form-group">
-                        <label>Whisper Model</label>
-                        <input type="text" name="WHISPER_MODEL" value="{{ get_val('WHISPER_MODEL') }}">
+                        <label>Transcription Provider</label>
+                        <select name="TRANSCRIPTION_PROVIDER">
+                            <option value="local" {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif
+                                %}>Local Whisper</option>
+                            <option value="deepgram" {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{%
+                                endif %}>Deepgram (Cloud)</option>
+                        </select>
+                        <div class="help-text">Local uses faster-whisper. Deepgram is faster but requires API key.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Deepgram API Key</label>
+                        <input type="password" name="DEEPGRAM_API_KEY" value="{{ get_val('DEEPGRAM_API_KEY') }}"
+                            placeholder="dg_...">
+                        <div class="help-text">Get your key at <a href="https://console.deepgram.com"
+                                target="_blank">console.deepgram.com</a></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Deepgram Model</label>
+                        <select name="DEEPGRAM_MODEL">
+                            <option value="nova-2" {% if get_val('DEEPGRAM_MODEL')=='nova-2' %}selected{% endif %}>
+                                Nova-2 (Best accuracy)</option>
+                            <option value="nova-3" {% if get_val('DEEPGRAM_MODEL')=='nova-3' %}selected{% endif %}>
+                                Nova-3 (Latest)</option>
+                            <option value="base" {% if get_val('DEEPGRAM_MODEL')=='base' %}selected{% endif %}>Base
+                                (Fastest)</option>
+                            <option value="enhanced" {% if get_val('DEEPGRAM_MODEL')=='enhanced' %}selected{% endif %}>
+                                Enhanced</option>
+                        </select>
+                        <div class="help-text">Nova-2 recommended. See <a
+                                href="https://developers.deepgram.com/docs/models" target="_blank">Deepgram Models</a>
+                        </div>
+                    </div>
+                    <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3;">
+                    <div class="form-group">
+                        <label>Whisper Model (Local)</label>
+                        <select name="WHISPER_MODEL">
+                            {% for model in ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'] %}
+                            <option value="{{ model }}" {% if get_val('WHISPER_MODEL')==model %}selected{% endif %}>{{
+                                model }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="help-text">Only used when provider is Local. Larger = better accuracy but slower.
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Whisper Device</label>
+                        <select name="WHISPER_DEVICE">
+                            <option value="auto" {% if get_val('WHISPER_DEVICE')=='auto' %}selected{% endif %}>Auto
+                                (Detect GPU)</option>
+                            <option value="cpu" {% if get_val('WHISPER_DEVICE')=='cpu' %}selected{% endif %}>CPU
+                            </option>
+                            <option value="cuda" {% if get_val('WHISPER_DEVICE')=='cuda' %}selected{% endif %}>CUDA
+                                (NVIDIA GPU)</option>
+                        </select>
+                        <div class="help-text">Auto will try GPU if available, fallback to CPU.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Whisper Compute Type</label>
+                        <select name="WHISPER_COMPUTE_TYPE">
+                            <option value="auto" {% if get_val('WHISPER_COMPUTE_TYPE')=='auto' %}selected{% endif %}>
+                                Auto (int8 CPU / float16 GPU)</option>
+                            <option value="int8" {% if get_val('WHISPER_COMPUTE_TYPE')=='int8' %}selected{% endif %}>
+                                int8 (Fast, CPU-optimized)</option>
+                            <option value="float16" {% if get_val('WHISPER_COMPUTE_TYPE')=='float16' %}selected{% endif
+                                %}>float16 (Fast, GPU-optimized)</option>
+                            <option value="float32" {% if get_val('WHISPER_COMPUTE_TYPE')=='float32' %}selected{% endif
+                                %}>float32 (Highest accuracy)</option>
+                        </select>
+                        <div class="help-text">Use int8 for CPU, float16 for GPU.</div>
                     </div>
                     <div class="form-group">
                         <label>Job Max Retries</label>

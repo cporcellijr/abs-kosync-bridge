@@ -27,6 +27,7 @@ from collections import OrderedDict
 import re
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
+from src.utils.transcription_providers import get_transcription_provider
 # We keep the import for type hinting, but we don't instantiate it directly anymore
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,10 @@ class AudioTranscriber:
         self.cache_root.mkdir(parents=True, exist_ok=True)
 
         self.model_size = os.environ.get("WHISPER_MODEL", "base")
+        
+        # GPU/Device configuration
+        self.whisper_device = os.environ.get("WHISPER_DEVICE", "auto").lower()
+        self.whisper_compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "auto").lower()
 
         self._transcript_cache = OrderedDict()
         self._cache_capacity = 3
@@ -50,6 +55,42 @@ class AudioTranscriber:
 
         # [UPDATED] Use the injected instance
         self.smil_extractor = smil_extractor
+
+    def _get_whisper_config(self) -> tuple[str, str]:
+        """
+        Determine the Whisper device and compute type based on configuration.
+        
+        Returns:
+            (device, compute_type) tuple
+        
+        Configuration options:
+            WHISPER_DEVICE: 'auto', 'cpu', 'cuda'
+            WHISPER_COMPUTE_TYPE: 'auto', 'int8', 'float16', 'float32'
+        
+        When 'auto', attempts CUDA detection with graceful fallback to CPU.
+        """
+        device = self.whisper_device
+        compute_type = self.whisper_compute_type
+        
+        if device == 'auto':
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = 'cuda'
+                    logger.info(f"🎮 CUDA available: {torch.cuda.get_device_name(0)}")
+                else:
+                    device = 'cpu'
+                    logger.info("💻 CUDA not available, using CPU")
+            except ImportError:
+                device = 'cpu'
+                logger.info("💻 PyTorch not installed, using CPU")
+        
+        if compute_type == 'auto':
+            # float16 for GPU, int8 for CPU (optimal defaults)
+            compute_type = 'float16' if device == 'cuda' else 'int8'
+        
+        logger.info(f"⚙️ Whisper config: device={device}, compute_type={compute_type}, model={self.model_size}")
+        return device, compute_type
 
     def validate_transcript(self, segments: list, max_overlap_ratio: float = 0.05) -> tuple[bool, float]:
         """
@@ -334,9 +375,8 @@ class AudioTranscriber:
 
             # Phase 2: Transcribe
             logger.info(f"✅ All parts cached. Starting transcription ({len(downloaded_files)} chunks)...")
-            logger.info(f"🧠 Phase 2: Transcribing using {self.model_size} model...")
-
-            model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=4)
+            provider = get_transcription_provider()
+            logger.info(f"🧠 Phase 2: Transcribing using {provider.get_name()}...")
 
             total_chunks = len(downloaded_files)
             # Calculate total audio duration for progress reporting
@@ -352,16 +392,15 @@ class AudioTranscriber:
                 logger.info(f"   [{pct:.0f}%] Transcribing chunk {idx + 1}/{total_chunks} ({duration/60:.1f} min)...")
 
                 try:
-                    segments, info = model.transcribe(str(local_path), beam_size=1, best_of=1)
-
-                    segment_count = 0
+                    # Use the transcription provider
+                    segments = provider.transcribe(local_path)
+                    
                     for segment in segments:
                         full_transcript.append({
-                            "start": segment.start + cumulative_duration,
-                            "end": segment.end + cumulative_duration,
-                            "text": segment.text.strip()
+                            "start": segment["start"] + cumulative_duration,
+                            "end": segment["end"] + cumulative_duration,
+                            "text": segment["text"]
                         })
-                        segment_count += 1
 
                 except Exception as e:
                     logger.error(f"   ❌ Transcription failed for {local_path.name}: {e}")

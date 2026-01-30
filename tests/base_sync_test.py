@@ -317,11 +317,11 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                     if hasattr(state, 'client_name') and hasattr(state, 'percentage'):
                         final_states[state.client_name] = state.percentage
 
-            print(f"🔍 Final states from database service calls: {final_states}")
+            print(f"[VERIFY] Final states from database service calls: {final_states}")
 
             # If no states were saved, fall back to checking the mock return values
             if not final_states:
-                print("⚠️  No states found in database service calls, using expected values")
+                print("[WARN] No states found in database service calls, using expected values")
                 expected_pct = self.expected_final_pct
                 final_states = {
                     'abs': expected_pct,
