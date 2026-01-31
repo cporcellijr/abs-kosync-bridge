@@ -109,6 +109,7 @@ class ABSSyncClient(SyncClient):
 
         ts_for_text = self.transcriber.find_time_for_text(book.transcript_file, request.txt,
                                                           hint_percentage=request.locator_result.percentage,
+                                                          char_offset=request.locator_result.match_index,
                                                           book_title=book_title)
         if ts_for_text is not None:
             response = self.abs_client.get_progress(book.abs_id)
