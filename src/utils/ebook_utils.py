@@ -431,8 +431,33 @@ class EbookParser:
                 return None
             total_len = len(full_text)
 
-            # 1. Exact match
-            match_index = full_text.find(search_phrase)
+            # [NEW] 0. Global Uniqueness Check (The "Anchor" Logic)
+            # Try to find a 10-word sequence that appears EXACTLY once in the book.
+            # This prevents jumping to duplicate phrases (e.g., "Chapter 1" in the ToC vs the actual chapter).
+            clean_search = " ".join(search_phrase.split())
+            words = clean_search.split()
+            
+            match_index = -1
+            
+            if len(words) >= 10:
+                N = 10
+                # Scan through the search phrase to find a unique anchor
+                for i in range(len(words) - N + 1):
+                    candidate = " ".join(words[i:i+N])
+                    
+                    # Check if this phrase exists exactly ONCE in the text
+                    if full_text.count(candidate) == 1:
+                        found_idx = full_text.find(candidate)
+                        if found_idx != -1:
+                            match_index = found_idx
+                            logger.info(f"⚓ Found unique text anchor: '{candidate[:30]}...' at index {match_index}")
+                            break
+            
+            # [End of NEW logic] - Continue to existing fallbacks
+
+            # 1. Exact match (if anchor logic didn't find anything)
+            if match_index == -1:
+                match_index = full_text.find(search_phrase)
 
             # 2. Normalized match
             if match_index == -1:
