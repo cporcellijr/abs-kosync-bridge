@@ -3,8 +3,8 @@ import os
 import requests
 import logging
 import time
-import hashlib
 
+from src.utils.kosync_headers import hash_kosync_key, kosync_auth_headers
 from src.utils.logging_utils import sanitize_log_data
 
 logger = logging.getLogger(__name__)
@@ -397,8 +397,7 @@ class KoSyncClient:
     def __init__(self):
         self.base_url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
         self.user = os.environ.get("KOSYNC_USER")
-        # Kept your MD5 hash logic
-        self.auth_token = hashlib.md5(os.environ.get("KOSYNC_KEY", "").encode('utf-8')).hexdigest()
+        self.auth_token = hash_kosync_key(os.environ.get("KOSYNC_KEY", ""))
         self.session = requests.Session()
 
     def is_configured(self):
@@ -414,8 +413,8 @@ class KoSyncClient:
             
         is_local = '127.0.0.1' in self.base_url or 'localhost' in self.base_url
         url = f"{self.base_url}/healthcheck"
+        headers = kosync_auth_headers(self.user, self.auth_token)
         try:
-            headers = {'accept': 'application/vnd.koreader.v1+json'}
             r = self.session.get(url, timeout=5, headers=headers)
             if r.status_code == 200:
                 # First-run visible INFO, otherwise DEBUG
@@ -434,7 +433,6 @@ class KoSyncClient:
                 return True
             # Fallback check
             url_sync = f"{self.base_url}/syncs/progress/test-connection"
-            headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token}
             r = self.session.get(url_sync, headers=headers, timeout=5)
             if r.status_code == 200:
                 return True
@@ -453,7 +451,7 @@ class KoSyncClient:
         CRITICAL FIX: Returns TUPLE (percentage, xpath_string)
         This prevents the 'cannot unpack non-iterable float' crash.
         """
-        headers = {"x-auth-user": self.user, "x-auth-key": self.auth_token, 'accept': 'application/vnd.koreader.v1+json'}
+        headers = kosync_auth_headers(self.user, self.auth_token)
         url = f"{self.base_url}/syncs/progress/{doc_id}"
         try:
             r = self.session.get(url, headers=headers)
@@ -472,10 +470,8 @@ class KoSyncClient:
         if not self.is_configured(): return False
 
         headers = {
-            "x-auth-user": self.user,
-            "x-auth-key": self.auth_token,
-            'accept': 'application/vnd.koreader.v1+json',
-            'content-type': 'application/json'
+            **kosync_auth_headers(self.user, self.auth_token),
+            "content-type": "application/json",
         }
         url = f"{self.base_url}/syncs/progress"
 
