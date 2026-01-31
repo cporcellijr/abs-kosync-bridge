@@ -939,7 +939,7 @@ class SyncManager:
                 # (discrepancy will resolve next time someone reads)
                 # Exception: if character delta triggered, we have a real change
                 if significant_diff and not any_significant_delta and not char_delta_triggered:
-                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists but no significant changes, skipping until next read")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader.")
                     continue
 
                 if significant_diff:
