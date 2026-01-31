@@ -674,7 +674,7 @@ class AudioTranscriber:
         if not transcript_words or not book_words:
             return None
 
-        # 3. Identify Anchors (Unique N-grams, N=6)
+        # 3. Identify Anchors (Unique N-grams, N=12)
         N = 12
         
         def get_n_grams(word_list, is_transcript=False):
