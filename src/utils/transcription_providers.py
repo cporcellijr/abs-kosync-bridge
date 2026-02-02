@@ -7,6 +7,7 @@ Supports local Whisper and cloud providers like Deepgram.
 
 import logging
 import os
+import requests
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -201,6 +202,52 @@ class DeepgramProvider(TranscriptionProvider):
         logger.info(f"✅ Deepgram transcription complete: {len(segments_out)} segments")
         return segments_out
 
+class WhisperCppServerProvider(TranscriptionProvider):
+    """Transcription via whisper.cpp HTTP server (ggml-org)."""
+
+    def __init__(self):
+        url = os.environ.get("WHISPER_CPP_URL", "").strip()
+        if not url:
+            raise ValueError(
+                "WHISPER_CPP_URL is not configured. Set it in Settings → Advanced Options."
+            )
+        self.server_url = url
+
+    def get_name(self) -> str:
+        return "Whisper.cpp (server)"
+
+    def transcribe(self, audio_path: Path, progress_callback=None) -> list[dict]:
+        import requests
+
+        logger.info(f"🌐 Transcribing with {self.get_name()}: {audio_path.name}")
+
+        with open(audio_path, "rb") as f:
+            files = {
+                "file": (audio_path.name, f, "audio/wav")
+            }
+            data = {"response_format": "verbose_json"}
+
+            response = requests.post(
+                self.server_url,
+                files=files,
+                data=data,
+                timeout=600
+            )
+
+        response.raise_for_status()
+        result = response.json()
+
+        segments_out = []
+        for seg in result.get("segments", []):
+            segments_out.append({
+                "start": float(seg["start"]),
+                "end": float(seg["end"]),
+                "text": seg["text"].strip()
+            })
+
+        logger.info(f"✅ whisper.cpp transcription complete: {len(segments_out)} segments")
+        return segments_out
+
 
 def get_transcription_provider() -> TranscriptionProvider:
     """Factory function to get the configured transcription provider."""
@@ -212,5 +259,7 @@ def get_transcription_provider() -> TranscriptionProvider:
             logger.warning("⚠️ Deepgram selected but no API key configured, falling back to local")
             return LocalWhisperProvider()
         return DeepgramProvider()
+    elif provider_name == "whispercpp":
+        return WhisperCppServerProvider()
     else:
         return LocalWhisperProvider()
