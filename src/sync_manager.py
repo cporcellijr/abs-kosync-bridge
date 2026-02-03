@@ -180,16 +180,23 @@ class SyncManager:
             client_pct = client_state.current.get('pct', 0)
             
             try:
-                # Get the text at the ebook's current position
-                txt = client.get_text_from_current_state(book, client_state)
+                # [NEW] Get character offset from the ebook position for precise alignment
+                book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+                full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+                total_text_len = len(full_text)
+                
+                char_offset = int(client_pct * total_text_len)
+                txt = full_text[max(0, char_offset - 400):min(total_text_len, char_offset + 400)]
+                
                 if not txt:
                     logger.debug(f"[{book.abs_id}] Could not get text from {client_name} for normalization")
                     continue
                     
-                # Find equivalent timestamp in audiobook
+                # Find equivalent timestamp in audiobook using the precise aligner if available
                 ts_for_text = self.transcriber.find_time_for_text(
-                    book.transcript_file, txt,
+                    book.transcript_file, txt, 
                     hint_percentage=client_pct,
+                    char_offset=char_offset,
                     book_title=book.abs_title
                 )
                 
@@ -582,9 +589,14 @@ class SyncManager:
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
             if not transcript_path:
                 logger.info("[INFO] SMIL data not found or failed, falling back to Whisper transcription.")
+                
+                # [NEW] Extract full text for alignment if not already done
+                book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
+                
                 audio_files = self.abs_client.get_audio_files(abs_id)
                 transcript_path = self.transcriber.process_audio(
                     abs_id, audio_files,
+                    full_book_text=book_text,
                     progress_callback=lambda p: update_progress(p, 2)
                 )
             else:
@@ -929,7 +941,7 @@ class SyncManager:
                 # (discrepancy will resolve next time someone reads)
                 # Exception: if character delta triggered, we have a real change
                 if significant_diff and not any_significant_delta and not char_delta_triggered:
-                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists but no significant changes, skipping until next read")
+                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader.")
                     continue
 
                 if significant_diff:
@@ -1141,6 +1153,11 @@ class SyncManager:
                     'successful_resets': sum(1 for r in reset_results.values() if r['success']),
                     'total_clients': len(reset_results)
                 }
+
+                # Force the background job to re-evaluate this book (e.g. to generate missing alignment maps)
+                book.status = 'pending'
+                self.database_service.save_book(book)
+                logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
 
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")

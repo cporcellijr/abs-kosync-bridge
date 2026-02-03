@@ -431,8 +431,33 @@ class EbookParser:
                 return None
             total_len = len(full_text)
 
-            # 1. Exact match
-            match_index = full_text.find(search_phrase)
+            # [NEW] 0. Global Uniqueness Check (The "Anchor" Logic)
+            # Try to find a 10-word sequence that appears EXACTLY once in the book.
+            # This prevents jumping to duplicate phrases (e.g., "Chapter 1" in the ToC vs the actual chapter).
+            clean_search = " ".join(search_phrase.split())
+            words = clean_search.split()
+            
+            match_index = -1
+            
+            if len(words) >= 10:
+                N = 10
+                # Scan through the search phrase to find a unique anchor
+                for i in range(len(words) - N + 1):
+                    candidate = " ".join(words[i:i+N])
+                    
+                    # Check if this phrase exists exactly ONCE in the text
+                    if full_text.count(candidate) == 1:
+                        found_idx = full_text.find(candidate)
+                        if found_idx != -1:
+                            match_index = found_idx
+                            logger.info(f"⚓ Found unique text anchor: '{candidate[:30]}...' at index {match_index}")
+                            break
+            
+            # [End of NEW logic] - Continue to existing fallbacks
+
+            # 1. Exact match (if anchor logic didn't find anything)
+            if match_index == -1:
+                match_index = full_text.find(search_phrase)
 
             # 2. Normalized match
             if match_index == -1:
@@ -627,8 +652,8 @@ class EbookParser:
     def resolve_xpath(self, filename, xpath_str):
         """
         RESOLVER:
-        Uses LXML to handle KOReader's /text().123 format accurately.
-        Includes WHITESPACE STRIPPING to align with get_xpath_and_percentage.
+        Uses LXML to find the target element, then searches for its text in the
+        BS4-generated full_text to ensure alignment (Fixes Parser Drift).
         """
         try:
             logger.debug(f"🔍 Resolving XPath (Hybrid): {xpath_str}")
@@ -645,8 +670,8 @@ class EbookParser:
             if not target_item:
                 return None
 
+            # Parse path and offset
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
-
             offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
             target_offset = int(offset_match.group(1)) if offset_match else 0
             clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
@@ -655,13 +680,14 @@ class EbookParser:
                 clean_xpath = '.' + clean_xpath
 
             tree = html.fromstring(target_item['content'])
-
+            
             elements = []
             try:
                 elements = tree.xpath(clean_xpath)
             except Exception as e:
                 logger.debug(f"XPath query failed: {e}")
-
+            
+            # [Fallback logic from original code for finding elements...]
             if not elements and clean_xpath.startswith('./'):
                 try: elements = tree.xpath(clean_xpath[2:])
                 except: pass
@@ -683,40 +709,75 @@ class EbookParser:
 
             target_node = elements[0]
 
-            # Calculate position by counting CLEAN text length
-            preceding_len = 0
-            found_target = False
-            SEPARATOR_LEN = 1
+            # [NEW LOGIC STARTS HERE]
+            # Instead of calculating offset via LXML iteration (which drifts),
+            # grab the text and FIND it in the spine item content.
+            
+            # 1. Extract a unique-ish fingerprint from the node
+            node_text = ""
+            if target_node.text: node_text += target_node.text.strip()
+            if target_node.tail: node_text += " " + target_node.tail.strip()
+            
+            # If node text is too short, grab parent context
+            if len(node_text) < 20:
+                parent = target_node.getparent()
+                if parent is not None:
+                    node_text = parent.text_content().strip()
 
-            for node in tree.iter():
-                if node == target_node:
-                    found_target = True
-                    # The offset from KOReader is a RAW offset into node.text (or tail)
-                    # We need to convert this RAW offset into CLEAN length contribution.
-                    if node.text and target_offset > 0:
-                        # Safety check for slice range
-                        raw_segment = node.text[:min(len(node.text), target_offset)]
-                        preceding_len += len(raw_segment.strip())
-                    elif target_offset > 0:
-                        # Fallback for tail targeting or weird state
-                        preceding_len += target_offset # Best guess
-                    break
-
-                if node.text and node.text.strip():
-                    preceding_len += (len(node.text.strip()) + SEPARATOR_LEN)
-                if node.tail and node.tail.strip():
-                    preceding_len += (len(node.tail.strip()) + SEPARATOR_LEN)
-
-            if not found_target:
-                logger.warning(f"❌ Target node not found in iteration")
+            clean_anchor = " ".join(node_text.split())
+            if not clean_anchor:
                 return None
 
-            local_pos = preceding_len
-            global_offset = target_item['start'] + local_pos
+            # 2. Find this anchor in the BS4 content (spine_map item)
+            # We search specifically in this chapter's content to minimize false positives
+            bs4_chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            
+            local_start_index = bs4_chapter_text.find(clean_anchor)
+            
+            if local_start_index != -1:
+                # Found it! Calculate global position
+                # Add target_offset (clamped to length of anchor)
+                safe_offset = min(target_offset, len(clean_anchor))
+                global_index = target_item['start'] + local_start_index + safe_offset
+                
+                # 3. Return text from the Main Source of Truth (full_text)
+                start = max(0, global_index)
+                end = min(len(full_text), global_index + 600) # Grab enough context
+                return full_text[start:end]
+            
+            else:
+                # Fallback: If exact match fails (rare), try the old calculation method
+                # (This preserves old behavior if the new matching fails)
+                logger.debug("⚠️ Exact text match failed, falling back to LXML offset calculation")
+                # Falling back to strict calculation (Logic from original implementation)
+                
+                preceding_len = 0
+                found_target = False
+                SEPARATOR_LEN = 1
 
-            start = max(0, global_offset)
-            end = min(len(full_text), global_offset + 500)
-            return full_text[start:end]
+                for node in tree.iter():
+                    if node == target_node:
+                        found_target = True
+                        if node.text and target_offset > 0:
+                            raw_segment = node.text[:min(len(node.text), target_offset)]
+                            preceding_len += len(raw_segment.strip())
+                        elif target_offset > 0:
+                            preceding_len += target_offset
+                        break
+
+                    if node.text and node.text.strip():
+                        preceding_len += (len(node.text.strip()) + SEPARATOR_LEN)
+                    if node.tail and node.tail.strip():
+                        preceding_len += (len(node.tail.strip()) + SEPARATOR_LEN)
+                
+                if found_target:
+                     local_pos = preceding_len
+                     global_offset = target_item['start'] + local_pos
+                     start = max(0, global_offset)
+                     end = min(len(full_text), global_offset + 500)
+                     return full_text[start:end]
+
+                return None
 
         except Exception as e:
             logger.error(f"Error resolving XPath {xpath_str}: {e}")
