@@ -361,10 +361,16 @@ class SyncManager:
                 if duration > 0:
                     pct = current_time / duration
                     if pct > 0.01:
-                        # Check existing pending suggestion
-                        if self.database_service.get_pending_suggestion(abs_id):
-                            logger.debug(f"Skipping {abs_id}: suggestion already exists")
+                        # Check if a suggestion already exists (pending, dismissed, or ignored)
+                        if self.database_service.suggestion_exists(abs_id):
+                            logger.debug(f"Skipping {abs_id}: suggestion already exists/dismissed")
                             continue
+                            
+                        # Check if book is already mostly finished (>70%)
+                        # If a user has listened to >70% elsewhere, they probably don't need a suggestion
+                        if pct > 0.70:
+                             logger.debug(f"Skipping {abs_id}: progress {pct:.1%} > 70% threshold")
+                             continue
                         
                         logger.debug(f"Creating suggestion for {abs_id} (progress: {pct:.1%})")    
                         self._create_suggestion(abs_id, item_data)
