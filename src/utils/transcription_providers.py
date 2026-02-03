@@ -260,6 +260,10 @@ def get_transcription_provider() -> TranscriptionProvider:
             return LocalWhisperProvider()
         return DeepgramProvider()
     elif provider_name == "whispercpp":
+        url = os.environ.get("WHISPER_CPP_URL", "").strip()
+        if not url:
+            logger.warning("⚠️ Whisper.cpp selected but no URL configured, falling back to local")
+            return LocalWhisperProvider()
         return WhisperCppServerProvider()
     else:
         return LocalWhisperProvider()
