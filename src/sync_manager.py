@@ -1,4 +1,5 @@
 # [START FILE: abs-kosync-enhanced/main.py]
+import glob
 import logging
 import os
 import threading
@@ -291,7 +292,8 @@ class SyncManager:
         """
         # First, try to find on filesystem
         books_search_dir = self.books_dir or Path("/books")
-        filesystem_matches = list(books_search_dir.glob(f"**/{ebook_filename}"))
+        escaped_filename = glob.escape(ebook_filename)
+        filesystem_matches = list(books_search_dir.glob(f"**/{escaped_filename}"))
         if filesystem_matches:
             logger.info(f"[FS] Found EPUB on filesystem: {filesystem_matches[0]}")
             return filesystem_matches[0]
