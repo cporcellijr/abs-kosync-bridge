@@ -192,7 +192,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         transcriber = Mock()
         transcriber.get_text_at_time.return_value = f"Sample text from {self.expected_leader} leader at {self.expected_final_pct * 100:.0f}%"
         
-        def find_time_for_text_side_effect(transcript_path, search_text, hint_percentage=None, book_title=None):
+        def find_time_for_text_side_effect(transcript_path, search_text, hint_percentage=None, book_title=None, **kwargs):
             """Return timestamp proportional to hint_percentage for cross-format normalization."""
             if hint_percentage is not None:
                 # Return timestamp proportional to percentage (1000s total duration)

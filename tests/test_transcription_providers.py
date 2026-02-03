@@ -66,6 +66,7 @@ class TestLocalWhisperProvider(unittest.TestCase):
 
     @patch("faster_whisper.WhisperModel")
     @patch("utils.transcription_providers.logger")
+    @patch.dict(os.environ, {"WHISPER_MODEL": "base", "WHISPER_DEVICE": "auto"}, clear=True)
     def test_model_initialization_gpu(self, mock_logger, mock_whisper_model):
         """Test that WhisperModel is initialized with correct GPU params."""
         provider = LocalWhisperProvider()

@@ -527,6 +527,7 @@ class FindEbookFileTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.name, filename)
 
+    @unittest.skipIf(os.name == 'nt', "Windows does not support * in filenames")
     def test_find_ebook_file_with_asterisk(self):
         """Test that filenames with asterisks are found correctly."""
         from src.web_server import find_ebook_file
@@ -542,6 +543,7 @@ class FindEbookFileTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.name, filename)
 
+    @unittest.skipIf(os.name == 'nt', "Windows does not support ? in filenames")
     def test_find_ebook_file_with_question_mark(self):
         """Test that filenames with question marks are found correctly."""
         from src.web_server import find_ebook_file
