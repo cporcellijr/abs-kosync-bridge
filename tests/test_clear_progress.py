@@ -164,6 +164,10 @@ class TestClearProgressMethod(unittest.TestCase):
         # Verify KoSync document was deleted
         self.assertIsNone(self.db_service.get_kosync_document('test-hash-123'), "KoSync document should be deleted")
 
+        # Verify book status was updated to 'pending'
+        updated_book = self.db_service.get_book('test-book-123')
+        self.assertEqual(updated_book.status, 'pending', "Book status should be 'pending' for re-sync")
+
         # Verify sync clients were called correctly
         from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult
 

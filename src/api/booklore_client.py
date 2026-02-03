@@ -178,19 +178,49 @@ class BookloreClient:
 
     def _refresh_book_cache(self):
         """
-        Refresh the book cache. Booklore v1.17+ requires fetching individual
-        book details to get fileName, so we do a two-step process:
-        1. Get list of all book IDs
-        2. Fetch details for books we don't have cached yet
+        Refresh the book cache using robust pagination.
+        Fetches books in batches to ensure complete library sync.
         """
-        # Step 1: Get all books (lightweight list)
-        response = self._make_request("GET", "/api/v1/books")
-        if not response or response.status_code != 200:
-            logger.error(f"Booklore: Failed to fetch book list")
-            return False
+        all_books_list = []
+        page = 0
+        batch_size = 200  # Reasonable chunk size
+        
+        logger.info("📚 Booklore: Starting full library scan...")
+        
+        while True:
+            # Request specific page and size
+            # Note: Booklore/Spring usually expects 'page' (0-indexed) and 'size'
+            endpoint = f"/api/v1/books?page={page}&size={batch_size}"
+            response = self._make_request("GET", endpoint)
+            
+            if not response or response.status_code != 200:
+                logger.error(f"Booklore: Failed to fetch page {page}")
+                return False
 
-        books_list = response.json()
-        if not books_list:
+            data = response.json()
+            
+            # Handle different response shapes (List vs Page Object)
+            current_batch = []
+            if isinstance(data, list):
+                current_batch = data
+            elif isinstance(data, dict) and 'content' in data:
+                # Spring Data Page object wrapper
+                current_batch = data['content']
+            
+            if not current_batch:
+                break  # No more books, we are done
+                
+            all_books_list.extend(current_batch)
+            logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
+            
+            # If we got fewer items than requested, we are on the last page
+            # Also break if we got MORE items than requested (server ignored size param)
+            if len(current_batch) != batch_size:
+                break
+                
+            page += 1
+
+        if not all_books_list:
             logger.debug("Booklore: No books found in library")
             self._book_cache = {}
             self._book_id_cache = {}
@@ -198,20 +228,18 @@ class BookloreClient:
             self._save_cache()
             return True
 
+        logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+
+        # --- Proceed with Step 2: Detail Fetching (Same as before) ---
+        
         # Step 2: For books not in cache, fetch details to get fileName
-        # Use parallel fetching for speed
-        new_book_ids = [b['id'] for b in books_list if b['id'] not in self._book_id_cache]
+        new_book_ids = [b['id'] for b in all_books_list if b['id'] not in self._book_id_cache]
 
         if new_book_ids:
             logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
-
-            # Get token ONCE before parallel fetching to avoid race conditions
             token = self._get_fresh_token()
-            if not token:
-                logger.error("Booklore: Could not get token for parallel fetch")
-                return False
+            if not token: return False
 
-            # Fetch in parallel with limited concurrency
             def fetch_one(book_id):
                 return book_id, self._fetch_book_detail(book_id, token)
 
@@ -222,22 +250,16 @@ class BookloreClient:
                         book_id, detail = future.result()
                         if detail and isinstance(detail, dict):
                             self._process_book_detail(detail)
-                        elif detail:
-                            logger.debug(f"Booklore: Unexpected response type for book {book_id}: {type(detail)}")
                     except Exception as e:
-                        logger.debug(f"Booklore: Error fetching book detail: {e}")
+                        logger.debug(f"Booklore: Error fetching details: {e}")
 
-        # Update books that were already in cache with fresh progress data
-        existing_ids = [b['id'] for b in books_list if b['id'] in self._book_id_cache]
-        for book in books_list:
-            if book['id'] in self._book_id_cache:
-                # Update progress fields from the list response if available
-                cached = self._book_id_cache[book['id']]
-                # The list endpoint doesn't have progress, so we keep cached values
-                # Progress is fetched fresh in get_progress() anyway
+        # Refresh existing items from the new list
+        for book in all_books_list:
+             if book['id'] in self._book_id_cache:
+                 # Optional: Update shallow fields if needed
+                 pass
 
         self._cache_timestamp = time.time()
-        logger.debug(f"Booklore: Cached {len(self._book_cache)} books")
         self._save_cache()
         return True
 
@@ -279,13 +301,17 @@ class BookloreClient:
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
 
+        return None
+
+    def _normalize_string(self, s):
+        """Remove non-alphanumeric characters and lowercase."""
+        import re
+        if not s: return ""
+        return re.sub(r'[\W_]+', '', s.lower())
+
     def find_book_by_filename(self, ebook_filename, allow_refresh=True):
         """
-        Find a book by its filename.
-        Args:
-            ebook_filename: The filename to search for.
-            allow_refresh: If True, allows triggering a network refresh of the cache.
-                           Set to False for blocking UI threads to ensure instant return.
+        Find a book by its filename using exact, stem, or normalized matching.
         """
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
         if not self._book_cache and allow_refresh: 
@@ -295,30 +321,49 @@ class BookloreClient:
         if allow_refresh and time.time() - self._cache_timestamp > 3600:
             self._refresh_book_cache()
 
-        filename = Path(ebook_filename).name.lower()
-        if filename in self._book_cache: return self._book_cache[filename]
+        target_name = Path(ebook_filename).name.lower()
+        
+        # 1. Exact Filename Match
+        if target_name in self._book_cache: return self._book_cache[target_name]
 
-        stem = Path(filename).stem.lower()
+        target_stem = Path(ebook_filename).stem.lower()
+        
+        # 2. Strict Stem Match
         for cached_name, book_info in list(self._book_cache.items()):
-            if Path(cached_name).stem.lower() == stem: return book_info
+            if Path(cached_name).stem.lower() == target_stem: return book_info
 
+        # 3. Partial Stem Match
         for cached_name, book_info in list(self._book_cache.items()):
-            if stem in cached_name or cached_name.replace('.epub', '') in stem:
+            if target_stem in cached_name or cached_name.replace('.epub', '') in target_stem:
+                # High confidence check: ensure significant overlap
                 return book_info
 
-        # If not found, try refreshing cache once (in case Booklore updated externally)
-        # But ONLY if allow_refresh is True AND we haven't refreshed recently (e.g. last 60 seconds)
+        # 4. Fuzzy / Normalized Match (Handling "Dragon's" vs "Dragons")
+        # Use similarity ratio instead of substring to avoid false positives
+        target_norm = self._normalize_string(target_stem)
+        if len(target_norm) > 5:
+            from difflib import SequenceMatcher
+            best_match = None
+            best_ratio = 0.0
+            
+            for cached_name, book_info in list(self._book_cache.items()):
+                cached_norm = self._normalize_string(Path(cached_name).stem)
+                # Calculate similarity ratio
+                ratio = SequenceMatcher(None, target_norm, cached_norm).ratio()
+                
+                # Require high similarity (90%+) to avoid matching sequels
+                if ratio > 0.90 and ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = (cached_name, book_info)
+            
+            if best_match:
+                logger.debug(f"Fuzzy match: '{target_stem}' ~= '{best_match[0]}' (similarity: {best_ratio:.1%})")
+                return best_match[1]
+
+        # If not found, try refreshing cache once
         if allow_refresh and time.time() - self._cache_timestamp > 60:
             if self._refresh_book_cache():
-                # Re-check after refresh
-                filename = Path(ebook_filename).name.lower()
-                if filename in self._book_cache: return self._book_cache[filename]
-                stem = Path(filename).stem.lower()
-                for cached_name, book_info in self._book_cache.items():
-                    if Path(cached_name).stem.lower() == stem: return book_info
-                for cached_name, book_info in self._book_cache.items():
-                    if stem in cached_name or cached_name.replace('.epub', '') in stem:
-                        return book_info
+                return self.find_book_by_filename(ebook_filename, allow_refresh=False)
 
         return None
 
@@ -338,15 +383,31 @@ class BookloreClient:
             return list(self._book_cache.values())
 
         search_lower = search_term.lower()
+        search_norm = self._normalize_string(search_term)
+        
         results = []
         for book_info in list(self._book_cache.values()):
             title = (book_info.get('title') or '').lower()
             authors = (book_info.get('authors') or '').lower()
             filename = (book_info.get('fileName') or '').lower()
 
+            # 1. Standard substring match
             if search_lower in title or search_lower in authors or search_lower in filename:
                 results.append(book_info)
-
+                continue
+            
+            # 2. Normalized match (for "Dragon's" vs "Dragons")
+            # Only perform if standard match failed
+            title_norm = self._normalize_string(title)
+            authors_norm = self._normalize_string(authors)
+            filename_norm = self._normalize_string(filename)
+            
+            if len(search_norm) > 3: # Avoid extremely short noisy matches
+                if (search_norm in title_norm or 
+                    search_norm in authors_norm or 
+                    search_norm in filename_norm):
+                    results.append(book_info)
+        
         return results
 
     def download_book(self, book_id):

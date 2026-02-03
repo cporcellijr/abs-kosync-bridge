@@ -1,6 +1,7 @@
 requests
 schedule
 faster-whisper
+deepgram-sdk
 ebooklib
 epubcfi
 beautifulsoup4
@@ -14,3 +15,4 @@ lxml
 dependency-injector
 sqlalchemy
 alembic
+

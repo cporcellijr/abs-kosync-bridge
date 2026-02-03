@@ -1,4 +1,5 @@
 # [START FILE: abs-kosync-enhanced/main.py]
+import glob
 import logging
 import os
 import threading
@@ -81,18 +82,18 @@ class SyncManager:
         for name, client in clients.items():
             if client.is_configured():
                 self.sync_clients[name] = client
-                logger.info(f"✅ Sync client enabled: {name}")
+                logger.info(f"[INIT] Sync client enabled: {name}")
             else:
-                logger.info(f"🚫 Sync client disabled/unconfigured: {name}")
+                logger.info(f"[SKIP] Sync client disabled/unconfigured: {name}")
 
     def startup_checks(self):
         # Check configured sync clients
         for client_name, client in (self.sync_clients or {}).items():
             try:
                 client.check_connection()
-                logger.info(f"✅ {client_name} connection verified")
+                logger.info(f"[OK] {client_name} connection verified")
             except Exception as e:
-                logger.warning(f"⚠️ {client_name} connection failed: {e}")
+                logger.warning(f"[WARN] {client_name} connection failed: {e}")
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -133,6 +134,86 @@ class SyncManager:
         media = ab.get('media', {})
         return media.get('duration', 0)
 
+    def _normalize_for_cross_format_comparison(self, book, config):
+        """
+        Normalize positions for cross-format comparison (audiobook vs ebook).
+        
+        When syncing between audiobook (ABS) and ebook clients (KoSync, etc.),
+        raw percentages are not comparable because:
+        - Audiobook % = time position / total duration
+        - Ebook % = text position / total text
+        
+        These don't correlate linearly. This method converts ebook positions
+        to equivalent audiobook timestamps using text-matching, enabling
+        accurate comparison of "who is further in the story".
+        
+        Returns:
+            dict: {client_name: normalized_timestamp} for comparison,
+                  or None if normalization not possible/needed
+        """
+        # Check if we have both ABS and ebook clients in the mix
+        has_abs = 'ABS' in config
+        ebook_clients = [k for k in config.keys() if k != 'ABS']
+        
+        if not has_abs or not ebook_clients:
+            # Same-format sync, raw percentages are fine
+            return None
+            
+        if not book.transcript_file:
+            logger.debug(f"[{book.abs_id}] No transcript available for cross-format normalization")
+            return None
+            
+        normalized = {}
+        
+        # ABS already has timestamp
+        abs_state = config['ABS']
+        abs_ts = abs_state.current.get('ts', 0)
+        normalized['ABS'] = abs_ts
+        
+        # For each ebook client, get their text and find equivalent timestamp
+        for client_name in ebook_clients:
+            client = self.sync_clients.get(client_name)
+            if not client:
+                continue
+                
+            client_state = config[client_name]
+            client_pct = client_state.current.get('pct', 0)
+            
+            try:
+                # [NEW] Get character offset from the ebook position for precise alignment
+                book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+                full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+                total_text_len = len(full_text)
+                
+                char_offset = int(client_pct * total_text_len)
+                txt = full_text[max(0, char_offset - 400):min(total_text_len, char_offset + 400)]
+                
+                if not txt:
+                    logger.debug(f"[{book.abs_id}] Could not get text from {client_name} for normalization")
+                    continue
+                    
+                # Find equivalent timestamp in audiobook using the precise aligner if available
+                ts_for_text = self.transcriber.find_time_for_text(
+                    book.transcript_file, txt, 
+                    hint_percentage=client_pct,
+                    char_offset=char_offset,
+                    book_title=book.abs_title
+                )
+                
+                if ts_for_text is not None:
+                    normalized[client_name] = ts_for_text
+                    logger.debug(f"[{book.abs_id}] Normalized {client_name} {client_pct:.2%} -> {ts_for_text:.1f}s")
+                else:
+                    logger.debug(f"[{book.abs_id}] Could not find timestamp for {client_name} text")
+            except Exception as e:
+                logger.warning(f"[{book.abs_id}] Cross-format normalization failed for {client_name}: {e}")
+                
+        # Only return if we successfully normalized at least one ebook client
+        if len(normalized) > 1:
+            return normalized
+        return None
+
+
     def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, bulk_states_per_client=None, clients_to_use=None):
         """Fetch states from specified clients (or all if not specified) in parallel."""
         clients_to_use = clients_to_use or self.sync_clients
@@ -167,7 +248,7 @@ class SyncManager:
         """
         One-time scan of active books to identify and purge corrupted SMIL transcripts.
         """
-        logger.info("🔍 Scanning for corrupted legacy transcripts...")
+        logger.info("[SCAN] Scanning for corrupted legacy transcripts...")
         active_books = self.database_service.get_books_by_status('active')
         count = 0
         
@@ -198,9 +279,9 @@ class SyncManager:
                     if current_file and os.path.exists(current_file):
                         try:
                             os.remove(current_file)
-                            logger.info(f"   🗑️ Deleted corrupted file: {current_file}")
+                            logger.info(f"   [DEL] Deleted corrupted file: {current_file}")
                         except Exception as e:
-                            logger.error(f"   ❌ Failed to delete file {current_file}: {e}")
+                            logger.error(f"   [FAIL] Failed to delete file {current_file}: {e}")
                             
                     count += 1
             except Exception as e:
@@ -208,7 +289,7 @@ class SyncManager:
                 pass
         
         if count > 0:
-            logger.info(f"♻️ Scheduled {count} corrupted transcripts for re-processing.")
+            logger.info(f"[JOB] Scheduled {count} corrupted transcripts for re-processing.")
 
 
 
@@ -218,16 +299,17 @@ class SyncManager:
         """
         # First, try to find on filesystem
         books_search_dir = self.books_dir or Path("/books")
-        filesystem_matches = list(books_search_dir.glob(f"**/{ebook_filename}"))
+        escaped_filename = glob.escape(ebook_filename)
+        filesystem_matches = list(books_search_dir.glob(f"**/{escaped_filename}"))
         if filesystem_matches:
-            logger.info(f"📚 Found EPUB on filesystem: {filesystem_matches[0]}")
+            logger.info(f"[FS] Found EPUB on filesystem: {filesystem_matches[0]}")
             return filesystem_matches[0]
-
+        
         # Check persistent EPUB cache
         self.epub_cache_dir.mkdir(parents=True, exist_ok=True)
         cached_path = self.epub_cache_dir / ebook_filename
         if cached_path.exists():
-            logger.info(f"📚 Found EPUB in cache: {cached_path}")
+            logger.info(f"[CACHE] Found EPUB in cache: {cached_path}")
             return cached_path
 
         # Try to download from Booklore API
@@ -235,13 +317,13 @@ class SyncManager:
         if hasattr(self.booklore_client, 'is_configured') and self.booklore_client.is_configured():
             book = self.booklore_client.find_book_by_filename(ebook_filename)
             if book:
-                logger.info(f"📥 Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
+                logger.info(f"[DL] Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
                 if hasattr(self.booklore_client, 'download_book'):
                     content = self.booklore_client.download_book(book['id'])
                     if content:
                         with open(cached_path, 'wb') as f:
                             f.write(content)
-                        logger.info(f"✅ Downloaded EPUB to cache: {cached_path}")
+                        logger.info(f"[OK] Downloaded EPUB to cache: {cached_path}")
                         return cached_path
                     else:
                         logger.error(f"Failed to download EPUB content from Booklore")
@@ -255,13 +337,22 @@ class SyncManager:
     # Suggestion Logic
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
+        suggestions_enabled_val = os.environ.get("SUGGESTIONS_ENABLED", "true")
+        logger.debug(f"DEBUG: SUGGESTIONS_ENABLED env var is: '{suggestions_enabled_val}'")
+        
+        if suggestions_enabled_val.lower() != "true":
+            return
+
         try:
             # optimization: get all mapped IDs to avoid suggesting existing books (even if inactive)
             all_books = self.database_service.get_all_books()
             mapped_ids = {b.abs_id for b in all_books}
+            
+            logger.debug(f"Checking for suggestions: {len(abs_progress_map)} books with progress, {len(mapped_ids)} already mapped")
 
             for abs_id, item_data in abs_progress_map.items():
                 if abs_id in mapped_ids:
+                    logger.debug(f"Skipping {abs_id}: already mapped")
                     continue
 
                 duration = item_data.get('duration', 0)
@@ -270,22 +361,35 @@ class SyncManager:
                 if duration > 0:
                     pct = current_time / duration
                     if pct > 0.01:
-                        # Check existing pending suggestion
-                        if self.database_service.get_pending_suggestion(abs_id):
+                        # Check if a suggestion already exists (pending, dismissed, or ignored)
+                        if self.database_service.suggestion_exists(abs_id):
+                            logger.debug(f"Skipping {abs_id}: suggestion already exists/dismissed")
                             continue
                             
+                        # Check if book is already mostly finished (>70%)
+                        # If a user has listened to >70% elsewhere, they probably don't need a suggestion
+                        if pct > 0.70:
+                             logger.debug(f"Skipping {abs_id}: progress {pct:.1%} > 70% threshold")
+                             continue
+                        
+                        logger.debug(f"Creating suggestion for {abs_id} (progress: {pct:.1%})")    
                         self._create_suggestion(abs_id, item_data)
+                    else:
+                        logger.debug(f"Skipping {abs_id}: progress {pct:.1%} below 1% threshold")
+                else:
+                    logger.debug(f"Skipping {abs_id}: no duration")
         except Exception as e:
             logger.error(f"Error checking suggestions: {e}")
 
     def _create_suggestion(self, abs_id, progress_data):
         """Create a new suggestion for an unmapped book."""
-        logger.info(f"💡 Found potential new book for suggestion: {abs_id}")
+        logger.info(f"[IDEA] Found potential new book for suggestion: {abs_id}")
         
         try:
             # 1. Get Details from ABS
             item = self.abs_client.get_item_details(abs_id)
             if not item:
+                logger.debug(f"Suggestion failed: Could not get details for {abs_id}")
                 return
 
             media = item.get('media', {})
@@ -295,20 +399,27 @@ class SyncManager:
             # Use local proxy for cover image to ensure accessibility
             cover = f"/api/cover-proxy/{abs_id}"
             
+            logger.debug(f"Checking suggestions for '{title}' (Author: {author})")
+            
             matches = []
+            
+            found_filenames = set()
             
             # 2a. Search Booklore
             if self.booklore_client and self.booklore_client.is_configured():
                 try:
                     bl_results = self.booklore_client.search_books(title)
+                    logger.debug(f"Booklore returned {len(bl_results)} results for '{title}'")
                     for b in bl_results:
                          # Filter for EPUBs
-                         if b.get('fileName', '').lower().endswith('.epub'):
+                         fname = b.get('fileName', '')
+                         if fname.lower().endswith('.epub'):
+                             found_filenames.add(fname)
                              matches.append({
                                  "source": "booklore",
                                  "title": b.get('title'),
                                  "author": b.get('authors'),
-                                 "filename": b.get('fileName'), # Important for auto-linking
+                                 "filename": fname, # Important for auto-linking
                                  "id": str(b.get('id')),
                                  "confidence": "high" if title.lower() in b.get('title', '').lower() else "medium"
                              })
@@ -319,18 +430,27 @@ class SyncManager:
             if self.books_dir and self.books_dir.exists():
                 try:
                     clean_title = title.lower()
+                    fs_matches = 0
                     for epub in self.books_dir.rglob("*.epub"):
+                         if epub.name in found_filenames:
+                             continue
                          if clean_title in epub.name.lower():
+                             fs_matches += 1
                              matches.append({
                                  "source": "filesystem",
                                  "filename": epub.name,
                                  "path": str(epub),
                                  "confidence": "high"
                              })
+                    logger.debug(f"Filesystem found {fs_matches} matches")
                 except Exception as e:
                     logger.warning(f"Filesystem search failed during suggestion: {e}")
             
             # 3. Save to DB
+            if not matches:
+                logger.debug(f"[INFO] No matches found for '{title}', skipping suggestion creation.")
+                return
+
             suggestion = PendingSuggestion(
                 source_id=abs_id,
                 title=title,
@@ -340,7 +460,7 @@ class SyncManager:
             )
             self.database_service.save_pending_suggestion(suggestion)
             match_count = len(matches)
-            logger.info(f"✅ Created suggestion for '{title}' with {match_count} matches")
+            logger.info(f"[OK] Created suggestion for '{title}' with {match_count} matches")
 
         except Exception as e:
             logger.error(f"Failed to create suggestion for {abs_id}: {e}")
@@ -474,10 +594,15 @@ class SyncManager:
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
             if not transcript_path:
-                logger.info("ℹ️ SMIL data not found or failed, falling back to Whisper transcription.")
+                logger.info("[INFO] SMIL data not found or failed, falling back to Whisper transcription.")
+                
+                # [NEW] Extract full text for alignment if not already done
+                book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
+                
                 audio_files = self.abs_client.get_audio_files(abs_id)
                 transcript_path = self.transcriber.process_audio(
                     abs_id, audio_files,
+                    full_book_text=book_text,
                     progress_callback=lambda p: update_progress(p, 2)
                 )
             else:
@@ -536,6 +661,99 @@ class SyncManager:
 
             self.database_service.save_book(book)
 
+    def _has_significant_delta(self, client_name, config, book):
+        """
+        Check if a client has a significant delta using hybrid time/percentage logic.
+        
+        Returns True if:
+        - Percentage delta > 0.05% (catches large jumps)
+        - OR absolute time delta > 30 seconds (catches small but real progress)
+        
+        This prevents:
+        - API noise on short books (0.3s changes don't count)
+        - API noise on long books (BookLore's 20s rounding errors filtered)
+        - Missing real progress on all books (30s+ changes do count)
+        """
+        delta_pct = config[client_name].delta
+        
+        # Quick check: percentage threshold
+        MIN_PCT_THRESHOLD = 0.0005  # 0.05%
+        if delta_pct > MIN_PCT_THRESHOLD:
+            return True
+        
+        # Time-based check (if we have duration info)
+        if hasattr(book, 'duration') and book.duration:
+            delta_seconds = delta_pct * book.duration
+            MIN_TIME_THRESHOLD = 30  # seconds
+            if delta_seconds > MIN_TIME_THRESHOLD:
+                return True
+                
+        return False
+
+    def _determine_leader(self, config, book, abs_id, title_snip):
+        """
+        Determines which client should be the leader based on:
+        1. Most recent change (delta > threshold)
+        2. Furthest progress (fallback)
+        3. Cross-format normalization (if needed)
+        
+        Returns:
+            tuple: (leader_client_name, leader_percentage) or (None, None)
+        """
+        # Build vals from config - only include clients that can be leaders
+        vals = {}
+        for k, v in config.items():
+            client = self.sync_clients[k]
+            if client.can_be_leader():
+                vals[k] = v.current.get('pct')
+
+        # Ensure we have at least one potential leader
+        if not vals:
+            logger.warning(f"[WARN] [{abs_id}] [{title_snip}] No clients available to be leader")
+            return None, None
+
+        # Check which clients have changed (delta > minimum threshold)
+        # "Most recent change wins" - if only one client changed, it becomes the leader
+        # Use hybrid time/percentage logic to filter out phantom API noise
+        clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
+
+        leader = None
+        leader_pct = None
+
+        if len(clients_with_delta) == 1:
+            # Only one client changed - that client is the leader (most recent change wins)
+            leader = list(clients_with_delta.keys())[0]
+            leader_pct = vals[leader]
+            logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
+        else:
+            # Multiple clients changed or this is a discrepancy resolution
+            # Use "furthest wins" logic among changed clients (or all if none changed)
+            candidates = clients_with_delta if clients_with_delta else vals
+            
+            # For cross-format sync (audiobook vs ebook), use normalized timestamps
+            normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+            
+            if normalized_positions and len(normalized_positions) > 1:
+                # Filter normalized positions to only include candidates
+                normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
+                if normalized_candidates:
+                    leader = max(normalized_candidates, key=normalized_candidates.get)
+                    leader_ts = normalized_candidates[leader]
+                    leader_pct = vals[leader]
+                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                else:
+                    # Fallback to percentage-based comparison among candidates
+                    leader = max(candidates, key=candidates.get)
+                    leader_pct = vals[leader]
+                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+            else:
+                # Same-format sync or normalization failed - use raw percentages
+                leader = max(candidates, key=candidates.get)
+                leader_pct = vals[leader]
+                logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                
+        return leader, leader_pct
+
     def sync_cycle(self, target_abs_id=None):
         """
         Run a sync cycle.
@@ -550,7 +768,7 @@ class SyncManager:
              # Instant Sync: Block and wait for lock (up to 10s)
              acquired = self._sync_lock.acquire(timeout=10)
              if not acquired:
-                 logger.warning(f"⚠️ Sync lock timeout for {target_abs_id} - skipping")
+                 logger.warning(f"[WARN] Sync lock timeout for {target_abs_id} - skipping")
                  return
         else:
              # Daemon: Non-blocking attempt
@@ -591,7 +809,7 @@ class SyncManager:
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
-            logger.info(f"⚡ Instant Sync triggered for {target_abs_id}")
+            logger.info(f"[JOB] Instant Sync triggered for {target_abs_id}")
             book = self.database_service.get_book(target_abs_id)
             if book and book.status == 'active':
                 active_books = [book]
@@ -652,11 +870,17 @@ class SyncManager:
                     continue  # No valid states to process
 
                 # Check for ABS offline condition (only for audiobook mode)
+                # Check for ABS offline condition (only for audiobook mode)
                 if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
                     abs_state = config.get('ABS')
                     if abs_state is None:
-                        logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline, skipping")
-                        continue  # ABS offline
+                        # Fallback logic: If ABS is missing but we have ebook clients, try to sync them as ebook-only
+                        ebook_clients_active = [k for k in config.keys() if k != 'ABS']
+                        if ebook_clients_active:
+                             logger.info(f"[{abs_id}] [{title_snip}] ABS audiobook not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
+                        else:
+                             logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline and no other clients, skipping")
+                             continue  # ABS offline and no fallback possible
 
 
 
@@ -684,6 +908,7 @@ class SyncManager:
                 # If state.delta > 0 and book has epub, get total chars via extract_text_and_map
                 # Calculate char_delta = int(state.delta * total_chars)
                 # If char_delta >= self.delta_chars_thresh, log it and set significant_diff = True
+                char_delta_triggered = False  # Track if character delta triggered significance
                 if not significant_diff and hasattr(book, 'ebook_filename') and book.ebook_filename:
                     for client_name_key, client_state in config.items():
                          if client_state.delta > 0:
@@ -697,6 +922,7 @@ class SyncManager:
                                      if char_delta >= self.delta_chars_thresh:
                                          logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
                                          significant_diff = True
+                                         char_delta_triggered = True  # Mark that this came from char delta
                                          break
                              except Exception as e:
                                  logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
@@ -705,10 +931,23 @@ class SyncManager:
                 # We typically skip if nothing changed, BUT if there is a significant discrepancy
                 # between clients (e.g. from a fresh push to DB), we must proceed to sync them.
                 deltas_zero = all(round(cfg.delta, 4) == 0 for cfg in config.values())
+                
+                # Check if any client has a significant delta (using time-based threshold)
+                any_significant_delta = any(
+                    self._has_significant_delta(k, config, book) 
+                    for k in config.keys()
+                )
 
                 # If nothing changed AND clients are effectively in sync, skip
                 if deltas_zero and not significant_diff:
                     logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
+                    continue
+                
+                # If there's a discrepancy but no client actually changed, skip
+                # (discrepancy will resolve next time someone reads)
+                # Exception: if character delta triggered, we have a real change
+                if significant_diff and not any_significant_delta and not char_delta_triggered:
+                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader.")
                     continue
 
                 if significant_diff:
@@ -755,22 +994,12 @@ class SyncManager:
                 for line in status_lines:
                     logger.info(line)
 
-                # Build vals from config - only include clients that can be leaders
-                vals = {}
-                for k, v in config.items():
-                    client = self.sync_clients[k]
-                    if client.can_be_leader():
-                        vals[k] = v.current.get('pct')
-
-                # Ensure we have at least one potential leader
-                if not vals:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] No clients available to be leader")
+                # Determine leader
+                leader, leader_pct = self._determine_leader(config, book, abs_id, title_snip)
+                if not leader:
                     continue
 
-                leader = max(vals, key=vals.get)
                 leader_formatter = config[leader].value_formatter
-                leader_pct = vals[leader]
-                logger.info(f"📖 [{abs_id}] [{title_snip}] {leader} leads at {leader_formatter(leader_pct)}")
 
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]
@@ -784,6 +1013,16 @@ class SyncManager:
                 # Get locator (percentage, xpath, etc) from text
                 epub = book.ebook_filename
                 locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+                if not locator:
+                    # Try fallback if enabled (e.g. look at previous segment)
+                    if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
+                        fallback_txt = leader_client.get_fallback_text(book, leader_state)
+                        if fallback_txt and fallback_txt != txt:
+                            logger.info(f"🔄 [{abs_id}] [{title_snip}] Primary text match failed. Trying previous segment fallback...")
+                            locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
+                            if locator:
+                                logger.info(f"✅ [{abs_id}] [{title_snip}] Fallback successful!")
+
                 if not locator:
                     logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
                     locator = LocatorResult(percentage=leader_pct)
@@ -876,7 +1115,7 @@ class SyncManager:
 
                 # Clear all states for this book from database
                 cleared_count = self.database_service.delete_states_for_book(abs_id)
-                logger.info(f"📊 Cleared {cleared_count} state records from database")
+                logger.info(f"💾 Cleared {cleared_count} state records from database")
 
                 # Delete KOSync document record to bypass "furthest wins" protection
                 # Without this, the integrated KOSync server will reject the 0% update
@@ -920,6 +1159,11 @@ class SyncManager:
                     'successful_resets': sum(1 for r in reset_results.values() if r['success']),
                     'total_clients': len(reset_results)
                 }
+
+                # Force the background job to re-evaluate this book (e.g. to generate missing alignment maps)
+                book.status = 'pending'
+                self.database_service.save_book(book)
+                logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
 
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")

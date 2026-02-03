@@ -186,10 +186,20 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         mocks['ebook_parser'].find_text_location.return_value = mock_locator
         mocks['ebook_parser'].get_perfect_ko_xpath.return_value = mock_locator.xpath
 
-        # Create transcriber mock
+        # Create transcriber mock with smart find_time_for_text
+        # that returns timestamps proportional to the hint percentage
+        # This ensures cross-format normalization picks the correct leader
         transcriber = Mock()
         transcriber.get_text_at_time.return_value = f"Sample text from {self.expected_leader} leader at {self.expected_final_pct * 100:.0f}%"
-        transcriber.find_time_for_text.return_value = self.expected_final_pct * 1000
+        
+        def find_time_for_text_side_effect(transcript_path, search_text, hint_percentage=None, book_title=None, **kwargs):
+            """Return timestamp proportional to hint_percentage for cross-format normalization."""
+            if hint_percentage is not None:
+                # Return timestamp proportional to percentage (1000s total duration)
+                return hint_percentage * 1000
+            return self.expected_final_pct * 1000
+        
+        transcriber.find_time_for_text.side_effect = find_time_for_text_side_effect
 
         # Import SyncManager and create with dependency injection
         from src.sync_manager import SyncManager
@@ -307,11 +317,11 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                     if hasattr(state, 'client_name') and hasattr(state, 'percentage'):
                         final_states[state.client_name] = state.percentage
 
-            print(f"🔍 Final states from database service calls: {final_states}")
+            print(f"[VERIFY] Final states from database service calls: {final_states}")
 
             # If no states were saved, fall back to checking the mock return values
             if not final_states:
-                print("⚠️  No states found in database service calls, using expected values")
+                print("[WARN] No states found in database service calls, using expected values")
                 expected_pct = self.expected_final_pct
                 final_states = {
                     'abs': expected_pct,

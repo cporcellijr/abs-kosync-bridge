@@ -90,6 +90,12 @@ class ABSSyncClient(SyncClient):
             return None
         return self.transcriber.get_text_at_time(book.transcript_file, abs_ts)
 
+    def get_fallback_text(self, book: Book, state: ServiceState) -> Optional[str]:
+        abs_ts = state.current.get('ts')
+        if not book or abs_ts is None:
+            return None
+        return self.transcriber.get_previous_segment_text(book.transcript_file, abs_ts)
+
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         book_title = book.abs_title or 'Unknown Book'
         if request.locator_result.percentage == 0.0:
@@ -103,6 +109,7 @@ class ABSSyncClient(SyncClient):
 
         ts_for_text = self.transcriber.find_time_for_text(book.transcript_file, request.txt,
                                                           hint_percentage=request.locator_result.percentage,
+                                                          char_offset=request.locator_result.match_index,
                                                           book_title=book_title)
         if ts_for_text is not None:
             response = self.abs_client.get_progress(book.abs_id)

@@ -216,6 +216,11 @@ class PendingSuggestion(Base):
             return json.loads(self.matches_json) if self.matches_json else []
         except:
             return []
+    
+    @property
+    def audiobook_count(self):
+        """Count only audiobook matches, excluding ebook entries."""
+        return sum(1 for m in self.matches if m.get('source') != 'ebook')
 
     def __repr__(self):
         return f"<PendingSuggestion(id={self.id}, title='{self.title}', status='{self.status}')>"
