@@ -500,6 +500,80 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             src.web_server.render_template = original_render
 
 
+class FindEbookFileTest(unittest.TestCase):
+    """Test find_ebook_file function handles special characters in filenames."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        os.environ["BOOKS_DIR"] = self.temp_dir
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_find_ebook_file_with_brackets(self):
+        """Test that filenames with brackets like [01] are found correctly."""
+        from src.web_server import find_ebook_file
+        import src.web_server
+
+        src.web_server.EBOOK_DIR = Path(self.temp_dir)
+
+        filename = "Hyperion Cantos [02] - The Fall of Hyperion.epub"
+        test_file = Path(self.temp_dir) / filename
+        test_file.touch()
+
+        result = find_ebook_file(filename)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, filename)
+
+    def test_find_ebook_file_with_asterisk(self):
+        """Test that filenames with asterisks are found correctly."""
+        from src.web_server import find_ebook_file
+        import src.web_server
+
+        src.web_server.EBOOK_DIR = Path(self.temp_dir)
+
+        filename = "Book Title * Special Edition.epub"
+        test_file = Path(self.temp_dir) / filename
+        test_file.touch()
+
+        result = find_ebook_file(filename)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, filename)
+
+    def test_find_ebook_file_with_question_mark(self):
+        """Test that filenames with question marks are found correctly."""
+        from src.web_server import find_ebook_file
+        import src.web_server
+
+        src.web_server.EBOOK_DIR = Path(self.temp_dir)
+
+        filename = "What If? - Science Questions.epub"
+        test_file = Path(self.temp_dir) / filename
+        test_file.touch()
+
+        result = find_ebook_file(filename)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, filename)
+
+    def test_find_ebook_file_in_subdirectory(self):
+        """Test that files in subdirectories are found."""
+        from src.web_server import find_ebook_file
+        import src.web_server
+
+        src.web_server.EBOOK_DIR = Path(self.temp_dir)
+
+        subdir = Path(self.temp_dir) / "Author Name"
+        subdir.mkdir()
+        filename = "Book [Series 01].epub"
+        test_file = subdir / filename
+        test_file.touch()
+
+        result = find_ebook_file(filename)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, filename)
+
 if __name__ == '__main__':
     print("TEST Clean Flask Integration Testing with Dependency Injection")
     print("=" * 70)

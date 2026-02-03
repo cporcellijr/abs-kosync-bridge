@@ -1,4 +1,5 @@
 # [START FILE: abs-kosync-enhanced/web_server.py]
+import glob
 import html
 import logging
 import json
@@ -449,7 +450,8 @@ def sync_daemon():
 
 def find_ebook_file(filename):
     base = EBOOK_DIR
-    matches = list(base.rglob(filename))
+    escaped_filename = glob.escape(filename)
+    matches = list(base.rglob(escaped_filename))
     return matches[0] if matches else None
 
 
