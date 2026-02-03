@@ -839,12 +839,35 @@
                     <div class="form-group">
                         <label>Transcription Provider</label>
                         <select name="TRANSCRIPTION_PROVIDER">
-                            <option value="local" {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif
-                                %}>Local Whisper</option>
-                            <option value="deepgram" {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{%
-                                endif %}>Deepgram (Cloud)</option>
+                            <option value="local"
+                                {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif %}>
+                                Local Whisper
+                            </option>
+
+                            <option value="deepgram"
+                                {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{% endif %}>
+                                Deepgram (Cloud)
+                            </option>
+
+                            <option value="whispercpp"
+                                {% if get_val('TRANSCRIPTION_PROVIDER')=='whispercpp' %}selected{% endif %}>
+                                Whisper.cpp (Server)
+                            </option>
                         </select>
-                        <div class="help-text">Local uses faster-whisper. Deepgram is faster but requires API key.</div>
+
+                        <div class="help-text">
+                            Local = faster‑whisper. Deepgram = cloud. Whisper.cpp = external HTTP server.
+                        </div>
+                    </div>
+                    <div class="form-group">
+                      <label>Whisper.cpp Server URL</label>
+                      <input
+                        type="text"
+                        name="WHISPER_CPP_URL"
+                        value="{{ get_val('WHISPER_CPP_URL', '') }}"
+                        placeholder="http://192.168.178.132:11080/audio/transcriptions"
+                      />
+                      <div class="help-text">Example: http://HOST:11080/audio/transcriptions</div>
                     </div>
                     <div class="form-group">
                         <label>Deepgram API Key</label>
