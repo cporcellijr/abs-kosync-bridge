@@ -1,6 +1,5 @@
 # KoSync Server - Extracted from web_server.py for clean code separation
 # Implements KOSync protocol compatible with kosync-dotnet
-import hashlib
 import logging
 import os
 import threading
@@ -11,6 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 from flask import Blueprint, jsonify, request
+
+from src.utils.kosync_headers import hash_kosync_key
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def kosync_auth_required(f):
             logger.error("KOSync Integrated Server: Credentials not configured in settings")
             return jsonify({"error": "Server not configured"}), 500
 
-        expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
+        expected_hash = hash_kosync_key(expected_password)
 
         if user and expected_user and user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
             return f(*args, **kwargs)
@@ -87,7 +88,7 @@ def kosync_users_auth():
         logger.error("KOSync Auth: Server credentials not configured")
         return jsonify({"message": "Server not configured"}), 500
 
-    expected_hash = hashlib.md5(expected_password.encode()).hexdigest()
+    expected_hash = hash_kosync_key(expected_password)
 
     if user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
         logger.debug(f"KOSync Auth: User '{user}' authenticated successfully")
