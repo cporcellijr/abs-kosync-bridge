@@ -362,15 +362,27 @@ class AudioTranscriber:
 
             # Phase 1: Download and Normalize (if not resuming)
             if not resuming:
-                # FIX: Check if files exist from a previous run before wiping
+                # FIX: Check if files exist for ALL parts before skipping
                 existing_files = sorted(book_cache_dir.glob("part_*_split_*.wav"))
-
-                if existing_files:
-                    logger.info(f"♻️ Found {len(existing_files)} existing split files. Skipping download phase.")
+                
+                # Check coverage: Do we have at least one file for every index in audio_urls?
+                missing_parts = False
+                for idx in range(len(audio_urls)):
+                    # Look for any file starting with part_{idx:03d}
+                    part_exists = any(f.name.startswith(f"part_{idx:03d}_") for f in existing_files)
+                    if not part_exists:
+                        missing_parts = True
+                        break
+                
+                if existing_files and not missing_parts:
+                    logger.info(f"♻️ Found valid cache ({len(existing_files)} files covering all {len(audio_urls)} parts). Skipping download.")
                     downloaded_files = list(existing_files)
                 else:
+                    if existing_files:
+                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh.")
+                        shutil.rmtree(book_cache_dir)
+                    
                     # Original logic: Wipe and Start Fresh
-                    if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
                     book_cache_dir.mkdir(parents=True, exist_ok=True)
                     downloaded_files = []
 
