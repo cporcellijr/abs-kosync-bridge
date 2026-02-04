@@ -9,22 +9,23 @@
     {# Calculate sync discrepancy for highlighting #}
     {% set progress_values = [] %}
     {% if mapping.states.abs is defined and mapping.states.abs.percentage %}
-        {% set _ = progress_values.append(mapping.states.abs.percentage) %}
+    {% set _ = progress_values.append(mapping.states.abs.percentage) %}
     {% endif %}
     {% if mapping.states.storyteller is defined and mapping.states.storyteller.percentage %}
-        {% set _ = progress_values.append(mapping.states.storyteller.percentage) %}
+    {% set _ = progress_values.append(mapping.states.storyteller.percentage) %}
     {% endif %}
     {% if mapping.states.booklore is defined and mapping.states.booklore.percentage %}
-        {% set _ = progress_values.append(mapping.states.booklore.percentage) %}
+    {% set _ = progress_values.append(mapping.states.booklore.percentage) %}
     {% endif %}
     {% if mapping.states.kosync is defined and mapping.states.kosync.percentage %}
-        {% set _ = progress_values.append(mapping.states.kosync.percentage) %}
+    {% set _ = progress_values.append(mapping.states.kosync.percentage) %}
     {% endif %}
-    {% set max_diff = (progress_values|max|default(0) - progress_values|min|default(0)) if progress_values|length > 1 else 0 %}
+    {% set max_diff = (progress_values|max|default(0) - progress_values|min|default(0)) if progress_values|length > 1
+    else 0 %}
 
-    <div class="book-card {% if max_diff > 5 %}out-of-sync{% endif %}" data-progress="{{ mapping.unified_progress }}" data-last-sync="{{ mapping.last_sync }}"
-        data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}" data-sync-mode="{{ mapping.sync_mode }}"
-        data-abs-id="{{ mapping.abs_id }}">
+    <div class="book-card {% if max_diff > 5 %}out-of-sync{% endif %}" data-progress="{{ mapping.unified_progress }}"
+        data-last-sync="{{ mapping.last_sync }}" data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}"
+        data-sync-mode="{{ mapping.sync_mode }}" data-abs-id="{{ mapping.abs_id }}">
 
         {# Cover image section - prioritize ebook cover, fallback to ABS cover #}
         <div class="book-cover-section">
@@ -72,11 +73,13 @@
             {# Service progress - always visible #}
             <div class="service-progress">
                 {% if integrations.abs %}
-                <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener" class="service-item" title="Open in Audiobookshelf">
+                <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
+                    title="Open in Audiobookshelf">
                     <img src="/static/audiobookshelf.png" alt="ABS" class="service-icon">
                     <span class="service-name">ABS</span>
                     {% if mapping.states.abs is defined %}
-                    <span class="service-value">{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int) // 3600,
+                    <span class="service-value">{{ '%d:%02d:%02d' | format((mapping.states.abs.timestamp|default(0)|int)
+                        // 3600,
                         ((mapping.states.abs.timestamp|default(0)|int) % 3600) // 60,
                         (mapping.states.abs.timestamp|default(0)|int) % 60) }}</span>
                     {% else %}
@@ -85,13 +88,15 @@
                 </a>
                 {% endif %}
                 {% if integrations.kosync %}
-                <div class="service-item cursor-pointer" title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
+                <div class="service-item cursor-pointer"
+                    title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
                     data-abs-id="{{ mapping.abs_id }}" data-title="{{ mapping.abs_title|escape }}"
                     data-hash="{{ mapping.kosync_doc_id }}" onclick="updateKoSyncHash(event)">
                     <span class="service-icon-emoji">📖</span>
                     <span class="service-name">KoSync</span>
                     {% if mapping.states.kosync is defined %}
-                    <span class="service-value">{{ '%.1f' | format(mapping.states.kosync.percentage|default(0)) }}%</span>
+                    <span class="service-value">{{ '%.1f' | format(mapping.states.kosync.percentage|default(0))
+                        }}%</span>
                     {% else %}
                     <span class="service-value">0.0%</span>
                     {% endif %}
@@ -102,20 +107,23 @@
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
                     {% if mapping.states.storyteller is defined %}
-                    <span class="service-value">{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0)) }}%</span>
+                    <span class="service-value">{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0))
+                        }}%</span>
                     {% else %}
                     <span class="service-value">0.0%</span>
                     {% endif %}
                 </div>
                 {% endif %}
                 {% if integrations.booklore %}
-                <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener"
+                <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener noreferrer"
                     class="service-item {% if not mapping.booklore_id %}disabled{% endif %}"
                     title="{% if mapping.booklore_id %}Open in Booklore{% else %}Not found in Booklore{% endif %}">
-                    <img src="/static/booklore.png" alt="BL" class="service-icon {% if not mapping.booklore_id %}grayscale-muted{% endif %}">
+                    <img src="/static/booklore.png" alt="BL"
+                        class="service-icon {% if not mapping.booklore_id %}grayscale-muted{% endif %}">
                     <span class="service-name">Booklore</span>
                     {% if mapping.states.booklore is defined %}
-                    <span class="service-value">{{ '%.1f' | format(mapping.states.booklore.percentage|default(0)) }}%</span>
+                    <span class="service-value">{{ '%.1f' | format(mapping.states.booklore.percentage|default(0))
+                        }}%</span>
                     {% else %}
                     <span class="service-value">0.0%</span>
                     {% endif %}
@@ -125,7 +133,7 @@
                 {% if integrations.hardcover %}
                 <div class="service-item progress-item-hc">
                     <a href="{{ mapping.hardcover_url|default('https://hardcover.app') }}" target="_blank"
-                        rel="noopener"
+                        rel="noopener noreferrer"
                         title="{% if mapping.hardcover_book_id %}Open {{ mapping.hardcover_title }} in Hardcover{% else %}Not linked to Hardcover{% endif %}"
                         class="hc-link {% if not mapping.hardcover_book_id %}pe-none{% endif %}">
                         <img src="/static/hardcover.png" alt="HC"
@@ -156,11 +164,12 @@
                 <div class="last-sync">Synced {{ mapping.last_sync }}</div>
                 <div class="quick-actions">
                     <form method="POST" action="/clear-progress/{{ mapping.abs_id }}">
-                        <button type="submit" class="action-btn warning"
+                        <button type="submit" class="action-btn warning" aria-label="Clear Progress"
                             onclick="return confirm('Clear all progress for this book?')">🔄</button>
                     </form>
                     <form method="POST" action="/delete/{{ mapping.abs_id }}">
-                        <button type="submit" class="action-btn danger" onclick="return confirm('Delete this mapping?')">🗑️</button>
+                        <button type="submit" class="action-btn danger" aria-label="Delete Mapping"
+                            onclick="return confirm('Delete this mapping?')">🗑️</button>
                     </form>
                 </div>
             </div>
@@ -847,7 +856,8 @@
 
             <div class="library-links">
                 {% if abs_server %}
-                <a href="{{ abs_server }}" class="nav-icon-link" target="_blank" title="Audiobookshelf">
+                <a href="{{ abs_server }}" class="nav-icon-link" target="_blank" rel="noopener noreferrer"
+                    title="Audiobookshelf">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
                         <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
@@ -856,8 +866,9 @@
                 </a>
                 {% endif %}
 
-                {% if booklore_server %}
-                <a href="{{ booklore_server }}" class="nav-icon-link" target="_blank" title="Ebook Library">
+                {% if booklore_server and (get_bool('BOOKLORE_ENABLED') or get_val('BOOKLORE_ENABLED') == '') %}
+                <a href="{{ booklore_server }}" class="nav-icon-link" target="_blank" rel="noopener noreferrer"
+                    title="Ebook Library">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
                         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
@@ -866,7 +877,8 @@
                 </a>
                 {% endif %}
 
-                {% if shelfmark_url %}
+                {% if shelfmark_url and (get_bool('SHELFMARK_ENABLED') or (get_val('SHELFMARK_URL') != '' and
+                get_val('SHELFMARK_ENABLED') == '')) %}
                 <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
