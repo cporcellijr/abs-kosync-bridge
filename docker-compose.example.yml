@@ -4,8 +4,8 @@
 # See README.md for detailed configuration instructions.
 
 services:
-  abs-kosync-enhanced:
-    image: cporcellijr/abs-kosync-enhanced:latest
+  abs-kosync:
+    image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
 
     # Optional: Build locally if you need specific modifications or GPU libraries included
     # build:
@@ -13,7 +13,7 @@ services:
     #   args:
     #     # Set to "true" to download NVIDIA CUDA libraries (adds ~800MB to image)
     #     INSTALL_GPU: "false"
-    container_name: abs_kosync_enhanced
+    container_name: abs_kosync
     restart: unless-stopped
 
     environment:
@@ -26,7 +26,7 @@ services:
       # Configuration Note
       # ============================================
       # All other configuration (ABS, KoSync, Providers, etc.) 
-      # is now managed via the Web UI variables at http://localhost:5757/settings
+      # is now managed via the Web UI variables at http://localhost:8080/settings
 
     volumes:
       # ============================================

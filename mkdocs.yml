@@ -1,0 +1,58 @@
+site_name: ABS-KoSync Enhanced
+site_url: https://cporcellijr.github.io/abs-kosync-bridge/
+site_author: cporcellijr
+site_description: The ultimate bridge for cross-platform reading and listening synchronization.
+
+repo_name: cporcellijr/abs-kosync-bridge
+repo_url: https://github.com/cporcellijr/abs-kosync-bridge
+
+theme:
+  name: material
+  logo: static/images/logo.png
+  favicon: static/images/favicon.png
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide: user-guide.md
+  - Configuration: configuration.md
+  - Troubleshooting: troubleshooting.md
+  - Changelog: changelog.md

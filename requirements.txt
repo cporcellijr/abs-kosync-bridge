@@ -15,4 +15,5 @@ lxml
 dependency-injector
 sqlalchemy
 alembic
+mkdocs-material
 
