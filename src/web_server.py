@@ -177,10 +177,54 @@ def get_audiobooks_conditionally():
 
 # ---------------- CONTEXT PROCESSORS ----------------
 def inject_global_vars():
+    def get_val(key, default_val=None):
+        if key in os.environ: return os.environ[key]
+        DEFAULTS = {
+            'TZ': 'America/New_York',
+            'LOG_LEVEL': 'INFO',
+            'DATA_DIR': '/data',
+            'BOOKS_DIR': '/books',
+            'ABS_COLLECTION_NAME': 'Synced with KOReader',
+            'BOOKLORE_SHELF_NAME': 'Kobo',
+            'SYNC_PERIOD_MINS': '5',
+            'SYNC_DELTA_ABS_SECONDS': '60',
+            'SYNC_DELTA_KOSYNC_PERCENT': '0.5',
+            'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
+            'SYNC_DELTA_KOSYNC_WORDS': '400',
+            'FUZZY_MATCH_THRESHOLD': '80',
+            'WHISPER_MODEL': 'tiny',
+            'JOB_MAX_RETRIES': '5',
+            'JOB_RETRY_DELAY_MINS': '15',
+            'MONITOR_INTERVAL': '3600',
+            'LINKER_BOOKS_DIR': '/linker_books',
+            'PROCESSING_DIR': '/processing',
+            'STORYTELLER_INGEST_DIR': '/linker_books',
+            'AUDIOBOOKS_DIR': '/audiobooks',
+            'ABS_PROGRESS_OFFSET_SECONDS': '0',
+            'EBOOK_CACHE_SIZE': '3',
+            'KOSYNC_HASH_METHOD': 'content',
+            'TELEGRAM_LOG_LEVEL': 'ERROR',
+            'SHELFMARK_URL': '',
+            'KOSYNC_ENABLED': 'false',
+            'STORYTELLER_ENABLED': 'false',
+            'BOOKLORE_ENABLED': 'false',
+            'HARDCOVER_ENABLED': 'false',
+            'TELEGRAM_ENABLED': 'false',
+            'SUGGESTIONS_ENABLED': 'false'
+        }
+        if key in DEFAULTS: return DEFAULTS[key]
+        return default_val if default_val is not None else ''
+
+    def get_bool(key):
+        val = os.environ.get(key, 'false')
+        return val.lower() in ('true', '1', 'yes', 'on')
+
     return dict(
         shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
         abs_server=os.environ.get("ABS_SERVER", ""),
-        booklore_server=os.environ.get("BOOKLORE_SERVER", "")
+        booklore_server=os.environ.get("BOOKLORE_SERVER", ""),
+        get_val=get_val,
+        get_bool=get_bool
     )
 
 # ---------------- BOOK LINKER HELPERS ----------------
@@ -609,39 +653,8 @@ def restart_server():
 
 def settings():
     # Application Defaults
-    DEFAULTS = {
-        'TZ': 'America/New_York',
-        'LOG_LEVEL': 'INFO',
-        'DATA_DIR': '/data',
-        'BOOKS_DIR': '/books',
-        'ABS_COLLECTION_NAME': 'Synced with KOReader',
-        'BOOKLORE_SHELF_NAME': 'Kobo',
-        'SYNC_PERIOD_MINS': '5',
-        'SYNC_DELTA_ABS_SECONDS': '60',
-        'SYNC_DELTA_KOSYNC_PERCENT': '0.5',
-        'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
-        'SYNC_DELTA_KOSYNC_WORDS': '400',
-        'FUZZY_MATCH_THRESHOLD': '80',
-        'WHISPER_MODEL': 'tiny',
-        'JOB_MAX_RETRIES': '5',
-        'JOB_RETRY_DELAY_MINS': '15',
-        'MONITOR_INTERVAL': '3600',
-        'LINKER_BOOKS_DIR': '/linker_books',
-        'PROCESSING_DIR': '/processing',
-        'STORYTELLER_INGEST_DIR': '/linker_books',
-        'AUDIOBOOKS_DIR': '/audiobooks',
-        'ABS_PROGRESS_OFFSET_SECONDS': '0',
-        'EBOOK_CACHE_SIZE': '3',
-        'KOSYNC_HASH_METHOD': 'content',
-        'TELEGRAM_LOG_LEVEL': 'ERROR',
-        'SHELFMARK_URL': '',
-        'KOSYNC_ENABLED': 'false',
-        'STORYTELLER_ENABLED': 'false',
-        'BOOKLORE_ENABLED': 'false',
-        'HARDCOVER_ENABLED': 'false',
-        'TELEGRAM_ENABLED': 'false',
-        'SUGGESTIONS_ENABLED': 'false'
-    }
+    # Note: These are also defined in inject_global_vars for context processor usage
+    # We should probably centralize them, but for now this works.
 
     if request.method == 'POST':
         bool_keys = [
@@ -710,19 +723,7 @@ def settings():
     message = session.pop('message', None)
     is_error = session.pop('is_error', False)
 
-    # helper to get value from Env (which is loaded from DB) > Defaults
-    def get_val(key, default_val=None):
-        if key in os.environ: return os.environ[key]
-        if key in DEFAULTS: return DEFAULTS[key]
-        return default_val if default_val is not None else ''
-
-    def get_bool(key):
-        val = os.environ.get(key, 'false')
-        return val.lower() in ('true', '1', 'yes', 'on')
-
     return render_template('settings.html',
-                         get_val=get_val,
-                         get_bool=get_bool,
                          message=message,
                          is_error=is_error)
 
@@ -1659,13 +1660,7 @@ def create_app(test_container=None):
     setup_dependencies(app, test_container=test_container)
 
     # Register context processors, jinja globals, etc.
-    @app.context_processor
-    def inject_global_vars():
-        return dict(
-            shelfmark_url=os.environ.get("SHELFMARK_URL", ""),
-            abs_server=os.environ.get("ABS_SERVER", ""),
-            booklore_server=os.environ.get("BOOKLORE_SERVER", "")
-        )
+    app.context_processor(inject_global_vars)
     app.jinja_env.globals['safe_folder_name'] = safe_folder_name
 
     # Register all routes here

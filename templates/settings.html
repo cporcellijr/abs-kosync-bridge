@@ -173,6 +173,10 @@
             display: none;
         }
 
+        .hidden {
+            display: none !important;
+        }
+
         .full-width {
             grid-column: span 2;
         }
@@ -409,7 +413,7 @@
                 </a>
                 {% endif %}
 
-                {% if shelfmark_url %}
+                {% if shelfmark_url and get_bool('SHELFMARK_ENABLED') %}
                 <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
@@ -467,6 +471,13 @@
                     <h3 class="text-primary">Audiobookshelf (Required)</h3>
                 </div>
                 <div class="section-body">
+                    <!-- Moved Checkbox to top -->
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="abs_only_lib" name="ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID" {% if
+                            get_bool('ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID') %}checked{% endif %}>
+                        <label for="abs_only_lib">Limit Search to Configured Library</label>
+                    </div>
+
                     <div class="form-group full-width">
                         <label>Server URL</label>
                         <input type="text" name="ABS_SERVER" value="{{ get_val('ABS_SERVER') }}" required>
@@ -475,10 +486,13 @@
                         <label>API Token</label>
                         <input type="password" name="ABS_KEY" value="{{ get_val('ABS_KEY') }}" required>
                     </div>
-                    <div class="form-group">
+
+                    <!-- Wrapper for Library ID -->
+                    <div id="abs_library_id_group" class="form-group">
                         <label>Library ID</label>
                         <input type="text" name="ABS_LIBRARY_ID" value="{{ get_val('ABS_LIBRARY_ID') }}" required>
                     </div>
+
                     <div class="form-group">
                         <label>Collection Name (Auto-Add)</label>
                         <input type="text" name="ABS_COLLECTION_NAME" value="{{ get_val('ABS_COLLECTION_NAME') }}">
@@ -489,11 +503,7 @@
                             value="{{ get_val('ABS_PROGRESS_OFFSET_SECONDS') }}">
                         <div class="help-text">Rewind progress sent to ABS (e.g. -60)</div>
                     </div>
-                    <div class="checkbox-wrapper full-width">
-                        <input type="checkbox" id="abs_only_lib" name="ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID" {% if
-                            get_bool('ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID') %}checked{% endif %}>
-                        <label for="abs_only_lib">Limit Search to Configured Library</label>
-                    </div>
+                    <!-- Old Checkbox location removed -->
                 </div>
             </div>
 
@@ -516,48 +526,47 @@
                 </div>
                 <div id="kosync_body" class="section-body {% if not kosync_enabled %}collapsed{% endif %}">
 
-                    <!-- Integrated Server Info -->
-                    <!-- Integrated Server Info -->
-                    <div class="full-width"
+                    <!-- Integrated Server Toggle -->
+                    <div class="checkbox-wrapper full-width">
+                        <!-- We use a hidden input or similar logic? 
+                             The user wants a toggle "Use Built-in KOSync Bridge"
+                             Let's assume a new setting key KOSYNC_USE_BUILTIN for the frontend logic, 
+                             or strictly rely on front-end JS to set the URL.
+                             The request says: "secondary toggle one for yes use kosync which opens url to input user/pass... then the second to use built in"
+                        -->
+                        <input type="checkbox" id="kosync_use_builtin" onchange="toggleKosyncServerMode()" checked>
+                        <label for="kosync_use_builtin">Use Built-in KOSync Bridge (Recommended)</label>
+                    </div>
+
+                    <!-- Public URL (Only if Built-in) -->
+                    <div id="kosync_public_url_group" class="full-width"
                         style="background: rgba(102, 126, 234, 0.1); padding: 15px; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.2); margin-bottom: 5px;">
-                        <h4 style="margin-bottom: 12px; color: #fff; font-size: 14px;">🚀 Built-in KOSync Server
-                            Configuration</h4>
+                        <h4 style="margin-bottom: 12px; color: #fff; font-size: 14px;">🚀 Public URL (Put this in
+                            KOReader)</h4>
 
-                        <div style="margin-bottom: 15px;">
-                            <label style="display:block; font-size: 12px; color: #aaa; margin-bottom: 4px;">1. Public
-                                URL (Put this in KOReader on your device)</label>
-                            <div style="display: flex; gap: 10px;">
-                                <input type="text" id="public_kosync_url" readonly value="" onclick="this.select()"
-                                    style="cursor: pointer; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.4);">
-                                <button type="button" class="btn" onclick="copyPublicUrl()"
-                                    title="Copy to clipboard">📋</button>
-                            </div>
-                            <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Detected from
-                                your browser. Append path (e.g. /koreader) if using a proxy.</div>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="public_kosync_url" aria-label="Public KOSync URL" readonly value=""
+                                onclick="this.select()"
+                                style="flex: 1; cursor: pointer; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.4);">
+                            <button type="button" class="btn" onclick="copyPublicUrl()"
+                                title="Copy to clipboard">📋</button>
                         </div>
-
-                        <div>
-                            <label style="display:block; font-size: 12px; color: #aaa; margin-bottom: 4px;">2. Internal
-                                Bridge Connection (Set this below)</label>
-                            <div style="display: flex; gap: 10px; align-items: center;">
-                                <code
-                                    style="font-family: monospace; color: #fff; background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 4px;">http://127.0.0.1:5757</code>
-                                <button type="button" class="btn btn-sm" onclick="useIntegratedServer()"
-                                    style="white-space: nowrap; font-size: 12px; padding: 4px 10px;">Set to
-                                    Localhost</button>
-                            </div>
-                            <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">The bridge
-                                connects to itself locally to read progress.</div>
-                        </div>
+                        <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Detected from
+                            your browser. Append path (e.g. /koreader) if using a proxy.</div>
                     </div>
 
                     <div class="form-group full-width">
-                        <label>Internal Target URL (For Bridge)</label>
+                        <label>Target KOSync URL</label>
                         <input type="text" name="KOSYNC_SERVER" id="kosync_server_input"
                             value="{{ get_val('KOSYNC_SERVER') }}">
-                        <div class="help-text">Keep as 127.0.0.1 if using built-in server. Only change if using an
-                            external KOSync provider.</div>
+                        <div class="help-text" id="kosync_server_help">Internal URL the bridge connects to.</div>
                     </div>
+
+                    <!-- Separator -->
+                    <div class="full-width" style="margin: 10px 0; border-top: 1px solid rgba(255,255,255,0.1);"></div>
+                    <h4 class="full-width" style="font-size: 14px; color: #fff; margin-bottom: -10px;">User Credentials
+                    </h4>
+
                     <div class="form-group">
                         <label>Username</label>
                         <input type="text" name="KOSYNC_USER" value="{{ get_val('KOSYNC_USER') }}">
@@ -567,7 +576,7 @@
                         <input type="password" name="KOSYNC_KEY" value="{{ get_val('KOSYNC_KEY') }}">
                         <div class="help-text">This will be your KOSync password in KOReader.</div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group full-width">
                         <label>Hash Method</label>
                         <select name="KOSYNC_HASH_METHOD">
                             <option value="content" {% if get_val('KOSYNC_HASH_METHOD')=='content' %}selected{% endif
@@ -722,6 +731,16 @@
             <div class="settings-section">
                 <div class="section-header">
                     <h3>Shelfmark View</h3>
+                    <div class="toggle-switch-wrapper">
+                        <span class="toggle-label">Enable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle_shelfmark" aria-label="Enable Shelfmark"
+                                name="SHELFMARK_ENABLED" {% if get_bool('SHELFMARK_ENABLED') or
+                                (get_val('SHELFMARK_URL') !='' and get_val('SHELFMARK_ENABLED')=='' ) %}checked{% endif
+                                %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                 </div>
                 <div class="section-body">
                     <div class="form-group full-width">
@@ -832,103 +851,10 @@
                     <h3>Advanced Options</h3>
                 </div>
                 <div class="section-body">
+                    <!-- System Settings (Moved to Top) -->
                     <div class="form-group">
                         <label>Ebook Cache Size</label>
                         <input type="number" name="EBOOK_CACHE_SIZE" value="{{ get_val('EBOOK_CACHE_SIZE') }}">
-                    </div>
-                    <div class="form-group">
-                        <label>Transcription Provider</label>
-                        <select name="TRANSCRIPTION_PROVIDER">
-                            <option value="local"
-                                {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif %}>
-                                Local Whisper
-                            </option>
-
-                            <option value="deepgram"
-                                {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{% endif %}>
-                                Deepgram (Cloud)
-                            </option>
-
-                            <option value="whispercpp"
-                                {% if get_val('TRANSCRIPTION_PROVIDER')=='whispercpp' %}selected{% endif %}>
-                                Whisper.cpp (Server)
-                            </option>
-                        </select>
-
-                        <div class="help-text">
-                            Local = faster‑whisper. Deepgram = cloud. Whisper.cpp = external HTTP server.
-                        </div>
-                    </div>
-                    <div class="form-group">
-                      <label>Whisper.cpp Server URL</label>
-                      <input
-                        type="text"
-                        name="WHISPER_CPP_URL"
-                        value="{{ get_val('WHISPER_CPP_URL', '') }}"
-                        placeholder="http://192.168.178.132:11080/audio/transcriptions"
-                      />
-                      <div class="help-text">Example: http://HOST:11080/audio/transcriptions</div>
-                    </div>
-                    <div class="form-group">
-                        <label>Deepgram API Key</label>
-                        <input type="password" name="DEEPGRAM_API_KEY" value="{{ get_val('DEEPGRAM_API_KEY') }}"
-                            placeholder="dg_...">
-                        <div class="help-text">Get your key at <a href="https://console.deepgram.com"
-                                target="_blank">console.deepgram.com</a></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Deepgram Model</label>
-                        <select name="DEEPGRAM_MODEL">
-                            <option value="nova-2" {% if get_val('DEEPGRAM_MODEL')=='nova-2' %}selected{% endif %}>
-                                Nova-2 (Best accuracy)</option>
-                            <option value="nova-3" {% if get_val('DEEPGRAM_MODEL')=='nova-3' %}selected{% endif %}>
-                                Nova-3 (Latest)</option>
-                            <option value="base" {% if get_val('DEEPGRAM_MODEL')=='base' %}selected{% endif %}>Base
-                                (Fastest)</option>
-                            <option value="enhanced" {% if get_val('DEEPGRAM_MODEL')=='enhanced' %}selected{% endif %}>
-                                Enhanced</option>
-                        </select>
-                        <div class="help-text">Nova-2 recommended. See <a
-                                href="https://developers.deepgram.com/docs/models" target="_blank">Deepgram Models</a>
-                        </div>
-                    </div>
-                    <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3;">
-                    <div class="form-group">
-                        <label>Whisper Model (Local)</label>
-                        <select name="WHISPER_MODEL">
-                            {% for model in ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'] %}
-                            <option value="{{ model }}" {% if get_val('WHISPER_MODEL')==model %}selected{% endif %}>{{
-                                model }}</option>
-                            {% endfor %}
-                        </select>
-                        <div class="help-text">Only used when provider is Local. Larger = better accuracy but slower.
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Whisper Device</label>
-                        <select name="WHISPER_DEVICE">
-                            <option value="auto" {% if get_val('WHISPER_DEVICE')=='auto' %}selected{% endif %}>Auto
-                                (Detect GPU)</option>
-                            <option value="cpu" {% if get_val('WHISPER_DEVICE')=='cpu' %}selected{% endif %}>CPU
-                            </option>
-                            <option value="cuda" {% if get_val('WHISPER_DEVICE')=='cuda' %}selected{% endif %}>CUDA
-                                (NVIDIA GPU)</option>
-                        </select>
-                        <div class="help-text">Auto will try GPU if available, fallback to CPU.</div>
-                    </div>
-                    <div class="form-group">
-                        <label>Whisper Compute Type</label>
-                        <select name="WHISPER_COMPUTE_TYPE">
-                            <option value="auto" {% if get_val('WHISPER_COMPUTE_TYPE')=='auto' %}selected{% endif %}>
-                                Auto (int8 CPU / float16 GPU)</option>
-                            <option value="int8" {% if get_val('WHISPER_COMPUTE_TYPE')=='int8' %}selected{% endif %}>
-                                int8 (Fast, CPU-optimized)</option>
-                            <option value="float16" {% if get_val('WHISPER_COMPUTE_TYPE')=='float16' %}selected{% endif
-                                %}>float16 (Fast, GPU-optimized)</option>
-                            <option value="float32" {% if get_val('WHISPER_COMPUTE_TYPE')=='float32' %}selected{% endif
-                                %}>float32 (Highest accuracy)</option>
-                        </select>
-                        <div class="help-text">Use int8 for CPU, float16 for GPU.</div>
                     </div>
                     <div class="form-group">
                         <label>Job Max Retries</label>
@@ -946,6 +872,126 @@
                         <label>Fuzzy Match Threshold</label>
                         <input type="number" step="0.1" name="FUZZY_MATCH_THRESHOLD"
                             value="{{ get_val('FUZZY_MATCH_THRESHOLD') }}">
+                    </div>
+
+                    <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
+
+                    <!-- Transcription Settings -->
+                    <div class="form-group">
+                        <label>Transcription Provider</label>
+                        <select name="TRANSCRIPTION_PROVIDER">
+                            <option value="local" {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif
+                                %}>
+                                Local Whisper
+                            </option>
+
+                            <option value="deepgram" {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{%
+                                endif %}>
+                                Deepgram (Cloud)
+                            </option>
+
+                            <option value="whispercpp" {% if get_val('TRANSCRIPTION_PROVIDER')=='whispercpp'
+                                %}selected{% endif %}>
+                                Whisper.cpp (Server)
+                            </option>
+                        </select>
+
+                        <div class="help-text">
+                            Local = faster‑whisper. Deepgram = cloud. Whisper.cpp = external HTTP server.
+                        </div>
+                    </div>
+                    <!-- Wrapper: Whisper.cpp -->
+                    <div id="group_whispercpp" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group full-width">
+                            <label>Whisper.cpp Server URL</label>
+                            <input type="text" name="WHISPER_CPP_URL" value="{{ get_val('WHISPER_CPP_URL', '') }}"
+                                placeholder="http://192.168.178.132:11080/audio/transcriptions" />
+                            <div class="help-text">Example: http://HOST:11080/audio/transcriptions</div>
+                        </div>
+                    </div>
+
+                    <!-- Wrapper: Deepgram -->
+                    <div id="group_deepgram" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Deepgram API Key</label>
+                            <input type="password" name="DEEPGRAM_API_KEY" value="{{ get_val('DEEPGRAM_API_KEY') }}"
+                                placeholder="dg_...">
+                            <div class="help-text">Get your key at <a href="https://console.deepgram.com"
+                                    target="_blank" rel="noopener noreferrer">console.deepgram.com</a></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="deepgram_model">Deepgram Model</label>
+                            <select name="DEEPGRAM_MODEL" id="deepgram_model">
+                                <option value="nova-2" {% if get_val('DEEPGRAM_MODEL')=='nova-2' %}selected{% endif %}>
+                                    Nova-2 (Best accuracy)</option>
+                                <option value="nova-3" {% if get_val('DEEPGRAM_MODEL')=='nova-3' %}selected{% endif %}>
+                                    Nova-3 (Latest)</option>
+                                <option value="base" {% if get_val('DEEPGRAM_MODEL')=='base' %}selected{% endif %}>Base
+                                    (Fastest)</option>
+                                <option value="enhanced" {% if get_val('DEEPGRAM_MODEL')=='enhanced' %}selected{% endif
+                                    %}>
+                                    Enhanced</option>
+                            </select>
+                            <div class="help-text">Nova-2 recommended. See <a
+                                    href="https://developers.deepgram.com/docs/models" target="_blank"
+                                    rel="noopener noreferrer">Deepgram
+                                    Models</a>
+                            </div>
+                            <div class="alert alert-warning" id="gpu_warning" style="display:none; margin-top:10px;">
+                                <strong>⚠️ NVIDIA GPU Selected:</strong>
+                                <ul style="margin: 5px 0 0 20px; font-size: 0.9em;">
+                                    <li>Ensure <code>INSTALL_GPU: "true"</code> is set in docker-compose.yml (this
+                                        builds the container with CUDA libraries).</li>
+                                    <li>Ensure the <strong>NVIDIA Container Toolkit</strong> is installed on your host
+                                        system (this allows Docker to access your GPU).</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- Wrapper: Local Whisper -->
+                    <div id="group_local" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Whisper Model (Local)</label>
+                            <select name="WHISPER_MODEL">
+                                {% for model in ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'] %}
+                                <option value="{{ model }}" {% if get_val('WHISPER_MODEL')==model %}selected{% endif %}>
+                                    {{
+                                    model }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="help-text">Only used when provider is Local. Larger = better accuracy but
+                                slower.
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Whisper Device</label>
+                            <select name="WHISPER_DEVICE">
+                                <option value="cpu" {% if get_val('WHISPER_DEVICE')=='cpu' %}selected{% endif %}>CPU
+                                </option>
+                                <option value="cuda" {% if get_val('WHISPER_DEVICE')=='cuda' %}selected{% endif %}>GPU
+                                    (NVIDIA)
+                                </option>
+                            </select>
+                            <div class="help-text">Use CUDA for NVIDIA GPU. Default is CPU.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Whisper Compute Type</label>
+                            <select name="WHISPER_COMPUTE_TYPE">
+                                <option value="auto" {% if get_val('WHISPER_COMPUTE_TYPE')=='auto' %}selected{% endif
+                                    %}>
+                                    Auto (int8 CPU / float16 GPU)</option>
+                                <option value="int8" {% if get_val('WHISPER_COMPUTE_TYPE')=='int8' %}selected{% endif
+                                    %}>
+                                    int8 (Fast, CPU-optimized)</option>
+                                <option value="float16" {% if get_val('WHISPER_COMPUTE_TYPE')=='float16' %}selected{%
+                                    endif %}>float16 (Fast, GPU-optimized)</option>
+                                <option value="float32" {% if get_val('WHISPER_COMPUTE_TYPE')=='float32' %}selected{%
+                                    endif %}>float32 (Highest accuracy)</option>
+                            </select>
+                            <div class="help-text">Use int8 for CPU, float16 for GPU.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -969,12 +1015,34 @@
             }
         }
 
-        function useIntegratedServer() {
-            const input = document.getElementById('kosync_server_input');
-            input.value = "http://127.0.0.1:5757";
-            // Highlight to show change
-            input.style.borderColor = "#667eea";
-            setTimeout(() => input.style.borderColor = "", 1000);
+        function toggleKosyncServerMode() {
+            const useBuiltin = document.getElementById('kosync_use_builtin').checked;
+
+            const internalInput = document.getElementById('kosync_server_input');
+            const publicGroup = document.getElementById('kosync_public_url_group');
+            // We want to force it if checked?
+
+            if (useBuiltin) {
+                // Show Public URL section
+                if (publicGroup) publicGroup.classList.remove('hidden');
+
+                // Force internal value and make readonly
+                internalInput.value = "http://127.0.0.1:5757";
+                internalInput.setAttribute('readonly', 'readonly');
+                internalInput.style.opacity = "0.7";
+                internalInput.style.cursor = "not-allowed";
+            } else {
+                // Hide Public URL section
+                if (publicGroup) publicGroup.classList.add('hidden');
+
+                // Make internal editable (user must set external server)
+                // We don't necessarily clear it, but maybe we should? 
+                // Let's leave it, user can edit.
+                internalInput.removeAttribute('readonly');
+                internalInput.style.opacity = "1";
+                internalInput.style.cursor = "text";
+                // If it was the localhost default, maybe clear it? No, safe to leave.
+            }
         }
 
         function copyPublicUrl() {
@@ -998,7 +1066,123 @@
 
             // Try to be smart mostly for display
             document.getElementById('public_kosync_url').value = baseUrl + "/";
+
+            // Initialize Dynamic Logic
+            initDynamicForms();
+
+            // Check initial state of KOSync
+            const kosyncServerVal = document.getElementById('kosync_server_input').value;
+            // If it matches localhost, check the box. Else uncheck.
+            const builtinCheckbox = document.getElementById('kosync_use_builtin');
+            if (kosyncServerVal === "http://127.0.0.1:5757" || kosyncServerVal === "") {
+                builtinCheckbox.checked = true;
+            } else {
+                builtinCheckbox.checked = false;
+            }
+            toggleKosyncServerMode();
         });
+
+        function initDynamicForms() {
+            // 1. ABS Library ID Toggle
+            const absCheckbox = document.getElementById('abs_only_lib');
+            if (absCheckbox) {
+                absCheckbox.addEventListener('change', toggleAbsLibraryId);
+                toggleAbsLibraryId(); // Initial state
+            }
+
+            // 2. Transcription Provider Toggle
+            const providerSelect = document.querySelector('select[name="TRANSCRIPTION_PROVIDER"]');
+            if (providerSelect) {
+                providerSelect.addEventListener('change', toggleProviderSettings);
+                toggleProviderSettings(); // Initial state
+            }
+
+            // 3. GPU Warning
+            const deviceSelect = document.querySelector('select[name="WHISPER_DEVICE"]');
+            if (deviceSelect) {
+                deviceSelect.addEventListener('change', function () {
+                    if (this.value === 'cuda') {
+                        alert("To use an NVIDIA GPU, you must modify your docker-compose.yml to include the 'deploy' block with 'capabilities: [gpu]' and ensure the NVIDIA Container Toolkit is installed on your host.");
+                    }
+                });
+            }
+        }
+
+        function toggleAbsLibraryId() {
+            const checkbox = document.getElementById('abs_only_lib');
+            const group = document.getElementById('abs_library_id_group');
+            const input = document.querySelector('input[name="ABS_LIBRARY_ID"]');
+
+            if (checkbox && group && input) {
+                if (checkbox.checked) {
+                    group.classList.remove('hidden');
+                    input.setAttribute('required', 'required');
+                } else {
+                    group.classList.add('hidden');
+                    input.removeAttribute('required');
+                }
+            }
+        }
+
+        function toggleProviderSettings() {
+            const provider = document.querySelector('select[name="TRANSCRIPTION_PROVIDER"]').value;
+
+            // Groups
+            const groupLocal = document.getElementById('group_local');
+            const groupDeepgram = document.getElementById('group_deepgram');
+            const groupWhisperCpp = document.getElementById('group_whispercpp');
+
+            // Hide all first
+            if (groupLocal) groupLocal.classList.add('hidden');
+            if (groupDeepgram) groupDeepgram.classList.add('hidden');
+            if (groupWhisperCpp) groupWhisperCpp.classList.add('hidden');
+
+            // Show selected
+            if (provider === 'local' && groupLocal) {
+                groupLocal.classList.remove('hidden');
+            } else if (provider === 'deepgram' && groupDeepgram) {
+                groupDeepgram.classList.remove('hidden');
+            } else if (provider === 'whispercpp' && groupWhisperCpp) {
+                groupWhisperCpp.classList.remove('hidden');
+            }
+        }
+    </script>
+    <script>
+        // --- Unsaved Changes Guard ---
+        let isFormDirty = false;
+
+        function markDirty() {
+            isFormDirty = true;
+        }
+
+        function setupDirtyCheck() {
+            const inputs = document.querySelectorAll('input, select, textarea');
+            inputs.forEach(input => {
+                input.addEventListener('change', markDirty);
+                input.addEventListener('input', markDirty);
+            });
+
+            // Warn before leaving
+            window.addEventListener('beforeunload', function (e) {
+                if (isFormDirty) {
+                    // Standard message (though most modern browsers show their own generic message)
+                    const msg = "You have unsaved changes. Are you sure you want to leave?";
+                    e.returnValue = msg;
+                    return msg;
+                }
+            });
+
+            // Clear dirty flag on valid submit
+            const form = document.querySelector('form');
+            if (form) {
+                form.addEventListener('submit', function () {
+                    isFormDirty = false;
+                });
+            }
+        }
+
+        // Initialize dirty check after DOM is ready
+        document.addEventListener('DOMContentLoaded', setupDirtyCheck);
     </script>
 </body>
 
