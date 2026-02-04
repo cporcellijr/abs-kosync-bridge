@@ -26,11 +26,11 @@
         data-status="{{ mapping.status }}" data-title="{{ mapping.abs_title }}" data-sync-mode="{{ mapping.sync_mode }}"
         data-abs-id="{{ mapping.abs_id }}">
 
-        {# Cover image section #}
+        {# Cover image section - prioritize ebook cover, fallback to ABS cover #}
         <div class="book-cover-section">
-            {% if mapping.sync_mode == 'ebook_only' %}
+            {% if mapping.kosync_doc_id %}
             <img src="/covers/{{ mapping.kosync_doc_id }}.jpg" alt="Cover" class="book-cover"
-                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                onerror="{% if mapping.cover_url %}this.onerror=null; this.src='{{ mapping.cover_url }}';{% else %}this.style.display='none'; this.nextElementSibling.classList.remove('hidden');{% endif %}">
             <div class="book-cover-placeholder hidden">📖</div>
             {% elif mapping.cover_url %}
             <img src="{{ mapping.cover_url }}" alt="Cover" class="book-cover"
@@ -429,9 +429,13 @@
             .book-cover-section {
                 width: 100px;
                 min-width: 100px;
-                min-height: 140px;
+                aspect-ratio: 2/3;
                 position: relative;
                 flex-shrink: 0;
+                align-self: flex-start;
+                overflow: hidden;
+                border-radius: 8px;
+                background: rgba(0, 0, 0, 0.3);
             }
 
             .book-cover {
@@ -440,7 +444,7 @@
                 left: 0;
                 width: 100%;
                 height: 100%;
-                object-fit: cover;
+                object-fit: contain;
             }
 
             .book-cover-placeholder {
