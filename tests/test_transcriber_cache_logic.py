@@ -1,0 +1,101 @@
+import unittest
+from unittest.mock import MagicMock, patch, mock_open
+import shutil
+import os
+from pathlib import Path
+import sys
+
+# Add src to path
+sys.path.append(str(Path(__file__).parent.parent / "src"))
+
+from utils.transcriber import AudioTranscriber
+
+class TestTranscriberCacheLogic(unittest.TestCase):
+    def setUp(self):
+        self.mock_data_dir = Path("/tmp/mock_data")
+        self.mock_smil_extractor = MagicMock()
+        self.transcriber = AudioTranscriber(self.mock_data_dir, self.mock_smil_extractor)
+        
+        # Mock dependencies that hit the network or filesystem
+        self.transcriber.normalize_audio_to_wav = MagicMock()
+        self.transcriber.split_audio_file = MagicMock()
+        self.transcriber.get_audio_duration = MagicMock(return_value=100.0)
+        
+    @patch("src.utils.transcriber.requests.get")
+    def test_partial_cache_triggers_redownload(self, mock_requests_get):
+        """
+        Bug Reproduction: 
+        If we have 3 audio parts to download, but the cache only has part 0,
+        the current logic sees 'some' files and skips the download.
+        
+        Expected Behavior:
+        It should detect that parts 1 and 2 are missing, wipe the cache, and re-download everything.
+        """
+        # Setup
+        abs_id = "test-book-id"
+        audio_urls = [
+            {'stream_url': 'http://example.com/1.mp3', 'ext': 'mp3'},
+            {'stream_url': 'http://example.com/2.mp3', 'ext': 'mp3'},
+            {'stream_url': 'http://example.com/3.mp3', 'ext': 'mp3'}
+        ]
+        
+        # Setup real filesystem in mock_data_dir (which was set up in setUp)
+        book_cache_dir = self.mock_data_dir / "audio_cache" / abs_id
+        book_cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create ONLY the first part to simulate incomplete cache
+        # The transcriber looks for part_000_split_*.wav
+        (book_cache_dir / "part_000_split_000.wav").touch()
+        # Part 1 and 2 are missing
+        
+        # Setup dependencies
+        with patch("src.utils.transcriber.get_transcription_provider") as mock_provider_getter:
+            # Setup mock provider
+            mock_provider = MagicMock()
+            mock_provider.transcribe.return_value = []
+            mock_provider_getter.return_value = mock_provider
+            
+            # Setup split implementation to create dummy files so the process continues
+            # We need simple implementations that return valid Paths for the next steps
+            
+            # Mock requests response
+            mock_response = MagicMock()
+            mock_response.iter_content.return_value = [b"audio data"]
+            mock_requests_get.return_value.__enter__.return_value = mock_response
+            
+            # Mock normalize: return a path that exists (we can just return the input path if we say it's wav)
+            # Actually process_audio calls normalize_audio_to_wav which calls ffmpeg.
+            # We mocked normalize_audio_to_wav in setUp.
+            # Let's make it create a file so subsequent checks pass (if any).
+            # The code calls: normalized_path = self.normalize_audio_to_wav(local_path)
+            # Then self.split_audio_file(normalized_path)
+            
+            def mock_normalize(p):
+                 # Return a path that "exists"
+                 out = p.with_suffix('.wav')
+                 out.touch()
+                 return out
+            self.transcriber.normalize_audio_to_wav.side_effect = mock_normalize
+            
+            def mock_split(path, duration):
+                # Return the file itself as if it didn't need splitting
+                return [path]
+            self.transcriber.split_audio_file.side_effect = mock_split
+            
+            # Execute
+            try:
+                self.transcriber.process_audio(abs_id, audio_urls, progress_callback=MagicMock())
+            except Exception as e:
+                print(f"Caught exception: {e}")
+                pass
+
+            # ASSERTION
+            # In fixed version, it should detect missing parts, wipe cache (rmtree), and download 3 times.
+            
+            if mock_requests_get.call_count == 0:
+                self.fail("Bug Reproduced: Download was skipped despite missing audio parts in cache.")
+            
+            self.assertEqual(mock_requests_get.call_count, 3, "Should download all 3 parts")
+
+if __name__ == '__main__':
+    unittest.main()
