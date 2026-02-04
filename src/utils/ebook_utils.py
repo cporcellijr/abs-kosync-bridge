@@ -582,11 +582,13 @@ class EbookParser:
             # Find the element that contains our target position
             target_element = None
             target_offset = 0
+            is_tail = False
 
             for elem_info in text_elements:
                 if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
                     target_element = elem_info['element']
                     target_offset = local_pos - elem_info['start_pos']
+                    is_tail = elem_info.get('is_tail', False)
                     break
 
             if target_element is None:
@@ -606,8 +608,22 @@ class EbookParser:
                 logger.warning(f"No text elements found in spine {target_item['spine_index']}")
                 return None
 
+            # Handle tail text: If matching tail, the text actually belongs to the parent in DOM
+            if is_tail and target_element is not None:
+                target_element = target_element.getparent()
+                # We invalidate the offset because it was relative to the sibling, not the parent
+                target_offset = None
+
             # Build xpath for the target element
             xpath = self._build_xpath(target_element)
+
+            # [Fix] If target is an anchor/inline or we moved to parent, drop the strict text offset.
+            # This prevents KOReader from failing to find the text node and jumping to start.
+            unstable_tags = ['a', 'span', 'strong', 'em', 'i', 'b', 'u']
+            if target_offset is None or (target_element is not None and target_element.tag in unstable_tags):
+                logger.info(f"⚠️ Falling back to element-level XPath for stability (tag: {target_element.tag if target_element is not None else 'None'})")
+                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}"
+
             return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
