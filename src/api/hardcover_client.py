@@ -329,7 +329,15 @@ class HardcoverClient:
             editions = []
             for ed in result['editions']:
                 # Determine format label: prefer edition_format, fall back to physical_format
-                format_label = ed.get('edition_format') or ed.get('physical_format') or 'Unknown'
+                format_label = ed.get('edition_format') or ed.get('physical_format')
+                if not format_label:
+                    # Infer format from available data
+                    if ed.get('audio_seconds') and ed.get('audio_seconds') > 0:
+                        format_label = 'Audiobook'
+                    elif ed.get('pages') and ed.get('pages') > 0:
+                        format_label = 'Book'
+                    else:
+                        format_label = 'Unknown'
                 # Capitalize first letter
                 if format_label and format_label != 'Unknown':
                     format_label = format_label.capitalize()
