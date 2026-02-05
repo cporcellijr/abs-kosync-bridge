@@ -53,7 +53,7 @@ def api_hardcover_resolve():
         # Get metadata from ABS
         item = _container.abs_client().get_item_details(abs_id)
         if not item:
-            return jsonify({'found': False, 'message': 'Could not fetch book metadata from ABS'})
+            return jsonify({'found': False, 'message': 'Could not fetch book metadata from ABS'}), 502
 
         meta = item.get('media', {}).get('metadata', {})
         isbn = meta.get('isbn')
@@ -75,7 +75,7 @@ def api_hardcover_resolve():
             book_data = hardcover_client.search_by_title_author(title, "")
 
     if not book_data:
-        return jsonify({'found': False, 'message': 'Could not find book. Please enter Hardcover URL or ID.'})
+        return jsonify({'found': False, 'message': 'Could not find book. Please enter Hardcover URL or ID.'}), 404
 
     # Fetch all editions for this book
     editions = hardcover_client.get_book_editions(book_data['book_id'])
@@ -113,7 +113,7 @@ def link_hardcover(abs_id):
 
         try:
             # Use pages if available, otherwise use -1 for audiobooks (indicates no page count)
-            hardcover_pages = pages if pages else (-1 if audio_seconds else None)
+            hardcover_pages = pages if pages is not None else (-1 if audio_seconds else None)
 
             hardcover_details = HardcoverDetails(
                 abs_id=abs_id,
