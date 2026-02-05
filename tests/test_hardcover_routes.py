@@ -24,6 +24,7 @@ class MockHardcoverClient:
         self.search_by_title_author_result = None
         self.resolve_book_result = None
         self.editions_result = []
+        self.author_result = None
 
     def is_configured(self):
         return self._configured
@@ -39,6 +40,9 @@ class MockHardcoverClient:
 
     def get_book_editions(self, book_id):
         return self.editions_result
+
+    def get_book_author(self, book_id):
+        return self.author_result
 
     def update_status(self, book_id, status_id, edition_id=None):
         return {'id': 1, 'status_id': status_id}
@@ -156,7 +160,7 @@ class TestHardcoverResolveEndpoint(unittest.TestCase):
             'media': {
                 'metadata': {
                     'title': 'Test Book',
-                    'authorName': 'Test Author',
+                    'authorName': 'ABS Author',
                     'isbn': '9781234567890'
                 }
             }
@@ -168,6 +172,9 @@ class TestHardcoverResolveEndpoint(unittest.TestCase):
             'title': 'Test Book',
             'slug': 'test-book'
         }
+
+        # Mock author from Hardcover (should be preferred over ABS)
+        self.mock_container.mock_hardcover_client.author_result = 'Hardcover Author'
 
         # Mock editions
         self.mock_container.mock_hardcover_client.editions_result = [
@@ -182,6 +189,7 @@ class TestHardcoverResolveEndpoint(unittest.TestCase):
         self.assertTrue(data['found'])
         self.assertEqual(data['book_id'], 12345)
         self.assertEqual(data['title'], 'Test Book')
+        self.assertEqual(data['author'], 'Hardcover Author')  # Should prefer Hardcover author
         self.assertEqual(len(data['editions']), 2)
 
     def test_resolve_manual_input_success(self):
@@ -331,6 +339,50 @@ class TestGetBookEditionsYearExtraction(unittest.TestCase):
         self.assertEqual(editions[0]['year'], 2023)
         self.assertEqual(editions[1]['year'], 2024)
         self.assertIsNone(editions[2]['year'])
+
+
+class TestGetBookAuthor(unittest.TestCase):
+    """Tests for get_book_author method."""
+
+    def test_get_book_author_success(self):
+        """Test that author is correctly extracted from contributions."""
+        from src.api.hardcover_client import HardcoverClient
+
+        client = HardcoverClient()
+        client.query = Mock(return_value={
+            'books_by_pk': {
+                'contributions': [
+                    {'author': {'name': 'J.K. Rowling'}}
+                ]
+            }
+        })
+
+        author = client.get_book_author(12345)
+        self.assertEqual(author, 'J.K. Rowling')
+
+    def test_get_book_author_no_contributions(self):
+        """Test that None is returned when book has no contributions."""
+        from src.api.hardcover_client import HardcoverClient
+
+        client = HardcoverClient()
+        client.query = Mock(return_value={
+            'books_by_pk': {
+                'contributions': []
+            }
+        })
+
+        author = client.get_book_author(12345)
+        self.assertIsNone(author)
+
+    def test_get_book_author_book_not_found(self):
+        """Test that None is returned when book doesn't exist."""
+        from src.api.hardcover_client import HardcoverClient
+
+        client = HardcoverClient()
+        client.query = Mock(return_value={'books_by_pk': None})
+
+        author = client.get_book_author(99999)
+        self.assertIsNone(author)
 
 
 if __name__ == '__main__':

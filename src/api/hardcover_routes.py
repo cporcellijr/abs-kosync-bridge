@@ -78,13 +78,17 @@ def api_hardcover_resolve():
         return jsonify({'found': False, 'message': 'Could not find book. Please enter Hardcover URL or ID.'}), 404
 
     # Fetch all editions for this book
-    editions = hardcover_client.get_book_editions(book_data['book_id'])
+    book_id = book_data['book_id']
+    editions = hardcover_client.get_book_editions(book_id)
+
+    # Get author from Hardcover (prefer over ABS since we're linking to Hardcover)
+    hardcover_author = hardcover_client.get_book_author(book_id)
 
     return jsonify({
         'found': True,
-        'book_id': book_data['book_id'],
+        'book_id': book_id,
         'title': book_data.get('title'),
-        'author': author or '',
+        'author': hardcover_author or author or '',
         'slug': book_data.get('slug'),
         'editions': editions
     })

@@ -290,6 +290,26 @@ class HardcoverClient:
 
         return None
 
+    def get_book_author(self, book_id: int) -> Optional[str]:
+        """Fetch the primary author name for a book."""
+        query = """
+        query ($bookId: Int!) {
+            books_by_pk(id: $bookId) {
+                contributions(limit: 1) {
+                    author {
+                        name
+                    }
+                }
+            }
+        }
+        """
+        result = self.query(query, {"bookId": book_id})
+        if result and result.get('books_by_pk'):
+            contributions = result['books_by_pk'].get('contributions', [])
+            if contributions and contributions[0].get('author'):
+                return contributions[0]['author'].get('name')
+        return None
+
     def get_book_editions(self, book_id: int) -> list:
         """Fetch all editions for a book with format, pages, duration, and year."""
         query = """
