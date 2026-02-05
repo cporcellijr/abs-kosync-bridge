@@ -41,11 +41,16 @@ async function autoResolveBook() {
     try {
         const resp = await fetch('/api/hardcover/resolve?abs_id=' + hardcoverModalState.absId);
         const data = await resp.json();
-        if (data.found) {
+        if (data && data.found) {
             displayBookWithEditions(data);
-        } else {
-            showHcState('manual');
+            return;
         }
+        if (!resp.ok) {
+            document.getElementById('hc-error-msg').textContent = (data && data.message) || 'Search failed';
+            showHcState('error');
+            return;
+        }
+        showHcState('manual');
     } catch (err) {
         showHcState('manual');
     }
@@ -64,12 +69,12 @@ async function resolveManualInput() {
     try {
         const resp = await fetch('/api/hardcover/resolve?abs_id=' + hardcoverModalState.absId + '&input=' + encodeURIComponent(input));
         const data = await resp.json();
-        if (data.found) {
+        if (data && data.found) {
             displayBookWithEditions(data);
-        } else {
-            document.getElementById('hc-error-msg').textContent = data.message || 'Book not found';
-            showHcState('error');
+            return;
         }
+        document.getElementById('hc-error-msg').textContent = (data && data.message) || 'Book not found';
+        showHcState('error');
     } catch (err) {
         document.getElementById('hc-error-msg').textContent = 'Search failed';
         showHcState('error');
