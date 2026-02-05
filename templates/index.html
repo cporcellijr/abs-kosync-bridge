@@ -844,6 +844,8 @@
             }
 
             /* Hardcover Edition Picker Modal */
+            @import url('https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600&display=swap');
+
             .hc-modal {
                 position: fixed;
                 top: 0; left: 0; right: 0; bottom: 0;
@@ -855,118 +857,286 @@
             .hc-modal-backdrop {
                 position: absolute;
                 top: 0; left: 0; right: 0; bottom: 0;
-                background: rgba(0, 0, 0, 0.7);
+                background: rgba(0, 0, 0, 0.8);
+                backdrop-filter: blur(4px);
+                -webkit-backdrop-filter: blur(4px);
             }
             .hc-modal-content {
                 position: relative;
-                background: #1a1a1a;
-                border-radius: 12px;
-                max-width: 450px;
-                width: 90%;
-                max-height: 80vh;
-                overflow-y: auto;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: linear-gradient(180deg, #1a1a1a 0%, #141414 100%);
+                border-radius: 16px;
+                max-width: 520px;
+                width: 94%;
+                max-height: 85vh;
+                overflow: hidden;
+                border: 1px solid rgba(102, 126, 234, 0.15);
+                box-shadow:
+                    0 24px 80px rgba(0, 0, 0, 0.6),
+                    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+                animation: hc-modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             }
-            .hc-modal-header, .hc-modal-body, .hc-modal-footer {
-                padding: 1rem;
+            @keyframes hc-modal-in {
+                from { opacity: 0; transform: scale(0.96) translateY(8px); }
+                to { opacity: 1; transform: scale(1) translateY(0); }
             }
+
             .hc-modal-header {
+                padding: 1.25rem 1.5rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             }
-            .hc-modal-header h3 { margin: 0; font-size: 1.1rem; }
+            .hc-modal-header h3 {
+                margin: 0;
+                font-size: 1.1rem;
+                font-weight: 600;
+                background: linear-gradient(135deg, #667eea 0%, #a78bfa 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
             .hc-modal-close {
-                background: none;
+                background: rgba(255, 255, 255, 0.05);
                 border: none;
-                color: rgba(255, 255, 255, 0.6);
-                font-size: 1.5rem;
+                color: rgba(255, 255, 255, 0.5);
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                font-size: 1.25rem;
                 cursor: pointer;
                 line-height: 1;
-            }
-            .hc-modal-close:hover { color: #fff; }
-            .hc-modal-footer {
                 display: flex;
-                justify-content: flex-end;
-                gap: 0.5rem;
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s;
             }
-            .hc-modal-footer button {
-                padding: 0.5rem 1rem;
-                border-radius: 6px;
-                border: none;
-                cursor: pointer;
-                font-size: 0.9rem;
-            }
-            .hc-btn-cancel {
+            .hc-modal-close:hover {
                 background: rgba(255, 255, 255, 0.1);
                 color: #fff;
             }
+
+            .hc-modal-body {
+                padding: 1.5rem;
+                max-height: calc(85vh - 140px);
+                overflow-y: auto;
+            }
+            .hc-modal-body::-webkit-scrollbar { width: 6px; }
+            .hc-modal-body::-webkit-scrollbar-track { background: transparent; }
+            .hc-modal-body::-webkit-scrollbar-thumb {
+                background: rgba(102, 126, 234, 0.3);
+                border-radius: 3px;
+            }
+
+            .hc-modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 0.75rem;
+                padding: 1rem 1.5rem;
+                border-top: 1px solid rgba(255, 255, 255, 0.06);
+                background: rgba(0, 0, 0, 0.2);
+            }
+            .hc-modal-footer button {
+                padding: 0.6rem 1.25rem;
+                border-radius: 8px;
+                border: none;
+                cursor: pointer;
+                font-size: 0.875rem;
+                font-weight: 600;
+                transition: all 0.2s;
+            }
+            .hc-btn-cancel {
+                background: rgba(255, 255, 255, 0.06);
+                color: rgba(255, 255, 255, 0.7);
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            }
             .hc-btn-cancel:hover {
-                background: rgba(255, 255, 255, 0.15);
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
             }
             .hc-btn-link {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: #fff;
+                box-shadow: 0 2px 12px rgba(102, 126, 234, 0.3);
+            }
+            .hc-btn-link:hover:not(:disabled) {
+                box-shadow: 0 4px 20px rgba(102, 126, 234, 0.45);
+                transform: translateY(-1px);
             }
             .hc-btn-link:disabled {
-                opacity: 0.5;
+                opacity: 0.4;
                 cursor: not-allowed;
+                box-shadow: none;
             }
+
+            /* Book info display */
+            .hc-book-info {
+                margin-bottom: 1.5rem;
+                padding-bottom: 1.25rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .hc-book-title {
+                font-family: 'Literata', Georgia, serif;
+                font-size: 1.2rem;
+                font-weight: 500;
+                color: #fff;
+                margin-bottom: 0.25rem;
+                line-height: 1.4;
+            }
+            .hc-book-author {
+                font-size: 0.9rem;
+                color: rgba(255, 255, 255, 0.5);
+            }
+
+            /* Editions section */
+            .hc-editions-label {
+                font-size: 0.7rem;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: rgba(255, 255, 255, 0.4);
+                margin-bottom: 0.75rem;
+                font-weight: 600;
+            }
+
             .hc-edition-option {
                 display: flex;
-                align-items: center;
-                padding: 0.75rem;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
+                align-items: stretch;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 10px;
                 margin-bottom: 0.5rem;
                 cursor: pointer;
-                transition: all 0.2s;
+                transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+                background: rgba(255, 255, 255, 0.02);
+                overflow: hidden;
             }
             .hc-edition-option:hover {
-                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(102, 126, 234, 0.3);
+                background: rgba(102, 126, 234, 0.05);
+                transform: translateY(-1px);
             }
             .hc-edition-option.selected {
-                border-color: #667eea;
+                border-color: rgba(102, 126, 234, 0.6);
+                background: rgba(102, 126, 234, 0.1);
+                box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.2) inset;
+            }
+
+            .hc-edition-icon {
+                width: 48px;
+                min-width: 48px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.2);
+                font-size: 1.15rem;
+                border-right: 1px solid rgba(255, 255, 255, 0.04);
+            }
+            .hc-edition-option.selected .hc-edition-icon {
                 background: rgba(102, 126, 234, 0.15);
             }
-            .hc-edition-format {
-                font-weight: 500;
-                min-width: 100px;
+
+            .hc-edition-main {
+                flex: 1;
+                padding: 0.875rem 1rem;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 1rem;
             }
+
+            .hc-edition-format {
+                font-weight: 600;
+                font-size: 0.9rem;
+                color: #fff;
+            }
+
             .hc-edition-details {
+                display: flex;
+                gap: 1rem;
+                color: rgba(255, 255, 255, 0.45);
+                font-size: 0.8rem;
+            }
+            .hc-edition-detail {
+                display: flex;
+                align-items: center;
+                gap: 0.35rem;
+            }
+            .hc-edition-detail svg {
+                width: 12px;
+                height: 12px;
+                opacity: 0.6;
+            }
+
+            /* Manual input */
+            #hc-manual p {
                 color: rgba(255, 255, 255, 0.6);
-                margin-left: auto;
+                font-size: 0.9rem;
+                margin-bottom: 0.75rem;
             }
             #hc-input {
                 width: 100%;
-                padding: 0.5rem;
-                border-radius: 6px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                background: rgba(255, 255, 255, 0.05);
+                padding: 0.75rem 1rem;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(0, 0, 0, 0.3);
                 color: #fff;
-                margin-bottom: 0.5rem;
+                margin-bottom: 0.75rem;
                 font-size: 0.9rem;
+                transition: all 0.2s;
             }
+            #hc-input::placeholder { color: rgba(255, 255, 255, 0.3); }
             #hc-input:focus {
                 outline: none;
-                border-color: #667eea;
+                border-color: rgba(102, 126, 234, 0.5);
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             }
-            .hc-text-muted { color: rgba(255, 255, 255, 0.5); font-size: 0.85rem; }
-            .hc-text-muted a { color: #667eea; text-decoration: none; }
-            .hc-text-muted a:hover { text-decoration: underline; }
-            .hc-text-error { color: #ef5350; }
-            .hc-loading { text-align: center; padding: 2rem 0; color: rgba(255, 255, 255, 0.7); }
             #hc-manual button {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: #fff;
                 border: none;
-                padding: 0.5rem 1rem;
-                border-radius: 6px;
+                padding: 0.6rem 1.25rem;
+                border-radius: 8px;
                 cursor: pointer;
-                font-size: 0.9rem;
+                font-size: 0.875rem;
+                font-weight: 600;
+                transition: all 0.2s;
             }
+            #hc-manual button:hover {
+                box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35);
+                transform: translateY(-1px);
+            }
+
+            .hc-text-muted {
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 0.8rem;
+                margin-top: 1rem;
+            }
+            .hc-text-muted a {
+                color: #667eea;
+                text-decoration: none;
+                transition: color 0.2s;
+            }
+            .hc-text-muted a:hover { color: #a78bfa; }
+            .hc-text-error { color: #f87171; }
+
+            /* Loading state */
+            .hc-loading {
+                text-align: center;
+                padding: 3rem 1rem;
+                color: rgba(255, 255, 255, 0.6);
+            }
+            .hc-loading-spinner {
+                width: 40px;
+                height: 40px;
+                margin: 0 auto 1rem;
+                border: 3px solid rgba(102, 126, 234, 0.2);
+                border-top-color: #667eea;
+                border-radius: 50%;
+                animation: hc-spin 0.8s linear infinite;
+            }
+            @keyframes hc-spin {
+                to { transform: rotate(360deg); }
+            }
+            .hc-loading-text { font-size: 0.9rem; }
         </style>
     </head>
 
@@ -1438,16 +1608,25 @@
         <div class="hc-modal-content">
             <div class="hc-modal-header">
                 <h3>Link to Hardcover</h3>
-                <button class="hc-modal-close" onclick="closeHardcoverModal()">&times;</button>
+                <button class="hc-modal-close" onclick="closeHardcoverModal()" aria-label="Close">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <path d="M1 1l12 12M13 1L1 13"/>
+                    </svg>
+                </button>
             </div>
             <div class="hc-modal-body">
                 <div id="hc-loading" class="hc-loading" style="display:none;">
-                    Searching Hardcover...
+                    <div class="hc-loading-spinner"></div>
+                    <div class="hc-loading-text">Searching Hardcover...</div>
                 </div>
                 <div id="hc-found" style="display:none;">
-                    <p><strong>Found:</strong> "<span id="hc-title"></span>" by <span id="hc-author"></span></p>
-                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Wrong book? Enter URL manually</a></p>
+                    <div class="hc-book-info">
+                        <div class="hc-book-title" id="hc-title"></div>
+                        <div class="hc-book-author" id="hc-author"></div>
+                    </div>
+                    <div class="hc-editions-label">Select Edition</div>
                     <div id="hc-editions"></div>
+                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Wrong book? Enter URL manually</a></p>
                 </div>
                 <div id="hc-manual" style="display:none;">
                     <p>Enter Hardcover URL or book ID:</p>
