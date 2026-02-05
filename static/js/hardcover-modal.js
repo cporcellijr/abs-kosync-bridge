@@ -4,10 +4,11 @@
  */
 
 // Modal state
-let hardcoverModalState = {
+var hardcoverModalState = {
     absId: null,
     bookData: null,
-    selectedEditionId: null
+    selectedEditionId: null,
+    linkedEditionId: null
 };
 
 function linkHardcover(event) {
@@ -77,7 +78,7 @@ async function resolveManualInput() {
 
 function getFormatIcon(format) {
     var f = (format || '').toLowerCase();
-    if (f.includes('audio')) return '🎧';
+    if (f.includes('audio') || f.includes('audible')) return '🎧';
     if (f.includes('hard')) return '📕';
     if (f.includes('paper') || f.includes('soft')) return '📖';
     if (f.includes('ebook') || f.includes('kindle') || f.includes('digital')) return '📱';
@@ -113,6 +114,7 @@ function createSvgIcon(type) {
 
 function displayBookWithEditions(data) {
     hardcoverModalState.bookData = data;
+    hardcoverModalState.linkedEditionId = data.linked_edition_id || null;
     document.getElementById('hc-title').textContent = data.title || 'Unknown Title';
     document.getElementById('hc-author').textContent = data.author || 'Unknown Author';
 
@@ -129,9 +131,27 @@ function displayBookWithEditions(data) {
         return;
     }
 
-    data.editions.forEach(function(ed, idx) {
+    // Determine which edition to pre-select (linked edition or first)
+    var linkedId = data.linked_edition_id ? String(data.linked_edition_id) : null;
+    var preSelectId = linkedId || String(data.editions[0].id);
+
+    // Sort editions so linked edition appears first
+    var sortedEditions = data.editions.slice();
+    if (linkedId) {
+        sortedEditions.sort(function(a, b) {
+            if (String(a.id) === linkedId) return -1;
+            if (String(b.id) === linkedId) return 1;
+            return 0;
+        });
+    }
+
+    sortedEditions.forEach(function(ed) {
+        var edId = String(ed.id);
+        var isSelected = (edId === preSelectId);
+        var isLinked = (edId === linkedId);
+
         var div = document.createElement('div');
-        div.className = 'hc-edition-option' + (idx === 0 ? ' selected' : '');
+        div.className = 'hc-edition-option' + (isSelected ? ' selected' : '');
         div.dataset.editionId = ed.id;
         div.dataset.pages = ed.pages || '';
         div.dataset.audioSeconds = ed.audio_seconds || '';
@@ -149,6 +169,14 @@ function displayBookWithEditions(data) {
         var formatSpan = document.createElement('span');
         formatSpan.className = 'hc-edition-format';
         formatSpan.textContent = ed.format || 'Unknown';
+
+        // Add "Currently linked" badge if this is the linked edition
+        if (isLinked) {
+            var linkedBadge = document.createElement('span');
+            linkedBadge.className = 'hc-edition-linked';
+            linkedBadge.textContent = 'Linked';
+            formatSpan.appendChild(linkedBadge);
+        }
 
         var detailsDiv = document.createElement('div');
         detailsDiv.className = 'hc-edition-details';
@@ -185,7 +213,7 @@ function displayBookWithEditions(data) {
         div.appendChild(mainDiv);
         container.appendChild(div);
 
-        if (idx === 0) {
+        if (isSelected) {
             hardcoverModalState.selectedEditionId = ed.id;
         }
     });

@@ -84,13 +84,20 @@ def api_hardcover_resolve():
     # Get author from Hardcover (prefer over ABS since we're linking to Hardcover)
     hardcover_author = hardcover_client.get_book_author(book_id)
 
+    # Check if there's an existing link for this book
+    linked_edition_id = None
+    existing_details = _database_service.get_hardcover_details(abs_id)
+    if existing_details and existing_details.hardcover_edition_id:
+        linked_edition_id = existing_details.hardcover_edition_id
+
     return jsonify({
         'found': True,
         'book_id': book_id,
         'title': book_data.get('title'),
         'author': hardcover_author or author or '',
         'slug': book_data.get('slug'),
-        'editions': editions
+        'editions': editions,
+        'linked_edition_id': linked_edition_id
     })
 
 
