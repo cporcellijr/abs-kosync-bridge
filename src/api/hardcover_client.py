@@ -300,7 +300,7 @@ class HardcoverClient:
                 audio_seconds
                 edition_format
                 physical_format
-                release_year
+                release_date
             }
         }
         """
@@ -314,12 +314,16 @@ class HardcoverClient:
                 if format_label and format_label != 'Unknown':
                     format_label = format_label.capitalize()
 
+                # Extract year from release_date (format: "YYYY-MM-DD")
+                release_date = ed.get('release_date')
+                year = int(release_date[:4]) if release_date and len(release_date) >= 4 else None
+
                 editions.append({
                     'id': ed.get('id'),
                     'format': format_label,
                     'pages': ed.get('pages'),
                     'audio_seconds': ed.get('audio_seconds'),
-                    'year': ed.get('release_year')
+                    'year': year
                 })
             return editions
         return []
