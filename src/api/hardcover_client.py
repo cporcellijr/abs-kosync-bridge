@@ -290,6 +290,40 @@ class HardcoverClient:
 
         return None
 
+    def get_book_editions(self, book_id: int) -> list:
+        """Fetch all editions for a book with format, pages, duration, and year."""
+        query = """
+        query ($bookId: Int!) {
+            editions(where: { book_id: { _eq: $bookId } }) {
+                id
+                pages
+                audio_seconds
+                edition_format
+                physical_format
+                release_year
+            }
+        }
+        """
+        result = self.query(query, {"bookId": book_id})
+        if result and result.get('editions'):
+            editions = []
+            for ed in result['editions']:
+                # Determine format label: prefer edition_format, fall back to physical_format
+                format_label = ed.get('edition_format') or ed.get('physical_format') or 'Unknown'
+                # Capitalize first letter
+                if format_label and format_label != 'Unknown':
+                    format_label = format_label.capitalize()
+
+                editions.append({
+                    'id': ed.get('id'),
+                    'format': format_label,
+                    'pages': ed.get('pages'),
+                    'audio_seconds': ed.get('audio_seconds'),
+                    'year': ed.get('release_year')
+                })
+            return editions
+        return []
+
     def resolve_book_from_input(self, input_str: str) -> Optional[Dict]:
         """
         Resolve a Hardcover book from a URL, numeric ID, or slug.

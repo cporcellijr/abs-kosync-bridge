@@ -842,6 +842,131 @@
             .mt-80 {
                 margin-top: 80px !important;
             }
+
+            /* Hardcover Edition Picker Modal */
+            .hc-modal {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .hc-modal-backdrop {
+                position: absolute;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+            }
+            .hc-modal-content {
+                position: relative;
+                background: #1a1a1a;
+                border-radius: 12px;
+                max-width: 450px;
+                width: 90%;
+                max-height: 80vh;
+                overflow-y: auto;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .hc-modal-header, .hc-modal-body, .hc-modal-footer {
+                padding: 1rem;
+            }
+            .hc-modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .hc-modal-header h3 { margin: 0; font-size: 1.1rem; }
+            .hc-modal-close {
+                background: none;
+                border: none;
+                color: rgba(255, 255, 255, 0.6);
+                font-size: 1.5rem;
+                cursor: pointer;
+                line-height: 1;
+            }
+            .hc-modal-close:hover { color: #fff; }
+            .hc-modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 0.5rem;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .hc-modal-footer button {
+                padding: 0.5rem 1rem;
+                border-radius: 6px;
+                border: none;
+                cursor: pointer;
+                font-size: 0.9rem;
+            }
+            .hc-btn-cancel {
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+            }
+            .hc-btn-cancel:hover {
+                background: rgba(255, 255, 255, 0.15);
+            }
+            .hc-btn-link {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: #fff;
+            }
+            .hc-btn-link:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .hc-edition-option {
+                display: flex;
+                align-items: center;
+                padding: 0.75rem;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                margin-bottom: 0.5rem;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .hc-edition-option:hover {
+                background: rgba(255, 255, 255, 0.05);
+            }
+            .hc-edition-option.selected {
+                border-color: #667eea;
+                background: rgba(102, 126, 234, 0.15);
+            }
+            .hc-edition-format {
+                font-weight: 500;
+                min-width: 100px;
+            }
+            .hc-edition-details {
+                color: rgba(255, 255, 255, 0.6);
+                margin-left: auto;
+            }
+            #hc-input {
+                width: 100%;
+                padding: 0.5rem;
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                background: rgba(255, 255, 255, 0.05);
+                color: #fff;
+                margin-bottom: 0.5rem;
+                font-size: 0.9rem;
+            }
+            #hc-input:focus {
+                outline: none;
+                border-color: #667eea;
+            }
+            .hc-text-muted { color: rgba(255, 255, 255, 0.5); font-size: 0.85rem; }
+            .hc-text-muted a { color: #667eea; text-decoration: none; }
+            .hc-text-muted a:hover { text-decoration: underline; }
+            .hc-text-error { color: #ef5350; }
+            .hc-loading { text-align: center; padding: 2rem 0; color: rgba(255, 255, 255, 0.7); }
+            #hc-manual button {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: #fff;
+                border: none;
+                padding: 0.5rem 1rem;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.9rem;
+            }
         </style>
     </head>
 
@@ -1061,31 +1186,6 @@
 
                 // Persist choice
                 localStorage.setItem('abs_kosync_filter', filterValue);
-            }
-
-            function linkHardcover(event) {
-                event.stopPropagation();
-                const item = event.currentTarget;
-                const absId = item.dataset.absId;
-                const currentTitle = item.dataset.title;
-
-                let promptText = "Enter Hardcover URL or ID:";
-                if (currentTitle) {
-                    promptText = `Current: ${currentTitle}\n\nEnter new Hardcover URL or ID to replace it:`;
-                }
-                const input = prompt(promptText);
-                if (input) {
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = `/link-hardcover/${absId}`;
-                    const inputField = document.createElement('input');
-                    inputField.type = 'hidden';
-                    inputField.name = 'hardcover_url';
-                    inputField.value = input;
-                    form.appendChild(inputField);
-                    document.body.appendChild(form);
-                    form.submit();
-                }
             }
 
             function updateKoSyncHash(event) {
@@ -1331,6 +1431,41 @@
 
             setTimeout(refreshDashboard, 30000);
         </script>
+
+    <!-- Hardcover Edition Picker Modal -->
+    <div id="hardcover-modal" class="hc-modal" style="display:none;">
+        <div class="hc-modal-backdrop" onclick="closeHardcoverModal()"></div>
+        <div class="hc-modal-content">
+            <div class="hc-modal-header">
+                <h3>Link to Hardcover</h3>
+                <button class="hc-modal-close" onclick="closeHardcoverModal()">&times;</button>
+            </div>
+            <div class="hc-modal-body">
+                <div id="hc-loading" class="hc-loading" style="display:none;">
+                    Searching Hardcover...
+                </div>
+                <div id="hc-found" style="display:none;">
+                    <p><strong>Found:</strong> "<span id="hc-title"></span>" by <span id="hc-author"></span></p>
+                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Wrong book? Enter URL manually</a></p>
+                    <div id="hc-editions"></div>
+                </div>
+                <div id="hc-manual" style="display:none;">
+                    <p>Enter Hardcover URL or book ID:</p>
+                    <input type="text" id="hc-input" placeholder="https://hardcover.app/books/...">
+                    <button onclick="resolveManualInput()">Search</button>
+                </div>
+                <div id="hc-error" style="display:none;">
+                    <p id="hc-error-msg" class="hc-text-error"></p>
+                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Try entering URL manually</a></p>
+                </div>
+            </div>
+            <div class="hc-modal-footer">
+                <button class="hc-btn-cancel" onclick="closeHardcoverModal()">Cancel</button>
+                <button id="hc-link-btn" class="hc-btn-link" onclick="linkSelectedEdition()" disabled>Link Book</button>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/hardcover-modal.js"></script>
 </body>
 
 </html>
