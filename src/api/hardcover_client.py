@@ -350,6 +350,13 @@ class HardcoverClient:
                         format_label = "Book"
                     else:
                         format_label = "Unknown"
+                # Normalize format label
+                if format_label and format_label != "Unknown":
+                    format_lower = format_label.lower()
+                    if format_lower == "ebook":
+                        format_label = "eBook"
+                    else:
+                        format_label = format_label.capitalize()
                 # Extract year from release_date (format: "YYYY-MM-DD")
                 release_date = ed.get("release_date")
                 year = (
