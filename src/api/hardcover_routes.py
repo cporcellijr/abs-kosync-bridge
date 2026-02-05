@@ -40,39 +40,46 @@ def api_hardcover_resolve():
 
     book_data = None
     author = None
+    existing_details = _database_service.get_hardcover_details(abs_id)
 
     if manual_input:
         # Manual input provided - resolve directly
         book_data = hardcover_client.resolve_book_from_input(manual_input)
     else:
-        # Auto-match using book metadata from ABS
-        book = _database_service.get_book(abs_id)
-        if not book:
-            return jsonify({'found': False, 'message': 'Book not found'}), 404
+        # Check if there's an existing Hardcover link for this ABS book
+        if existing_details and existing_details.hardcover_book_id:
+            # Use the existing linked book instead of auto-matching
+            book_data = hardcover_client.resolve_book_from_input(existing_details.hardcover_book_id)
 
-        # Get metadata from ABS
-        item = _container.abs_client().get_item_details(abs_id)
-        if not item:
-            return jsonify({'found': False, 'message': 'Could not fetch book metadata from ABS'}), 502
+        if not book_data:
+            # No existing link (or fetch failed) - fall back to auto-match from ABS metadata
+            book = _database_service.get_book(abs_id)
+            if not book:
+                return jsonify({'found': False, 'message': 'Book not found'}), 404
 
-        meta = item.get('media', {}).get('metadata', {})
-        isbn = meta.get('isbn')
-        asin = meta.get('asin')
-        title = meta.get('title')
-        author = meta.get('authorName')
+            # Get metadata from ABS
+            item = _container.abs_client().get_item_details(abs_id)
+            if not item:
+                return jsonify({'found': False, 'message': 'Could not fetch book metadata from ABS'}), 502
 
-        # Try match cascade: ISBN -> ASIN -> title+author -> title only
-        if isbn:
-            book_data = hardcover_client.search_by_isbn(isbn)
+            meta = item.get('media', {}).get('metadata', {})
+            isbn = meta.get('isbn')
+            asin = meta.get('asin')
+            title = meta.get('title')
+            author = meta.get('authorName')
 
-        if not book_data and asin:
-            book_data = hardcover_client.search_by_isbn(asin)
+            # Try match cascade: ISBN -> ASIN -> title+author -> title only
+            if isbn:
+                book_data = hardcover_client.search_by_isbn(isbn)
 
-        if not book_data and title and author:
-            book_data = hardcover_client.search_by_title_author(title, author)
+            if not book_data and asin:
+                book_data = hardcover_client.search_by_isbn(asin)
 
-        if not book_data and title:
-            book_data = hardcover_client.search_by_title_author(title, "")
+            if not book_data and title and author:
+                book_data = hardcover_client.search_by_title_author(title, author)
+
+            if not book_data and title:
+                book_data = hardcover_client.search_by_title_author(title, "")
 
     if not book_data:
         return jsonify({'found': False, 'message': 'Could not find book. Please enter Hardcover URL or ID.'}), 404
@@ -84,10 +91,9 @@ def api_hardcover_resolve():
     # Get author from Hardcover (prefer over ABS since we're linking to Hardcover)
     hardcover_author = hardcover_client.get_book_author(book_id)
 
-    # Check if there's an existing link for this book
+    # Only show linked_edition_id if we're displaying the same book that's linked
     linked_edition_id = None
-    existing_details = _database_service.get_hardcover_details(abs_id)
-    if existing_details and existing_details.hardcover_edition_id:
+    if existing_details and str(existing_details.hardcover_book_id) == str(book_id):
         linked_edition_id = existing_details.hardcover_edition_id
 
     return jsonify({
