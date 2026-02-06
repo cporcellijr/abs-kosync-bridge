@@ -6,9 +6,6 @@ AudioBookShelf (ABS), Booklore (Metadata), and our local database.
 
 import logging
 import os
-import glob
-import shutil
-from pathlib import Path
 from typing import List, Optional
 
 from src.db.models import Book
@@ -31,17 +28,6 @@ class LibraryService:
                 os.makedirs(self.epub_cache_dir)
             except Exception:
                 pass
-
-        # Log configuration status for visibility
-        if self.cwa_client and self.cwa_client.is_configured():
-            logger.info("[INIT] CWA Integration enabled")
-        else:
-            logger.info("[SKIP] CWA Integration disabled/unconfigured")
-
-        if self.booklore and (hasattr(self.booklore, 'is_configured') and self.booklore.is_configured()):
-            logger.info("[INIT] Booklore Integration enabled")
-        else:
-            logger.info("[SKIP] Booklore Integration disabled/unconfigured")
 
     def get_syncable_books(self) -> List[Book]:
         """
@@ -72,10 +58,14 @@ class LibraryService:
             return None
 
         logger.info(f"📚 Acquiring ebook for: {title} ({item_id})")
+        logger.debug(f"   Author: {author}")
+        logger.debug(f"   ABS Client available: {self.abs_client is not None}")
+        logger.debug(f"   CWA Client available: {self.cwa_client is not None}, configured: {self.cwa_client.is_configured() if self.cwa_client else 'N/A'}")
 
         # 1. ABS Direct Match
         if self.abs_client:
             ebooks = self.abs_client.get_ebook_files(item_id)
+            logger.debug(f"   ABS Direct Check: Found {len(ebooks)} ebook file(s)")
             if ebooks:
                 logger.info(f"   ✅ Priority 1 (ABS Direct): Found {len(ebooks)} ebook(s) in item.")
                 target = ebooks[0]
@@ -115,36 +105,11 @@ class LibraryService:
             else:
                  logger.debug(f"   CWA: No matches for '{query}'")
 
-        # 4. ABS Library Scan (Fallback for Mixed Content)
-        # If the item exists in the SAME library but as a separate "book" item (and search fails),
-        # we scan the library directly.
-        if self.abs_client and abs_item.get('libraryId'):
-            lib_id = abs_item['libraryId']
-            logger.info(f"   🔍 Priority 4 (Library Scan): Scanning library {lib_id} for '{title}'...")
-            
-            matches = self.abs_client.find_book_in_library(lib_id, title, author)
-            for match in matches:
-                # Avoid re-checking the same item if checking direct match failed already
-                if match['id'] == item_id: continue
-                
-                # Check for ebook files in this match
-                target_files = self.abs_client.get_ebook_files(match['id'])
-                if target_files:
-                    tf = target_files[0]
-                    filename = f"{item_id}_libscan.{tf['ext']}"
-                    output_path = os.path.join(self.epub_cache_dir, filename)
-                    
-                    if self.abs_client.download_file(tf['stream_url'], output_path):
-                        logger.info(f"   ⬇️ Downloaded Library Scan match to {output_path}")
-                        return output_path
-            
-            if not matches:
-                logger.debug("   Library Scan: No matches found.")
-
+        # 4. ABS Search
         if self.abs_client:
              results = self.abs_client.search_ebooks(title)
              if results:
-                 logger.info(f"   ✅ Priority 5 (ABS Search): Found {len(results)} matches for '{title}'")
+                 logger.info(f"   ✅ Priority 4 (ABS Search): Found {len(results)} matches for '{title}'")
                  # Try to find one with ebook files
                  for res in results:
                      # Check if author matches loosely

@@ -492,6 +492,70 @@ class SyncManager:
                 except Exception as e:
                     logger.warning(f"Filesystem search failed during suggestion: {e}")
             
+            # 2c. ABS Direct Match (check if audiobook item has ebook files)
+            if self.abs_client:
+                try:
+                    ebook_files = self.abs_client.get_ebook_files(abs_id)
+                    if ebook_files:
+                        logger.debug(f"ABS Direct: Found {len(ebook_files)} ebook file(s) in audiobook item")
+                        for ef in ebook_files:
+                            matches.append({
+                                "source": "abs_direct",
+                                "title": title,
+                                "author": author,
+                                "filename": f"{abs_id}_direct.{ef['ext']}",
+                                "stream_url": ef['stream_url'],
+                                "ext": ef['ext'],
+                                "confidence": "high"
+                            })
+                except Exception as e:
+                    logger.warning(f"ABS Direct search failed during suggestion: {e}")
+            
+            # 2d. CWA Search (Calibre-Web Automated via OPDS)
+            if self.library_service and self.library_service.cwa_client and self.library_service.cwa_client.is_configured():
+                try:
+                    query = f"{title}"
+                    if author:
+                        query += f" {author}"
+                    cwa_results = self.library_service.cwa_client.search_ebooks(query)
+                    if cwa_results:
+                        logger.debug(f"CWA: Found {len(cwa_results)} result(s) for '{title}'")
+                        for cr in cwa_results:
+                            matches.append({
+                                "source": "cwa",
+                                "title": cr.get('title'),
+                                "author": cr.get('author'),
+                                "filename": f"{abs_id}_cwa.{cr.get('ext', 'epub')}",
+                                "download_url": cr.get('download_url'),
+                                "ext": cr.get('ext', 'epub'),
+                                "confidence": "high" if title.lower() in cr.get('title', '').lower() else "medium"
+                            })
+                except Exception as e:
+                    logger.warning(f"CWA search failed during suggestion: {e}")
+
+            # 2e. ABS Search (search other libraries for matching ebook)
+            if self.abs_client:
+                try:
+                    abs_results = self.abs_client.search_ebooks(title)
+                    if abs_results:
+                        logger.debug(f"ABS Search: Found {len(abs_results)} result(s) for '{title}'")
+                        for ar in abs_results:
+                            # Check if this result has ebook files
+                            result_ebooks = self.abs_client.get_ebook_files(ar['id'])
+                            if result_ebooks:
+                                ef = result_ebooks[0]
+                                matches.append({
+                                    "source": "abs_search",
+                                    "title": ar.get('title'),
+                                    "author": ar.get('author'),
+                                    "filename": f"{abs_id}_abs_search.{ef['ext']}",
+                                    "stream_url": ef['stream_url'],
+                                    "ext": ef['ext'],
+                                    "confidence": "medium"
+                                })
+                except Exception as e:
+                    logger.warning(f"ABS Search failed during suggestion: {e}")
+            
             # 3. Save to DB
             if not matches:
                 logger.debug(f"[INFO] No matches found for '{title}', skipping suggestion creation.")
