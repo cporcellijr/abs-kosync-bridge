@@ -138,6 +138,12 @@ class CWAClient:
         """Parse Atom XML response from OPDS feed."""
         results = []
         try:
+            # Check for HTML response (common if auth failed or 404 page returned as 200)
+            if xml_content.lstrip().lower().startswith(('<!doctype html', '<html')):
+                logger.warning("⚠️ CWA returned HTML content instead of XML. Check configuration/URL.")
+                logger.debug(f"HTML Snippet: {xml_content[:200]}")
+                return []
+
             # OPDS is Atom-based
             # Namespaces are annoying in ElementTree, ignore them or handle them
             # For simplicity, we'll try to handle standard Atom namespace
@@ -145,8 +151,17 @@ class CWAClient:
             
             root = ET.fromstring(xml_content)
             
-            for entry in root.findall('atom:entry', namespaces):
-                title = entry.find('atom:title', namespaces).text
+            entries = []
+            # Check if root is a feed or an entry
+            if root.tag.endswith('entry'):
+                entries = [root]
+            else:
+                entries = root.findall('atom:entry', namespaces)
+
+            for entry in entries:
+                title_elem = entry.find('atom:title', namespaces)
+                title = title_elem.text if title_elem is not None else "Unknown"
+                
                 author_elem = entry.find('atom:author/atom:name', namespaces)
                 author = author_elem.text if author_elem is not None else "Unknown"
                 
@@ -196,7 +211,42 @@ class CWAClient:
 
         except Exception as e:
             logger.error(f"Error parsing CWA OPDS: {e}")
+            logger.debug(f"Failed XML content (first 500 chars): {xml_content[:500]}")
             return []
+
+    def get_book_by_id(self, cwa_id):
+        """
+        Fetch a specific book by its CWA ID (calibre ID) via OPDS.
+        Tries standard endpoints: /opds/book/{id}
+        """
+        if not self.is_configured(): return None
+        
+        # Try standard endpoints
+        # Calibre-Web usually supports /opds/books/{id} or /opds/book/{id}
+        endpoints = [f"/opds/book/{cwa_id}", f"/opds/books/{cwa_id}"]
+        
+        for ep in endpoints:
+            try:
+                url = f"{self.base_url}{ep}"
+                logger.debug(f"🔍 CWA: Trying direct ID lookup at {url}")
+                r = self.session.get(url, timeout=self.timeout)
+                if r.status_code == 200:
+                    # Parse single entry
+                    # Note: API might return a feed with one entry, or just the entry
+                    results = self._parse_opds(r.text)
+                    if results:
+                        # Return the first result that matches (should be only one)
+                        for res in results:
+                            # If parser extracted ID, check match. Or just assume it's the right one.
+                            if str(res['id']) == str(cwa_id):
+                                return res
+                        # Fallback: if we just got one result from a direct ID call, it's probably it
+                        if len(results) == 1:
+                            return results[0]
+            except Exception as e:
+                logger.warning(f"CWA ID lookup failed for {url}: {e}")
+                
+        return None
 
     def download_ebook(self, download_url, output_path):
         """Download ebook file from URL to output_path."""
