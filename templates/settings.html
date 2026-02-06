@@ -813,9 +813,10 @@
                     <div class="checkbox-wrapper full-width">
                         <input type="checkbox" id="reprocess_on_clear" name="REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT" {% if
                             get_bool('REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT') %}checked{% endif %}>
-                        <label for="reprocess_on_clear">Smart Progress Reset (Re-process only if missing data)</label>
+                        <label for="reprocess_on_clear">Regenerate Missing Data on Reset</label>
                         <div class="help-text" style="display: block; width: 100%; margin-top: 5px;">
-                            If enabled, resetting a book to 0% will only trigger a full re-alignment (and potential re-transcription) if no existing alignment map is found.
+                            When resetting your progress, check for missing sync data. If found, the system will attempt
+                            to regenerate it (which may require re-transcription).
                         </div>
                     </div>
                 </div>
