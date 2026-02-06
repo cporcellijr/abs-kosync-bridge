@@ -14,10 +14,20 @@ class CWAClient:
         if raw_url.endswith('/opds'):
             raw_url = raw_url[:-5]
         self.base_url = raw_url
-        self.username = os.environ.get("CWA_USERNAME", "")
-        self.password = os.environ.get("CWA_PASSWORD", "")
+        
+        # Sanitize credentials (strip whitespace)
+        self.username = os.environ.get("CWA_USERNAME", "").strip()
+        self.password = os.environ.get("CWA_PASSWORD", "").strip()
         self.enabled = os.environ.get("CWA_ENABLED", "").lower() == "true"
         
+        if self.username:
+            # Log masked username to confirm what we loaded
+            # Show first 2 chars if possible, or just 1 if short
+            masked = self.username[:2] + "***" if len(self.username) > 2 else "***"
+            logger.debug(f"🔑 CWA Auth: Loaded credentials for user '{masked}'")
+        else:
+            logger.debug("⚠️ CWA Auth: No username provided (Guest Mode?)")
+
         self.session = requests.Session()
         
         # Standardize headers for all requests
