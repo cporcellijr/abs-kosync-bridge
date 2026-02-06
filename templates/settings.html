@@ -670,7 +670,7 @@
             <!-- CWA (Optional) -->
             <div class="settings-section">
                 {% set cwa_configured = get_val('CWA_SERVER') != '' %}
-                {% set cwa_enabled = get_bool('CWA_ENABLED') or (cwa_configured and get_val('CWA_ENABLED') == '') %}
+                {% set cwa_enabled = get_bool('CWA_ENABLED') %}
                 <div class="section-header">
                     <h3>Calibre-Web Automated</h3>
                     <div class="toggle-switch-wrapper">

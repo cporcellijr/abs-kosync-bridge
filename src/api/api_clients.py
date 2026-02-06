@@ -138,30 +138,59 @@ class ABSClient:
         try:
             # Get all libraries first
             r_libs = self.session.get(f"{self.base_url}/api/libraries", timeout=self.timeout)
-            if r_libs.status_code != 200: return []
+            if r_libs.status_code != 200:
+                logger.warning(f"ABS Search: Failed to get libraries (status {r_libs.status_code})")
+                return []
             
             libraries = r_libs.json().get('libraries', [])
-            # Search ALL libraries to support mixed content (e.g. ebooks in audiobook libraries)
-            # book_libs = [l for l in libraries if l.get('mediaType') == 'book']
+            logger.debug(f"ABS Search: Found {len(libraries)} libraries to search")
             
+            # Search ALL libraries to support mixed content (e.g. ebooks in audiobook libraries)
             for lib in libraries:
+                lib_name = lib.get('name', 'Unknown')
+                lib_type = lib.get('mediaType', 'unknown')
+                logger.debug(f"   Searching library '{lib_name}' (type: {lib_type})")
+                
                 search_url = f"{self.base_url}/api/libraries/{lib['id']}/search"
-                params = {'q': query, 'limit': 3}
+                params = {'q': query, 'limit': 10}
                 r = self.session.get(search_url, params=params, timeout=self.timeout)
+                
                 if r.status_code == 200:
-                    items = r.json().get('results', [])
+                    data = r.json()
+                    # ABS returns different keys: book, podcast, libraryItem, etc.
+                    # For books: data.get('book', [])
+                    # For audiobooks in mixed mode: data might have 'libraryItem' or similar
+                    
+                    # Log the response keys to understand structure
+                    logger.debug(f"   Response keys: {list(data.keys())}")
+                    
+                    # Try different possible keys
+                    items = data.get('book', []) or data.get('libraryItem', []) or data.get('results', [])
+                    
                     if items:
-                         logger.debug(f"   ABS Search: Found {len(items)} hits in library '{lib.get('name')}'")
-                    for item in items:
-                        match = item.get('match', {})
-                        results.append({
-                            "id": item.get('id'),
-                            "title": match.get('title'),
-                            "author": match.get('author'),
-                            "libraryId": lib['id'],
-                            "source": "ABS",
-                            "ext": "epub" # Assumption, refined later by get_ebook_files
-                        })
+                        logger.debug(f"   ABS Search: Found {len(items)} hits in library '{lib_name}'")
+                        for item in items:
+                            # Handle different response structures
+                            if isinstance(item, dict):
+                                lib_item = item.get('libraryItem', item)
+                                metadata = lib_item.get('media', {}).get('metadata', {}) or lib_item.get('metadata', {})
+                                item_id = lib_item.get('id', item.get('id'))
+                                title = metadata.get('title') or item.get('matchKey')
+                                author = metadata.get('authorName') or metadata.get('author')
+                                
+                                results.append({
+                                    "id": item_id,
+                                    "title": title,
+                                    "author": author,
+                                    "libraryId": lib['id'],
+                                    "source": "ABS",
+                                    "ext": "epub"
+                                })
+                    else:
+                        logger.debug(f"   No items found in library '{lib_name}'")
+                else:
+                    logger.warning(f"   Search failed for library '{lib_name}' (status {r.status_code})")
+                    
             return results
         except Exception as e:
             logger.error(f"Error searching ABS ebooks: {e}")

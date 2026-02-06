@@ -109,6 +109,36 @@ class SyncManager:
             except Exception as e:
                 logger.warning(f"[WARN] {client_name} connection failed: {e}")
         
+        # [NEW] Check CWA Integration Status
+        if self.library_service and self.library_service.cwa_client:
+            cwa = self.library_service.cwa_client
+            if cwa.is_configured():
+                logger.info(f"[OK] CWA (Calibre-Web Automated) enabled: {cwa.base_url}")
+                # Try to discover search template
+                try:
+                    template = cwa._get_search_template()
+                    if template:
+                        logger.info(f"   📚 CWA search template: {template}")
+                    else:
+                        logger.warning(f"   ⚠️ CWA: Could not discover search template")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ CWA connection test failed: {e}")
+            else:
+                logger.info("[SKIP] CWA not configured (disabled or missing server URL)")
+        else:
+            logger.debug("[SKIP] CWA not available (library_service or cwa_client missing)")
+        
+        # [NEW] Check ABS ebook search capability
+        if self.abs_client:
+            try:
+                # Just verify methods exist (don't actually search during startup)
+                if hasattr(self.abs_client, 'get_ebook_files') and hasattr(self.abs_client, 'search_ebooks'):
+                    logger.info("[OK] ABS ebook methods available (get_ebook_files, search_ebooks)")
+                else:
+                    logger.warning("[WARN] ABS ebook methods missing - ebook search may not work")
+            except Exception as e:
+                logger.warning(f"[WARN] ABS ebook check failed: {e}")
+
         # [NEW] Run one-time migration
         if self.migration_service:
             logger.info("🔄 Checking for legacy data to migrate...")

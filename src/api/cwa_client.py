@@ -167,7 +167,25 @@ class CWAClient:
                     if not epub_link.startswith('http'):
                          epub_link = f"{self.base_url}{epub_link}" if epub_link.startswith('/') else f"{self.base_url}/{epub_link}"
 
+                    # Extract ID from entry (OPDS uses atom:id)
+                    id_elem = entry.find('atom:id', namespaces)
+                    entry_id = None
+                    if id_elem is not None and id_elem.text:
+                        # Extract a usable ID from the atom:id (often a URN or URL)
+                        import re
+                        # Try to get the last numeric/alphanumeric portion
+                        match = re.search(r'(\d+)$', id_elem.text)
+                        if match:
+                            entry_id = match.group(1)
+                        else:
+                            # Fallback: clean the title
+                            entry_id = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
+                    else:
+                        import re
+                        entry_id = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
+
                     results.append({
+                        "id": entry_id,
                         "title": title,
                         "author": author,
                         "download_url": epub_link,
