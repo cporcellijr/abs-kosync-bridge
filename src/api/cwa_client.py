@@ -122,7 +122,6 @@ class CWAClient:
                  search_url = template.replace("{searchTerms}", safe_query)
         
         try:
-            logger.debug(f"🔍 CWA: Searching for '{query}' -> {search_url}")
             r = self.session.get(search_url, timeout=self.timeout)
             
             if r.status_code != 200:
