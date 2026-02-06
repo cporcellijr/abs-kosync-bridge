@@ -262,21 +262,33 @@ class CWAClient:
                          epub_link = f"{self.base_url}{epub_link}" if epub_link.startswith('/') else f"{self.base_url}/{epub_link}"
 
                     # Extract ID from entry (OPDS uses atom:id)
-                    id_elem = entry.find('atom:id', namespaces)
                     entry_id = None
-                    if id_elem is not None and id_elem.text:
-                        # Extract a usable ID from the atom:id (often a URN or URL)
-                        import re
-                        # Try to get the last numeric/alphanumeric portion
-                        match = re.search(r'(\d+)$', id_elem.text)
-                        if match:
-                            entry_id = match.group(1)
+                    import re
+
+                    # 1. Try to extract ID from links (Most reliable for Calibre-Web)
+                    # Look for /opds/book/123 or /books/123 in any link
+                    for link in entry.findall('atom:link', namespaces):
+                        href = link.get('href', '')
+                        # Regex matches /book/123 or /books/123 anywhere in the path
+                        id_match = re.search(r'/(?:book|books)/(\d+)', href)
+                        if id_match:
+                            entry_id = id_match.group(1)
+                            break
+
+                    # 2. Fallback: Extract from atom:id if link extraction failed
+                    if not entry_id:
+                        id_elem = entry.find('atom:id', namespaces)
+                        if id_elem is not None and id_elem.text:
+                            # STRICTER REGEX: Only match if the ID is purely numeric or ends in a slash-number
+                            # Avoid matching UUIDs like ...ae11
+                            match = re.search(r'(?:^|/)(\d+)$', id_elem.text)
+                            if match:
+                                entry_id = match.group(1)
+                            else:
+                                # Last resort: Clean the title
+                                entry_id = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
                         else:
-                            # Fallback: clean the title
                             entry_id = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
-                    else:
-                        import re
-                        entry_id = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
 
                     results.append({
                         "id": entry_id,
