@@ -586,20 +586,25 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
                  cwa_client = container.cwa_client()
                  if cwa_client and cwa_client.is_configured():
                      logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
-                     # We try searching for the ID
-                     results = cwa_client.search_ebooks(cwa_id)
                      
-                     # Find exact ID match if possible
-                     target = None
-                     for res in results:
-                         # Loose match on ID?
-                         if str(res['id']) == cwa_id:
-                             target = res
-                             break
+                     # Priority: Try Direct ID lookup first (More reliable)
+                     target = cwa_client.get_book_by_id(cwa_id)
                      
-                     # 2nd pass: If no exact ID match, maybe it was the only result?
-                     if not target and len(results) == 1:
-                         target = results[0]
+                     # Fallback: Search (Logic from before)
+                     if not target:
+                         # We try searching for the ID
+                         results = cwa_client.search_ebooks(cwa_id)
+                         
+                         # Find exact ID match if possible
+                         for res in results:
+                             # Loose match on ID?
+                             if str(res['id']) == cwa_id:
+                                 target = res
+                                 break
+                         
+                         # 2nd pass: If no exact ID match, maybe it was the only result?
+                         if not target and len(results) == 1:
+                             target = results[0]
 
                      if target:
                          if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
