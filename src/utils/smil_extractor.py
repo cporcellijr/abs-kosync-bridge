@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import zipfile
+import urllib.parse
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from typing import Optional, List, Dict, Tuple
@@ -24,6 +25,19 @@ class SmilExtractor:
     
     def __init__(self):
         self._xhtml_cache = {}
+
+    def _strip_namespaces(self, xml_string: str) -> str:
+        # Remove default xmlns
+        xml_string = re.sub(r'\sxmlns="[^"]+"', '', xml_string)
+        # Remove named namespaces (xmlns:foo="bar")
+        xml_string = re.sub(r'\sxmlns:[a-zA-Z0-9-]+\s*=\s*"[^"]+"', '', xml_string)
+        # Remove tag prefixes (<epub:text> -> <text>)
+        xml_string = re.sub(r'<([a-zA-Z0-9-]+):', '<', xml_string)
+        xml_string = re.sub(r'</([a-zA-Z0-9-]+):', '</', xml_string)
+        # Remove attribute prefixes (epub:textref="foo" -> textref="foo")
+        # Match whitespace, then prefix:name=
+        xml_string = re.sub(r'(\s)[a-zA-Z0-9-]+:([a-zA-Z0-9-]+\s*=)', r'\1\2', xml_string)
+        return xml_string
 
     def has_media_overlays(self, epub_path: str) -> bool:
         """Check if an EPUB has media overlay (SMIL) files."""
@@ -160,9 +174,7 @@ class SmilExtractor:
         for smil_path in smil_files[:min(10, len(smil_files))]:  # Sample more files
             try:
                 smil_content = zf.read(smil_path).decode('utf-8')
-                smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-                smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-                smil_content = re.sub(r'epub:', '', smil_content)
+                smil_content = self._strip_namespaces(smil_content)
                 
                 root = ET.fromstring(smil_content)
                 
@@ -211,9 +223,7 @@ class SmilExtractor:
         try:
             smil_content = zf.read(smil_path).decode('utf-8')
             # Strip namespaces
-            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'epub:', '', smil_content)
+            smil_content = self._strip_namespaces(smil_content)
             
             root = ET.fromstring(smil_content)
             starts = []
@@ -243,9 +253,7 @@ class SmilExtractor:
             smil_dir = str(Path(smil_path).parent)
             if smil_dir == '.': smil_dir = ''
             
-            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'epub:', '', smil_content)
+            smil_content = self._strip_namespaces(smil_content)
             
             root = ET.fromstring(smil_content)
             
@@ -259,7 +267,7 @@ class SmilExtractor:
                 clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
                 clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
                 
-                text_src = text_elem.get('src', '')
+                text_src = urllib.parse.unquote(text_elem.get('src', ''))
                 text_content = self._get_text_content(zf, smil_dir, text_src)
                 
                 if text_content:
@@ -268,9 +276,13 @@ class SmilExtractor:
                         'end': round(clip_end, 3),
                         'text': text_content
                     })
-                    
+                else:
+                    logger.debug(f"       ⚠️ Text content empty for {text_src} (decoded)")
+
         except Exception as e:
             logger.warning(f"Error processing SMIL {smil_path}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         return segments
 
@@ -286,6 +298,9 @@ class SmilExtractor:
             filename = Path(path).stem.lower()
             if not self._is_front_matter(filename):
                 content_smil_files.append(path)
+        
+        if len(content_smil_files) == 0:
+            logger.warning(f"   ⚠️ ALL SMIL files filtered as front matter! Sample names: {[Path(p).stem for p in smil_files[:5]]}")
         
         for idx, smil_path in enumerate(content_smil_files):
             # Use corresponding ABS chapter offset if available
@@ -410,9 +425,7 @@ class SmilExtractor:
             smil_dir = str(Path(smil_path).parent)
             if smil_dir == '.': smil_dir = ''
             
-            smil_content = re.sub(r'xmlns="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'xmlns:[a-z]+="[^"]+"', '', smil_content)
-            smil_content = re.sub(r'epub:', '', smil_content)
+            smil_content = self._strip_namespaces(smil_content)
             
             root = ET.fromstring(smil_content)
             
@@ -426,7 +439,7 @@ class SmilExtractor:
                 clip_begin = self._parse_timestamp(audio_elem.get('clipBegin', '0s'))
                 clip_end = self._parse_timestamp(audio_elem.get('clipEnd', '0s'))
                 
-                text_src = text_elem.get('src', '')
+                text_src = urllib.parse.unquote(text_elem.get('src', ''))
                 text_content = self._get_text_content(zf, smil_dir, text_src)
                 
                 if text_content:
@@ -435,9 +448,11 @@ class SmilExtractor:
                         'end': round(clip_end + offset, 3),
                         'text': text_content
                     })
-                    
+        
         except Exception as e:
             logger.warning(f"Error processing SMIL {smil_path}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         return segments
 
@@ -470,10 +485,14 @@ class SmilExtractor:
                 logger.warning(f"⚠️ Transcript exceeds audiobook: {coverage:.1f}% (ends at {transcript_end:.0f}s, audiobook ends at {abs_end:.0f}s)")
 
     def _is_front_matter(self, filename: str) -> bool:
-        """Check if filename indicates front matter."""
-        front_patterns = ['contents', 'toc', 'copyright', 'title', 'cover', 'dedication', 
-                         'acknowledgment', 'preface', 'foreword', 'fm0', 'frontmatter']
-        return any(p in filename for p in front_patterns)
+        """Check if filename indicates front matter using word boundary matching."""
+        # Use word boundaries to avoid matching 'toc' in 'TOCREF' etc.
+        front_patterns = [
+            r'\bcontents\b', r'\btoc\b', r'\bcopyright\b', r'\btitle\b', 
+            r'\bcover\b', r'\bdedication\b', r'\backnowledgment\b', 
+            r'\bpreface\b', r'\bforeword\b', r'\bfm0\b', r'\bfrontmatter\b'
+        ]
+        return any(re.search(p, filename, re.IGNORECASE) for p in front_patterns)
 
     def _find_opf_path(self, zf: zipfile.ZipFile) -> Optional[str]:
         try:
@@ -546,7 +565,12 @@ class SmilExtractor:
     
     def _parse_timestamp(self, ts_str: str) -> float:
         if not ts_str: return 0.0
-        ts_str = ts_str.strip().replace('s', '')
+        ts_str = ts_str.strip()
+        if ts_str.endswith('ms'):
+            try: return float(ts_str.replace('ms', '')) / 1000.0
+            except: return 0.0
+        
+        ts_str = ts_str.replace('s', '')
         if ':' in ts_str:
             parts = ts_str.split(':')
             return sum(float(p) * (60 ** i) for i, p in enumerate(reversed(parts)))
