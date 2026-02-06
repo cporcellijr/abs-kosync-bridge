@@ -17,6 +17,11 @@ from src.sync_clients.sync_client_interface import UpdateProgressRequest, Locato
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
 
+# [NEW] Service Imports
+from src.services.alignment_service import AlignmentService
+from src.services.library_service import LibraryService
+from src.services.migration_service import MigrationService
+
 # Silence noisy third-party loggers
 for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
     logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -41,6 +46,9 @@ class SyncManager:
                  database_service=None,
                  storyteller_client: StorytellerDBWithAPI=None,
                  sync_clients: dict[str, SyncClient]=None,
+                 alignment_service: AlignmentService = None,
+                 library_service: LibraryService = None,
+                 migration_service: MigrationService = None,
                  epub_cache_dir=None,
                  data_dir=None,
                  books_dir=None):
@@ -54,6 +62,12 @@ class SyncManager:
         self.ebook_parser = ebook_parser
         self.database_service = database_service
         self.storyteller_client = storyteller_client
+        
+        # [NEW] Services
+        self.alignment_service = alignment_service
+        self.library_service = library_service
+        self.migration_service = migration_service
+        
         self.data_dir = data_dir
         self.books_dir = books_dir
 
@@ -74,8 +88,8 @@ class SyncManager:
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
-        # Scan for corrupted transcripts
-        self.scan_and_fix_legacy_transcripts()
+        # Scan for corrupted transcripts check removed
+
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
         self.sync_clients = {}
@@ -94,6 +108,14 @@ class SyncManager:
                 logger.info(f"[OK] {client_name} connection verified")
             except Exception as e:
                 logger.warning(f"[WARN] {client_name} connection failed: {e}")
+        
+        # [NEW] Run one-time migration
+        if self.migration_service:
+            logger.info("🔄 Checking for legacy data to migrate...")
+            self.migration_service.migrate_legacy_data()
+
+        # [NEW] Cleanup orphaned cache files
+        self.cleanup_cache()
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -106,23 +128,90 @@ class SyncManager:
                 logger.info(f"[JOB] Reset crashed book status: {sanitize_log_data(book.abs_title)}")
 
             # Get books with processing status and mark them for retry
-            processing_books = self.database_service.get_books_by_status('processing')
-            for book in processing_books:
-                logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(book.abs_title)}")
-                book.status = 'failed_retry_later'
-                self.database_service.save_book(book)
+            # Get books with processing status OR failed_retry_later and check if they actually finished
+            # This covers cases where a job finished but status failed to update, or previous restart marked it failed
+            candidates = self.database_service.get_books_by_status('processing') + \
+                         self.database_service.get_books_by_status('failed_retry_later')
+            
+            for book in candidates:
+                # Check if alignment actually exists (job finished but status update failed)
+                has_alignment = False
+                if self.alignment_service:
+                    has_alignment = bool(self.alignment_service._get_alignment(book.abs_id))
+                
+                if has_alignment:
+                    # Only log if we are CHANGING status (active is goal)
+                    if book.status != 'active':
+                        logger.info(f"[JOB] Found orphan alignment for {book.status} book: {sanitize_log_data(book.abs_title)}. Marking ACTIVE.")
+                        book.status = 'active'
+                        self.database_service.save_book(book)
+                elif book.status == 'processing':
+                     # Only mark processing checks as failed (failed are already failed)
+                    logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(book.abs_title)}")
+                    book.status = 'failed_retry_later'
+                    self.database_service.save_book(book)
 
-                # Also update the job record with error info
-                job = Job(
-                    abs_id=book.abs_id,
-                    last_attempt=time.time(),
-                    retry_count=0,
-                    last_error='Interrupted by restart'
-                )
-                self.database_service.save_job(job)
+                    # Also update the job record with error info
+                    job = Job(
+                        abs_id=book.abs_id,
+                        last_attempt=time.time(),
+                        retry_count=0,
+                        last_error='Interrupted by restart'
+                    )
+                    self.database_service.save_job(job)
 
         except Exception as e:
             logger.error(f"Error cleaning up stale jobs: {e}")
+
+    def cleanup_cache(self):
+        """Delete files from ebook cache that are not referenced in the DB."""
+        if not self.epub_cache_dir.exists():
+            return
+
+        logger.info("🧹 Starting ebook cache cleanup...")
+        
+        try:
+            # 1. Collect all valid filenames from DB
+            valid_filenames = set()
+            
+            # From Active Books
+            books = self.database_service.get_all_books()
+            for book in books:
+                if book.ebook_filename:
+                    valid_filenames.add(book.ebook_filename)
+            
+            # From Pending Suggestions (covers auto-discovery matches)
+            suggestions = self.database_service.get_all_pending_suggestions()
+            for suggestion in suggestions:
+                # matches property automatically parses the JSON
+                for match in suggestion.matches:
+                    if match.get('filename'):
+                        valid_filenames.add(match['filename'])
+
+            # 2. Iterate cache and delete orphans
+            deleted_count = 0
+            reclaimed_bytes = 0
+            
+            for file_path in self.epub_cache_dir.iterdir():
+                # Only check files, and ensure we don't delete if it's in our valid list
+                if file_path.is_file() and file_path.name not in valid_filenames:
+                    try:
+                        size = file_path.stat().st_size
+                        file_path.unlink()
+                        deleted_count += 1
+                        reclaimed_bytes += size
+                        logger.debug(f"   🗑️ Deleted orphaned cache file: {file_path.name}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to delete {file_path.name}: {e}")
+            
+            if deleted_count > 0:
+                mb = reclaimed_bytes / (1024 * 1024)
+                logger.info(f"✨ Cache cleanup complete: Removed {deleted_count} files ({mb:.2f} MB)")
+            else:
+                logger.info("✨ Cache is clean (no orphaned files found).")
+                
+        except Exception as e:
+            logger.error(f"Error during cache cleanup: {e}")
 
     def get_abs_title(self, ab):
         media = ab.get('media', {})
@@ -193,12 +282,14 @@ class SyncManager:
                     continue
                     
                 # Find equivalent timestamp in audiobook using the precise aligner if available
-                ts_for_text = self.transcriber.find_time_for_text(
-                    book.transcript_file, txt, 
-                    hint_percentage=client_pct,
-                    char_offset=char_offset,
-                    book_title=book.abs_title
-                )
+                if self.alignment_service:
+                    ts_for_text = self.alignment_service.get_time_for_text(
+                        book.abs_id, txt, 
+                        char_offset_hint=char_offset
+                    )
+                else:
+                    # Fallback or strict error? 
+                    ts_for_text = None
                 
                 if ts_for_text is not None:
                     normalized[client_name] = ts_for_text
@@ -244,52 +335,7 @@ class SyncManager:
 
         return config
 
-    def scan_and_fix_legacy_transcripts(self):
-        """
-        One-time scan of active books to identify and purge corrupted SMIL transcripts.
-        """
-        logger.info("[SCAN] Scanning for corrupted legacy transcripts...")
-        active_books = self.database_service.get_books_by_status('active')
-        count = 0
-        
-        for book in active_books:
-            if not book.transcript_file or not os.path.exists(book.transcript_file):
-                continue
-                
-            try:
-                # Load transcript
-                # We use the transcriber's cache method or direct load
-                with open(book.transcript_file, 'r', encoding='utf-8') as f:
-                    segments = json.load(f)
-                
-                # Validate using transcriber's method
-                is_valid, ratio = self.transcriber.validate_transcript(segments)
-                
-                if not is_valid:
-                    logger.warning(f"⚠️ Found corrupted transcript for '{sanitize_log_data(book.abs_title)}': {ratio:.1%} overlap.")
-                    
-                    # Mark for retry (using 'pending' as requested)
-                    book.status = 'pending'
-                    # Clear transcript file from DB record
-                    current_file = book.transcript_file
-                    book.transcript_file = None
-                    self.database_service.save_book(book)
-                    
-                    # Delete the corrupted file
-                    if current_file and os.path.exists(current_file):
-                        try:
-                            os.remove(current_file)
-                            logger.info(f"   [DEL] Deleted corrupted file: {current_file}")
-                        except Exception as e:
-                            logger.error(f"   [FAIL] Failed to delete file {current_file}: {e}")
-                            
-                    count += 1
-            except Exception as e:
-                logger.debug(f"   Skipping validation for '{book.abs_title}': {e}")
-                pass
-        
-        if count > 0:
-            logger.info(f"[JOB] Scheduled {count} corrupted transcripts for re-processing.")
+
 
 
 
@@ -579,35 +625,67 @@ class SyncManager:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
 
             # Step 2: Try Fast-Path (SMIL Extraction)
-            transcript_path = None
+            raw_transcript = None
+            transcript_source = None
 
             # Fetch item details to get chapters (for time alignment)
             item_details = self.abs_client.get_item_details(abs_id)
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+            
+            # [NEW] Pre-fetch book text for validation/alignment
+            # We need this for Validating SMIL OR for Aligning Whisper
+            book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
 
             # Attempt SMIL extraction
             if hasattr(self.transcriber, 'transcribe_from_smil'):
-                 transcript_path = self.transcriber.transcribe_from_smil(
-                     abs_id, epub_path, chapters,
-                     progress_callback=lambda p: update_progress(p, 2)
-                 )
+                  raw_transcript = self.transcriber.transcribe_from_smil(
+                      abs_id, epub_path, chapters,
+                      full_book_text=book_text,
+                       progress_callback=lambda p: update_progress(p, 2)
+                  )
+                  if raw_transcript:
+                      transcript_source = "SMIL"
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
-            if not transcript_path:
-                logger.info("[INFO] SMIL data not found or failed, falling back to Whisper transcription.")
-                
-                # [NEW] Extract full text for alignment if not already done
-                book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
+            if not raw_transcript:
+                logger.info("[INFO] SMIL extraction skipped/failed, falling back to Whisper transcription.")
                 
                 audio_files = self.abs_client.get_audio_files(abs_id)
-                transcript_path = self.transcriber.process_audio(
+                raw_transcript = self.transcriber.process_audio(
                     abs_id, audio_files,
-                    full_book_text=book_text,
+                    full_book_text=book_text, # Passed for context/alignment inside transcriber if old logic used
                     progress_callback=lambda p: update_progress(p, 2)
                 )
+                if raw_transcript:
+                    transcript_source = "WHISPER"
             else:
                 # If SMIL worked, it's already done with transcribing phase
                 update_progress(1.0, 2)
+
+            if not raw_transcript:
+                raise Exception("Failed to generate transcript from both SMIL and Whisper.")
+
+            # Step 4: Parse EPUB (Already did this for text, but ensure map is ready if needed?) 
+            # Actually ebook_parser caches result, so repeating is cheap.
+            # But we already have 'book_text'.
+            
+            # [NEW] Step 5: Align and Store using AlignmentService
+            # This is where we commit the result to the DB
+            logger.info(f"🧠 Aligning transcript ({transcript_source}) using Anchored Alignment...")
+            
+            # Update progress to show we are working on alignment (Start of Phase 3 = 90%)
+            update_progress(0.1, 3) # 91%
+            
+            success = self.alignment_service.align_and_store(
+                abs_id, raw_transcript, book_text, chapters
+            )
+            
+            # Alignment done
+            update_progress(0.5, 3) # 95%
+            
+            if not success:
+                raise Exception("Alignment failed to generate valid map.")
+
 
             # Step 4: Parse EPUB
             self.ebook_parser.extract_text_and_map(
@@ -616,8 +694,8 @@ class SyncManager:
             )
 
             # --- Success Update using database service ---
-            # Update book with transcript path and set to active
-            book.transcript_file = str(transcript_path)
+            # Update book with transcript path (Now just a marker or None, as data is in book_alignments)
+            book.transcript_file = "DB_MANAGED"
             book.status = 'active'
             self.database_service.save_book(book)
 
@@ -656,6 +734,17 @@ class SyncManager:
             if new_retry_count >= max_retries:
                 book.status = 'failed_permanent'
                 logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
+                
+                # Clean up audio cache on permanent failure to free disk space
+                if self.data_dir:
+                    import shutil
+                    audio_cache_dir = Path(self.data_dir) / "audio_cache" / abs_id
+                    if audio_cache_dir.exists():
+                        try:
+                            shutil.rmtree(audio_cache_dir)
+                            logger.info(f"[JOB] Cleaned up audio cache for {sanitize_log_data(abs_title)}")
+                        except Exception as cleanup_err:
+                            logger.warning(f"[JOB] Failed to clean audio cache: {cleanup_err}")
             else:
                 book.status = 'failed_retry_later'
 
@@ -793,18 +882,9 @@ class SyncManager:
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
                 
-        # Refresh Booklore cache in background
-        if self.booklore_client and self.booklore_client.is_configured():
-            # This triggers a refresh if needed (older than 1h), or can be forced if desired
-            # Pass allow_refresh=True (default) implicitly by just checking cache
-            # But we can call _refresh_book_cache directly if we want to enforce it periodically
-            # For now, let's just "touch" it safely
-            pass 
-            # Actually, let's explicitly refresh if it's stale (>1h) to keep UI fast
-            # Accessing internal method is dirty but effective for this patch
-            if time.time() - self.booklore_client._cache_timestamp > 3600:
-                logger.info("Background refreshing Booklore cache...")
-                self.booklore_client._refresh_book_cache()
+        # Refresh Library Metadata (Booklore)
+        if self.library_service:
+            self.library_service.sync_library_books()
     
         # Get active books directly from database service
         active_books = []
@@ -913,8 +993,14 @@ class SyncManager:
                     for client_name_key, client_state in config.items():
                          if client_state.delta > 0:
                              try:
+                                 # Ensure file is available locally (download if needed)
+                                 epub_path = self._get_local_epub(book.ebook_filename)
+                                 if not epub_path:
+                                     logger.warning(f"Could not locate or download EPUB for {book.ebook_filename}")
+                                     continue
+
                                  # Use existing ebook_parser which has caching
-                                 full_text, _ = self.ebook_parser.extract_text_and_map(book.ebook_filename)
+                                 full_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
                                  if full_text:
                                      total_chars = len(full_text)
                                      char_delta = int(client_state.delta * total_chars)
@@ -1160,10 +1246,34 @@ class SyncManager:
                     'total_clients': len(reset_results)
                 }
 
-                # Force the background job to re-evaluate this book (e.g. to generate missing alignment maps)
-                book.status = 'pending'
-                self.database_service.save_book(book)
-                logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+                # [CHANGED LOGIC] Handle book status update based on alignment presence and user setting
+                smart_reset = os.getenv('REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT', 'true').lower() == 'true'
+                
+                if smart_reset:
+                    # Check if we already have a valid alignment map in the DB
+                    has_alignment = False
+                    if self.alignment_service:
+                        has_alignment = bool(self.alignment_service._get_alignment(abs_id))
+
+                    if has_alignment:
+                        # If we have an alignment, just ensure the book is active.
+                        # DO NOT set to 'pending' - this prevents re-transcription.
+                        if book.status != 'active':
+                            book.status = 'active'
+                            self.database_service.save_book(book)
+                        logger.info(f"   [OK] Alignment map exists. Reset progress to 0% without triggering re-transcription.")
+                    else:
+                        # Only trigger a full re-process if we lack alignment data
+                        book.status = 'pending'
+                        self.database_service.save_book(book)
+                        logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+                else:
+                    # Legacy or explicit "just clear 0" behavior
+                    # If smart reset is disabled, we still want to ensure it's at least active
+                    if book.status != 'active':
+                        book.status = 'active'
+                        self.database_service.save_book(book)
+                    logger.info(f"   [OK] Reset progress to 0%. (Smart re-process disabled)")
 
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")

@@ -1,4 +1,3 @@
-# [START FILE: abs-kosync-enhanced/booklore_client.py]
 import os
 import time
 import logging
@@ -602,4 +601,3 @@ class BookloreClient:
         except Exception as e:
             logger.error(f"Error removing book from Booklore shelf: {e}")
             return False
-# [END FILE]

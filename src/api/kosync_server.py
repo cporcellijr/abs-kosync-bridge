@@ -27,13 +27,12 @@ _ebook_dir = None
 _active_scans = set()
 
 
-def init_kosync_server(database_service, container, manager, hash_cache=None, ebook_dir=None):
+def init_kosync_server(database_service, container, manager, ebook_dir=None):
     """Initialize KoSync server with required dependencies."""
-    global _database_service, _container, _manager, _hash_cache, _ebook_dir
+    global _database_service, _container, _manager, _ebook_dir
     _database_service = database_service
     _container = container
     _manager = manager
-    _hash_cache = hash_cache
     _ebook_dir = ebook_dir
 
 
@@ -377,16 +376,15 @@ def kosync_put_progress():
 def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
     """Try to find matching EPUB file for a KOSync document hash."""
     try:
-        # Check hash cache first
-        if _hash_cache:
-            cached_filename = _hash_cache.lookup_by_hash(doc_hash)
-            if cached_filename:
-                try:
-                    _container.ebook_parser().resolve_book_path(cached_filename)
-                    logger.info(f"📚 Matched EPUB via hash cache: {cached_filename}")
-                    return cached_filename
-                except FileNotFoundError:
-                    logger.debug(f"⚠️ Hash cache suggested '{cached_filename}' but file is missing. Re-scanning...")
+        # Check database for linked document first
+        doc = _database_service.get_kosync_document(doc_hash)
+        if doc and doc.filename:
+            try:
+                _container.ebook_parser().resolve_book_path(doc.filename)
+                logger.info(f"📚 Matched EPUB via DB: {doc.filename}")
+                return doc.filename
+            except FileNotFoundError:
+                logger.debug(f"⚠️ DB suggested '{doc.filename}' but file is missing. Re-scanning...")
 
         # Check filesystem
         if _ebook_dir and _ebook_dir.exists():
@@ -397,19 +395,35 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                 if count % 100 == 0:
                     logger.debug(f"Checked {count} local EPUBs...")
 
-                if _hash_cache:
-                    cached_hash = _hash_cache.lookup_by_filepath(epub_path)
-                    if cached_hash:
-                        if cached_hash == doc_hash:
-                            logger.info(f"📚 Matched EPUB via filepath cache: {epub_path.name}")
+                # Optimization: Check if we already have this file's hash in DB
+                cached_doc = _database_service.get_kosync_doc_by_filename(epub_path.name)
+                if cached_doc:
+                    # Check mtime for invalidation
+                    current_mtime = epub_path.stat().st_mtime
+                    if cached_doc.mtime == current_mtime:
+                        if cached_doc.document_hash == doc_hash:
+                            logger.info(f"📚 Matched EPUB via DB filename lookup: {epub_path.name}")
                             return epub_path.name
                         continue
-
+                
                 try:
                     computed_hash = _container.ebook_parser().get_kosync_id(epub_path)
-
-                    if _hash_cache:
-                        _hash_cache.store_hash(computed_hash, epub_path.name, source='filesystem', filepath=epub_path)
+                    
+                    # Store/Update in DB
+                    if cached_doc:
+                        cached_doc.document_hash = computed_hash
+                        cached_doc.mtime = epub_path.stat().st_mtime
+                        cached_doc.source = 'filesystem'
+                        _database_service.save_kosync_document(cached_doc)
+                    else:
+                        from src.db.models import KosyncDocument
+                        new_doc = KosyncDocument(
+                            document_hash=computed_hash,
+                            filename=epub_path.name,
+                            source='filesystem',
+                            mtime=epub_path.stat().st_mtime
+                        )
+                        _database_service.save_kosync_document(new_doc)
 
                     if computed_hash == doc_hash:
                         logger.info(f"📚 Matched EPUB via filesystem: {epub_path.name}")
@@ -423,46 +437,74 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
             logger.info("🔎 Starting Booklore API search...")
 
             try:
-                books = _container.booklore_client().get_all_books()
-                logger.info(f"Fetched {len(books)} books from Booklore. Scanning...")
+                # Query BookloreBook cache in DB first
+                books = _database_service.get_all_booklore_books()
+                if not books:
+                    # If DB cache empty, fetch from API
+                    raw_books = _container.booklore_client().get_all_books()
+                    # (Note: LibraryService syncs this, but we'll do a quick check here if needed)
+                    # For now, let's just assume they might be in the BookloreBook table already if synced.
+                    logger.info("Booklore cache in DB is empty. Consider running a library sync.")
+                    # Fallback to direct API call for scan
+                    from src.services.library_service import LibraryService
+                    lib_service = LibraryService(_database_service, _container.booklore_client())
+                    lib_service.sync_library_books()
+                    books = _database_service.get_all_booklore_books()
+
+                logger.info(f"Scanning {len(books)} books from Booklore DB cache...")
 
                 for book in books:
-                    book_id = str(book['id'])
+                    book_id = str(book.raw_metadata_dict.get('id')) if hasattr(book, 'raw_metadata_dict') else None
+                    # Fallback to parsing raw_metadata if needed
+                    if not book_id:
+                        import json
+                        try:
+                            meta = json.loads(book.raw_metadata)
+                            book_id = str(meta.get('id'))
+                        except:
+                            continue
 
-                    if _hash_cache:
-                        cached_hash = _hash_cache.lookup_by_booklore_id(book_id)
-                        if cached_hash:
-                            if cached_hash == doc_hash:
-                                safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
-                                try:
-                                    _container.ebook_parser().resolve_book_path(safe_title)
-                                    logger.info(f"📚 Matched EPUB via Booklore ID cache: {safe_title}")
-                                    return safe_title
-                                except FileNotFoundError:
-                                    pass
+                    # Check if we have a KosyncDocument for this Booklore ID
+                    cached_doc = _database_service.get_kosync_doc_by_booklore_id(book_id)
+                    if cached_doc:
+                        if cached_doc.document_hash == doc_hash:
+                            logger.info(f"📚 Matched EPUB via Booklore ID in DB: {book.filename}")
+                            return book.filename
 
                     try:
                         book_content = _container.booklore_client().download_book(book_id)
                         if book_content:
-                            computed_hash = _container.ebook_parser().get_kosync_id_from_bytes(book['fileName'], book_content)
-
-                            safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
-
-                            cache_dir = _container.data_dir() / "epub_cache"
-                            cache_dir.mkdir(parents=True, exist_ok=True)
-                            cache_path = cache_dir / safe_title
-                            with open(cache_path, 'wb') as f:
-                                f.write(book_content)
-                            logger.info(f"📥 Persisted Booklore book to cache: {safe_title}")
-
-                            if _hash_cache:
-                                _hash_cache.store_hash(computed_hash, safe_title, source='booklore', booklore_id=book_id)
+                            computed_hash = _container.ebook_parser().get_kosync_id_from_bytes(book.filename, book_content)
 
                             if computed_hash == doc_hash:
+                                safe_title = book.filename
+                                cache_dir = _container.data_dir() / "epub_cache"
+                                cache_dir.mkdir(parents=True, exist_ok=True)
+                                cache_path = cache_dir / safe_title
+                                with open(cache_path, 'wb') as f:
+                                    f.write(book_content)
+                                logger.info(f"📥 Persisted Booklore book to cache: {safe_title}")
+
+                                # Save/Update KosyncDocument in DB
+                                if cached_doc:
+                                    cached_doc.document_hash = computed_hash
+                                    cached_doc.filename = safe_title
+                                    cached_doc.source = 'booklore'
+                                    _database_service.save_kosync_document(cached_doc)
+                                else:
+                                    from src.db.models import KosyncDocument
+                                    new_doc = KosyncDocument(
+                                        document_hash=computed_hash,
+                                        filename=safe_title,
+                                        source='booklore',
+                                        booklore_id=book_id
+                                    )
+                                    _database_service.save_kosync_document(new_doc)
+
                                 logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
                                 return safe_title
                     except Exception as e:
-                        logger.warning(f"Failed to check Booklore book {book['title']}: {e}")
+                        logger.warning(f"Failed to check Booklore book {book.title}: {e}")
 
                 logger.info(f"❌ Booklore search finished. Checked {len(books)} books. No match.")
 
@@ -545,6 +587,8 @@ def api_unlink_kosync_document(doc_hash):
     """Remove the ABS book link from a KOSync document."""
     success = _database_service.unlink_kosync_document(doc_hash)
     if success:
+        # Cleanup cached EPUB for this hash
+        _cleanup_cache_for_hash(doc_hash)
         return jsonify({'success': True, 'message': 'Document unlinked'})
     return jsonify({'error': 'Document not found'}), 404
 
@@ -554,5 +598,40 @@ def api_delete_kosync_document(doc_hash):
     """Delete a KOSync document."""
     success = _database_service.delete_kosync_document(doc_hash)
     if success:
+        # Cleanup cached EPUB for this hash
+        _cleanup_cache_for_hash(doc_hash)
         return jsonify({'success': True, 'message': 'Document deleted'})
     return jsonify({'error': 'Document not found'}), 404
+
+
+def _cleanup_cache_for_hash(doc_hash):
+    """Delete cached EPUB file for a document."""
+    try:
+        # Identify filename from DB
+        doc = _database_service.get_kosync_document(doc_hash)
+        filename = doc.filename if doc else None
+        
+        # Fallback: check linked book
+        if not filename and doc and doc.linked_abs_id:
+            book = _database_service.get_book(doc.linked_abs_id)
+            if book:
+                filename = book.ebook_filename
+
+        if filename:
+            # Delete file if in epub_cache
+            if _container:
+                cache_dir = _container.data_dir() / "epub_cache"
+                file_path = cache_dir / filename
+                if file_path.exists():
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"🗑️ Deleted cached EPUB: {filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete cached file {filename}: {e}")
+        
+        # Note: We don't delete the KosyncDocument record here, 
+        # as it may contain important progress data. 
+        # The filename/mtime/source fields just become stale or are cleared if unlinked.
+
+    except Exception as e:
+        logger.error(f"Error cleaning up cache for {doc_hash}: {e}")
