@@ -17,6 +17,7 @@ class ABSClient:
         self.headers = {"Authorization": f"Bearer {self.token}"}
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+        self.timeout = 30
 
     def is_configured(self):
         """Check if ABS is configured with URL and token."""
@@ -30,7 +31,7 @@ class ABSClient:
 
         url = f"{self.base_url}/api/me"
         try:
-            r = self.session.get(url, timeout=5)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code == 200:
                 # If this is the first container start, show INFO for visibility; otherwise use DEBUG
                 first_run_marker = '/data/.first_run_done'
@@ -60,7 +61,7 @@ class ABSClient:
     def get_all_audiobooks(self):
         lib_url = f"{self.base_url}/api/libraries"
         try:
-            r = self.session.get(lib_url)
+            r = self.session.get(lib_url, timeout=self.timeout)
             if r.status_code != 200: return []
             libraries = r.json().get('libraries', [])
             all_audiobooks = []
@@ -75,7 +76,7 @@ class ABSClient:
     def get_audiobooks_for_lib(self, lib: str):
         items_url = f"{self.base_url}/api/libraries/{lib}/items"
         params = {"mediaType": "audiobook"}
-        r_items = self.session.get(items_url, params=params)
+        r_items = self.session.get(items_url, params=params, timeout=self.timeout)
         if r_items.status_code == 200:
             return r_items.json().get('results', [])
         logger.warning("⚠️ ABS - Failed to fetch audiobooks for library " + lib)
@@ -84,7 +85,7 @@ class ABSClient:
     def get_audio_files(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:
-            r = self.session.get(url)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code == 200:
                 data = r.json()
                 files = []
@@ -108,7 +109,7 @@ class ABSClient:
     def get_item_details(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:
-            r = self.session.get(url)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code == 200: return r.json()
         except Exception:
             pass
@@ -117,7 +118,7 @@ class ABSClient:
     def get_progress(self, item_id):
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
-            r = self.session.get(url)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code == 200: return r.json()
         except Exception:
             logger.exception(f"Error fetching ABS progress for item {item_id}")
@@ -147,7 +148,7 @@ class ABSClient:
         }
 
         try:
-            r = self.session.patch(url, json=payload, timeout=10)
+            r = self.session.patch(url, json=payload, timeout=self.timeout)
             if r.status_code in (200, 204):
                 logger.debug(f"ABS ebook progress updated: {item_id} -> {progress} at location: {location[:50]}...")
                 return True
@@ -186,7 +187,7 @@ class ABSClient:
 
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
-            r = self.session.post(url, json=payload, timeout=10)
+            r = self.session.post(url, json=payload, timeout=self.timeout)
             if r.status_code in (200, 204):
                 logger.debug(f"ABS progress updated via session: {abs_id}, payload: {payload}")
                 self.close_session(session_id)
@@ -206,7 +207,7 @@ class ABSClient:
         # Try specific progress endpoint first
         url = f"{self.base_url}/api/me/progress"
         try:
-            r = self.session.get(url, timeout=10)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code == 200:
                 data = r.json()
                 items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
@@ -217,7 +218,7 @@ class ABSClient:
                 # Fallback to /api/me
                 logger.debug("⚠️ /api/me/progress not found (404), falling back to /api/me")
                 url_fallback = f"{self.base_url}/api/me"
-                r2 = self.session.get(url_fallback, timeout=10)
+                r2 = self.session.get(url_fallback, timeout=self.timeout)
                 if r2.status_code == 200:
                     data = r2.json()
                     
@@ -244,7 +245,7 @@ class ABSClient:
         """Fetch in-progress items, optimized to avoid redundant detail fetches if possible."""
         url = f"{self.base_url}/api/me/progress"
         try:
-            r = self.session.get(url, timeout=10)
+            r = self.session.get(url, timeout=self.timeout)
             if r.status_code != 200: return []
             data = r.json()
             items = data if isinstance(data, list) else data.get('libraryItemsInProgress', [])
@@ -300,7 +301,7 @@ class ABSClient:
             "forceTranscode": False
         }
         try:
-            r = self.session.post(play_url, json=play_payload, timeout=10)
+            r = self.session.post(play_url, json=play_payload, timeout=self.timeout)
             if r.status_code == 200:
                 id = r.json().get('id')
                 logger.debug(f"Created new ABS session for item {abs_id}, id: {id}")
