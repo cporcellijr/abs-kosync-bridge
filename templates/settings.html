@@ -666,6 +666,41 @@
                 </div>
             </div>
 
+
+            <!-- CWA (Optional) -->
+            <div class="settings-section">
+                {% set cwa_configured = get_val('CWA_SERVER') != '' %}
+                {% set cwa_enabled = get_bool('CWA_ENABLED') or (cwa_configured and get_val('CWA_ENABLED') == '') %}
+                <div class="section-header">
+                    <h3>Calibre-Web Automated</h3>
+                    <div class="toggle-switch-wrapper">
+                        <span class="toggle-label">Enable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle_cwa" name="CWA_ENABLED"
+                                onchange="toggleSection('cwa_body', this.checked)" {% if cwa_enabled %}checked{% endif
+                                %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div id="cwa_body" class="section-body {% if not cwa_enabled %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="CWA_SERVER" value="{{ get_val('CWA_SERVER') }}">
+                        <div class="help-text">URL to your Calibre-Web Automated instance (e.g.
+                            http://192.168.1.100:8083)</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="CWA_USERNAME" value="{{ get_val('CWA_USERNAME') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="CWA_PASSWORD" value="{{ get_val('CWA_PASSWORD') }}">
+                    </div>
+                </div>
+            </div>
+
             <!-- Hardcover.app (Optional) -->
             <div class="settings-section">
                 {% set hardcover_configured = get_val('HARDCOVER_TOKEN') != '' %}
@@ -1004,9 +1039,11 @@
                                     %}>
                                     int8 (Fast, CPU-optimized)</option>
                                 <option value="float16" {% if get_val('WHISPER_COMPUTE_TYPE')=='float16' %}selected{%
-                                    endif %}>float16 (Fast, GPU-optimized)</option>
+                                    endif %}>
+                                    float16 (Fast, GPU-optimized)</option>
                                 <option value="float32" {% if get_val('WHISPER_COMPUTE_TYPE')=='float32' %}selected{%
-                                    endif %}>float32 (Highest accuracy)</option>
+                                    endif %}>
+                                    float32 (Highest accuracy)</option>
                             </select>
                             <div class="help-text">Use int8 for CPU, float16 for GPU.</div>
                         </div>

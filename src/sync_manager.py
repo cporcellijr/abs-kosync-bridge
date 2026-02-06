@@ -619,7 +619,19 @@ class SyncManager:
             # --- Heavy Lifting (Blocks this thread, but not the Main thread) ---
             # Step 1: Get EPUB file
             update_progress(0.0, 1)
-            epub_path = self._get_local_epub(ebook_filename)
+
+            # Fetch item details for acquisition context
+            item_details = self.abs_client.get_item_details(abs_id)
+            
+            epub_path = None
+            if self.library_service:
+                # Try Priority Chain (ABS Direct -> Booklore -> CWA -> ABS Search)
+                epub_path = self.library_service.acquire_ebook(item_details)
+
+            # Fallback to legacy logic (Local Filesystem / Cache / Booklore Classic)
+            if not epub_path:
+                epub_path = self._get_local_epub(ebook_filename)
+                
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
@@ -628,8 +640,8 @@ class SyncManager:
             raw_transcript = None
             transcript_source = None
 
-            # Fetch item details to get chapters (for time alignment)
-            item_details = self.abs_client.get_item_details(abs_id)
+            # [MOVED UP] Fetch item details to get chapters (for time alignment) and for Ebook Acquisition
+            # item_details = self.abs_client.get_item_details(abs_id) # Already fetched above
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             
             # [NEW] Pre-fetch book text for validation/alignment

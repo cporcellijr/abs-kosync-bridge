@@ -106,6 +106,82 @@ class ABSClient:
             logger.error(f"Error getting audio files: {e}")
             return []
 
+    def get_ebook_files(self, item_id):
+        """Get ebook files for an item (from libraryFiles)."""
+        url = f"{self.base_url}/api/items/{item_id}"
+        try:
+            r = self.session.get(url, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                library_files = data.get('libraryFiles', [])
+                ebook_files = []
+                
+                for f in library_files:
+                    ext = f.get('metadata', {}).get('ext') or f.get('ext') or ""
+                    ext = ext.lower().replace('.', '')
+                    if ext in ['epub', 'mobi', 'pdf', 'azw3']:
+                         stream_url = f"{self.base_url}/api/items/{item_id}/file/{f['ino']}?token={self.token}"
+                         ebook_files.append({
+                             "stream_url": stream_url,
+                             "ext": ext,
+                             "ino": f['ino']
+                         })
+                return ebook_files
+            return []
+        except Exception as e:
+            logger.error(f"Error getting ebook files: {e}")
+            return []
+
+    def search_ebooks(self, query):
+        """Search for ebooks across all book libraries."""
+        results = []
+        try:
+            # Get all libraries first
+            r_libs = self.session.get(f"{self.base_url}/api/libraries", timeout=self.timeout)
+            if r_libs.status_code != 200: return []
+            
+            libraries = r_libs.json().get('libraries', [])
+            book_libs = [l for l in libraries if l.get('mediaType') == 'book']
+            
+            for lib in book_libs:
+                search_url = f"{self.base_url}/api/libraries/{lib['id']}/search"
+                params = {'q': query, 'limit': 3}
+                r = self.session.get(search_url, params=params, timeout=self.timeout)
+                if r.status_code == 200:
+                    items = r.json().get('results', [])
+                    for item in items:
+                        match = item.get('match', {})
+                        results.append({
+                            "id": item.get('id'),
+                            "title": match.get('title'),
+                            "author": match.get('author'),
+                            "libraryId": lib['id'],
+                            "source": "ABS",
+                            "ext": "epub" # Assumption, refined later by get_ebook_files
+                        })
+            return results
+        except Exception as e:
+            logger.error(f"Error searching ABS ebooks: {e}")
+            return []
+
+    def download_file(self, stream_url, output_path):
+        """Download file from stream_url to output_path."""
+        try:
+            logger.info(f"⬇️ ABS: Downloading file from {stream_url}...")
+            with self.session.get(stream_url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(output_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"❌ ABS Download failed: {e}")
+            if os.path.exists(output_path): os.remove(output_path)
+            return False
+
     def get_item_details(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:

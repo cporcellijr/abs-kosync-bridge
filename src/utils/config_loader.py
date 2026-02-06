@@ -22,6 +22,9 @@ ALL_SETTINGS = [
     
     # Booklore
     'BOOKLORE_ENABLED', 'BOOKLORE_SERVER', 'BOOKLORE_USER', 'BOOKLORE_PASSWORD', 'BOOKLORE_SHELF_NAME',
+
+    # CWA (Calibre-Web Automated)
+    'CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD',
     
     # Hardcover
     'HARDCOVER_ENABLED', 'HARDCOVER_TOKEN',
@@ -82,6 +85,10 @@ DEFAULT_CONFIG = {
     'KOSYNC_ENABLED': 'false',
     'STORYTELLER_ENABLED': 'false',
     'BOOKLORE_ENABLED': 'false',
+    'CWA_ENABLED': 'false',
+    'CWA_SERVER': '',
+    'CWA_USERNAME': '',
+    'CWA_PASSWORD': '',
     'HARDCOVER_ENABLED': 'false',
     'TELEGRAM_ENABLED': 'false',
     'SUGGESTIONS_ENABLED': 'false',
