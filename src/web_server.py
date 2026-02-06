@@ -545,6 +545,82 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
     if ebook_path:
         return container.ebook_parser().get_kosync_id(ebook_path)
 
+    # [NEW] Check Epub Cache explicitly (if acquired by LibraryService but not meant for /books)
+    epub_cache = container.epub_cache_dir()
+    cached_path = epub_cache / ebook_filename
+    if cached_path.exists():
+         return container.ebook_parser().get_kosync_id(cached_path)
+
+    # [NEW] On-Demand Fetching
+    # 1. ABS On-Demand
+    if "_abs." in ebook_filename:
+        try:
+             # Extract ID: 1941a138-1c8d-49eb-954f-f6bb26f87ebc_abs.epub -> 1941a138-1c8d-49eb-954f-f6bb26f87ebc
+             abs_id = ebook_filename.split("_abs.")[0]
+             abs_client = container.abs_client()
+             if abs_client and abs_client.is_configured():
+                 logger.info(f"📥 Attempting on-demand ABS download for {abs_id}...")
+                 ebook_files = abs_client.get_ebook_files(abs_id)
+                 if ebook_files:
+                     target = ebook_files[0]
+                     if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+                     
+                     if abs_client.download_file(target['stream_url'], cached_path):
+                         logger.info(f"   ✅ Downloaded ABS ebook to {cached_path}")
+                         return container.ebook_parser().get_kosync_id(cached_path)
+                 else:
+                     logger.warning(f"   ⚠️ No ebook files found in ABS for item {abs_id}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed ABS on-demand download: {e}")
+
+    # 2. CWA On-Demand
+    if "_cwa." in ebook_filename or ebook_filename.startswith("cwa_"):
+        try:
+             # Extract ID: cwa_12345.epub -> 12345
+             # Format is cwa_{id}.{ext}
+             parts = ebook_filename.split("_")
+             if len(parts) >= 2:
+                 cwa_id_part = parts[1] # "12345.epub"
+                 cwa_id = cwa_id_part.split(".")[0]
+                 
+                 cwa_client = container.cwa_client()
+                 if cwa_client and cwa_client.is_configured():
+                     logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
+                     
+                     target = None
+                     
+                     # Priority 1: Search for the ID (search results include download_url and won't crash the server)
+                     results = cwa_client.search_ebooks(cwa_id)
+                     
+                     # Find exact ID match if possible
+                     for res in results:
+                         if str(res.get('id')) == cwa_id:
+                             target = res
+                             break
+                     
+                     # If no exact ID match, maybe it was the only result
+                     if not target and len(results) == 1:
+                         target = results[0]
+
+                     # Priority 2: Use direct download URL from search if available
+                     if target and target.get('download_url'):
+                         logger.info(f"🚀 Using direct download link from search for '{target.get('title', 'Unknown')}'")
+                     else:
+                         # Priority 3: Fallback to get_book_by_id only if search didn't provide a URL
+                         # This may crash server on metadata page, but includes a blind URL fallback
+                         logger.debug(f"🔍 Search did not return a usable result, trying direct ID lookup...")
+                         target = cwa_client.get_book_by_id(cwa_id)
+
+                     if target and target.get('download_url'):
+                         if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+                         if cwa_client.download_ebook(target['download_url'], cached_path):
+                             logger.info(f"   ✅ Downloaded CWA ebook to {cached_path}")
+                             return container.ebook_parser().get_kosync_id(cached_path)
+                     else:
+                         logger.warning(f"   ⚠️ Could not find CWA book for ID {cwa_id}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed CWA on-demand download: {e}")
+
     # Neither source available - log helpful warning
     if not container.booklore_client().is_configured() and not EBOOK_DIR.exists():
         logger.warning(
@@ -554,31 +630,35 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
             "or mount the ebooks directory to /books."
         )
     elif not booklore_id and not ebook_path:
-        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore or filesystem")
+        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore, filesystem, or remote sources.")
 
     return None
 
 
 class EbookResult:
-    """Wrapper to provide consistent interface for ebooks from Booklore or filesystem."""
+    """Wrapper to provide consistent interface for ebooks from Booklore, CWA, ABS, or filesystem."""
 
-    def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None):
+    def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None, source=None):
         self.name = name
         self.title = title or Path(name).stem
         self.subtitle = subtitle or ''
         self.authors = authors or ''
         self.booklore_id = booklore_id
         self._path = path
-        self.has_metadata = booklore_id is not None
+        self.source = source  # 'booklore', 'cwa', 'abs', 'filesystem'
+        # Has metadata if we have a real title (not just filename) or booklore_id
+        self.has_metadata = booklore_id is not None or (title is not None and title != name)
 
     @property
     def display_name(self):
-        """Format: 'Author - Title: Subtitle' for Booklore, filename for filesystem."""
-        if self.has_metadata and self.authors:
+        """Format: 'Author - Title: Subtitle' for sources with metadata, filename for filesystem."""
+        if self.has_metadata and self.title:
             full_title = self.title
             if self.subtitle:
                 full_title = f"{self.title}: {self.subtitle}"
-            return f"{self.authors} - {full_title}"
+            if self.authors:
+                return f"{self.authors} - {full_title}"
+            return full_title
         return self.name
 
     @property
@@ -590,7 +670,7 @@ class EbookResult:
 
 
 def get_searchable_ebooks(search_term):
-    """Get ebooks from Booklore API and filesystem.
+    """Get ebooks from Booklore API, filesystem, ABS, and CWA.
     Returns list of EbookResult objects for consistent interface."""
 
     results = []
@@ -630,9 +710,59 @@ def get_searchable_ebooks(search_term):
 
                  if not search_term or search_term.lower() in eb.name.lower():
                      results.append(EbookResult(name=eb.name, path=eb))
+                     found_filenames.add(eb.name)
 
         except Exception as e:
             logger.warning(f"Filesystem search failed: {e}")
+
+    # Search ABS ebook libraries
+    if search_term:
+        try:
+            abs_client = container.abs_client()
+            logger.debug(f"ABS Search: Starting search for '{search_term}'")
+            if abs_client:
+                abs_ebooks = abs_client.search_ebooks(search_term)
+                logger.debug(f"ABS Search: Returned {len(abs_ebooks) if abs_ebooks else 0} results")
+                if abs_ebooks:
+                    logger.debug(f"ABS Search: Found {len(abs_ebooks)} ebook(s) for '{search_term}'")
+                    for ab in abs_ebooks:
+                        # Check if this item has actual ebook files
+                        ebook_files = abs_client.get_ebook_files(ab['id'])
+                        logger.debug(f"   ABS item {ab['id']} has {len(ebook_files) if ebook_files else 0} ebook files")
+                        if ebook_files:
+                            ef = ebook_files[0]
+                            fname = f"{ab['id']}_abs.{ef['ext']}"
+                            if fname not in found_filenames:
+                                results.append(EbookResult(
+                                    name=fname,
+                                    title=ab.get('title'),
+                                    authors=ab.get('author'),
+                                    path=None  # Will need to be downloaded
+                                ))
+                                found_filenames.add(fname)
+        except Exception as e:
+            logger.warning(f"ABS ebook search failed: {e}")
+
+    # Search CWA (Calibre-Web Automated) via OPDS
+    if search_term:
+        try:
+            library_service = container.library_service()
+            if library_service and library_service.cwa_client and library_service.cwa_client.is_configured():
+                cwa_results = library_service.cwa_client.search_ebooks(search_term)
+                if cwa_results:
+                    logger.debug(f"CWA Search: Found {len(cwa_results)} ebook(s) for '{search_term}'")
+                    for cr in cwa_results:
+                        fname = f"cwa_{cr.get('id', 'unknown')}.{cr.get('ext', 'epub')}"
+                        if fname not in found_filenames:
+                            results.append(EbookResult(
+                                name=fname,
+                                title=cr.get('title'),
+                                authors=cr.get('author'),
+                                path=None  # Will need to be downloaded
+                            ))
+                            found_filenames.add(fname)
+        except Exception as e:
+            logger.warning(f"CWA search failed: {e}")
 
     # Check if we have no sources at all
     if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
@@ -671,6 +801,7 @@ def settings():
             'KOSYNC_ENABLED',
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
+            'CWA_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
             'SUGGESTIONS_ENABLED',

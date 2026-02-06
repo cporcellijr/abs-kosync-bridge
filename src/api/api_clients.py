@@ -106,6 +106,114 @@ class ABSClient:
             logger.error(f"Error getting audio files: {e}")
             return []
 
+    def get_ebook_files(self, item_id):
+        """Get ebook files for an item (from libraryFiles)."""
+        url = f"{self.base_url}/api/items/{item_id}"
+        try:
+            r = self.session.get(url, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                library_files = data.get('libraryFiles', [])
+                ebook_files = []
+                
+                for f in library_files:
+                    ext = f.get('metadata', {}).get('ext') or f.get('ext') or ""
+                    ext = ext.lower().replace('.', '')
+                    if ext in ['epub', 'mobi', 'pdf', 'azw3']:
+                         stream_url = f"{self.base_url}/api/items/{item_id}/file/{f['ino']}?token={self.token}"
+                         ebook_files.append({
+                             "stream_url": stream_url,
+                             "ext": ext,
+                             "ino": f['ino']
+                         })
+                return ebook_files
+            return []
+        except Exception as e:
+            logger.error(f"Error getting ebook files: {e}")
+            return []
+
+    def search_ebooks(self, query):
+        """Search for ebooks across all book libraries."""
+        results = []
+        try:
+            # Get all libraries first
+            r_libs = self.session.get(f"{self.base_url}/api/libraries", timeout=self.timeout)
+            if r_libs.status_code != 200:
+                logger.warning(f"ABS Search: Failed to get libraries (status {r_libs.status_code})")
+                return []
+            
+            libraries = r_libs.json().get('libraries', [])
+            logger.debug(f"ABS Search: Found {len(libraries)} libraries to search")
+            
+            # Search ALL libraries to support mixed content (e.g. ebooks in audiobook libraries)
+            for lib in libraries:
+                lib_name = lib.get('name', 'Unknown')
+                lib_type = lib.get('mediaType', 'unknown')
+                logger.debug(f"   Searching library '{lib_name}' (type: {lib_type})")
+                
+                search_url = f"{self.base_url}/api/libraries/{lib['id']}/search"
+                params = {'q': query, 'limit': 10}
+                r = self.session.get(search_url, params=params, timeout=self.timeout)
+                
+                if r.status_code == 200:
+                    data = r.json()
+                    # ABS returns different keys: book, podcast, libraryItem, etc.
+                    # For books: data.get('book', [])
+                    # For audiobooks in mixed mode: data might have 'libraryItem' or similar
+                    
+                    # Log the response keys to understand structure
+                    logger.debug(f"   Response keys: {list(data.keys())}")
+                    
+                    # Try different possible keys
+                    items = data.get('book', []) or data.get('libraryItem', []) or data.get('results', [])
+                    
+                    if items:
+                        logger.debug(f"   ABS Search: Found {len(items)} hits in library '{lib_name}'")
+                        for item in items:
+                            # Handle different response structures
+                            if isinstance(item, dict):
+                                lib_item = item.get('libraryItem', item)
+                                metadata = lib_item.get('media', {}).get('metadata', {}) or lib_item.get('metadata', {})
+                                item_id = lib_item.get('id', item.get('id'))
+                                title = metadata.get('title') or item.get('matchKey')
+                                author = metadata.get('authorName') or metadata.get('author')
+                                
+                                results.append({
+                                    "id": item_id,
+                                    "title": title,
+                                    "author": author,
+                                    "libraryId": lib['id'],
+                                    "source": "ABS",
+                                    "ext": "epub"
+                                })
+                    else:
+                        logger.debug(f"   No items found in library '{lib_name}'")
+                else:
+                    logger.warning(f"   Search failed for library '{lib_name}' (status {r.status_code})")
+                    
+            return results
+        except Exception as e:
+            logger.error(f"Error searching ABS ebooks: {e}")
+            return []
+
+    def download_file(self, stream_url, output_path):
+        """Download file from stream_url to output_path."""
+        try:
+            logger.info(f"⬇️ ABS: Downloading file from {stream_url}...")
+            with self.session.get(stream_url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(output_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"❌ ABS Download failed: {e}")
+            if os.path.exists(output_path): os.remove(output_path)
+            return False
+
     def get_item_details(self, item_id):
         url = f"{self.base_url}/api/items/{item_id}"
         try:

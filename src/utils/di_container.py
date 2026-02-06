@@ -13,6 +13,7 @@ from dependency_injector import containers, providers
 # Import all the classes we'll be using
 from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.booklore_client import BookloreClient
+from src.api.cwa_client import CWAClient
 from src.api.hardcover_client import HardcoverClient
 from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.database_service import DatabaseService
@@ -86,6 +87,8 @@ class Container(containers.DeclarativeContainer):
 
     hardcover_client = providers.Singleton(HardcoverClient)
 
+    cwa_client = providers.Singleton(CWAClient)
+
 
 
     # Ebook parser
@@ -115,7 +118,10 @@ class Container(containers.DeclarativeContainer):
     library_service = providers.Singleton(
         LibraryService,
         database_service=database_service,
-        booklore_client=booklore_client
+        booklore_client=booklore_client,
+        cwa_client=cwa_client,
+        abs_client=abs_client,
+        epub_cache_dir=epub_cache_dir
     )
 
     migration_service = providers.Singleton(

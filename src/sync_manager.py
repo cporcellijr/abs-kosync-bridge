@@ -109,6 +109,32 @@ class SyncManager:
             except Exception as e:
                 logger.warning(f"[WARN] {client_name} connection failed: {e}")
         
+        # [NEW] Check CWA Integration Status
+        if self.library_service and self.library_service.cwa_client:
+            cwa = self.library_service.cwa_client
+            if cwa.is_configured():
+                # check_connection() logs its own Success/Fail messages and verifies Authentication
+                if cwa.check_connection():
+                    # If connected, ensure search template is cached
+                    template = cwa._get_search_template()
+                    if template:
+                        logger.info(f"   📚 CWA search template: {template}")
+            else:
+                logger.info("[SKIP] CWA not configured (disabled or missing server URL)")
+        else:
+            logger.debug("[SKIP] CWA not available (library_service or cwa_client missing)")
+        
+        # [NEW] Check ABS ebook search capability
+        if self.abs_client:
+            try:
+                # Just verify methods exist (don't actually search during startup)
+                if hasattr(self.abs_client, 'get_ebook_files') and hasattr(self.abs_client, 'search_ebooks'):
+                    logger.info("[OK] ABS ebook methods available (get_ebook_files, search_ebooks)")
+                else:
+                    logger.warning("[WARN] ABS ebook methods missing - ebook search may not work")
+            except Exception as e:
+                logger.warning(f"[WARN] ABS ebook check failed: {e}")
+
         # [NEW] Run one-time migration
         if self.migration_service:
             logger.info("🔄 Checking for legacy data to migrate...")
@@ -492,6 +518,70 @@ class SyncManager:
                 except Exception as e:
                     logger.warning(f"Filesystem search failed during suggestion: {e}")
             
+            # 2c. ABS Direct Match (check if audiobook item has ebook files)
+            if self.abs_client:
+                try:
+                    ebook_files = self.abs_client.get_ebook_files(abs_id)
+                    if ebook_files:
+                        logger.debug(f"ABS Direct: Found {len(ebook_files)} ebook file(s) in audiobook item")
+                        for ef in ebook_files:
+                            matches.append({
+                                "source": "abs_direct",
+                                "title": title,
+                                "author": author,
+                                "filename": f"{abs_id}_direct.{ef['ext']}",
+                                "stream_url": ef['stream_url'],
+                                "ext": ef['ext'],
+                                "confidence": "high"
+                            })
+                except Exception as e:
+                    logger.warning(f"ABS Direct search failed during suggestion: {e}")
+            
+            # 2d. CWA Search (Calibre-Web Automated via OPDS)
+            if self.library_service and self.library_service.cwa_client and self.library_service.cwa_client.is_configured():
+                try:
+                    query = f"{title}"
+                    if author:
+                        query += f" {author}"
+                    cwa_results = self.library_service.cwa_client.search_ebooks(query)
+                    if cwa_results:
+                        logger.debug(f"CWA: Found {len(cwa_results)} result(s) for '{title}'")
+                        for cr in cwa_results:
+                            matches.append({
+                                "source": "cwa",
+                                "title": cr.get('title'),
+                                "author": cr.get('author'),
+                                "filename": f"{abs_id}_cwa.{cr.get('ext', 'epub')}",
+                                "download_url": cr.get('download_url'),
+                                "ext": cr.get('ext', 'epub'),
+                                "confidence": "high" if title.lower() in cr.get('title', '').lower() else "medium"
+                            })
+                except Exception as e:
+                    logger.warning(f"CWA search failed during suggestion: {e}")
+
+            # 2e. ABS Search (search other libraries for matching ebook)
+            if self.abs_client:
+                try:
+                    abs_results = self.abs_client.search_ebooks(title)
+                    if abs_results:
+                        logger.debug(f"ABS Search: Found {len(abs_results)} result(s) for '{title}'")
+                        for ar in abs_results:
+                            # Check if this result has ebook files
+                            result_ebooks = self.abs_client.get_ebook_files(ar['id'])
+                            if result_ebooks:
+                                ef = result_ebooks[0]
+                                matches.append({
+                                    "source": "abs_search",
+                                    "title": ar.get('title'),
+                                    "author": ar.get('author'),
+                                    "filename": f"{abs_id}_abs_search.{ef['ext']}",
+                                    "stream_url": ef['stream_url'],
+                                    "ext": ef['ext'],
+                                    "confidence": "medium"
+                                })
+                except Exception as e:
+                    logger.warning(f"ABS Search failed during suggestion: {e}")
+            
             # 3. Save to DB
             if not matches:
                 logger.debug(f"[INFO] No matches found for '{title}', skipping suggestion creation.")
@@ -619,7 +709,19 @@ class SyncManager:
             # --- Heavy Lifting (Blocks this thread, but not the Main thread) ---
             # Step 1: Get EPUB file
             update_progress(0.0, 1)
-            epub_path = self._get_local_epub(ebook_filename)
+
+            # Fetch item details for acquisition context
+            item_details = self.abs_client.get_item_details(abs_id)
+            
+            epub_path = None
+            if self.library_service:
+                # Try Priority Chain (ABS Direct -> Booklore -> CWA -> ABS Search)
+                epub_path = self.library_service.acquire_ebook(item_details)
+
+            # Fallback to legacy logic (Local Filesystem / Cache / Booklore Classic)
+            if not epub_path:
+                epub_path = self._get_local_epub(ebook_filename)
+                
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
@@ -628,8 +730,8 @@ class SyncManager:
             raw_transcript = None
             transcript_source = None
 
-            # Fetch item details to get chapters (for time alignment)
-            item_details = self.abs_client.get_item_details(abs_id)
+            # [MOVED UP] Fetch item details to get chapters (for time alignment) and for Ebook Acquisition
+            # item_details = self.abs_client.get_item_details(abs_id) # Already fetched above
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             
             # [NEW] Pre-fetch book text for validation/alignment

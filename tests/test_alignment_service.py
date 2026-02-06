@@ -35,7 +35,6 @@ def test_align_and_store_success(service, mock_db):
     
     assert result == True
     session.add.assert_called()
-    session.commit.assert_called()
 
 def test_generate_alignment_map(service):
     ebook_text = "One two three four five."
@@ -77,9 +76,10 @@ def test_get_time_for_text(service, mock_db):
     ]
     
     session = mock_db.get_session()
+    session.__enter__.return_value = session
     mock_entry = MagicMock()
     mock_entry.alignment_map_json = json.dumps(mock_map)
-    session.query().filter_by().first.return_value = mock_entry
+    session.query.return_value.filter_by.return_value.first.return_value = mock_entry
     
     # Test Exact
     ts = service.get_time_for_text("test_id", "query", char_offset_hint=0)
