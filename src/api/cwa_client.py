@@ -32,7 +32,7 @@ class CWAClient:
         
         # Standardize headers for all requests
         headers = {
-            "User-Agent": "ABS-KoSync-Bridge/1.0",
+            "User-Agent": "KOReader/2023.10",  # Spoof KOReader
             "Accept": "application/atom+xml,application/xml,application/xhtml+xml,text/xml;q=0.9,*/*;q=0.8",
         }
 
