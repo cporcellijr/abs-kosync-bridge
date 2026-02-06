@@ -1,0 +1,235 @@
+# Hardcover Routes - Flask Blueprint for Hardcover API endpoints
+import logging
+
+from flask import Blueprint, jsonify, request, redirect, url_for, flash
+
+logger = logging.getLogger(__name__)
+
+# Create Blueprint for Hardcover endpoints
+hardcover_bp = Blueprint("hardcover", __name__)
+
+# Module-level references - set via init_hardcover_routes()
+_database_service = None
+_container = None
+
+
+def init_hardcover_routes(database_service, container):
+    """Initialize Hardcover routes with required dependencies."""
+    global _database_service, _container
+    _database_service = database_service
+    _container = container
+
+
+def _get_dependencies():
+    if _database_service is None or _container is None:
+        logger.error("Hardcover routes not initialized")
+        return (
+            None,
+            None,
+            (
+                jsonify(
+                    {"found": False, "message": "Hardcover routes not initialized"}
+                ),
+                500,
+            ),
+        )
+    return _database_service, _container, None
+
+
+@hardcover_bp.route("/api/hardcover/resolve", methods=["GET"])
+def api_hardcover_resolve():
+    """
+    Resolve a Hardcover book and return all editions.
+    Auto-matches using book metadata if no input provided.
+
+    GET /api/hardcover/resolve?abs_id={abs_id}&input={optional_url_or_id}
+    """
+    database_service, container, error_response = _get_dependencies()
+    if error_response:
+        return error_response
+
+    abs_id = request.args.get("abs_id", "").strip()
+    manual_input = request.args.get("input", "").strip()
+
+    if not abs_id:
+        return jsonify({"found": False, "message": "Missing abs_id parameter"}), 400
+
+    hardcover_client = container.hardcover_client()
+    if not hardcover_client.is_configured():
+        return jsonify({"found": False, "message": "Hardcover not configured"}), 400
+
+    book_data = None
+    author = None
+    existing_details = database_service.get_hardcover_details(abs_id)
+
+    if manual_input:
+        # Manual input provided - resolve directly
+        book_data = hardcover_client.resolve_book_from_input(manual_input)
+    else:
+        # Check if there's an existing Hardcover link for this ABS book
+        if existing_details and existing_details.hardcover_book_id:
+            # Use the existing linked book instead of auto-matching
+            book_data = hardcover_client.resolve_book_from_input(
+                existing_details.hardcover_book_id
+            )
+
+        if not book_data:
+            # No existing link (or fetch failed) - fall back to auto-match from ABS metadata
+            book = database_service.get_book(abs_id)
+            if not book:
+                return jsonify({"found": False, "message": "Book not found"}), 404
+
+            # Get metadata from ABS
+            item = container.abs_client().get_item_details(abs_id)
+            if not item:
+                return jsonify(
+                    {
+                        "found": False,
+                        "message": "Could not fetch book metadata from ABS",
+                    }
+                ), 502
+
+            meta = item.get("media", {}).get("metadata", {})
+            isbn = meta.get("isbn")
+            asin = meta.get("asin")
+            title = meta.get("title")
+            author = meta.get("authorName")
+
+            # Try match cascade: ISBN -> ASIN -> title+author -> title only
+            if isbn:
+                book_data = hardcover_client.search_by_isbn(isbn)
+
+            if not book_data and asin:
+                book_data = hardcover_client.search_by_isbn(asin)
+
+            if not book_data and title and author:
+                book_data = hardcover_client.search_by_title_author(title, author)
+
+            if not book_data and title:
+                book_data = hardcover_client.search_by_title_author(title, "")
+
+    if not book_data:
+        return jsonify(
+            {
+                "found": False,
+                "message": "Could not find book. Please enter Hardcover URL or ID.",
+            }
+        ), 404
+
+    # Fetch all editions for this book
+    book_id = book_data["book_id"]
+    editions = hardcover_client.get_book_editions(book_id)
+
+    # Get author from Hardcover (prefer over ABS since we're linking to Hardcover)
+    hardcover_author = hardcover_client.get_book_author(book_id)
+
+    # Only show linked_edition_id if we're displaying the same book that's linked
+    linked_edition_id = None
+    if existing_details and str(existing_details.hardcover_book_id) == str(book_id):
+        linked_edition_id = existing_details.hardcover_edition_id
+
+    return jsonify(
+        {
+            "found": True,
+            "book_id": book_id,
+            "title": book_data.get("title"),
+            "author": hardcover_author or author or "",
+            "slug": book_data.get("slug"),
+            "editions": editions,
+            "linked_edition_id": linked_edition_id,
+        }
+    )
+
+
+@hardcover_bp.route("/link-hardcover/<abs_id>", methods=["POST"])
+def link_hardcover(abs_id):
+    """
+    Link a book to Hardcover with a specific edition.
+    Supports both JSON (new modal flow) and form data (legacy flow).
+    """
+    from src.db.models import HardcoverDetails
+
+    database_service, container, error_response = _get_dependencies()
+    if error_response:
+        return error_response
+
+    # Check if JSON request (new flow) or form data (legacy flow)
+    if request.is_json:
+        data = request.get_json()
+        book_id = data.get("book_id")
+        edition_id = data.get("edition_id")
+        pages = data.get("pages")
+        audio_seconds = data.get("audio_seconds")
+        title = data.get("title")
+        slug = data.get("slug")
+
+        if not book_id:
+            return jsonify({"error": "Missing book_id"}), 400
+
+        try:
+            # Use pages if available, otherwise use -1 for audiobooks (indicates no page count)
+            hardcover_pages = (
+                pages if pages is not None else (-1 if audio_seconds else None)
+            )
+
+            hardcover_details = HardcoverDetails(
+                abs_id=abs_id,
+                hardcover_book_id=str(book_id),
+                hardcover_slug=slug,
+                hardcover_edition_id=str(edition_id) if edition_id else None,
+                hardcover_pages=hardcover_pages,
+                matched_by="manual",
+            )
+
+            database_service.save_hardcover_details(hardcover_details)
+
+            # Force status to 'Want to Read' (1)
+            try:
+                container.hardcover_client().update_status(
+                    int(book_id), 1, int(edition_id) if edition_id else None
+                )
+            except Exception as e:
+                logger.warning(f"Failed to set Hardcover status: {e}")
+
+            return jsonify({"success": True, "title": title})
+        except Exception as e:
+            logger.error(f"Failed to save hardcover details: {e}")
+            return jsonify({"error": "Database update failed"}), 500
+
+    # Legacy form data flow
+    url = request.form.get("hardcover_url", "").strip()
+    if not url:
+        return redirect(url_for("index"))
+
+    # Resolve book
+    book_data = container.hardcover_client().resolve_book_from_input(url)
+    if not book_data:
+        flash(f"Could not find book for: {url}", "error")
+        return redirect(url_for("index"))
+
+    try:
+        hardcover_details = HardcoverDetails(
+            abs_id=abs_id,
+            hardcover_book_id=book_data["book_id"],
+            hardcover_slug=book_data.get("slug"),
+            hardcover_edition_id=book_data.get("edition_id"),
+            hardcover_pages=book_data.get("pages"),
+            matched_by="manual",
+        )
+
+        database_service.save_hardcover_details(hardcover_details)
+
+        # Force status to 'Want to Read' (1)
+        try:
+            container.hardcover_client().update_status(
+                book_data["book_id"], 1, book_data.get("edition_id")
+            )
+        except Exception as e:
+            logger.warning(f"Failed to set Hardcover status: {e}")
+
+        flash(f"Linked Hardcover: {book_data.get('title')}", "success")
+    except Exception as e:
+        logger.error(f"Failed to save hardcover details: {e}")
+        flash("Database update failed", "error")
+
+    return redirect(url_for("index"))

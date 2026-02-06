@@ -23,6 +23,7 @@ from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.hash_cache import HashCache
 from src.api.kosync_server import kosync_bp, init_kosync_server
+from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -132,6 +133,10 @@ def setup_dependencies(app, test_container=None):
     # Register KoSync Blueprint and initialize with dependencies
     init_kosync_server(database_service, container, manager, hash_cache, EBOOK_DIR)
     app.register_blueprint(kosync_bp)
+
+    # Register Hardcover Blueprint and initialize with dependencies
+    init_hardcover_routes(database_service, container)
+    app.register_blueprint(hardcover_bp)
 
     logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
@@ -1223,47 +1228,6 @@ def clear_progress(abs_id):
     return redirect(url_for('index'))
 
 
-def link_hardcover(abs_id):
-    from flask import flash
-    url = request.form.get('hardcover_url', '').strip()
-    if not url:
-        return redirect(url_for('index'))
-
-    # Resolve book
-    book_data = container.hardcover_client().resolve_book_from_input(url)
-    if not book_data:
-        flash(f"❌ Could not find book for: {url}", "error")
-        return redirect(url_for('index'))
-
-    # Create or update hardcover details using database service
-    from src.db.models import HardcoverDetails
-
-    try:
-        hardcover_details = HardcoverDetails(
-            abs_id=abs_id,
-            hardcover_book_id=book_data['book_id'],
-            hardcover_slug=book_data.get('slug'),
-            hardcover_edition_id=book_data.get('edition_id'),
-            hardcover_pages=book_data.get('pages'),
-            matched_by='manual'  # Since this was manually linked
-        )
-
-        database_service.save_hardcover_details(hardcover_details)
-
-        # Force status to 'Want to Read' (1)
-        try:
-            container.hardcover_client().update_status(book_data['book_id'], 1, book_data.get('edition_id'))
-        except Exception as e:
-            logger.warning(f"Failed to set Hardcover status: {e}")
-
-        flash(f"✅ Linked Hardcover: {book_data.get('title')}", "success")
-    except Exception as e:
-        logger.error(f"Failed to save hardcover details: {e}")
-        flash("❌ Database update failed", "error")
-
-    return redirect(url_for('index'))
-
-
 def update_hash(abs_id):
     from flask import flash
     new_hash = request.form.get('new_hash', '').strip()
@@ -1673,7 +1637,6 @@ def create_app(test_container=None):
     app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
     app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
     app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
-    app.add_url_rule('/link-hardcover/<abs_id>', 'link_hardcover', link_hardcover, methods=['POST'])
     app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
     app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
     app.add_url_rule('/api/status', 'api_status', api_status)
