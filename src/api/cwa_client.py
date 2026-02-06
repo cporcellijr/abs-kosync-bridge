@@ -296,38 +296,51 @@ class CWAClient:
 
     def get_book_by_id(self, cwa_id):
         """
-        Fetch a specific book by its CWA ID (calibre ID) via OPDS.
-        Tries standard endpoints: /opds/book/{id}
+        Fetch a specific book by its CWA ID. 
+        Includes a fallback to direct download link construction if the server crashes (metadata page error).
         """
         if not self.is_configured(): return None
         
-        # Try standard endpoints
-        # Calibre-Web usually supports /opds/books/{id} or /opds/book/{id}
+        # 1. Try standard OPDS lookup
         endpoints = [f"/opds/book/{cwa_id}", f"/opds/books/{cwa_id}"]
         
         for ep in endpoints:
             try:
                 url = f"{self.base_url}{ep}"
                 logger.debug(f"🔍 CWA: Trying direct ID lookup at {url}")
-                # Use helper
+                
+                # Use helper (Stateless)
                 r = self._make_request(url)
-                if r.status_code == 200:
-                    # Parse single entry
-                    # Note: API might return a feed with one entry, or just the entry
+                
+                # If we get valid XML, parse it
+                if r.status_code == 200 and not r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
                     results = self._parse_opds(r.text)
                     if results:
-                        # Return the first result that matches (should be only one)
                         for res in results:
-                            # If parser extracted ID, check match. Or just assume it's the right one.
                             if str(res['id']) == str(cwa_id):
                                 return res
-                        # Fallback: if we just got one result from a direct ID call, it's probably it
                         if len(results) == 1:
                             return results[0]
             except Exception as e:
                 logger.warning(f"CWA ID lookup failed for {url}: {e}")
-                
-        return None
+
+        # 2. Fallback: Direct Download Link Construction
+        # If the server crashed (Author DB error) or lookup failed, assume the ID is valid 
+        # and try to construct the download link blindly.
+        logger.warning(f"⚠️ CWA metadata lookup failed for ID {cwa_id}. Attempting direct download fallback.")
+        
+        # Standard Calibre-Web OPDS download format: /opds/download/{id}/{format}/
+        # We assume EPUB as it's the primary target
+        fallback_url = f"{self.base_url}/opds/download/{cwa_id}/epub/"
+        
+        return {
+            "id": cwa_id,
+            "title": f"Unknown Book {cwa_id} (Fallback)",  # We don't know the title, but download might still work
+            "author": "Unknown",
+            "download_url": fallback_url,
+            "ext": "epub",
+            "source": "CWA_Fallback"
+        }
 
     def download_ebook(self, download_url, output_path):
         """Download ebook file from URL to output_path."""
