@@ -875,6 +875,13 @@
                         <input type="number" step="0.1" name="FUZZY_MATCH_THRESHOLD"
                             value="{{ get_val('FUZZY_MATCH_THRESHOLD') }}">
                     </div>
+                    <div class="form-group">
+                        <label>SMIL Validation Threshold (%)</label>
+                        <input type="number" step="1" min="0" max="100" name="SMIL_VALIDATION_THRESHOLD"
+                            value="{{ get_val('SMIL_VALIDATION_THRESHOLD', '60') }}">
+                        <div class="help-text">Minimum token match % to accept EPUB SMIL data. Lower = more lenient.
+                        </div>
+                    </div>
 
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 

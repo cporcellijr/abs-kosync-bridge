@@ -69,6 +69,7 @@ class Book(Base):
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="book", cascade="all, delete-orphan")
     hardcover_details = relationship("HardcoverDetails", back_populates="book", cascade="all, delete-orphan", uselist=False)
+    alignment = relationship("BookAlignment", back_populates="book", uselist=False, cascade="all, delete-orphan")
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
                  kosync_doc_id: str = None, transcript_file: str = None,
@@ -241,6 +242,45 @@ class Setting(Base):
 
     def __repr__(self):
         return f"<Setting(key='{self.key}', value='{self.value}')>"
+
+
+class BookAlignment(Base):
+    """
+    Model for storing the computed alignment map for a book.
+    Replaces legacy JSON files in transcripts/ directory.
+    """
+    __tablename__ = 'book_alignments'
+
+    abs_id = Column(String(255), ForeignKey('books.abs_id', ondelete='CASCADE'), primary_key=True)
+    alignment_map_json = Column(Text, nullable=False)  # JSON-encoded list of dicts or optimized structure
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship
+    book = relationship("Book", back_populates="alignment")
+
+    def __init__(self, abs_id: str, alignment_map_json: str):
+        self.abs_id = abs_id
+        self.alignment_map_json = alignment_map_json
+
+
+class BookloreBook(Base):
+    """
+    Model for caching Booklore search results, replacing local JSON cache.
+    """
+    __tablename__ = 'booklore_books'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    filename = Column(String(500), index=True, nullable=False, unique=True)
+    title = Column(String(500))
+    authors = Column(String(500))
+    raw_metadata = Column(Text)  # JSON blob of full booklore response
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __init__(self, filename: str, title: str = None, authors: str = None, raw_metadata: str = None):
+        self.filename = filename
+        self.title = title
+        self.authors = authors
+        self.raw_metadata = raw_metadata
 
 
 # Database configuration

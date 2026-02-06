@@ -448,17 +448,17 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
 
                             safe_title = "".join(c for c in book['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip() + ".epub"
 
-                            cache_dir = _container.data_dir() / "epub_cache"
-                            cache_dir.mkdir(parents=True, exist_ok=True)
-                            cache_path = cache_dir / safe_title
-                            with open(cache_path, 'wb') as f:
-                                f.write(book_content)
-                            logger.info(f"📥 Persisted Booklore book to cache: {safe_title}")
-
-                            if _hash_cache:
-                                _hash_cache.store_hash(computed_hash, safe_title, source='booklore', booklore_id=book_id)
-
                             if computed_hash == doc_hash:
+                                cache_dir = _container.data_dir() / "epub_cache"
+                                cache_dir.mkdir(parents=True, exist_ok=True)
+                                cache_path = cache_dir / safe_title
+                                with open(cache_path, 'wb') as f:
+                                    f.write(book_content)
+                                logger.info(f"📥 Persisted Booklore book to cache: {safe_title}")
+
+                                if _hash_cache:
+                                    _hash_cache.store_hash(computed_hash, safe_title, source='booklore', booklore_id=book_id)
+
                                 logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
                                 return safe_title
                     except Exception as e:
@@ -545,6 +545,8 @@ def api_unlink_kosync_document(doc_hash):
     """Remove the ABS book link from a KOSync document."""
     success = _database_service.unlink_kosync_document(doc_hash)
     if success:
+        # Cleanup cached EPUB for this hash
+        _cleanup_cache_for_hash(doc_hash)
         return jsonify({'success': True, 'message': 'Document unlinked'})
     return jsonify({'error': 'Document not found'}), 404
 
@@ -554,5 +556,47 @@ def api_delete_kosync_document(doc_hash):
     """Delete a KOSync document."""
     success = _database_service.delete_kosync_document(doc_hash)
     if success:
+        # Cleanup cached EPUB for this hash
+        _cleanup_cache_for_hash(doc_hash)
         return jsonify({'success': True, 'message': 'Document deleted'})
     return jsonify({'error': 'Document not found'}), 404
+
+
+def _cleanup_cache_for_hash(doc_hash):
+    """Delete cached EPUB file and hash cache entry for a document."""
+    try:
+        # 1. Identify filename
+        filename = None
+        if _hash_cache:
+            filename = _hash_cache.lookup_by_hash(doc_hash)
+        
+        # Fallback: check database if not in hash cache
+        if not filename:
+            doc = _database_service.get_kosync_document(doc_hash)
+            # If doc is already deleted from DB, we can't look it up, 
+            # but we might have grabbed it before deletion if we reordered logic.
+            # However, for 'unlink', the doc still exists.
+            if doc and doc.linked_abs_id:
+                book = _database_service.get_book(doc.linked_abs_id)
+                if book:
+                    filename = book.ebook_filename
+
+        if filename:
+            # 2. Delete file if in epub_cache
+            # Ensure we only delete from cache, not the main library
+            if _container:
+                cache_dir = _container.data_dir() / "epub_cache"
+                file_path = cache_dir / filename
+                if file_path.exists():
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"🗑️ Deleted cached EPUB: {filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete cached file {filename}: {e}")
+        
+        # 3. Clean hash cache
+        if _hash_cache:
+            _hash_cache.delete_hash(doc_hash)
+
+    except Exception as e:
+        logger.error(f"Error cleaning up cache for {doc_hash}: {e}")

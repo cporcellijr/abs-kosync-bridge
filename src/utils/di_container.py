@@ -18,7 +18,11 @@ from src.api.storyteller_api import StorytellerDBWithAPI
 from src.db.database_service import DatabaseService
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
-from src.utils.smil_extractor import SmilExtractor  # [ADDED IMPORT]
+from src.utils.smil_extractor import SmilExtractor
+from src.utils.polisher import Polisher # [NEW]
+from src.services.alignment_service import AlignmentService # [NEW]
+from src.services.library_service import LibraryService # [NEW]
+from src.services.migration_service import MigrationService # [NEW]
 from src.sync_clients.abs_sync_client import ABSSyncClient
 from src.sync_clients.kosync_sync_client import KoSyncSyncClient
 from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
@@ -67,11 +71,7 @@ class Container(containers.DeclarativeContainer):
 
     kosync_client = providers.Singleton(KoSyncClient)
 
-    booklore_client = providers.Singleton(BookloreClient)
-
-    hardcover_client = providers.Singleton(HardcoverClient)
-
-    # SQLAlchemy Database Service
+    # SQLAlchemy Database Service - Moved up for dependency injection
     database_service = providers.Singleton(
         DatabaseService,
         providers.Factory(
@@ -79,6 +79,13 @@ class Container(containers.DeclarativeContainer):
             data_dir=data_dir
         )
     )
+
+    booklore_client = providers.Singleton(
+        BookloreClient
+    )
+
+    hardcover_client = providers.Singleton(HardcoverClient)
+
 
 
     # Ebook parser
@@ -88,9 +95,34 @@ class Container(containers.DeclarativeContainer):
         epub_cache_dir=epub_cache_dir
     )
 
-    # [ADDED] Smil Extractor Provider
+    # Smil Extractor Provider
     smil_extractor = providers.Singleton(
         SmilExtractor
+    )
+
+    # [NEW] Polisher
+    polisher = providers.Singleton(
+        Polisher
+    )
+
+    # [NEW] Services
+    alignment_service = providers.Singleton(
+        AlignmentService,
+        database_service=database_service,
+        polisher=polisher
+    )
+
+    library_service = providers.Singleton(
+        LibraryService,
+        database_service=database_service,
+        booklore_client=booklore_client
+    )
+
+    migration_service = providers.Singleton(
+        MigrationService,
+        database_service=database_service,
+        alignment_service=alignment_service,
+        data_dir=data_dir
     )
 
     # Storyteller client with factory
@@ -102,7 +134,8 @@ class Container(containers.DeclarativeContainer):
     transcriber = providers.Singleton(
         AudioTranscriber,
         data_dir,
-        smil_extractor  # [UPDATED] Injected dependency
+        smil_extractor,
+        polisher  # [UPDATED] Injected dependency
     )
 
     # Sync clients
@@ -110,7 +143,8 @@ class Container(containers.DeclarativeContainer):
         ABSSyncClient,
         abs_client,
         transcriber,
-        ebook_parser
+        ebook_parser,
+        alignment_service
     )
 
     kosync_sync_client = providers.Singleton(
@@ -166,6 +200,12 @@ class Container(containers.DeclarativeContainer):
         ebook_parser=ebook_parser,
         database_service=database_service,
         sync_clients=sync_clients,
+        
+        # [NEW] Injected Services
+        alignment_service=alignment_service,
+        library_service=library_service,
+        migration_service=migration_service,
+
         epub_cache_dir=epub_cache_dir,
         data_dir=data_dir,
         books_dir=books_dir

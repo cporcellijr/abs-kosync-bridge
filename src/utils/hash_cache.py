@@ -177,7 +177,41 @@ class HashCache:
                 if old_hash and old_hash in self._cache.get('by_hash', {}):
                     del self._cache['by_hash'][old_hash]
                 self._save_cache()
+                self._save_cache()
                 logger.debug(f"Invalidated cache for Booklore ID: {booklore_id}")
+    
+    def delete_hash(self, doc_hash: str):
+        """Delete a hash entry and all its indexes."""
+        with self._lock:
+            # Get entry to find other keys (filepath, booklore_id)
+            entry = self._cache.get('by_hash', {}).get(doc_hash)
+            if not entry:
+                return
+
+            # Remove from by_hash
+            del self._cache['by_hash'][doc_hash]
+
+            # Remove from by_booklore_id
+            booklore_id = entry.get('booklore_id')
+            if booklore_id and str(booklore_id) in self._cache.get('by_booklore_id', {}):
+                del self._cache['by_booklore_id'][str(booklore_id)]
+
+            # Remove from by_filepath
+            # We need to find which filepath points to this hash. 
+            # The entry doesn't strictly store the full filepath key used in by_filepath,
+            # but usually we can infer it or scan.
+            # Scanning is safe since by_filepath isn't huge.
+            filepath_to_remove = None
+            for fp, f_entry in self._cache.get('by_filepath', {}).items():
+                if f_entry.get('hash') == doc_hash:
+                    filepath_to_remove = fp
+                    break
+            
+            if filepath_to_remove:
+                del self._cache['by_filepath'][filepath_to_remove]
+
+            self._save_cache()
+            logger.debug(f"Deleted hash cache entry: {doc_hash}")
     
     def clear(self):
         """Clear entire cache."""

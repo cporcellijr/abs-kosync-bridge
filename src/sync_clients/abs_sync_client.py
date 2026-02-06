@@ -12,10 +12,11 @@ from src.utils.transcriber import AudioTranscriber
 logger = logging.getLogger(__name__)
 
 class ABSSyncClient(SyncClient):
-    def __init__(self, abs_client: ABSClient, transcriber: AudioTranscriber, ebook_parser: EbookParser):
+    def __init__(self, abs_client: ABSClient, transcriber: AudioTranscriber, ebook_parser: EbookParser, alignment_service=None):
         super().__init__(ebook_parser)
         self.abs_client = abs_client
         self.transcriber = transcriber
+        self.alignment_service = alignment_service
         self.abs_progress_offset = float(os.getenv("ABS_PROGRESS_OFFSET_SECONDS", 0))
         self.delta_abs_thresh = float(os.getenv("SYNC_DELTA_ABS_SECONDS", 60))
 
@@ -51,16 +52,15 @@ class ABSSyncClient(SyncClient):
             abs_ts = 0.0
 
         # Convert timestamp to percentage
-        abs_pct = self._abs_to_percentage(abs_ts, book.transcript_file)
+        abs_pct = self._abs_to_percentage(abs_ts, book)
         if abs_ts > 0 and abs_pct is None:
-            # Invalid transcript
-            logger.debug("⚠️ Unable to convert ABS timestamp to percentage - invalid transcript?")
-            return None
-
+            # We lower this to debug to avoid spam if book is offline/unprocessed
+            pass
+        
         # Get previous ABS state values
         prev_abs_ts = prev_state.timestamp if prev_state else 0
         prev_abs_pct = prev_state.percentage if prev_state else 0
-
+        
         delta = abs(abs_ts - prev_abs_ts) if abs_ts and prev_abs_ts else abs(abs_ts - prev_abs_ts) if abs_ts else 0
 
         return ServiceState(
@@ -74,8 +74,17 @@ class ABSSyncClient(SyncClient):
             value_formatter=lambda v: f"{v:.4%}"
         )
 
-    def _abs_to_percentage(self, abs_seconds, transcript_path):
-        """Convert ABS timestamp to percentage using transcript duration"""
+    def _abs_to_percentage(self, abs_seconds, book: Book):
+        """Convert ABS timestamp to percentage using book duration (preferred) or transcript"""
+        # 1. Try Book model duration (Golden Source)
+        if book.duration and book.duration > 0:
+            return min(max(abs_seconds / book.duration, 0.0), 1.0)
+            
+        # 2. Try Transcript file (Legacy fallback)
+        transcript_path = book.transcript_file
+        if not transcript_path or transcript_path == "DB_MANAGED":
+            return None
+
         try:
             with open(transcript_path, 'r') as f:
                 data = json.load(f)
@@ -88,12 +97,36 @@ class ABSSyncClient(SyncClient):
         abs_ts = state.current.get('ts')
         if not book or abs_ts is None:
             return None
+            
+        # [NEW] DB Managed (Unified Architecture)
+        if book.transcript_file == "DB_MANAGED" and self.alignment_service:
+            # Inverse lookup: Time -> Char -> Text
+            char_offset = self.alignment_service.get_char_for_time(book.abs_id, abs_ts)
+            if char_offset is not None:
+                 # Need book text
+                 book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+                 if book_path and book_path.exists():
+                     full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+                     # Return context around char
+                     start = max(0, char_offset - 50)
+                     end = min(len(full_text), char_offset + 150)
+                     return full_text[start:end]
+            return None
+
+        # Legacy File-Based
         return self.transcriber.get_text_at_time(book.transcript_file, abs_ts)
 
     def get_fallback_text(self, book: Book, state: ServiceState) -> Optional[str]:
+        # Similar logic for fallback
         abs_ts = state.current.get('ts')
         if not book or abs_ts is None:
             return None
+            
+        if book.transcript_file == "DB_MANAGED" and self.alignment_service:
+             # Just look a bit earlier?
+             earlier_ts = max(0, abs_ts - 10)
+             return self.get_text_from_current_state(book, ServiceState({'ts': earlier_ts}))
+
         return self.transcriber.get_previous_segment_text(book.transcript_file, abs_ts)
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
@@ -118,12 +151,12 @@ class ABSSyncClient(SyncClient):
                 logger.info(f"[{book_title}] Not updating ABS progress - target timestamp {ts_for_text:.2f}s is before current ABS position {abs_ts:.2f}s.")
                 return SyncResult(abs_ts, True, {
                     'ts': abs_ts,
-                    'pct': self._abs_to_percentage(abs_ts, book.transcript_file) or 0
+                    'pct': self._abs_to_percentage(abs_ts, book) or 0
                 })
 
             result, final_ts = self._update_abs_progress_with_offset(book.abs_id, ts_for_text, abs_ts if abs_ts is not None else 0.0)
             # Calculate percentage from timestamp for state
-            pct = self._abs_to_percentage(final_ts, book.transcript_file)
+            pct = self._abs_to_percentage(final_ts, book)
             updated_state = {
                 'ts': final_ts,
                 'pct': pct or 0
