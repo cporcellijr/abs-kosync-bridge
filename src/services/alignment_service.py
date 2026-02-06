@@ -292,3 +292,10 @@ class AlignmentService:
             if entry:
                 return json.loads(entry.alignment_map_json)
             return None
+    def get_book_duration(self, abs_id: str) -> Optional[float]:
+        """Get the total duration of the book from its alignment map."""
+        alignment = self._get_alignment(abs_id)
+        if alignment and len(alignment) > 0:
+            # The last point in the alignment map should have the max timestamp
+            return float(alignment[-1]['ts'])
+        return None

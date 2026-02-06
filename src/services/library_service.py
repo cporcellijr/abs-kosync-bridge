@@ -44,8 +44,24 @@ class LibraryService:
         # Trigger cache refresh by calling get_all_books()
         # This will refresh the internal JSON-based cache if stale
         try:
+            from src.db.models import BookloreBook
+            import json
+
             all_books = self.booklore.get_all_books()
-            logger.info(f"   📚 Booklore cache contains {len(all_books)} books")
+            logger.info(f"   📚 Booklore API returned {len(all_books)} books. Persisting to DB...")
+            
+            persisted_count = 0
+            for b in all_books:
+                booklore_book = BookloreBook(
+                    filename=b.get('fileName'),
+                    title=b.get('title'),
+                    authors=b.get('authors'),
+                    raw_metadata=json.dumps(b)
+                )
+                self.db.save_booklore_book(booklore_book)
+                persisted_count += 1
+            
+            logger.info(f"   ✅ Successfully persisted {persisted_count} books to BookloreBook table")
         except Exception as e:
             logger.error(f"   Library sync failed: {e}")
 

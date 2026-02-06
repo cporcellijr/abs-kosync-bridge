@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, Base
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, BookloreBook, Base
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -505,6 +505,26 @@ class DatabaseService:
                 session.expunge(doc)
             return doc
 
+    def get_kosync_doc_by_filename(self, filename: str) -> Optional[KosyncDocument]:
+        """Find a KOSync document by its associated filename."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.filename == filename
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+    def get_kosync_doc_by_booklore_id(self, booklore_id: str) -> Optional[KosyncDocument]:
+        """Find a KOSync document by its Booklore ID."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.booklore_id == str(booklore_id)
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
 
     # PendingSuggestion operations
     def get_pending_suggestion(self, source_id: str) -> Optional[PendingSuggestion]:
@@ -577,6 +597,54 @@ class DatabaseService:
             ).first()
             if suggestion:
                 suggestion.status = 'ignored'
+                return True
+            return False
+
+    # BookloreBook operations
+    def get_booklore_book(self, filename: str) -> Optional[BookloreBook]:
+        """Get a cached Booklore book by filename."""
+        with self.get_session() as session:
+            book = session.query(BookloreBook).filter(BookloreBook.filename == filename).first()
+            if book:
+                session.expunge(book)
+            return book
+
+    def get_all_booklore_books(self) -> List[BookloreBook]:
+        """Get all cached Booklore books."""
+        with self.get_session() as session:
+            books = session.query(BookloreBook).all()
+            for book in books:
+                session.expunge(book)
+            return books
+
+    def save_booklore_book(self, booklore_book: BookloreBook) -> BookloreBook:
+        """Save or update a Booklore book."""
+        with self.get_session() as session:
+            existing = session.query(BookloreBook).filter(
+                BookloreBook.filename == booklore_book.filename
+            ).first()
+
+            if existing:
+                for attr in ['title', 'authors', 'raw_metadata']:
+                    if hasattr(booklore_book, attr):
+                        setattr(existing, attr, getattr(booklore_book, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                session.add(booklore_book)
+                session.flush()
+                session.refresh(booklore_book)
+                session.expunge(booklore_book)
+                return booklore_book
+
+    def delete_booklore_book(self, filename: str) -> bool:
+        """Delete a Booklore book from cache."""
+        with self.get_session() as session:
+            book = session.query(BookloreBook).filter(BookloreBook.filename == filename).first()
+            if book:
+                session.delete(book)
                 return True
             return False
 

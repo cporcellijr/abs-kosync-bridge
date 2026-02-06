@@ -21,7 +21,8 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 from src.utils.config_loader import ConfigLoader
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
-from src.utils.hash_cache import HashCache
+from src.utils.logging_utils import sanitize_log_data
+# from src.utils.hash_cache import HashCache
 from src.api.kosync_server import kosync_bp, init_kosync_server
 
 def _reconfigure_logging():
@@ -47,7 +48,7 @@ def setup_dependencies(app, test_container=None):
         test_container: Optional test container for dependency injection during testing.
                        If None, creates production container from environment.
     """
-    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR, hash_cache
+    global container, manager, database_service, DATA_DIR, EBOOK_DIR, COVERS_DIR
 
     # Initialize Database Service
     from src.db.migration_utils import initialize_database
@@ -126,11 +127,11 @@ def setup_dependencies(app, test_container=None):
     if not COVERS_DIR.exists():
         COVERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initialize hash cache
-    hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
+    # Initialize hash cache (DEPRECATED - now in DB)
+    # hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
 
     # Register KoSync Blueprint and initialize with dependencies
-    init_kosync_server(database_service, container, manager, hash_cache, EBOOK_DIR)
+    init_kosync_server(database_service, container, manager, EBOOK_DIR)
     app.register_blueprint(kosync_bp)
 
     logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")

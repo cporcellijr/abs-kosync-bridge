@@ -88,8 +88,10 @@ class ABSSyncClient(SyncClient):
             return None
             
         if transcript_path == "DB_MANAGED":
-             # TODO: Implement time estimation from AlignmentService?
-             # For now, we rely on book duration mostly.
+             if self.alignment_service:
+                 dur = self.alignment_service.get_book_duration(book.abs_id)
+                 if dur:
+                     return min(max(abs_seconds / dur, 0.0), 1.0)
              return None
 
         try:

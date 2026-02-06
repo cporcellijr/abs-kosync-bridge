@@ -29,13 +29,20 @@ class KosyncDocument(Base):
     linked_abs_id = Column(String(255), ForeignKey('books.abs_id'), nullable=True, index=True)
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Hash cache replacement fields
+    filename = Column(String(500), nullable=True)
+    source = Column(String(50), nullable=True)
+    booklore_id = Column(String(255), nullable=True, index=True)
+    mtime = Column(Float, nullable=True)
 
     # Relationship to Book (optional)
     linked_book = relationship("Book", backref="kosync_documents")
 
     def __init__(self, document_hash: str, progress: str = None, percentage: float = 0,
                  device: str = None, device_id: str = None, timestamp: datetime = None,
-                 linked_abs_id: str = None):
+                 linked_abs_id: str = None, filename: str = None, source: str = None,
+                 booklore_id: str = None, mtime: float = None):
         self.document_hash = document_hash
         self.progress = progress
         self.percentage = percentage
@@ -43,6 +50,10 @@ class KosyncDocument(Base):
         self.device_id = device_id
         self.timestamp = timestamp
         self.linked_abs_id = linked_abs_id
+        self.filename = filename
+        self.source = source
+        self.booklore_id = booklore_id
+        self.mtime = mtime
         self.first_seen = datetime.utcnow()
         self.last_updated = datetime.utcnow()
 
@@ -275,6 +286,14 @@ class BookloreBook(Base):
     authors = Column(String(500))
     raw_metadata = Column(Text)  # JSON blob of full booklore response
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def raw_metadata_dict(self):
+        import json
+        try:
+            return json.loads(self.raw_metadata) if self.raw_metadata else {}
+        except:
+            return {}
 
     def __init__(self, filename: str, title: str = None, authors: str = None, raw_metadata: str = None):
         self.filename = filename
