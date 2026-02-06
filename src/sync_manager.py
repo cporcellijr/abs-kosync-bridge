@@ -114,6 +114,9 @@ class SyncManager:
             logger.info("🔄 Checking for legacy data to migrate...")
             self.migration_service.migrate_legacy_data()
 
+        # [NEW] Cleanup orphaned cache files
+        self.cleanup_cache()
+
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
         try:
@@ -159,6 +162,56 @@ class SyncManager:
 
         except Exception as e:
             logger.error(f"Error cleaning up stale jobs: {e}")
+
+    def cleanup_cache(self):
+        """Delete files from ebook cache that are not referenced in the DB."""
+        if not self.epub_cache_dir.exists():
+            return
+
+        logger.info("🧹 Starting ebook cache cleanup...")
+        
+        try:
+            # 1. Collect all valid filenames from DB
+            valid_filenames = set()
+            
+            # From Active Books
+            books = self.database_service.get_all_books()
+            for book in books:
+                if book.ebook_filename:
+                    valid_filenames.add(book.ebook_filename)
+            
+            # From Pending Suggestions (covers auto-discovery matches)
+            suggestions = self.database_service.get_all_pending_suggestions()
+            for suggestion in suggestions:
+                # matches property automatically parses the JSON
+                for match in suggestion.matches:
+                    if match.get('filename'):
+                        valid_filenames.add(match['filename'])
+
+            # 2. Iterate cache and delete orphans
+            deleted_count = 0
+            reclaimed_bytes = 0
+            
+            for file_path in self.epub_cache_dir.iterdir():
+                # Only check files, and ensure we don't delete if it's in our valid list
+                if file_path.is_file() and file_path.name not in valid_filenames:
+                    try:
+                        size = file_path.stat().st_size
+                        file_path.unlink()
+                        deleted_count += 1
+                        reclaimed_bytes += size
+                        logger.debug(f"   🗑️ Deleted orphaned cache file: {file_path.name}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to delete {file_path.name}: {e}")
+            
+            if deleted_count > 0:
+                mb = reclaimed_bytes / (1024 * 1024)
+                logger.info(f"✨ Cache cleanup complete: Removed {deleted_count} files ({mb:.2f} MB)")
+            else:
+                logger.info("✨ Cache is clean (no orphaned files found).")
+                
+        except Exception as e:
+            logger.error(f"Error during cache cleanup: {e}")
 
     def get_abs_title(self, ab):
         media = ab.get('media', {})
