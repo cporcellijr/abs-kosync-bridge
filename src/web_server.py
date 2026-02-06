@@ -587,26 +587,31 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
                  if cwa_client and cwa_client.is_configured():
                      logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
                      
-                     # Priority: Try Direct ID lookup first (More reliable)
-                     target = cwa_client.get_book_by_id(cwa_id)
+                     target = None
                      
-                     # Fallback: Search (Logic from before)
-                     if not target:
-                         # We try searching for the ID
-                         results = cwa_client.search_ebooks(cwa_id)
-                         
-                         # Find exact ID match if possible
-                         for res in results:
-                             # Loose match on ID?
-                             if str(res['id']) == cwa_id:
-                                 target = res
-                                 break
-                         
-                         # 2nd pass: If no exact ID match, maybe it was the only result?
-                         if not target and len(results) == 1:
-                             target = results[0]
+                     # Priority 1: Search for the ID (search results include download_url and won't crash the server)
+                     results = cwa_client.search_ebooks(cwa_id)
+                     
+                     # Find exact ID match if possible
+                     for res in results:
+                         if str(res.get('id')) == cwa_id:
+                             target = res
+                             break
+                     
+                     # If no exact ID match, maybe it was the only result
+                     if not target and len(results) == 1:
+                         target = results[0]
 
-                     if target:
+                     # Priority 2: Use direct download URL from search if available
+                     if target and target.get('download_url'):
+                         logger.info(f"🚀 Using direct download link from search for '{target.get('title', 'Unknown')}'")
+                     else:
+                         # Priority 3: Fallback to get_book_by_id only if search didn't provide a URL
+                         # This may crash server on metadata page, but includes a blind URL fallback
+                         logger.debug(f"🔍 Search did not return a usable result, trying direct ID lookup...")
+                         target = cwa_client.get_book_by_id(cwa_id)
+
+                     if target and target.get('download_url'):
                          if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
                          if cwa_client.download_ebook(target['download_url'], cached_path):
                              logger.info(f"   ✅ Downloaded CWA ebook to {cached_path}")
