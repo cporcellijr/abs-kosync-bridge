@@ -164,6 +164,45 @@ class ABSClient:
             logger.error(f"Error searching ABS ebooks: {e}")
             return []
 
+    def find_book_in_library(self, library_id, title, author=None):
+        """
+        Scan a specific library for a book with matching title/author.
+        Useful when 'search' API fails for mixed-content items.
+        """
+        try:
+            items_url = f"{self.base_url}/api/libraries/{library_id}/items"
+            params = {"mediaType": "book", "limit": 1000} # Fetch batch, filter locally
+            
+            r = self.session.get(items_url, params=params, timeout=self.timeout)
+            if r.status_code != 200: 
+                return []
+                
+            results = r.json().get('results', [])
+            matches = []
+            
+            # Simple fuzzy match logic
+            clean_title = title.lower().strip() if title else ""
+            clean_author = author.lower().strip() if author else ""
+            
+            for item in results:
+                meta = item.get('media', {}).get('metadata', {})
+                item_title = (meta.get('title') or "").lower()
+                item_author = (meta.get('authorName') or "").lower()
+                
+                # Title must be contained
+                if clean_title in item_title or item_title in clean_title:
+                    # If author provided, check it loosely
+                    if clean_author and clean_author not in item_author and item_author not in clean_author:
+                        continue
+                        
+                    matches.append(item)
+                    
+            return matches
+            
+        except Exception as e:
+            logger.error(f"Error scanning library {library_id}: {e}")
+            return []
+
     def download_file(self, stream_url, output_path):
         """Download file from stream_url to output_path."""
         try:
