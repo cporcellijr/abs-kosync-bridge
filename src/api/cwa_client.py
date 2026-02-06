@@ -8,7 +8,11 @@ logger = logging.getLogger(__name__)
 
 class CWAClient:
     def __init__(self):
-        self.base_url = os.environ.get("CWA_SERVER", "").rstrip('/')
+        # Strip trailing slash and verify we don't duplicate /opds
+        raw_url = os.environ.get("CWA_SERVER", "").rstrip('/')
+        if raw_url.endswith('/opds'):
+            raw_url = raw_url[:-5]
+        self.base_url = raw_url
         self.username = os.environ.get("CWA_USERNAME", "")
         self.password = os.environ.get("CWA_PASSWORD", "")
         self.enabled = os.environ.get("CWA_ENABLED", "").lower() == "true"
@@ -18,10 +22,73 @@ class CWAClient:
             self.session.auth = (self.username, self.password)
             
         self.timeout = 30
+        self.search_template = None
 
     def is_configured(self):
         """Check if CWA is enabled and configured."""
         return self.enabled and bool(self.base_url)
+
+    def _get_search_template(self):
+        """
+        Dynamically discover the search URL template from the OPDS root.
+        Returns: URL template string (e.g. '/opds/search/{searchTerms}') or None.
+        """
+        if self.search_template:
+            return self.search_template
+
+        try:
+            logger.debug(f"🔍 CWA: Discovering search endpoint from {self.base_url}/opds")
+            r = self.session.get(f"{self.base_url}/opds", timeout=self.timeout)
+            if r.status_code != 200:
+                logger.warning(f"⚠️ CWA OPDS Root failed {r.status_code}")
+                return None
+
+            root = ET.fromstring(r.text)
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            
+            # Find proper search link (prefer atom+xml)
+            search_link = None
+            
+            # Helper to check link
+            def is_valid_search_link(link_elem):
+                return link_elem.get('rel') == 'search'
+            
+            # 1. Try standard Atom namespace with type check
+            for link in root.findall('atom:link', ns):
+                if is_valid_search_link(link):
+                    l_type = link.get('type', '')
+                    l_href = link.get('href')
+                    if 'atom+xml' in l_type:
+                        search_link = l_href
+                        break # Found best match
+                    elif not search_link and 'opensearch' not in l_type:
+                        # Backup candidate (if not explicitly OSD)
+                        search_link = l_href
+
+            # 2. Fallback: Namespace-agnostic search
+            if not search_link:
+                for child in root:
+                    if child.tag.endswith('link') and is_valid_search_link(child):
+                        l_type = child.get('type', '')
+                        l_href = child.get('href')
+                        if 'atom+xml' in l_type:
+                            search_link = l_href
+                            break
+                        elif not search_link and 'opensearch' not in l_type:
+                            search_link = l_href
+
+            if search_link:
+                self.search_template = search_link
+                # Ensure absolute URL
+                if self.search_template and not self.search_template.startswith('http'):
+                    self.search_template = f"{self.base_url}{self.search_template}"
+                logger.info(f"✅ CWA: Discovered search template: {self.search_template}")
+                return self.search_template
+
+        except Exception as e:
+            logger.error(f"❌ CWA Discovery Error: {e}")
+        
+        return None
 
     def search_ebooks(self, query):
         """
@@ -31,12 +98,31 @@ class CWAClient:
         if not self.is_configured():
             return []
 
-        # Sanitize query
-        safe_query = quote(query)
-        search_url = f"{self.base_url}/opds/search?q={safe_query}"
+        # Get search template (dynamic or fallback)
+        template = self._get_search_template()
+        
+        if not template:
+            # Fallback to legacy assumed standard if discovery fails
+            safe_query = quote(query)
+            search_url = f"{self.base_url}/opds/search?q={safe_query}"
+            logger.warning("⚠️ CWA: Could not discover search template, falling back to legacy URL.")
+        else:
+            # Replace {searchTerms} with query
+            # Note: We must encode the query, but the template syntax might vary.
+            # Standard is {searchTerms}, we replace it.
+            safe_query = quote(query)
+            if "{searchTerms}" in template:
+                search_url = template.replace("{searchTerms}", safe_query)
+            else:
+                 # If template doesn't have placeholder (weird), try appending
+                 pass 
+                 # Actually, let's assume if it returns a base URL, we append query?
+                 # No, defined spec says it should have it.
+                 # If missing, we might fail or try simple replace?
+                 search_url = template.replace("{searchTerms}", safe_query)
         
         try:
-            logger.debug(f"🔍 CWA: Searching for '{query}'...")
+            logger.debug(f"🔍 CWA: Searching for '{query}' -> {search_url}")
             r = self.session.get(search_url, timeout=self.timeout)
             
             if r.status_code != 200:
