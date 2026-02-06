@@ -31,7 +31,7 @@ class CWAClient:
         # bypassing the "Redirect to Login Page" issue.
         if self.username and self.password:
             # We still set session.auth for compatibility, but the header takes precedence
-            self.session.auth = (self.username, self.password)
+            # REMOVED: self.session.auth = (self.username, self.password)
             
             # Manually construct the header
             user_pass = f"{self.username}:{self.password}"
@@ -42,6 +42,18 @@ class CWAClient:
             
         self.timeout = 30
         self.search_template = None
+
+    def _make_request(self, url, **kwargs):
+        """Helper to make requests with cookies cleared to force Basic Auth."""
+        try:
+            # Clear cookies to prevent 'Guest' session sticking
+            self.session.cookies.clear()
+            # Merge kwargs with default timeout if not present
+            kwargs.setdefault('timeout', self.timeout)
+            return self.session.get(url, **kwargs)
+        except Exception as e:
+            logger.error(f"CWA Request failed: {e}")
+            raise
 
     def is_configured(self):
         """Check if CWA is enabled and configured."""
@@ -55,7 +67,8 @@ class CWAClient:
 
         try:
             url = f"{self.base_url}/opds"
-            r = self.session.get(url, timeout=5)
+            # Use helper
+            r = self._make_request(url, timeout=5)
             
             # Check for soft login redirect (status 200 but HTML content)
             if r.status_code == 200:
@@ -87,7 +100,8 @@ class CWAClient:
 
         try:
             logger.debug(f"🔍 CWA: Discovering search endpoint from {self.base_url}/opds")
-            r = self.session.get(f"{self.base_url}/opds", timeout=self.timeout)
+            # Use helper
+            r = self._make_request(f"{self.base_url}/opds")
             
             # Check if we got an HTML login page disguised as 200 OK
             if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
@@ -177,7 +191,8 @@ class CWAClient:
                  search_url = template.replace("{searchTerms}", safe_query)
         
         try:
-            r = self.session.get(search_url, timeout=self.timeout)
+            # Use helper
+            r = self._make_request(search_url)
             
             if r.status_code != 200:
                 logger.warning(f"⚠️ CWA Search failed {r.status_code}: {search_url}")
@@ -284,7 +299,8 @@ class CWAClient:
             try:
                 url = f"{self.base_url}{ep}"
                 logger.debug(f"🔍 CWA: Trying direct ID lookup at {url}")
-                r = self.session.get(url, timeout=self.timeout)
+                # Use helper
+                r = self._make_request(url)
                 if r.status_code == 200:
                     # Parse single entry
                     # Note: API might return a feed with one entry, or just the entry
@@ -307,6 +323,9 @@ class CWAClient:
         """Download ebook file from URL to output_path."""
         try:
             logger.info(f"⬇️ CWA: Downloading ebook from {download_url}")
+            # Clear cookies manually for download too
+            self.session.cookies.clear()
+            
             with self.session.get(download_url, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 with open(output_path, 'wb') as f:
