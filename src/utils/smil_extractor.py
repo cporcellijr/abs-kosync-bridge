@@ -108,9 +108,15 @@ class SmilExtractor:
                                     logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
                 elif timestamp_mode == 'relative':
                     # Relative timestamps - need to calculate offsets
-                    if abs_chapters:
+                    # Only use 1:1 Chapter Mapping if counts are roughly equal
+                    # Otherwise assume SMILs are 'Parts' and stack them
+                    count_diff = abs(len(smil_files) - len(abs_chapters)) if abs_chapters else 999
+
+                    if abs_chapters and count_diff <= 2:
+                        logger.info(f"   Using 1:1 Chapter Mapping (Files: {len(smil_files)}, Chapters: {len(abs_chapters)})")
                         transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
                     else:
+                        logger.info(f"   Using Sequential Stacking (Files: {len(smil_files)} != Chapters: {len(abs_chapters) if abs_chapters else 0})")
                         transcript = self._process_relative_sequential(zf, smil_files, audio_offset)
                 else:
                     # Auto/Smart mode

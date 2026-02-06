@@ -178,16 +178,13 @@ class AlignmentService:
 
     def _generate_alignment_map(self, segments: List[Dict], full_text: str) -> List[Dict]:
         """
-        Core Anchored Alignment Algorithm.
-        Matches unique N-Grams (N=12) between audio transcript and book text.
+        Core Anchored Alignment Algorithm (Two-Pass).
+        Pass 1: High confidence (N=12) global search.
+        Pass 2: Backfill start gap (N=6) if first anchor is late.
         """
-        # Use Polisher for normalized view required for matching
-        # But we need to keep track of ORIGINAL indices.
-        
         # 1. Tokenize Transcript
         transcript_words = []
         for seg in segments:
-            # We normalize word by word for matching
             raw_words = seg['text'].split()
             if not raw_words: continue
             
@@ -199,74 +196,120 @@ class AlignmentService:
                 if not norm: continue
                 transcript_words.append({
                     "word": norm,
-                    "ts": seg['start'] + (i * per_word)
+                    "ts": seg['start'] + (i * per_word),
+                    "orig_index": len(transcript_words) # Keep track for slicing
                 })
 
         # 2. Tokenize Book
-        # We need "Word, StartChar" tuples. 
-        # Regex \b is good but we need to handle punctuation that Polisher strips.
-        # Actually, best way: Find words, normalize them, keep original start char.
         book_words = []
-        for match in re.finditer(r'\S+', full_text): # split by whitespace
+        for match in re.finditer(r'\S+', full_text):
             raw_w = match.group()
             norm = self.polisher.normalize(raw_w)
             if not norm: continue
             book_words.append({
                 "word": norm,
-                "char": match.start()
+                "char": match.start(),
+                "orig_index": len(book_words)
             })
 
         if not transcript_words or not book_words:
             return []
 
-        # 3. Find Anchors (Unique N-grams)
-        N = 10
-        def build_ngrams(items, is_book=False):
-            grams = {}
-            for i in range(len(items) - N + 1):
-                keys = [x['word'] for x in items[i:i+N]]
-                key = "_".join(keys)
-                if key not in grams: grams[key] = []
-                payload = items[i]['char'] if is_book else items[i]['ts']
-                grams[key].append(payload)
-            return grams
+        # --- Helper for N-Gram Logic ---
+        def _find_anchors(t_tokens, b_tokens, n_size):
+            # Build N-Grams
+            def build_ngrams(items, is_book=False):
+                grams = {}
+                for i in range(len(items) - n_size + 1):
+                    keys = [x['word'] for x in items[i:i+n_size]]
+                    key = "_".join(keys)
+                    if key not in grams: grams[key] = []
+                    # Store entire object to retrieve ts/char/index
+                    grams[key].append(items[i])
+                return grams
 
-        t_grams = build_ngrams(transcript_words, False)
-        b_grams = build_ngrams(book_words, True)
+            t_grams = build_ngrams(t_tokens, False)
+            b_grams = build_ngrams(b_tokens, True)
 
-        anchors = []
-        for key, times in t_grams.items():
-            if len(times) == 1: # Unique in transcript
-                if key in b_grams and len(b_grams[key]) == 1: # Unique in book
-                    anchors.append({
-                        "ts": times[0],
-                        "char": b_grams[key][0]
-                    })
+            found = []
+            for key, t_list in t_grams.items():
+                if len(t_list) == 1: # Unique in transcript slice
+                    if key in b_grams and len(b_grams[key]) == 1: # Unique in book slice
+                        # Safe access using indices
+                        b_item = b_grams[key][0]
+                        t_item = t_list[0]
+                        found.append({
+                            "ts": t_item['ts'],
+                            "char": b_item['char'],
+                            "t_idx": t_item['orig_index'],
+                            "b_idx": b_item['orig_index']
+                        })
+            return found
 
-        # 4. Sort and Filter Monotonic
+        # 3. PASS 1: Global Search (N=12)
+        anchors = _find_anchors(transcript_words, book_words, n_size=12)
+        
+        # Sort by character position
         anchors.sort(key=lambda x: x['char'])
         
-        if not anchors: 
-            return []
-            
-        valid_anchors = [anchors[0]]
-        for a in anchors[1:]:
-            if a['ts'] > valid_anchors[-1]['ts']:
-                valid_anchors.append(a)
-        
-        # 5. Build Map (Interpolation Points)
-        # Always include 0,0 and End,End
+        # Filter Monotonic (Global)
+        valid_anchors = []
+        if anchors:
+            valid_anchors.append(anchors[0])
+            for a in anchors[1:]:
+                if a['ts'] > valid_anchors[-1]['ts']:
+                    valid_anchors.append(a)
+
+        # 4. PASS 2: Backfill Start (N=6) "Work Backwards"
+        # If the first anchor is significantly into the book, try to recover the intro.
+        # Threshold: First anchor is > 1000 chars in AND > 30 seconds in
+        if valid_anchors and valid_anchors[0]['char'] > 1000 and valid_anchors[0]['ts'] > 30.0:
+            first = valid_anchors[0]
+            logger.info(f"   ⚠️ Late start detected (Char: {first['char']}, TS: {first['ts']:.1f}s). Attempting backfill...")
+
+            # Slice the data: Everything BEFORE the first anchor
+            # We use the indices we stored during tokenization
+            t_slice = transcript_words[:first['t_idx']]
+            b_slice = book_words[:first['b_idx']]
+
+            if t_slice and b_slice:
+                # Run with reduced N-Gram (N=6)
+                # Lower N is risky globally, but safe in this small constrained window
+                early_anchors = _find_anchors(t_slice, b_slice, n_size=6)
+                
+                # Filter Early Anchors (Must be monotonic with themselves)
+                early_anchors.sort(key=lambda x: x['char'])
+                valid_early = []
+                if early_anchors:
+                    valid_early.append(early_anchors[0])
+                    for a in early_anchors[1:]:
+                        if a['ts'] > valid_early[-1]['ts']:
+                            valid_early.append(a)
+                
+                if valid_early:
+                    logger.info(f"   ✅ Backfill success: Recovered {len(valid_early)} early anchors.")
+                    # Prepend to main list
+                    valid_anchors = valid_early + valid_anchors
+
+        # 5. Build Final Map
         final_map = []
+        if not valid_anchors:
+            return []
+
+        # Force 0,0 if still missing (Linear Interpolation fallback)
         if valid_anchors[0]['char'] > 0:
             final_map.append({"char": 0, "ts": 0.0})
             
         final_map.extend(valid_anchors)
         
+        # Force End
         last = valid_anchors[-1]
         if last['char'] < len(full_text):
-            final_map.append({"char": len(full_text), "ts": segments[-1]['end']})
+            # Safe check for segments
+            end_ts = segments[-1]['end'] if segments else last['ts']
+            final_map.append({"char": len(full_text), "ts": end_ts})
 
-        logger.info(f"   ⚓ Anchored Alignment: Found {len(valid_anchors)} anchors.")
+        logger.info(f"   ⚓ Anchored Alignment: Found {len(valid_anchors)} anchors (Total).")
         return final_map
 
     def _save_alignment(self, abs_id: str, alignment_map: List[Dict]):
