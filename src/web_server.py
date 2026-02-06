@@ -211,7 +211,8 @@ def inject_global_vars():
             'BOOKLORE_ENABLED': 'false',
             'HARDCOVER_ENABLED': 'false',
             'TELEGRAM_ENABLED': 'false',
-            'SUGGESTIONS_ENABLED': 'false'
+            'SUGGESTIONS_ENABLED': 'false',
+            'REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT': 'true'
         }
         if key in DEFAULTS: return DEFAULTS[key]
         return default_val if default_val is not None else ''
@@ -667,9 +668,9 @@ def settings():
             'BOOKLORE_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
-            'TELEGRAM_ENABLED',
             'SUGGESTIONS_ENABLED',
-            'ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID'
+            'ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID',
+            'REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT'
         ]
 
         # Current settings in DB

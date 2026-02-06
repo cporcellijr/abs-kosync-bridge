@@ -1246,10 +1246,34 @@ class SyncManager:
                     'total_clients': len(reset_results)
                 }
 
-                # Force the background job to re-evaluate this book (e.g. to generate missing alignment maps)
-                book.status = 'pending'
-                self.database_service.save_book(book)
-                logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+                # [CHANGED LOGIC] Handle book status update based on alignment presence and user setting
+                smart_reset = os.getenv('REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT', 'true').lower() == 'true'
+                
+                if smart_reset:
+                    # Check if we already have a valid alignment map in the DB
+                    has_alignment = False
+                    if self.alignment_service:
+                        has_alignment = bool(self.alignment_service._get_alignment(abs_id))
+
+                    if has_alignment:
+                        # If we have an alignment, just ensure the book is active.
+                        # DO NOT set to 'pending' - this prevents re-transcription.
+                        if book.status != 'active':
+                            book.status = 'active'
+                            self.database_service.save_book(book)
+                        logger.info(f"   [OK] Alignment map exists. Reset progress to 0% without triggering re-transcription.")
+                    else:
+                        # Only trigger a full re-process if we lack alignment data
+                        book.status = 'pending'
+                        self.database_service.save_book(book)
+                        logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+                else:
+                    # Legacy or explicit "just clear 0" behavior
+                    # If smart reset is disabled, we still want to ensure it's at least active
+                    if book.status != 'active':
+                        book.status = 'active'
+                        self.database_service.save_book(book)
+                    logger.info(f"   [OK] Reset progress to 0%. (Smart re-process disabled)")
 
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")
