@@ -545,6 +545,72 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
     if ebook_path:
         return container.ebook_parser().get_kosync_id(ebook_path)
 
+    # [NEW] Check Epub Cache explicitly (if acquired by LibraryService but not meant for /books)
+    epub_cache = container.epub_cache_dir()
+    cached_path = epub_cache / ebook_filename
+    if cached_path.exists():
+         return container.ebook_parser().get_kosync_id(cached_path)
+
+    # [NEW] On-Demand Fetching
+    # 1. ABS On-Demand
+    if "_abs." in ebook_filename:
+        try:
+             # Extract ID: 1941a138-1c8d-49eb-954f-f6bb26f87ebc_abs.epub -> 1941a138-1c8d-49eb-954f-f6bb26f87ebc
+             abs_id = ebook_filename.split("_abs.")[0]
+             abs_client = container.abs_client()
+             if abs_client and abs_client.is_configured():
+                 logger.info(f"📥 Attempting on-demand ABS download for {abs_id}...")
+                 ebook_files = abs_client.get_ebook_files(abs_id)
+                 if ebook_files:
+                     target = ebook_files[0]
+                     if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+                     
+                     if abs_client.download_file(target['stream_url'], cached_path):
+                         logger.info(f"   ✅ Downloaded ABS ebook to {cached_path}")
+                         return container.ebook_parser().get_kosync_id(cached_path)
+                 else:
+                     logger.warning(f"   ⚠️ No ebook files found in ABS for item {abs_id}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed ABS on-demand download: {e}")
+
+    # 2. CWA On-Demand
+    if "_cwa." in ebook_filename or ebook_filename.startswith("cwa_"):
+        try:
+             # Extract ID: cwa_12345.epub -> 12345
+             # Format is cwa_{id}.{ext}
+             parts = ebook_filename.split("_")
+             if len(parts) >= 2:
+                 cwa_id_part = parts[1] # "12345.epub"
+                 cwa_id = cwa_id_part.split(".")[0]
+                 
+                 cwa_client = container.cwa_client()
+                 if cwa_client and cwa_client.is_configured():
+                     logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
+                     # We try searching for the ID
+                     results = cwa_client.search_ebooks(cwa_id)
+                     
+                     # Find exact ID match if possible
+                     target = None
+                     for res in results:
+                         # Loose match on ID?
+                         if str(res['id']) == cwa_id:
+                             target = res
+                             break
+                     
+                     # 2nd pass: If no exact ID match, maybe it was the only result?
+                     if not target and len(results) == 1:
+                         target = results[0]
+
+                     if target:
+                         if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+                         if cwa_client.download_ebook(target['download_url'], cached_path):
+                             logger.info(f"   ✅ Downloaded CWA ebook to {cached_path}")
+                             return container.ebook_parser().get_kosync_id(cached_path)
+                     else:
+                         logger.warning(f"   ⚠️ Could not find CWA book for ID {cwa_id}")
+        except Exception as e:
+            logger.error(f"   ❌ Failed CWA on-demand download: {e}")
+
     # Neither source available - log helpful warning
     if not container.booklore_client().is_configured() and not EBOOK_DIR.exists():
         logger.warning(
@@ -554,7 +620,7 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
             "or mount the ebooks directory to /books."
         )
     elif not booklore_id and not ebook_path:
-        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore or filesystem")
+        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore, filesystem, or remote sources.")
 
     return None
 
