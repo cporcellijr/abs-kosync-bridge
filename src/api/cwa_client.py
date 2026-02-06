@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import base64
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
@@ -18,8 +19,26 @@ class CWAClient:
         self.enabled = os.environ.get("CWA_ENABLED", "").lower() == "true"
         
         self.session = requests.Session()
+        
+        # Standardize headers for all requests
+        headers = {
+            "User-Agent": "ABS-KoSync-Bridge/1.0",
+            "Accept": "application/atom+xml,application/xml,application/xhtml+xml,text/xml;q=0.9,*/*;q=0.8",
+        }
+
+        # Force Pre-emptive Basic Auth
+        # This sends credentials immediately without waiting for a 401 Challenge,
+        # bypassing the "Redirect to Login Page" issue.
         if self.username and self.password:
+            # We still set session.auth for compatibility, but the header takes precedence
             self.session.auth = (self.username, self.password)
+            
+            # Manually construct the header
+            user_pass = f"{self.username}:{self.password}"
+            encoded_u = base64.b64encode(user_pass.encode()).decode()
+            headers["Authorization"] = f"Basic {encoded_u}"
+            
+        self.session.headers.update(headers)
             
         self.timeout = 30
         self.search_template = None
@@ -27,6 +46,36 @@ class CWAClient:
     def is_configured(self):
         """Check if CWA is enabled and configured."""
         return self.enabled and bool(self.base_url)
+
+    def check_connection(self):
+        """Check connection to CWA and validate response type."""
+        if not self.is_configured():
+            logger.warning("⚠️ CWA not configured (skipping)")
+            return False
+
+        try:
+            url = f"{self.base_url}/opds"
+            r = self.session.get(url, timeout=5)
+            
+            # Check for soft login redirect (status 200 but HTML content)
+            if r.status_code == 200:
+                if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
+                    logger.error("❌ CWA Connection Failed: Server returned HTML login page instead of XML. Authentication failed.")
+                    return False
+                
+                logger.info(f"✅ Connected to CWA at {self.base_url}")
+                return True
+                
+            elif r.status_code in [401, 403]:
+                logger.error(f"❌ CWA Connection Failed: Unauthorized ({r.status_code}). Check credentials.")
+                return False
+            else:
+                logger.warning(f"❌ CWA Connection Failed: {r.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ CWA Connection Error: {e}")
+            return False
 
     def _get_search_template(self):
         """
@@ -39,6 +88,12 @@ class CWAClient:
         try:
             logger.debug(f"🔍 CWA: Discovering search endpoint from {self.base_url}/opds")
             r = self.session.get(f"{self.base_url}/opds", timeout=self.timeout)
+            
+            # Check if we got an HTML login page disguised as 200 OK
+            if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
+                 logger.warning("⚠️ CWA Discovery Failed: Server returned HTML content. Likely authentication failure (Soft Redirect).")
+                 return None
+
             if r.status_code != 200:
                 logger.warning(f"⚠️ CWA OPDS Root failed {r.status_code}")
                 return None
