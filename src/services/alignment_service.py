@@ -271,8 +271,7 @@ class AlignmentService:
 
     def _save_alignment(self, abs_id: str, alignment_map: List[Dict]):
         """Upsert alignment to SQLite."""
-        session = self.db.get_session()
-        try:
+        with self.db.get_session() as session:
             json_blob = json.dumps(alignment_map)
             
             # Check exist
@@ -284,20 +283,12 @@ class AlignmentService:
                 new_align = BookAlignment(abs_id=abs_id, alignment_map_json=json_blob)
                 session.add(new_align)
             
-            session.commit()
+            # Context manager handles commit
             logger.info(f"   💾 Saved alignment for {abs_id} to DB.")
-        except Exception as e:
-            session.rollback()
-            logger.error(f"   ❌ DB Save Error: {e}")
-        finally:
-            session.close()
 
     def _get_alignment(self, abs_id: str) -> Optional[List[Dict]]:
-        session = self.db.get_session()
-        try:
+        with self.db.get_session() as session:
             entry = session.query(BookAlignment).filter_by(abs_id=abs_id).first()
             if entry:
                 return json.loads(entry.alignment_map_json)
             return None
-        finally:
-            session.close()

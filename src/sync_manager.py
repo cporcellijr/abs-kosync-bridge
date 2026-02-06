@@ -619,9 +619,16 @@ class SyncManager:
             # [NEW] Step 5: Align and Store using AlignmentService
             # This is where we commit the result to the DB
             logger.info(f"🧠 Aligning transcript ({transcript_source}) using Anchored Alignment...")
+            
+            # Update progress to show we are working on alignment (Start of Phase 3 = 90%)
+            update_progress(0.1, 3) # 91%
+            
             success = self.alignment_service.align_and_store(
                 abs_id, raw_transcript, book_text, chapters
             )
+            
+            # Alignment done
+            update_progress(0.5, 3) # 95%
             
             if not success:
                 raise Exception("Alignment failed to generate valid map.")

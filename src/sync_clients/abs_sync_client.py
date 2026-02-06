@@ -7,7 +7,9 @@ from src.api.api_clients import ABSClient
 from src.db.models import Book, State
 from src.sync_clients.sync_client_interface import SyncClient, SyncResult, UpdateProgressRequest, ServiceState
 from src.utils.ebook_utils import EbookParser
+from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +84,20 @@ class ABSSyncClient(SyncClient):
             
         # 2. Try Transcript file (Legacy fallback)
         transcript_path = book.transcript_file
-        if not transcript_path or transcript_path == "DB_MANAGED":
+        if not transcript_path:
             return None
+            
+        if transcript_path == "DB_MANAGED":
+             # TODO: Implement time estimation from AlignmentService?
+             # For now, we rely on book duration mostly.
+             return None
 
         try:
+            # Check if file exists first
+            if not os.path.exists(transcript_path):
+                # If missing, we can't get duration from it.
+                return None
+                
             with open(transcript_path, 'r') as f:
                 data = json.load(f)
                 dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
@@ -114,6 +126,24 @@ class ABSSyncClient(SyncClient):
             return None
 
         # Legacy File-Based
+        # SMART FALLBACK: If file doesn't exist, try DB anyway (and self-heal)
+        if hasattr(book, 'transcript_file') and book.transcript_file:
+            path = Path(book.transcript_file)
+            if not path.exists() and self.alignment_service:
+                logger.warning(f"[{book.abs_id}] Legacy transcript file missing: {path}. Attempting DB fallback.")
+                # Try DB lookup
+                char_offset = self.alignment_service.get_char_for_time(book.abs_id, abs_ts)
+                if char_offset is not None:
+                     logger.info(f"[{book.abs_id}] ✅ Found in DB despite missing file. Self-healing state.")
+                     # We can't easily save the book here without circular dependency or passing DB service
+                     # But we can at least return valid text!
+                     book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+                     if book_path and book_path.exists():
+                         full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+                         start = max(0, char_offset - 50)
+                         end = min(len(full_text), char_offset + 150)
+                         return full_text[start:end]
+
         return self.transcriber.get_text_at_time(book.transcript_file, abs_ts)
 
     def get_fallback_text(self, book: Book, state: ServiceState) -> Optional[str]:
