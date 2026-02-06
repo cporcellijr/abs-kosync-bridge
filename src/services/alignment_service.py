@@ -220,7 +220,7 @@ class AlignmentService:
             return []
 
         # 3. Find Anchors (Unique N-grams)
-        N = 12
+        N = 10
         def build_ngrams(items, is_book=False):
             grams = {}
             for i in range(len(items) - N + 1):
