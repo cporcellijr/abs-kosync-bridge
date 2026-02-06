@@ -113,16 +113,12 @@ class SyncManager:
         if self.library_service and self.library_service.cwa_client:
             cwa = self.library_service.cwa_client
             if cwa.is_configured():
-                logger.info(f"[OK] CWA (Calibre-Web Automated) enabled: {cwa.base_url}")
-                # Try to discover search template
-                try:
+                # check_connection() logs its own Success/Fail messages and verifies Authentication
+                if cwa.check_connection():
+                    # If connected, ensure search template is cached
                     template = cwa._get_search_template()
                     if template:
                         logger.info(f"   📚 CWA search template: {template}")
-                    else:
-                        logger.warning(f"   ⚠️ CWA: Could not discover search template")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ CWA connection test failed: {e}")
             else:
                 logger.info("[SKIP] CWA not configured (disabled or missing server URL)")
         else:
