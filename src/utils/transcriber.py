@@ -171,6 +171,19 @@ class AudioTranscriber:
             if not transcript:
                 return None
 
+            # [FAILSAFE] Check Duration / Coverage
+            # If the SMIL transcript is significantly shorter than the audiobook, reject it.
+            if abs_chapters and len(abs_chapters) > 0:
+                expected_duration = float(abs_chapters[-1].get('end', 0))
+                if expected_duration > 0:
+                    transcript_duration = transcript[-1]['end']
+                    coverage = transcript_duration / expected_duration
+                    
+                    # Reject if coverage is less than 85%
+                    if coverage < 0.85:
+                        logger.warning(f"⛔ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s. Falling back to transcriber.")
+                        return None
+
             # [NEW] Validate transcript against BOOK TEXT
             # We require full_book_text for this validation.
             if full_book_text:

@@ -798,6 +798,10 @@ class SyncManager:
             # --- Success Update using database service ---
             # Update book with transcript path (Now just a marker or None, as data is in book_alignments)
             book.transcript_file = "DB_MANAGED"
+            # [FIX] Save the filename so cache cleanup knows this file belongs to a book
+            if epub_path:
+                book.ebook_filename = epub_path.name
+            
             book.status = 'active'
             self.database_service.save_book(book)
 
