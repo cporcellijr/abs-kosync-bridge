@@ -899,7 +899,13 @@ def audiobook_matches_search(ab, search_term):
     author = normalize(get_abs_author(ab))
     search_norm = normalize(search_term)
 
-    return (search_norm in title or title in search_norm) or (search_norm in author or author in search_norm)
+    # Match if search_norm is a substring of title or author
+    # We remove 'title in search_norm' because it causes false positives (e.g. empty title matches everything)
+    # and isn't typically desirable for a search bar.
+    title_match = search_norm in title if title else False
+    author_match = search_norm in author if author else False
+
+    return title_match or author_match
 
 # ---------------- ROUTES ----------------
 def index():

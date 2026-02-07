@@ -192,7 +192,7 @@ class HardcoverClient:
                 title
                 slug
                 contributions {
-                    person {
+                    author {
                         name
                     }
                 }
@@ -218,9 +218,9 @@ class HardcoverClient:
             if clean_input_author:
                 # Get all authors for this book
                 authors = [
-                    c["person"]["name"].lower().strip()
+                    c["author"]["name"].lower().strip()
                     for c in book.get("contributions", [])
-                    if c.get("person") and c["person"].get("name")
+                    if c.get("author") and c["author"].get("name")
                 ]
                 if authors:
                     # Find best similarity among all authors
@@ -308,7 +308,7 @@ class HardcoverClient:
         query ($bookId: Int!) {
             books_by_pk(id: $bookId) {
                 contributions(limit: 1) {
-                    person {
+                    author {
                         name
                     }
                 }
@@ -319,7 +319,7 @@ class HardcoverClient:
         if result and result.get("books_by_pk"):
             contributions = result["books_by_pk"].get("contributions", [])
             if contributions:
-                return contributions[0].get("person", {}).get("name")
+                return contributions[0].get("author", {}).get("name")
         return None
 
     def get_book_editions(self, book_id: int) -> list:
