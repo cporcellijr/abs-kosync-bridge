@@ -142,7 +142,9 @@ class SyncManager:
             self.migration_service.migrate_legacy_data()
 
         # [NEW] Cleanup orphaned cache files
-        self.cleanup_cache()
+        # DISABLED: Current logic is too aggressive (deletes original_ebook_filename for linked books).
+        # We rely on delete_mapping in web_server.py to handle explicit deletions.
+        # self.cleanup_cache()
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""

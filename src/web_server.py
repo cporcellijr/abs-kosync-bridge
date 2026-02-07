@@ -523,7 +523,7 @@ def find_ebook_file(filename):
     return matches[0] if matches else None
 
 
-def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
+def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=None):
     """Get KOSync document ID for an ebook.
     Tries Booklore API first (if configured and booklore_id provided),
     falls back to filesystem if needed.
@@ -542,6 +542,11 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None):
 
     # Fall back to filesystem
     ebook_path = find_ebook_file(ebook_filename)
+    if not ebook_path and original_filename:
+        # [Tri-Link] Fallback to original filename if Storyteller file not found/relevant
+        logger.debug(f"Primary file '{ebook_filename}' not found, checking original '{original_filename}'")
+        ebook_path = find_ebook_file(original_filename)
+
     if ebook_path:
         return container.ebook_parser().get_kosync_id(ebook_path)
 

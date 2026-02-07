@@ -166,7 +166,7 @@ class DatabaseService:
 
             if existing:
                 # Update existing book
-                for attr in ['abs_title', 'ebook_filename', 'kosync_doc_id',
+                for attr in ['abs_title', 'ebook_filename', 'original_ebook_filename', 'kosync_doc_id',
                            'transcript_file', 'status', 'duration', 'storyteller_uuid']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
