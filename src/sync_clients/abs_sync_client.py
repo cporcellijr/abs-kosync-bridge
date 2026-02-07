@@ -172,10 +172,30 @@ class ABSSyncClient(SyncClient):
             }
             return SyncResult(final_ts, result.get("success", False), updated_state)
 
-        ts_for_text = self.transcriber.find_time_for_text(book.transcript_file, request.txt,
-                                                          hint_percentage=request.locator_result.percentage,
-                                                          char_offset=request.locator_result.match_index,
-                                                          book_title=book_title)
+        # [FIX] Route DB_MANAGED books to AlignmentService, Legacy books to Transcriber
+        ts_for_text = None
+        
+        if book.transcript_file == "DB_MANAGED" and self.alignment_service:
+            # New Path: Use Database Alignment
+            # We use the match_index (character offset) found by the EbookParser
+            char_index = request.locator_result.match_index
+            if char_index is not None:
+                ts_for_text = self.alignment_service.get_time_for_text(
+                    book.abs_id, 
+                    request.txt, 
+                    char_offset_hint=char_index
+                )
+            else:
+                logger.debug(f"[{book_title}] Alignment lookup skipped: No character index provided in request.")
+                
+        elif book.transcript_file and book.transcript_file != "DB_MANAGED":
+            # Legacy Path: Use JSON File
+            ts_for_text = self.transcriber.find_time_for_text(
+                book.transcript_file, request.txt,
+                hint_percentage=request.locator_result.percentage,
+                char_offset=request.locator_result.match_index,
+                book_title=book_title
+            )
         if ts_for_text is not None:
             response = self.abs_client.get_progress(book.abs_id)
             abs_ts = response.get('currentTime') if response is not None else None
