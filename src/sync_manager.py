@@ -800,7 +800,18 @@ class SyncManager:
             book.transcript_file = "DB_MANAGED"
             # [FIX] Save the filename so cache cleanup knows this file belongs to a book
             if epub_path:
-                book.ebook_filename = epub_path.name
+                new_filename = epub_path.name
+                
+                # Check if this is a Storyteller artifact (Tri-Link)
+                if "storyteller_" in new_filename and book.ebook_filename and "storyteller_" not in book.ebook_filename:
+                    # We are switching TO a Storyteller artifact from a standard EPUB.
+                    # Save the OLD filename as the original if it's not already set.
+                    if not book.original_ebook_filename:
+                        book.original_ebook_filename = book.ebook_filename
+                        logger.info(f"   [Tri-Link] Preserving original filename: {book.original_ebook_filename}")
+
+                # Update the active filename to the one we just used/downloaded
+                book.ebook_filename = new_filename
             
             book.status = 'active'
             self.database_service.save_book(book)

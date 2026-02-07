@@ -1020,6 +1020,9 @@ def index():
         # Booklore deep link (if configured and book found)
         if manager.booklore_client.is_configured():
             bl_book = manager.booklore_client.find_book_by_filename(book.ebook_filename, allow_refresh=False)
+            # [FIX] Fallback to original filename if storyteller artifact doesn't match
+            if not bl_book and book.original_ebook_filename:
+                bl_book = manager.booklore_client.find_book_by_filename(book.original_ebook_filename, allow_refresh=False)
         else:
             bl_book = None
 
@@ -1154,7 +1157,9 @@ def trigger_monitor():
 def match():
     if request.method == 'POST':
         abs_id = request.form.get('audiobook_id')
-        ebook_filename = request.form.get('ebook_filename')
+        selected_filename = request.form.get('ebook_filename')
+        ebook_filename = selected_filename
+        original_ebook_filename = None
         audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
@@ -1178,6 +1183,7 @@ def match():
                 
                 if container.storyteller_client().download_book(storyteller_uuid, target_path):
                     ebook_filename = target_filename # Override filename
+                    original_ebook_filename = selected_filename # Preserve original
                     # We can also compute KOSync ID from this file now
                     kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
                 else:
@@ -1210,7 +1216,8 @@ def match():
             transcript_file=None,
             status="pending",
             duration=manager.get_duration(selected_ab),
-            storyteller_uuid=storyteller_uuid # Save UUID
+            storyteller_uuid=storyteller_uuid, # Save UUID
+            original_ebook_filename=original_ebook_filename
         )
 
         database_service.save_book(book)
@@ -1222,7 +1229,9 @@ def match():
 
         container.abs_client().add_to_collection(abs_id, ABS_COLLECTION_NAME)
         if container.booklore_client().is_configured():
-            container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
+            # Use original filename for shelf if we switched to storyteller
+            shelf_filename = original_ebook_filename or ebook_filename
+            container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
             container.storyteller_client().add_to_collection(ebook_filename)
 
@@ -1309,7 +1318,8 @@ def batch_match():
                     kosync_doc_id=kosync_doc_id,
                     transcript_file=None,
                     status="pending",
-                    duration=duration
+                    duration=duration,
+                    original_ebook_filename=None # Batch match currently only standard ebooks
                 )
 
                 database_service.save_book(book)
@@ -1534,6 +1544,11 @@ def api_storyteller_link(abs_id):
         target_path = epub_cache / f"storyteller_{storyteller_uuid}.epub"
         
         if container.storyteller_client().download_book(storyteller_uuid, target_path):
+            # Preserve OLD filename as original if not already set
+            if not book.original_ebook_filename:
+                book.original_ebook_filename = book.ebook_filename
+                logger.info(f"   [Tri-Link] Preserving original filename: {book.original_ebook_filename}")
+
             book.ebook_filename = target_path.name
             book.storyteller_uuid = storyteller_uuid
             # Also clear transcript to force re-alignment if needed? 
