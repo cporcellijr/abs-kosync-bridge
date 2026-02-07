@@ -1857,6 +1857,12 @@ def ignore_suggestion(source_id):
     return jsonify({"success": False, "error": "Not found"}), 404
 
 
+def clear_stale_suggestions():
+    count = database_service.clear_stale_suggestions()
+    logger.info(f"🧹 Cleared {count} stale suggestions from database")
+    return jsonify({"success": True, "count": count})
+
+
 def proxy_cover(abs_id):
     """Proxy cover access to allow loading covers from local network ABS instances."""
     try:
@@ -1919,6 +1925,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])
     app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
+    app.add_url_rule('/api/suggestions/clear_stale', 'clear_stale_suggestions', clear_stale_suggestions, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
 
     # Storyteller API routes

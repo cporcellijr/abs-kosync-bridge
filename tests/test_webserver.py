@@ -502,6 +502,25 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         finally:
             src.web_server.render_template = original_render
 
+    def test_clear_stale_suggestions_api(self):
+        """Test the clear-stale-suggestions API endpoint."""
+        # Setup mock return value
+        self.mock_database_service.clear_stale_suggestions.return_value = 5
+        
+        # Make POST request
+        response = self.client.post('/api/suggestions/clear_stale')
+        
+        # Verify response
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['count'], 5)
+        
+        # Verify service call
+        self.mock_database_service.clear_stale_suggestions.assert_called_once()
+        
+        print("[OK] Clear stale suggestions API test passed")
+
 
 class FindEbookFileTest(unittest.TestCase):
     """Test find_ebook_file function handles special characters in filenames."""

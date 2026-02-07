@@ -122,6 +122,36 @@
             border-color: rgba(102, 126, 234, 0.6);
         }
 
+        .btn-danger {
+            background: rgba(244, 67, 54, 0.1);
+            border-color: rgba(244, 67, 54, 0.3);
+            color: #e57373 !important;
+        }
+
+        .btn-danger:hover {
+            background: rgba(244, 67, 54, 0.2);
+            border-color: rgba(244, 67, 54, 0.5);
+        }
+
+        .cleanup-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-top: 5px;
+        }
+
+        .mt-20 {
+            margin-top: 20px !important;
+        }
+
+        .flex-1 {
+            flex: 1;
+        }
+
+        .m-0 {
+            margin: 0 !important;
+        }
+
         /* Container */
         .container {
             max-width: 1000px;
@@ -925,6 +955,20 @@
                         </div>
                     </div>
 
+                    <div class="form-group full-width mt-20">
+                        <label>Suggestion Cleanup</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-danger" onclick="clearStaleSuggestions()">
+                                🧹 Clear Stale Suggestions
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Deletes all suggestions for books that are not currently in your bridge library.
+                                This helps clear out junk suggestions and allows the bridge to re-suggest them if
+                                needed.
+                            </p>
+                        </div>
+                    </div>
+
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 
                     <!-- Transcription Settings -->
@@ -1107,6 +1151,31 @@
             const originalBg = copyText.style.backgroundColor;
             copyText.style.backgroundColor = "rgba(102, 126, 234, 0.3)";
             setTimeout(() => copyText.style.backgroundColor = originalBg, 200);
+        }
+
+        async function clearStaleSuggestions() {
+            if (!confirm("Are you sure you want to clear stale suggestions?\n\nThis will permanently delete all suggestions for books that are not currently matched in your bridge. Books you are already syncing will be preserved.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/suggestions/clear_stale', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`✅ Success! Cleared ${data.count} stale suggestions.`);
+                } else {
+                    alert(`❌ Failed to clear suggestions: ${data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                console.error('Error clearing suggestions:', err);
+                alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
         }
 
         // Auto-calculate public URL on load
