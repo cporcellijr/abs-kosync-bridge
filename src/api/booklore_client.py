@@ -416,16 +416,24 @@ class BookloreClient:
 
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/api/v1/books/{book_id}/download"
+        logger.info(f"Downloading book from {url}")
 
         try:
             response = self.session.get(url, headers=headers, timeout=60)
-            if response.status_code == 200:
-                return response.content
-            else:
-                logger.error(f"Booklore download failed: {response.status_code}")
+            
+            # Fallback for newer Booklore versions or different configurations
+            if response.status_code == 404:
+                file_url = f"{self.base_url}/api/v1/books/{book_id}/file"
+                logger.info(f"404 on /download, trying fallback: {file_url}")
+                response = self.session.get(file_url, headers=headers, timeout=60)
+
+            if response.status_code != 200:
+                logger.error(f"Failed to download book: {response.status_code}")
                 return None
+
+            return response.content
         except Exception as e:
-            logger.error(f"Booklore download error: {e}")
+            logger.error(f"Download error: {e}")
             return None
 
     def get_progress(self, ebook_filename):

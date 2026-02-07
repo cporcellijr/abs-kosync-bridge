@@ -355,7 +355,7 @@ class TestGetBookAuthor(unittest.TestCase):
         client.query = Mock(return_value={
             'books_by_pk': {
                 'contributions': [
-                    {'author': {'name': 'J.K. Rowling'}}
+                    {'person': {'name': 'J.K. Rowling'}}
                 ]
             }
         })
