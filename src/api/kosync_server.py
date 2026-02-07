@@ -373,6 +373,30 @@ def kosync_put_progress():
 
 # ---------------- Helper Functions ----------------
 
+def _upsert_kosync_metadata(document_hash, filename, source, mtime=None, booklore_id=None):
+    """Cache hash metadata without overwriting any existing progress data."""
+    from src.db.models import KosyncDocument
+
+    existing = _database_service.get_kosync_document(document_hash)
+    if existing:
+        existing.filename = filename
+        existing.source = source
+        if mtime is not None:
+            existing.mtime = mtime
+        if booklore_id is not None:
+            existing.booklore_id = booklore_id
+        _database_service.save_kosync_document(existing)
+    else:
+        doc = KosyncDocument(
+            document_hash=document_hash,
+            filename=filename,
+            source=source,
+            mtime=mtime,
+            booklore_id=booklore_id,
+        )
+        _database_service.save_kosync_document(doc)
+
+
 def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
     """Try to find matching EPUB file for a KOSync document hash."""
     try:
@@ -416,21 +440,8 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                         cached_doc.source = 'filesystem'
                         _database_service.save_kosync_document(cached_doc)
                     else:
-                        existing_doc = _database_service.get_kosync_document(computed_hash)
-                        if existing_doc:
-                            existing_doc.filename = epub_path.name
-                            existing_doc.mtime = epub_path.stat().st_mtime
-                            existing_doc.source = 'filesystem'
-                            _database_service.save_kosync_document(existing_doc)
-                        else:
-                            from src.db.models import KosyncDocument
-                            new_doc = KosyncDocument(
-                                document_hash=computed_hash,
-                                filename=epub_path.name,
-                                source='filesystem',
-                                mtime=epub_path.stat().st_mtime
-                            )
-                            _database_service.save_kosync_document(new_doc)
+                        _upsert_kosync_metadata(computed_hash, epub_path.name, 'filesystem',
+                                                mtime=epub_path.stat().st_mtime)
 
                     if computed_hash == doc_hash:
                         logger.info(f"📚 Matched EPUB via filesystem: {epub_path.name}")
@@ -499,21 +510,8 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                                     cached_doc.source = 'booklore'
                                     _database_service.save_kosync_document(cached_doc)
                                 else:
-                                    existing_doc = _database_service.get_kosync_document(computed_hash)
-                                    if existing_doc:
-                                        existing_doc.filename = safe_title
-                                        existing_doc.source = 'booklore'
-                                        existing_doc.booklore_id = book_id
-                                        _database_service.save_kosync_document(existing_doc)
-                                    else:
-                                        from src.db.models import KosyncDocument
-                                        new_doc = KosyncDocument(
-                                            document_hash=computed_hash,
-                                            filename=safe_title,
-                                            source='booklore',
-                                            booklore_id=book_id
-                                        )
-                                        _database_service.save_kosync_document(new_doc)
+                                    _upsert_kosync_metadata(computed_hash, safe_title, 'booklore',
+                                                            booklore_id=book_id)
 
                                 logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
                                 return safe_title
