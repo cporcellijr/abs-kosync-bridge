@@ -348,14 +348,14 @@ class TestGetBookAuthor(unittest.TestCase):
     """Tests for get_book_author method."""
 
     def test_get_book_author_success(self):
-        """Test that author is correctly extracted from contributions."""
+        """Test that author is correctly extracted from cached_contributors."""
         from src.api.hardcover_client import HardcoverClient
 
         client = HardcoverClient()
         client.query = Mock(return_value={
             'books_by_pk': {
-                'contributions': [
-                    {'person': {'name': 'J.K. Rowling'}}
+                'cached_contributors': [
+                    {'author': {'name': 'J.K. Rowling'}}
                 ]
             }
         })
@@ -364,13 +364,13 @@ class TestGetBookAuthor(unittest.TestCase):
         self.assertEqual(author, 'J.K. Rowling')
 
     def test_get_book_author_no_contributions(self):
-        """Test that None is returned when book has no contributions."""
+        """Test that None is returned when book has no contributors."""
         from src.api.hardcover_client import HardcoverClient
 
         client = HardcoverClient()
         client.query = Mock(return_value={
             'books_by_pk': {
-                'contributions': []
+                'cached_contributors': []
             }
         })
 
