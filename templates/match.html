@@ -388,6 +388,65 @@
                 margin-top: 16px !important;
             }
         }
+
+        /* 3-Column Layout */
+        .selection-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        @media (max-width: 1024px) {
+            .selection-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .section {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 24px;
+            height: 100%;
+            /* Full height for equal columns */
+            margin: 0;
+            /* Override old margin */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .section h3 {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 16px;
+        }
+
+        /* Scrollable content areas */
+        .scrollable-content {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 600px;
+            padding-right: 8px;
+            /* Space for scrollbar */
+        }
+
+        /* CustomScrollbar */
+        .scrollable-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .scrollable-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .scrollable-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .scrollable-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
     </style>
 </head>
 
@@ -459,79 +518,189 @@
         </div>
 
         <form method="POST" action="/match" id="mappingForm">
-            <!-- Audiobook Selection -->
-            <div class="section">
-                <h3><span class="section-number">1</span>Select Audiobook</h3>
-                {% if audiobooks %}
-                <div class="audiobook-grid">
-                    {% for ab in audiobooks %}
-                    <label class="audiobook-option" onclick="selectAudiobook(this, '{{ ab.id }}')">
-                        <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
-                        <div class="audiobook-cover-container">
-                            {% if ab.cover_url %}
-                            <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
-                                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
-                            <div class="audiobook-cover-placeholder hidden">🎧</div>
-                            {% else %}
-                            <div class="audiobook-cover-placeholder">🎧</div>
-                            {% endif %}
-                        </div>
-                        <div class="audiobook-info">
-                            <div class="audiobook-title">{{ get_title(ab) }}</div>
-                        </div>
-                    </label>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">🎧</div>
-                    <h3>No audiobooks found</h3>
-                    <p>Try a different search term</p>
-                </div>
-                {% endif %}
-            </div>
+            <div class="selection-container">
 
-            <!-- Ebook Selection -->
-            <div class="section">
-                <h3><span class="section-number">2</span>Select Ebook</h3>
-                {% if ebooks %}
-                <select name="ebook_filename" required title="Select ebook to link">
-                    <option value="">-- Choose Ebook --</option>
-                    {% for eb in ebooks %}
-                    <option value="{{ eb.name }}">{{ eb.display_name }}</option>
-                    {% endfor %}
-                </select>
-                {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">📖</div>
-                    <h3>No ebooks found</h3>
-                    <p>Try a different search term</p>
+                <!-- GRID COL 1: Audiobook -->
+                <div class="section">
+                    <h3><span class="section-number">1</span>Audiobook (Required)</h3>
+                    <div class="scrollable-content">
+                        {% if audiobooks %}
+                        <div class="audiobook-grid">
+                            {% for ab in audiobooks %}
+                            <label class="audiobook-option ab-option" onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
+                                <div class="audiobook-cover-container">
+                                    {% if ab.cover_url %}
+                                    <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
+                                        onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                                    <div class="audiobook-cover-placeholder hidden">🎧</div>
+                                    {% else %}
+                                    <div class="audiobook-cover-placeholder">🎧</div>
+                                    {% endif %}
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">{{ get_title(ab) }}</div>
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🎧</div>
+                            <h3>No audiobooks found</h3>
+                            <p>Try a different search term</p>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
-                {% endif %}
+
+                <!-- GRID COL 2: Storyteller (Preferred) -->
+                <div class="section">
+                    <h3><span class="section-number">2</span>Storyteller (Preferred)</h3>
+                    <div class="scrollable-content">
+                        {% if storyteller_books %}
+                        <div class="audiobook-grid">
+                            <!-- None Option -->
+                            <label class="audiobook-option st-option selected"
+                                onclick="selectItem(this, 'storyteller_uuid')">
+                                <input type="radio" name="storyteller_uuid" value="" checked>
+                                <div class="audiobook-info"
+                                    style="height: 100%; display: flex; align-items: center; justify-content: center;">
+                                    <div class="audiobook-title" style="font-size: 16px; color: #aaa;">None / Skip</div>
+                                </div>
+                            </label>
+
+                            {% for book in storyteller_books %}
+                            <label class="audiobook-option st-option" onclick="selectItem(this, 'storyteller_uuid')">
+                                <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}">
+                                <div class="audiobook-cover-container">
+                                    {% if book.cover_url %}
+                                    <div class="audiobook-cover-placeholder">⚡</div>
+                                    {% else %}
+                                    <div class="audiobook-cover-placeholder">⚡</div>
+                                    {% endif %}
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">{{ book.title }}</div>
+                                    <div class="audiobook-title" style="font-size: 12px; color: #aaa;">{{
+                                        book.authors|join(', ') }}</div>
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⚡</div>
+                            <h3>No Storyteller books</h3>
+                            <p>Select 'None' to use standard ebook</p>
+                        </div>
+                        <input type="hidden" name="storyteller_uuid" value="">
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- GRID COL 3: Standard Ebook (Fallback) -->
+                <div class="section">
+                    <h3><span class="section-number">3</span>Standard Ebook</h3>
+                    <div class="scrollable-content">
+                        {% if ebooks %}
+                        <div class="audiobook-grid">
+                            {% for eb in ebooks %}
+                            <label class="audiobook-option eb-option" onclick="selectItem(this, 'ebook_filename')">
+                                <input type="radio" name="ebook_filename" value="{{ eb.name }}">
+                                <div class="audiobook-cover-container">
+                                    <div class="audiobook-cover-placeholder"
+                                        style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);">📖</div>
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">{{ eb.display_name }}</div>
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📖</div>
+                            <h3>No ebooks found</h3>
+                            <p>Try a different search term</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
             </div>
 
             <!-- Submit Button -->
-            {% if audiobooks and ebooks %}
             <div class="submit-container">
-                <button type="submit" class="btn btn-success">
+                <button type="submit" class="btn btn-success" id="submitBtn" disabled>
                     ✅ Create Mapping
                 </button>
+                <div id="validationMsg" style="margin-top: 10px; color: #ff6b6b; display: none;">
+                    Please select an Audiobook and a Text Source (Storyteller or Ebook)
+                </div>
             </div>
-            {% endif %}
         </form>
     </div>
 
     <script>
-        function selectAudiobook(element, id) {
-            // Remove selected class from all options
-            document.querySelectorAll('.audiobook-option').forEach(el => {
-                el.classList.remove('selected');
-            });
+        function selectItem(element, groupName) {
+            // Remove selected class from all options in this group
+            let wrapperClass = '';
+            if (groupName === 'audiobook_id') wrapperClass = '.ab-option';
+            if (groupName === 'storyteller_uuid') wrapperClass = '.st-option';
+            if (groupName === 'ebook_filename') wrapperClass = '.eb-option';
+
+            if (wrapperClass) {
+                document.querySelectorAll(wrapperClass).forEach(el => {
+                    el.classList.remove('selected');
+                });
+            }
+
             // Add selected class to clicked option
             element.classList.add('selected');
             // Check the radio button
-            element.querySelector('input[type="radio"]').checked = true;
+            const radio = element.querySelector('input[type="radio"]');
+            if (radio) radio.checked = true;
+
+            validateForm();
         }
+
+        function validateForm() {
+            const ab = document.querySelector('input[name="audiobook_id"]:checked');
+            const st = document.querySelector('input[name="storyteller_uuid"]:checked');
+            const eb = document.querySelector('input[name="ebook_filename"]:checked');
+
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('validationMsg');
+
+            let hasAudio = !!ab;
+            // Valid text source if: 
+            // 1. Storyteller UUID is selected AND NOT EMPTY
+            // 2. OR Ebook Filename is selected
+            let stVal = st ? st.value : "";
+            let ebVal = eb ? eb.value : "";
+
+            let hasText = (stVal !== "") || (ebVal !== "");
+
+            if (hasAudio && hasText) {
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                msg.style.display = "none";
+            } else {
+                btn.disabled = true;
+                btn.style.opacity = "0.5";
+                if (hasAudio && !hasText) {
+                    msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
+                    msg.style.display = "block";
+                } else if (!hasAudio) {
+                    msg.textContent = "Please select an Audiobook";
+                    msg.style.display = "block";
+                }
+            }
+        }
+
+        // Initial check
+        validateForm();
     </script>
 </body>
 

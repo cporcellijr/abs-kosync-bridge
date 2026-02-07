@@ -114,7 +114,11 @@ class StorytellerSyncClient(SyncClient):
                     )
                     logger.debug(f"Resolved Storyteller href from percentage: {locator.href}")
 
-        success = self.storyteller_client.update_progress(epub, pct, locator)
+        if book.storyteller_uuid:
+            success = self.storyteller_client.update_position(book.storyteller_uuid, pct, locator)
+        else:
+            success = self.storyteller_client.update_progress(epub, pct, locator)
+        
         return SyncResult(pct, success)
 
     def _resolve_href_from_percentage(self, epub: str, pct: float) -> Optional[str]:

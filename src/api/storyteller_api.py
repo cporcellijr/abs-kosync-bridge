@@ -255,7 +255,97 @@ class StorytellerAPIClient:
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
-        return (r_back and r_back.status_code in [200, 204])
+    def search_books(self, query: str) -> list:
+        """Search for books in Storyteller."""
+        response = self._make_request("GET", "/api/v2/books", None)
+        if response and response.status_code == 200:
+            all_books = response.json()
+            # Client-side filtering since API doesn't seem to support search query param
+            query = query.lower()
+            results = []
+            for book in all_books:
+                if query in book.get('title', '').lower() or \
+                   any(query in author.get('name', '').lower() for author in book.get('authors', [])):
+                    results.append({
+                        'uuid': book.get('uuid') or book.get('id'),
+                        'title': book.get('title'),
+                        'authors': [a.get('name') for a in book.get('authors', [])],
+                        'cover_url': f"/api/v2/books/{book.get('uuid') or book.get('id')}/cover" # Proxy might be needed
+                    })
+            return results
+        return []
+
+    def download_book(self, book_uuid: str, output_path: Path) -> bool:
+        """Download the processed EPUB3 artifact."""
+        # Endpoint: GET /api/v2/books/{uuid}/file?format=readaloud
+        # Note: 'readaloud' format usually implies the processed EPUB3
+        url = f"{self.base_url}/api/v2/books/{book_uuid}/file"
+        # We need to manually construct the request to handle streaming
+        token = self._get_fresh_token()
+        if not token: return False
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Try API Download First
+        try:
+            logger.info(f"Attempting download from {url}")
+            with self.session.get(url, headers=headers, params={"format": "readaloud"}, stream=True, timeout=60) as r:
+                if r.status_code == 200:
+                    with open(output_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192): 
+                            f.write(chunk)
+                    logger.info(f"✅ Downloaded Storyteller artifact for {book_uuid} to {output_path}")
+                    return True
+                else:
+                    logger.warning(f"Storyteller API download failed: {r.status_code} - {r.text[:200]}")
+        except Exception as e:
+            logger.warning(f"API download raised exception: {e}")
+
+        # Fallback: Local File Copy
+        try:
+            # 1. Get Book Details for Filepath
+            r_details = self._make_request("GET", f"/api/v2/books/{book_uuid}")
+            if not r_details or r_details.status_code != 200:
+                logger.error(f"Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
+                raise Exception("API download failed and could not fetch details for fallback.")
+
+            book_data = r_details.json()
+            # Check readaloud object first, then root filepath
+            readaloud = book_data.get('readaloud', {})
+            source_path = readaloud.get('filepath')
+            
+            if not source_path:
+                logger.error("No filepath found in book details for fallback.")
+                raise Exception("No filepath in book details")
+
+            # 2. Map Path
+            # Mapping: /ebooks -> /storyteller/library
+            # This should ideally be configurable, but hardcoding for this fix based on known setup
+            local_path_str = source_path
+            if source_path.startswith("/ebooks"):
+                local_path_str = source_path.replace("/ebooks", "/storyteller/library", 1)
+            
+            local_path = Path(local_path_str)
+            
+            logger.info(f"Attempting local fallback from: {local_path}")
+            
+            if local_path.exists():
+                import shutil
+                shutil.copy2(local_path, output_path)
+                logger.info(f"✅ Downloaded (via Local Copy) Storyteller artifact for {book_uuid}")
+                return True
+            else:
+                 logger.error(f"Local fallback file not found: {local_path}")
+                 # Try unmapped?
+                 if Path(source_path).exists():
+                     shutil.copy2(source_path, output_path)
+                     logger.info(f"✅ Downloaded (via Direct Path) Storyteller artifact")
+                     return True
+                 
+                 raise Exception(f"File not found at {local_path} or {source_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to download Storyteller book {book_uuid} (API & Fallback): {e}")
+            raise e
 
 class StorytellerDBWithAPI:
     def __init__(self):
@@ -323,6 +413,10 @@ class StorytellerDBWithAPI:
         elif self.db_fallback: return self.db_fallback.update_progress(ebook_filename, percentage, rich_locator)
         return False
 
+    def update_position(self, book_uuid: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
+        if self.api_client: return self.api_client.update_position(book_uuid, percentage, rich_locator)
+        return False
+
     def get_recent_activity(self, hours: int = 24, min_progress: float = 0.01):
         if self.db_fallback: return self.db_fallback.get_recent_activity(hours, min_progress)
         return []
@@ -330,6 +424,14 @@ class StorytellerDBWithAPI:
     def add_to_collection(self, ebook_filename: str):
         if self.api_client: self.api_client.add_to_collection(ebook_filename)
         elif self.db_fallback: self.db_fallback.add_to_collection(ebook_filename)
+
+    def search_books(self, query: str) -> list:
+        if self.api_client: return self.api_client.search_books(query)
+        return []
+
+    def download_book(self, book_uuid: str, output_path: Path) -> bool:
+        if self.api_client: return self.api_client.download_book(book_uuid, output_path)
+        return False
 
 def create_storyteller_client():
     return StorytellerDBWithAPI()

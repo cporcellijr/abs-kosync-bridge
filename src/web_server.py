@@ -1007,6 +1007,12 @@ def index():
                 'hardcover_linked': False,
                 'hardcover_title': None
             })
+            
+        # [NEW] Check for legacy Storyteller link
+        # Book has 'storyteller' state but no 'storyteller_uuid'
+        has_storyteller_state = 'storyteller' in state_by_client
+        is_legacy_link = has_storyteller_state and not book.storyteller_uuid
+        mapping['storyteller_legacy_link'] = is_legacy_link
 
         # Platform deep links for dashboard
         mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
@@ -1155,13 +1161,41 @@ def match():
 
         # Get booklore_id if available for API-based hash computation
         booklore_id = None
-        if container.booklore_client().is_configured():
-            book = container.booklore_client().find_book_by_filename(ebook_filename)
-            if book:
-                booklore_id = book.get('id')
+        
+        # [NEW] Storyteller Tri-Link Logic
+        storyteller_uuid = request.form.get('storyteller_uuid')
+        
+        if storyteller_uuid:
+            # If Storyteller UUID is selected, we prioritize it
+            try:
+                epub_cache = container.epub_cache_dir()
+                if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+                
+                target_filename = f"storyteller_{storyteller_uuid}.epub"
+                target_path = epub_cache / target_filename
+                
+                logger.info(f"Using Storyteller Artifact: {storyteller_uuid}")
+                
+                if container.storyteller_client().download_book(storyteller_uuid, target_path):
+                    ebook_filename = target_filename # Override filename
+                    # We can also compute KOSync ID from this file now
+                    kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                else:
+                    return "Failed to download Storyteller artifact", 500
+                    
+            except Exception as e:
+                logger.error(f"Storyteller Link failed: {e}")
+                return f"Storyteller Link failed: {e}", 500
+        else:
+            # Fallback to Standard Logic
+            if container.booklore_client().is_configured():
+                book = container.booklore_client().find_book_by_filename(ebook_filename)
+                if book:
+                    booklore_id = book.get('id')
 
-        # Compute KOSync ID (Booklore API first, filesystem fallback)
-        kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+            # Compute KOSync ID (Booklore API first, filesystem fallback)
+            kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+            
         if not kosync_doc_id:
             logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
@@ -1175,7 +1209,8 @@ def match():
             kosync_doc_id=kosync_doc_id,
             transcript_file=None,
             status="pending",
-            duration=manager.get_duration(selected_ab)
+            duration=manager.get_duration(selected_ab),
+            storyteller_uuid=storyteller_uuid # Save UUID
         )
 
         database_service.save_book(book)
@@ -1199,7 +1234,7 @@ def match():
         return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
-    audiobooks, ebooks = [], []
+    audiobooks, ebooks, storyteller_books = [], [], []
     if search:
         # Fetch audiobooks conditionally based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting
         audiobooks = get_audiobooks_conditionally()
@@ -1208,8 +1243,15 @@ def match():
 
         # Use new search method
         ebooks = get_searchable_ebooks(search)
+        
+        # Search Storyteller
+        if container.storyteller_client().is_configured():
+            try:
+                storyteller_books = container.storyteller_client().search_books(search)
+            except Exception as e:
+                logger.warning(f"Storyteller search failed in match route: {e}")
 
-    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, search=search, get_title=manager.get_abs_title)
+    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books, search=search, get_title=manager.get_abs_title)
 
 
 def batch_match():
@@ -1312,6 +1354,17 @@ def delete_mapping(abs_id):
                 Path(book.transcript_file).unlink()
             except:
                 pass
+
+        # Clean up cached ebook if it exists
+        if book.ebook_filename:
+            epub_cache = container.epub_cache_dir()
+            cached_path = epub_cache / book.ebook_filename
+            if cached_path.exists():
+                try:
+                    cached_path.unlink()
+                    logger.info(f"🗑️ Deleted cached ebook file: {book.ebook_filename}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to delete cached ebook {book.ebook_filename}: {e}")
 
         # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
         if book.sync_mode == 'ebook_only' and book.kosync_doc_id:
@@ -1455,6 +1508,54 @@ def serve_cover(filename):
             logger.debug(f"Lazy cover extraction failed: {e}")
 
     return "Cover not found", 404
+
+def api_storyteller_search():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify({"error": "Query parameter 'q' is required"}), 400
+    results = container.storyteller_client().search_books(query)
+    return jsonify(results)
+
+
+def api_storyteller_link(abs_id):
+    data = request.get_json()
+    if not data or 'uuid' not in data:
+        return jsonify({"error": "Missing 'uuid' in JSON payload"}), 400
+
+    storyteller_uuid = data['uuid']
+    book = database_service.get_book(abs_id)
+    if not book:
+        return jsonify({"error": "Book not found"}), 404
+
+    try:
+        epub_cache = container.epub_cache_dir()
+        if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+        
+        target_path = epub_cache / f"storyteller_{storyteller_uuid}.epub"
+        
+        if container.storyteller_client().download_book(storyteller_uuid, target_path):
+            book.ebook_filename = target_path.name
+            book.storyteller_uuid = storyteller_uuid
+            # Also clear transcript to force re-alignment if needed? 
+            # Ideally yes, but SyncManager handles DB_MANAGED check.
+            # Maybe set status to pending to trigger re-alignment?
+            # For now, just link. The user might need to re-scan.
+            # Actually, let's set status to 'pending' to force a re-process with the new file!
+            book.status = 'pending' # Force re-process to align with new EPUB
+            # book.transcript_file = None # [OPTIMIZATION] Keep existing transcript to allow cache reuse
+            
+            database_service.save_book(book)
+            
+            # Dismiss suggestion if it exists
+            database_service.dismiss_suggestion(abs_id)
+            
+            return jsonify({"message": "Book linked successfully", "filename": target_path.name}), 200
+        else:
+            return jsonify({"error": "Failed to download Storyteller artifact"}), 500
+    except Exception as e:
+        logger.error(f"Error linking Storyteller book for {abs_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 def api_status():
     """Return status of all books from database service"""
@@ -1784,6 +1885,10 @@ def create_app(test_container=None):
     app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
+
+    # Storyteller API routes
+    app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])
+    app.add_url_rule('/api/storyteller/link/<abs_id>', 'api_storyteller_link', api_storyteller_link, methods=['POST'])
 
     # Return both app and container for external reference
     return app, container

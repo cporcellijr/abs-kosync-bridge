@@ -70,11 +70,13 @@ class Book(Base):
     abs_id = Column(String(255), primary_key=True)
     abs_title = Column(String(500))
     ebook_filename = Column(String(500))
+    original_ebook_filename = Column(String(500))  # NEW COLUMN
     kosync_doc_id = Column(String(255), index=True)
     transcript_file = Column(String(500))
     status = Column(String(50), default='active')
     duration = Column(Float)  # Duration in seconds from AudioBookShelf
     sync_mode = Column(String(20), default='audiobook')  # 'audiobook' or 'ebook_only'
+    storyteller_uuid = Column(String(36), index=True, nullable=True)
 
     # Relationships
     states = relationship("State", back_populates="book", cascade="all, delete-orphan")
@@ -83,16 +85,20 @@ class Book(Base):
     alignment = relationship("BookAlignment", back_populates="book", uselist=False, cascade="all, delete-orphan")
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
+                 original_ebook_filename: str = None,  # NEW ARGUMENT
                  kosync_doc_id: str = None, transcript_file: str = None,
-                 status: str = 'active', duration: float = None, sync_mode: str = 'audiobook'):
+                 status: str = 'active', duration: float = None, sync_mode: str = 'audiobook',
+                 storyteller_uuid: str = None):
         self.abs_id = abs_id
         self.abs_title = abs_title
         self.ebook_filename = ebook_filename
+        self.original_ebook_filename = original_ebook_filename  # NEW FIELD
         self.kosync_doc_id = kosync_doc_id
         self.transcript_file = transcript_file
         self.status = status
         self.duration = duration
         self.sync_mode = sync_mode
+        self.storyteller_uuid = storyteller_uuid
 
     def __repr__(self):
         return f"<Book(abs_id='{self.abs_id}', title='{self.abs_title}')>"

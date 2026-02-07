@@ -28,6 +28,7 @@ class MockContainer:
     def sync_clients(self): return {}
     def data_dir(self): return Path(tempfile.gettempdir())
     def books_dir(self): return Path(tempfile.gettempdir())
+    def epub_cache_dir(self): return Path(tempfile.gettempdir()) / 'test_epub_cache'
 
 class TestSettingsComprehensive(unittest.TestCase):
     def setUp(self):

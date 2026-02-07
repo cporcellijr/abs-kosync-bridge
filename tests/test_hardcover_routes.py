@@ -89,6 +89,9 @@ class MockContainer:
     def books_dir(self):
         return Path(tempfile.gettempdir()) / 'test_books'
 
+    def epub_cache_dir(self):
+        return Path(tempfile.gettempdir()) / 'test_epub_cache'
+
 
 class TestHardcoverResolveEndpoint(unittest.TestCase):
     """Tests for /api/hardcover/resolve endpoint."""

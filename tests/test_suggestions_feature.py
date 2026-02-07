@@ -44,6 +44,7 @@ class MockContainer:
     def sync_clients(self): return self.mock_sync_clients
     def data_dir(self): return Path(tempfile.gettempdir()) / 'test_data'
     def books_dir(self): return Path(tempfile.gettempdir()) / 'test_books'
+    def epub_cache_dir(self): return Path(tempfile.gettempdir()) / 'test_epub_cache'
 
 class TestSuggestionsFeature(unittest.TestCase):
     def setUp(self):
