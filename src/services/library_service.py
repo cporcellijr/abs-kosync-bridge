@@ -49,6 +49,9 @@ class LibraryService:
         Returns:
             Absolute path to the downloaded/found ebook, or None.
         """
+        if not abs_item:
+            return None
+
         item_id = abs_item.get('id')
         title = abs_item.get('media', {}).get('metadata', {}).get('title')
         author = abs_item.get('media', {}).get('metadata', {}).get('authorName')

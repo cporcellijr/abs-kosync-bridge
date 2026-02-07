@@ -847,19 +847,27 @@
 
             .hc-modal {
                 position: fixed;
-                top: 0; left: 0; right: 0; bottom: 0;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
                 z-index: 1000;
                 display: flex;
                 align-items: center;
                 justify-content: center;
             }
+
             .hc-modal-backdrop {
                 position: absolute;
-                top: 0; left: 0; right: 0; bottom: 0;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
                 background: rgba(0, 0, 0, 0.8);
                 backdrop-filter: blur(4px);
                 -webkit-backdrop-filter: blur(4px);
             }
+
             .hc-modal-content {
                 position: relative;
                 background: linear-gradient(180deg, #1a1a1a 0%, #141414 100%);
@@ -874,9 +882,17 @@
                     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
                 animation: hc-modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             }
+
             @keyframes hc-modal-in {
-                from { opacity: 0; transform: scale(0.96) translateY(8px); }
-                to { opacity: 1; transform: scale(1) translateY(0); }
+                from {
+                    opacity: 0;
+                    transform: scale(0.96) translateY(8px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: scale(1) translateY(0);
+                }
             }
 
             .hc-modal-header {
@@ -886,6 +902,7 @@
                 justify-content: space-between;
                 align-items: center;
             }
+
             .hc-modal-header h3 {
                 margin: 0;
                 font-size: 1.1rem;
@@ -895,6 +912,7 @@
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
             }
+
             .hc-modal-close {
                 background: rgba(255, 255, 255, 0.05);
                 border: none;
@@ -910,6 +928,7 @@
                 justify-content: center;
                 transition: all 0.2s;
             }
+
             .hc-modal-close:hover {
                 background: rgba(255, 255, 255, 0.1);
                 color: #fff;
@@ -920,8 +939,15 @@
                 max-height: calc(85vh - 140px);
                 overflow-y: auto;
             }
-            .hc-modal-body::-webkit-scrollbar { width: 6px; }
-            .hc-modal-body::-webkit-scrollbar-track { background: transparent; }
+
+            .hc-modal-body::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .hc-modal-body::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
             .hc-modal-body::-webkit-scrollbar-thumb {
                 background: rgba(102, 126, 234, 0.3);
                 border-radius: 3px;
@@ -935,6 +961,7 @@
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
                 background: rgba(0, 0, 0, 0.2);
             }
+
             .hc-modal-footer button {
                 padding: 0.6rem 1.25rem;
                 border-radius: 8px;
@@ -944,24 +971,29 @@
                 font-weight: 600;
                 transition: all 0.2s;
             }
+
             .hc-btn-cancel {
                 background: rgba(255, 255, 255, 0.06);
                 color: rgba(255, 255, 255, 0.7);
                 border: 1px solid rgba(255, 255, 255, 0.08) !important;
             }
+
             .hc-btn-cancel:hover {
                 background: rgba(255, 255, 255, 0.1);
                 color: #fff;
             }
+
             .hc-btn-link {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: #fff;
                 box-shadow: 0 2px 12px rgba(102, 126, 234, 0.3);
             }
+
             .hc-btn-link:hover:not(:disabled) {
                 box-shadow: 0 4px 20px rgba(102, 126, 234, 0.45);
                 transform: translateY(-1px);
             }
+
             .hc-btn-link:disabled {
                 opacity: 0.4;
                 cursor: not-allowed;
@@ -974,6 +1006,7 @@
                 padding-bottom: 1.25rem;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.06);
             }
+
             .hc-book-title {
                 font-size: 1.2rem;
                 font-weight: 600;
@@ -981,6 +1014,7 @@
                 margin-bottom: 0.25rem;
                 line-height: 1.4;
             }
+
             .hc-book-author {
                 font-size: 0.9rem;
                 color: rgba(255, 255, 255, 0.5);
@@ -1007,11 +1041,13 @@
                 background: rgba(255, 255, 255, 0.02);
                 overflow: hidden;
             }
+
             .hc-edition-option:hover {
                 border-color: rgba(102, 126, 234, 0.3);
                 background: rgba(102, 126, 234, 0.05);
                 transform: translateY(-1px);
             }
+
             .hc-edition-option.selected {
                 border-color: rgba(102, 126, 234, 0.6);
                 background: rgba(102, 126, 234, 0.1);
@@ -1028,6 +1064,7 @@
                 font-size: 1.15rem;
                 border-right: 1px solid rgba(255, 255, 255, 0.04);
             }
+
             .hc-edition-option.selected .hc-edition-icon {
                 background: rgba(102, 126, 234, 0.15);
             }
@@ -1049,6 +1086,7 @@
                 align-items: center;
                 gap: 0.5rem;
             }
+
             .hc-edition-linked {
                 font-size: 0.65rem;
                 font-weight: 600;
@@ -1066,11 +1104,13 @@
                 color: rgba(255, 255, 255, 0.45);
                 font-size: 0.8rem;
             }
+
             .hc-edition-detail {
                 display: flex;
                 align-items: center;
                 gap: 0.35rem;
             }
+
             .hc-edition-detail svg {
                 width: 12px;
                 height: 12px;
@@ -1083,6 +1123,7 @@
                 font-size: 0.9rem;
                 margin-bottom: 0.75rem;
             }
+
             #hc-input {
                 width: 100%;
                 padding: 0.75rem 1rem;
@@ -1094,12 +1135,17 @@
                 font-size: 0.9rem;
                 transition: all 0.2s;
             }
-            #hc-input::placeholder { color: rgba(255, 255, 255, 0.3); }
+
+            #hc-input::placeholder {
+                color: rgba(255, 255, 255, 0.3);
+            }
+
             #hc-input:focus {
                 outline: none;
                 border-color: rgba(102, 126, 234, 0.5);
                 box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
             }
+
             #hc-manual button {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: #fff;
@@ -1111,6 +1157,7 @@
                 font-weight: 600;
                 transition: all 0.2s;
             }
+
             #hc-manual button:hover {
                 box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35);
                 transform: translateY(-1px);
@@ -1121,13 +1168,20 @@
                 font-size: 0.8rem;
                 margin-top: 1rem;
             }
+
             .hc-text-muted a {
                 color: #667eea;
                 text-decoration: none;
                 transition: color 0.2s;
             }
-            .hc-text-muted a:hover { color: #a78bfa; }
-            .hc-text-error { color: #f87171; }
+
+            .hc-text-muted a:hover {
+                color: #a78bfa;
+            }
+
+            .hc-text-error {
+                color: #f87171;
+            }
 
             /* Loading state */
             .hc-loading {
@@ -1135,6 +1189,7 @@
                 padding: 3rem 1rem;
                 color: rgba(255, 255, 255, 0.6);
             }
+
             .hc-loading-spinner {
                 width: 40px;
                 height: 40px;
@@ -1144,10 +1199,116 @@
                 border-radius: 50%;
                 animation: hc-spin 0.8s linear infinite;
             }
+
             @keyframes hc-spin {
-                to { transform: rotate(360deg); }
+                to {
+                    transform: rotate(360deg);
+                }
             }
-            .hc-loading-text { font-size: 0.9rem; }
+
+            .hc-loading-text {
+                font-size: 0.9rem;
+            }
+
+            /* Suggestions Banner Styling */
+            .suggestions-banner {
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 12px;
+                padding: 16px 24px;
+                margin-bottom: 24px;
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .suggestions-banner:hover {
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+                border-color: rgba(102, 126, 234, 0.4);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 20px rgba(102, 126, 234, 0.1);
+            }
+
+            .suggestions-banner.active {
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+                margin-bottom: 0;
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            }
+
+            .suggestions-title-group {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+            }
+
+            .suggestions-title {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: #ffffff;
+                margin: 0;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .count-badge {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 2px 10px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 700;
+                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            }
+
+            .banner-hint {
+                font-size: 0.9rem;
+                color: rgba(255, 255, 255, 0.5);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .chevron {
+                font-size: 1.2rem;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                color: #667eea;
+            }
+
+            .suggestions-banner.active .chevron {
+                transform: rotate(180deg);
+            }
+
+            .suggestions-content {
+                display: none;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(102, 126, 234, 0.1);
+                border-top: none;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                padding: 24px;
+                margin-bottom: 24px;
+            }
+
+            .suggestions-content.show {
+                display: block;
+                animation: slide-down 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            @keyframes slide-down {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
         </style>
     </head>
 
@@ -1197,7 +1358,8 @@
         </div>
 
         <div class="nav-actions">
-            <a href="https://cporcellijr.github.io/abs-kosync-bridge/" class="btn" target="_blank" rel="noopener noreferrer">📚 Docs</a>
+            <a href="https://cporcellijr.github.io/abs-kosync-bridge/" class="btn" target="_blank"
+                rel="noopener noreferrer">📚 Docs</a>
             <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
             <a href="/book-linker" class="btn">🔗 Book Linker</a>
@@ -1209,40 +1371,92 @@
 
     <div class="container">
         {% if suggestions %}
-        <div class="suggestions-container"
-            style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            <h2
-                style="font-size: 1.1rem; color: #a0a0a0; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px;">
-                💡 Pending Suggestions
-            </h2>
-            <div class="suggestions-grid"
-                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
-                {% for suggestion in suggestions %}
-                <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
-                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
-                    <div class="suggestion-details">
-                        <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                            title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
-                        <div
-                            style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            {{ suggestion.author }}</div>
+        <div id="suggestions-section">
+            <div class="suggestions-banner" id="suggestions-banner">
+                <div class="suggestions-title-group">
+                    <h2 class="suggestions-title">💡 Pending Suggestions</h2>
+                    <span class="count-badge">{{ suggestions|length }}</span>
+                </div>
+                <div class="banner-hint">
+                    <span>Click to Review</span>
+                    <span class="chevron">↓</span>
+                </div>
+            </div>
+            <div class="suggestions-content" id="suggestions-content">
+                <div class="suggestions-container" style="padding: 0; border: none; background: transparent;">
+                    <div class="suggestions-grid"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+                        {% for suggestion in suggestions %}
+                        <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
+                            style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
+                            <div class="suggestion-details">
+                                <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                                    title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
+                                <div
+                                    style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    {{ suggestion.author }}</div>
 
-                        <div
-                            style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
-                            <span>📚</span> Found {{ suggestion.audiobook_count }} potential match(es)
-                        </div>
+                                <div
+                                    style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
+                                    <span>📚</span> Found {{ suggestion.audiobook_count }} potential match(es)
+                                </div>
 
-                        <div class="suggestion-actions" style="display: flex; gap: 8px;">
-                            <a href="/match?search={{ suggestion.title|urlencode }}" class="btn btn-sm btn-primary"
-                                style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
-                            <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')" class="btn btn-sm"
-                                style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
+                                <div class="suggestion-actions" style="display: flex; gap: 8px;">
+                                    <a href="/match?search={{ suggestion.title|urlencode }}"
+                                        class="btn btn-sm btn-primary"
+                                        style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
+                                    <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')"
+                                        class="btn btn-sm"
+                                        style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
+                                </div>
+                            </div>
                         </div>
+                        {% endfor %}
                     </div>
                 </div>
-                {% endfor %}
             </div>
             <script>
+                // Make function globally available
+                window.toggleSuggestions = function () {
+                    const content = document.getElementById('suggestions-content');
+                    const banner = document.getElementById('suggestions-banner');
+
+                    if (!content || !banner) return;
+
+                    const isShowing = content.classList.toggle('show');
+                    banner.classList.toggle('active');
+
+                    // Persist state in localStorage safely
+                    try {
+                        localStorage.setItem('suggestions_expanded', isShowing);
+                    } catch (e) {
+                        console.debug('LocalStorage error:', e);
+                    }
+                };
+
+                // Initialize on load
+                document.addEventListener('DOMContentLoaded', () => {
+                    // Attach click handler
+                    const banner = document.getElementById('suggestions-banner');
+                    if (banner) {
+                        banner.addEventListener('click', window.toggleSuggestions);
+                    }
+
+                    // Restore state
+                    try {
+                        const shouldExpand = localStorage.getItem('suggestions_expanded') === 'true';
+                        if (shouldExpand) {
+                            const content = document.getElementById('suggestions-content');
+                            if (content && banner) {
+                                content.classList.add('show');
+                                banner.classList.add('active');
+                            }
+                        }
+                    } catch (e) {
+                        console.debug('LocalStorage error:', e);
+                    }
+                });
+
                 function dismissSuggestion(e, id) {
                     e.preventDefault();
                     console.log('Dismissing suggestion:', id);
@@ -1613,49 +1827,53 @@
             setTimeout(refreshDashboard, 30000);
         </script>
 
-    <!-- Hardcover Edition Picker Modal -->
-    <div id="hardcover-modal" class="hc-modal" style="display:none;">
-        <div class="hc-modal-backdrop" onclick="closeHardcoverModal()"></div>
-        <div class="hc-modal-content">
-            <div class="hc-modal-header">
-                <h3>Link to Hardcover</h3>
-                <button class="hc-modal-close" onclick="closeHardcoverModal()" aria-label="Close">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                        <path d="M1 1l12 12M13 1L1 13"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="hc-modal-body">
-                <div id="hc-loading" class="hc-loading" style="display:none;">
-                    <div class="hc-loading-spinner"></div>
-                    <div class="hc-loading-text">Searching Hardcover...</div>
+        <!-- Hardcover Edition Picker Modal -->
+        <div id="hardcover-modal" class="hc-modal" style="display:none;">
+            <div class="hc-modal-backdrop" onclick="closeHardcoverModal()"></div>
+            <div class="hc-modal-content">
+                <div class="hc-modal-header">
+                    <h3>Link to Hardcover</h3>
+                    <button class="hc-modal-close" onclick="closeHardcoverModal()" aria-label="Close">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round">
+                            <path d="M1 1l12 12M13 1L1 13" />
+                        </svg>
+                    </button>
                 </div>
-                <div id="hc-found" style="display:none;">
-                    <div class="hc-book-info">
-                        <div class="hc-book-title" id="hc-title"></div>
-                        <div class="hc-book-author" id="hc-author"></div>
+                <div class="hc-modal-body">
+                    <div id="hc-loading" class="hc-loading" style="display:none;">
+                        <div class="hc-loading-spinner"></div>
+                        <div class="hc-loading-text">Searching Hardcover...</div>
                     </div>
-                    <div class="hc-editions-label">Select Edition</div>
-                    <div id="hc-editions"></div>
-                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Wrong book? Enter URL manually</a></p>
+                    <div id="hc-found" style="display:none;">
+                        <div class="hc-book-info">
+                            <div class="hc-book-title" id="hc-title"></div>
+                            <div class="hc-book-author" id="hc-author"></div>
+                        </div>
+                        <div class="hc-editions-label">Select Edition</div>
+                        <div id="hc-editions"></div>
+                        <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Wrong book?
+                                Enter URL manually</a></p>
+                    </div>
+                    <div id="hc-manual" style="display:none;">
+                        <p>Enter Hardcover URL or book ID:</p>
+                        <input type="text" id="hc-input" placeholder="https://hardcover.app/books/...">
+                        <button onclick="resolveManualInput()">Search</button>
+                    </div>
+                    <div id="hc-error" style="display:none;">
+                        <p id="hc-error-msg" class="hc-text-error"></p>
+                        <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Try entering URL
+                                manually</a></p>
+                    </div>
                 </div>
-                <div id="hc-manual" style="display:none;">
-                    <p>Enter Hardcover URL or book ID:</p>
-                    <input type="text" id="hc-input" placeholder="https://hardcover.app/books/...">
-                    <button onclick="resolveManualInput()">Search</button>
+                <div class="hc-modal-footer">
+                    <button class="hc-btn-cancel" onclick="closeHardcoverModal()">Cancel</button>
+                    <button id="hc-link-btn" class="hc-btn-link" onclick="linkSelectedEdition()" disabled>Link
+                        Book</button>
                 </div>
-                <div id="hc-error" style="display:none;">
-                    <p id="hc-error-msg" class="hc-text-error"></p>
-                    <p class="hc-text-muted"><a href="#" onclick="showManualInput(); return false;">Try entering URL manually</a></p>
-                </div>
-            </div>
-            <div class="hc-modal-footer">
-                <button class="hc-btn-cancel" onclick="closeHardcoverModal()">Cancel</button>
-                <button id="hc-link-btn" class="hc-btn-link" onclick="linkSelectedEdition()" disabled>Link Book</button>
             </div>
         </div>
-    </div>
-    <script src="/static/js/hardcover-modal.js"></script>
+        <script src="/static/js/hardcover-modal.js"></script>
 </body>
 
 </html>

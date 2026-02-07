@@ -8,6 +8,7 @@ import traceback
 from pathlib import Path
 import schedule
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 
 import json
 from src.api.storyteller_api import StorytellerDBWithAPI
@@ -471,7 +472,15 @@ class SyncManager:
             # Use local proxy for cover image to ensure accessibility
             cover = f"/api/cover-proxy/{abs_id}"
             
-            logger.debug(f"Checking suggestions for '{title}' (Author: {author})")
+            # Clean title for better matching (remove text in parens/brackets)
+            search_title = title
+            if title:
+                # Remove (Unabridged), [Dramatized Adaptation], etc.
+                search_title = re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+                if search_title != title:
+                     logger.debug(f"cleaned title for search: '{title}' -> '{search_title}'")
+
+            logger.debug(f"Checking suggestions for '{title}' (Search: '{search_title}', Author: {author})")
             
             matches = []
             
@@ -480,8 +489,8 @@ class SyncManager:
             # 2a. Search Booklore
             if self.booklore_client and self.booklore_client.is_configured():
                 try:
-                    bl_results = self.booklore_client.search_books(title)
-                    logger.debug(f"Booklore returned {len(bl_results)} results for '{title}'")
+                    bl_results = self.booklore_client.search_books(search_title)
+                    logger.debug(f"Booklore returned {len(bl_results)} results for '{search_title}'")
                     for b in bl_results:
                          # Filter for EPUBs
                          fname = b.get('fileName', '')
@@ -493,7 +502,7 @@ class SyncManager:
                                  "author": b.get('authors'),
                                  "filename": fname, # Important for auto-linking
                                  "id": str(b.get('id')),
-                                 "confidence": "high" if title.lower() in b.get('title', '').lower() else "medium"
+                                 "confidence": "high" if search_title.lower() in b.get('title', '').lower() else "medium"
                              })
                 except Exception as e:
                     logger.warning(f"Booklore search failed during suggestion: {e}")
@@ -501,7 +510,7 @@ class SyncManager:
             # 2b. Search Local Filesystem
             if self.books_dir and self.books_dir.exists():
                 try:
-                    clean_title = title.lower()
+                    clean_title = search_title.lower()
                     fs_matches = 0
                     for epub in self.books_dir.rglob("*.epub"):
                          if epub.name in found_filenames:
@@ -540,12 +549,12 @@ class SyncManager:
             # 2d. CWA Search (Calibre-Web Automated via OPDS)
             if self.library_service and self.library_service.cwa_client and self.library_service.cwa_client.is_configured():
                 try:
-                    query = f"{title}"
+                    query = f"{search_title}"
                     if author:
                         query += f" {author}"
                     cwa_results = self.library_service.cwa_client.search_ebooks(query)
                     if cwa_results:
-                        logger.debug(f"CWA: Found {len(cwa_results)} result(s) for '{title}'")
+                        logger.debug(f"CWA: Found {len(cwa_results)} result(s) for '{search_title}'")
                         for cr in cwa_results:
                             matches.append({
                                 "source": "cwa",
@@ -554,7 +563,7 @@ class SyncManager:
                                 "filename": f"{abs_id}_cwa.{cr.get('ext', 'epub')}",
                                 "download_url": cr.get('download_url'),
                                 "ext": cr.get('ext', 'epub'),
-                                "confidence": "high" if title.lower() in cr.get('title', '').lower() else "medium"
+                                "confidence": "high" if search_title.lower() in cr.get('title', '').lower() else "medium"
                             })
                 except Exception as e:
                     logger.warning(f"CWA search failed during suggestion: {e}")
@@ -562,9 +571,9 @@ class SyncManager:
             # 2e. ABS Search (search other libraries for matching ebook)
             if self.abs_client:
                 try:
-                    abs_results = self.abs_client.search_ebooks(title)
+                    abs_results = self.abs_client.search_ebooks(search_title)
                     if abs_results:
-                        logger.debug(f"ABS Search: Found {len(abs_results)} result(s) for '{title}'")
+                        logger.debug(f"ABS Search: Found {len(abs_results)} result(s) for '{search_title}'")
                         for ar in abs_results:
                             # Check if this result has ebook files
                             result_ebooks = self.abs_client.get_ebook_files(ar['id'])
@@ -714,7 +723,7 @@ class SyncManager:
             item_details = self.abs_client.get_item_details(abs_id)
             
             epub_path = None
-            if self.library_service:
+            if self.library_service and item_details:
                 # Try Priority Chain (ABS Direct -> Booklore -> CWA -> ABS Search)
                 epub_path = self.library_service.acquire_ebook(item_details)
 
