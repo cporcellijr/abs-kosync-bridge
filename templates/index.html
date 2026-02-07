@@ -1307,6 +1307,106 @@
             .hidden {
                 display: none !important;
             }
+
+            /* Suggestions Banner Styling */
+            .suggestions-banner {
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+                border: 1px solid rgba(102, 126, 234, 0.2);
+                border-radius: 12px;
+                padding: 16px 24px;
+                margin-bottom: 24px;
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .suggestions-banner:hover {
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.25) 0%, rgba(118, 75, 162, 0.25) 100%);
+                border-color: rgba(102, 126, 234, 0.4);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 20px rgba(102, 126, 234, 0.1);
+            }
+
+            .suggestions-banner.active {
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+                margin-bottom: 0;
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            }
+
+            .suggestions-title-group {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+            }
+
+            .suggestions-title {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: #ffffff;
+                margin: 0;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .count-badge {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 2px 10px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 700;
+                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            }
+
+            .banner-hint {
+                font-size: 0.9rem;
+                color: rgba(255, 255, 255, 0.5);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .chevron {
+                font-size: 1.2rem;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                color: #667eea;
+            }
+
+            .suggestions-banner.active .chevron {
+                transform: rotate(180deg);
+            }
+
+            .suggestions-content {
+                display: none;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(102, 126, 234, 0.1);
+                border-top: none;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                padding: 24px;
+                margin-bottom: 24px;
+            }
+
+            .suggestions-content.show {
+                display: block;
+                animation: slide-down 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            @keyframes slide-down {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
         </style>
     </head>
 
@@ -1369,40 +1469,92 @@
 
     <div class="container">
         {% if suggestions %}
-        <div class="suggestions-container"
-            style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            <h2
-                style="font-size: 1.1rem; color: #a0a0a0; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px;">
-                💡 Pending Suggestions
-            </h2>
-            <div class="suggestions-grid"
-                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
-                {% for suggestion in suggestions %}
-                <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
-                    style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
-                    <div class="suggestion-details">
-                        <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                            title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
-                        <div
-                            style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            {{ suggestion.author }}</div>
+        <div id="suggestions-section">
+            <div class="suggestions-banner" id="suggestions-banner">
+                <div class="suggestions-title-group">
+                    <h2 class="suggestions-title">💡 Pending Suggestions</h2>
+                    <span class="count-badge">{{ suggestions|length }}</span>
+                </div>
+                <div class="banner-hint">
+                    <span>Click to Review</span>
+                    <span class="chevron">↓</span>
+                </div>
+            </div>
+            <div class="suggestions-content" id="suggestions-content">
+                <div class="suggestions-container" style="padding: 0; border: none; background: transparent;">
+                    <div class="suggestions-grid"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+                        {% for suggestion in suggestions %}
+                        <div class="suggestion-card" id="suggestion-{{ suggestion.source_id }}"
+                            style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; transition: transform 0.2s; border: 1px solid rgba(255,255,255,0.05);">
+                            <div class="suggestion-details">
+                                <h3 style="font-size: 0.95rem; margin: 0 0 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                                    title="{{ suggestion.title }}">{{ suggestion.title }}</h3>
+                                <div
+                                    style="font-size: 0.8rem; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    {{ suggestion.author }}</div>
 
-                        <div
-                            style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
-                            <span>📚</span> Found {{ suggestion.audiobook_count }} potential match(es)
-                        </div>
+                                <div
+                                    style="font-size: 0.75rem; color: #4CAF50; margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
+                                    <span>📚</span> Found {{ suggestion.audiobook_count }} potential match(es)
+                                </div>
 
-                        <div class="suggestion-actions" style="display: flex; gap: 8px;">
-                            <a href="/match?search={{ suggestion.title|urlencode }}" class="btn btn-sm btn-primary"
-                                style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
-                            <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')" class="btn btn-sm"
-                                style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
+                                <div class="suggestion-actions" style="display: flex; gap: 8px;">
+                                    <a href="/match?search={{ suggestion.title|urlencode }}"
+                                        class="btn btn-sm btn-primary"
+                                        style="padding: 4px 10px; font-size: 0.8rem; text-decoration: none;">Review</a>
+                                    <button onclick="dismissSuggestion(event, '{{ suggestion.source_id }}')"
+                                        class="btn btn-sm"
+                                        style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #fff;">Dismiss</button>
+                                </div>
+                            </div>
                         </div>
+                        {% endfor %}
                     </div>
                 </div>
-                {% endfor %}
             </div>
             <script>
+                // Make function globally available
+                window.toggleSuggestions = function () {
+                    const content = document.getElementById('suggestions-content');
+                    const banner = document.getElementById('suggestions-banner');
+
+                    if (!content || !banner) return;
+
+                    const isShowing = content.classList.toggle('show');
+                    banner.classList.toggle('active');
+
+                    // Persist state in localStorage safely
+                    try {
+                        localStorage.setItem('suggestions_expanded', isShowing);
+                    } catch (e) {
+                        console.debug('LocalStorage error:', e);
+                    }
+                };
+
+                // Initialize on load
+                document.addEventListener('DOMContentLoaded', () => {
+                    // Attach click handler
+                    const banner = document.getElementById('suggestions-banner');
+                    if (banner) {
+                        banner.addEventListener('click', window.toggleSuggestions);
+                    }
+
+                    // Restore state
+                    try {
+                        const shouldExpand = localStorage.getItem('suggestions_expanded') === 'true';
+                        if (shouldExpand) {
+                            const content = document.getElementById('suggestions-content');
+                            if (content && banner) {
+                                content.classList.add('show');
+                                banner.classList.add('active');
+                            }
+                        }
+                    } catch (e) {
+                        console.debug('LocalStorage error:', e);
+                    }
+                });
+
                 function dismissSuggestion(e, id) {
                     e.preventDefault();
                     console.log('Dismissing suggestion:', id);
