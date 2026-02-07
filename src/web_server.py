@@ -583,11 +583,20 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
         try:
              # Extract ID: cwa_12345.epub -> 12345
              # Format is cwa_{id}.{ext}
-             parts = ebook_filename.split("_")
-             if len(parts) >= 2:
-                 cwa_id_part = parts[1] # "12345.epub"
-                 cwa_id = cwa_id_part.split(".")[0]
+             if ebook_filename.startswith("cwa_"):
+                 # Robust: strip cwa_ prefix and the extension
+                 cwa_id = ebook_filename[4:].rsplit(".", 1)[0]
+             else:
+                 # Pattern like somefile_cwa.epub or itemid_cwa.epub
+                 cwa_id = ebook_filename.split("_cwa.")[0]
                  
+                 # If it was still prefixed with something else, handle it? 
+                 # Usually it's {uuid}_cwa.epub or cwa_{id}.epub
+                 if "_" in cwa_id and not ebook_filename.startswith("cwa_"):
+                     # If format is uuid_cwa.epub, cwa_id is uuid (correct)
+                     pass 
+                 
+             if cwa_id:
                  cwa_client = container.cwa_client()
                  if cwa_client and cwa_client.is_configured():
                      logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
