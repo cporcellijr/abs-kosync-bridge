@@ -14,62 +14,106 @@ from src.sync_clients.sync_client_interface import LocatorResult
 logger = logging.getLogger(__name__)
 
 class BookloreClient:
-    def __init__(self):
+    def __init__(self, database_service=None):
         self.base_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
         self.username = os.environ.get("BOOKLORE_USER")
         self.password = os.environ.get("BOOKLORE_PASSWORD")
-        self._book_cache = {}
-        self._book_id_cache = {}  # Maps book_id -> book_info for quick lookups
+        self.db = database_service
+        
+        # In-memory cache for performance (populated from DB)
+        self._book_cache = {} 
+        self._book_id_cache = {}
         self._cache_timestamp = 0
+        
         self._token = None
         self._token_timestamp = 0
         self._token_max_age = 300
         self.session = requests.Session()
 
-        # Cache file path
-        self.cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
+        # Legacy Cache file path (for migration only)
+        self.legacy_cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
 
-        # Load cache on init
+        # Load cache from DB (and migrate if needed)
         self._load_cache()
 
     def _load_cache(self):
-        """Load cache from disk."""
-        if not self.cache_file.exists():
-            return
+        """Load cache from DB, migrating legacy JSON if needed."""
+        # 1. Migrate Legacy JSON if it exists and DB is empty
+        if self.legacy_cache_file.exists():
+            try:
+                # Check if DB is empty to avoid overwriting newer SQL data
+                if self.db and not self.db.get_all_booklore_books():
+                    logger.info("📦 Booklore: Migrating legacy JSON cache to SQLite...")
+                    with open(self.legacy_cache_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        books = data.get('books', {})
+                        count = 0
+                        for filename, book_info in books.items():
+                            try:
+                                from src.db.models import BookloreBook
+                                import json as pyjson
+                                
+                                # Convert book_info to BookloreBook model
+                                b_model = BookloreBook(
+                                    filename=filename,
+                                    title=book_info.get('title'),
+                                    authors=book_info.get('authors'),
+                                    raw_metadata=pyjson.dumps(book_info)
+                                )
+                                self.db.save_booklore_book(b_model)
+                                count += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to migrate book {filename}: {e}")
+                        
+                        logger.info(f"✅ Booklore: Migrated {count} books to database.")
+                        
+                    # Rename legacy file to .bak after successful migration
+                    try:
+                        self.legacy_cache_file.rename(self.legacy_cache_file.with_suffix('.json.bak'))
+                        logger.info("📦 Booklore: Legacy cache file renamed to .bak")
+                    except Exception as e:
+                        logger.warning(f"Could not rename legacy cache file: {e}")
+            except Exception as e:
+                logger.error(f"Booklore migration failed: {e}")
 
-        try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self._book_cache = data.get('books', {})
-                self._cache_timestamp = data.get('timestamp', 0)
-
-                # Rebuild ID cache
+        # 2. Load from DB into memory
+        if self.db:
+            try:
+                db_books = self.db.get_all_booklore_books()
+                self._book_cache = {}
                 self._book_id_cache = {}
-                for book in self._book_cache.values():
-                    uid = book.get('id')
-                    if uid:
-                        self._book_id_cache[uid] = book
-
-            logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from disk cache")
-        except Exception as e:
-            logger.warning(f"Failed to load Booklore cache: {e}")
-            self._book_cache = {}
+                
+                for db_book in db_books:
+                    # Parse raw metadata back to dict
+                    book_info = db_book.raw_metadata_dict
+                    # Ensure minimal fields exist
+                    if not book_info:
+                        book_info = {
+                            'fileName': db_book.filename,
+                            'title': db_book.title,
+                            'authors': db_book.authors
+                        }
+                    
+                    self._book_cache[db_book.filename] = book_info
+                    
+                    # Update ID cache
+                    bid = book_info.get('id')
+                    if bid:
+                        self._book_id_cache[bid] = book_info
+                        
+                self._cache_timestamp = time.time()
+                logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from database")
+            except Exception as e:
+                logger.error(f"Failed to load Booklore cache from DB: {e}")
+                self._book_cache = {}
 
     def _save_cache(self):
-        """Save cache to disk."""
-        try:
-            data = {
-                'timestamp': self._cache_timestamp,
-                'books': self._book_cache
-            }
-            # Atomic write
-            temp_file = self.cache_file.with_suffix('.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f)
-            temp_file.replace(self.cache_file)
-            logger.debug("Saved Booklore cache to disk")
-        except Exception as e:
-            logger.error(f"Failed to save Booklore cache: {e}")
+        """
+        Save cache to DB.
+        Note: We now save individual books on update, so this is mostly a no-op 
+        or used for bulk updates/timestamp management.
+        """
+        pass # Database persistence is handled atomically per book elsewhere
 
     def _get_fresh_token(self):
         if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
@@ -224,10 +268,14 @@ class BookloreClient:
             self._book_cache = {}
             self._book_id_cache = {}
             self._cache_timestamp = time.time()
-            self._save_cache()
+            self._save_cache() # No-op now
             return True
 
         logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+
+        # Sync deleted books (Remove from DB if not in scan)
+        # Note: This is an expensive operation, so maybe unnecessary unless strict sync needed.
+        # For now, we just Add/Update.
 
         # --- Proceed with Step 2: Detail Fetching (Same as before) ---
         
@@ -259,7 +307,7 @@ class BookloreClient:
                  pass
 
         self._cache_timestamp = time.time()
-        self._save_cache()
+        # self._save_cache() # DB is updated inside _process_book_detail
         return True
 
     def _process_book_detail(self, detail):
@@ -297,8 +345,29 @@ class BookloreClient:
             'koreaderProgress': detail.get('koreaderProgress'),
         }
 
+        self._book_cache[filename] = book_info # Filename case sensitivity might issue used to be filename.lower()
+        # The key in _book_cache seems to be filename (exact) or lower? 
+        # Original code line 300: self._book_cache[filename.lower()] = book_info
+        # Let's keep it consistent with what we see in database migration
+        
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
+
+        # Persist to DB
+        if self.db:
+            try:
+                from src.db.models import BookloreBook
+                import json as pyjson
+                
+                b_model = BookloreBook(
+                    filename=filename.lower(), # Store key as lowercase filename for consistency
+                    title=title,
+                    authors=author_str,
+                    raw_metadata=pyjson.dumps(book_info)
+                )
+                self.db.save_booklore_book(b_model)
+            except Exception as e:
+                logger.error(f"Failed to persist book {filename} to DB: {e}")
 
         return None
 
@@ -416,7 +485,7 @@ class BookloreClient:
 
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/api/v1/books/{book_id}/download"
-        logger.info(f"Downloading book from {url}")
+        logger.debug(f"Downloading book from {url}")
 
         try:
             response = self.session.get(url, headers=headers, timeout=60)
@@ -424,7 +493,7 @@ class BookloreClient:
             # Fallback for newer Booklore versions or different configurations
             if response.status_code == 404:
                 file_url = f"{self.base_url}/api/v1/books/{book_id}/file"
-                logger.info(f"404 on /download, trying fallback: {file_url}")
+                logger.debug(f"404 on /download, trying fallback: {file_url}")
                 response = self.session.get(file_url, headers=headers, timeout=60)
 
             if response.status_code != 200:

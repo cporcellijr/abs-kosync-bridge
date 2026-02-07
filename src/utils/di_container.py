@@ -82,7 +82,8 @@ class Container(containers.DeclarativeContainer):
     )
 
     booklore_client = providers.Singleton(
-        BookloreClient
+        BookloreClient,
+        database_service=database_service
     )
 
     hardcover_client = providers.Singleton(HardcoverClient)

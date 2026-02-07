@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class LibraryService:
     def __init__(self, database_service: DatabaseService, booklore_client, cwa_client: CWAClient, abs_client: ABSClient, epub_cache_dir: str):
-        self.db = database_service
+        self.database_service = database_service
         self.booklore = booklore_client
         self.cwa_client = cwa_client
         self.abs_client = abs_client
@@ -34,7 +34,7 @@ class LibraryService:
         Returns a list of books that are active and candidates for synchronization.
         """
         # This wraps the low-level DB query
-        return self.db.get_all_books()
+        return self.database_service.get_all_books()
 
     def acquire_ebook(self, abs_item: dict) -> Optional[str]:
         """
@@ -167,7 +167,7 @@ class LibraryService:
                     authors=b.get('authors'),
                     raw_metadata=json.dumps(b)
                 )
-                self.db.save_booklore_book(booklore_book)
+                self.database_service.save_booklore_book(booklore_book)
                 persisted_count += 1
             
             logger.info(f"   ✅ Successfully persisted {persisted_count} books to BookloreBook table")
