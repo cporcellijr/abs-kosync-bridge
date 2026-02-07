@@ -885,7 +885,7 @@ def audiobook_matches_search(ab, search_term):
     author = normalize(get_abs_author(ab))
     search_norm = normalize(search_term)
 
-    return search_norm in title or search_norm in author
+    return (search_norm in title or title in search_norm) or (search_norm in author or author in search_norm)
 
 # ---------------- ROUTES ----------------
 def index():

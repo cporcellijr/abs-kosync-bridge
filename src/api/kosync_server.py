@@ -281,7 +281,7 @@ def kosync_put_progress():
                                     title_norm = normalize(ab_title)
                                     author_norm = normalize(ab_author)
                                     
-                                    if search_norm in title_norm or search_norm in author_norm:
+                                    if (search_norm and title_norm) and (search_norm in title_norm or title_norm in search_norm):
                                         # Skip books with high progress (>75%) - they're already mostly done
                                         duration = media.get('duration', 0)
                                         progress_pct = 0
