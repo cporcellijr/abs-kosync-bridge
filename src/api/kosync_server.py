@@ -416,14 +416,21 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                         cached_doc.source = 'filesystem'
                         _database_service.save_kosync_document(cached_doc)
                     else:
-                        from src.db.models import KosyncDocument
-                        new_doc = KosyncDocument(
-                            document_hash=computed_hash,
-                            filename=epub_path.name,
-                            source='filesystem',
-                            mtime=epub_path.stat().st_mtime
-                        )
-                        _database_service.save_kosync_document(new_doc)
+                        existing_doc = _database_service.get_kosync_document(computed_hash)
+                        if existing_doc:
+                            existing_doc.filename = epub_path.name
+                            existing_doc.mtime = epub_path.stat().st_mtime
+                            existing_doc.source = 'filesystem'
+                            _database_service.save_kosync_document(existing_doc)
+                        else:
+                            from src.db.models import KosyncDocument
+                            new_doc = KosyncDocument(
+                                document_hash=computed_hash,
+                                filename=epub_path.name,
+                                source='filesystem',
+                                mtime=epub_path.stat().st_mtime
+                            )
+                            _database_service.save_kosync_document(new_doc)
 
                     if computed_hash == doc_hash:
                         logger.info(f"📚 Matched EPUB via filesystem: {epub_path.name}")
@@ -492,14 +499,21 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                                     cached_doc.source = 'booklore'
                                     _database_service.save_kosync_document(cached_doc)
                                 else:
-                                    from src.db.models import KosyncDocument
-                                    new_doc = KosyncDocument(
-                                        document_hash=computed_hash,
-                                        filename=safe_title,
-                                        source='booklore',
-                                        booklore_id=book_id
-                                    )
-                                    _database_service.save_kosync_document(new_doc)
+                                    existing_doc = _database_service.get_kosync_document(computed_hash)
+                                    if existing_doc:
+                                        existing_doc.filename = safe_title
+                                        existing_doc.source = 'booklore'
+                                        existing_doc.booklore_id = book_id
+                                        _database_service.save_kosync_document(existing_doc)
+                                    else:
+                                        from src.db.models import KosyncDocument
+                                        new_doc = KosyncDocument(
+                                            document_hash=computed_hash,
+                                            filename=safe_title,
+                                            source='booklore',
+                                            booklore_id=book_id
+                                        )
+                                        _database_service.save_kosync_document(new_doc)
 
                                 logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
                                 return safe_title
