@@ -733,6 +733,10 @@ class SyncManager:
             if not epub_path:
                 epub_path = self._get_local_epub(ebook_filename)
                 
+            # [FIX] Ensure epub_path is a Path object (LibraryService returns str)
+            if epub_path:
+                epub_path = Path(epub_path)
+                
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
