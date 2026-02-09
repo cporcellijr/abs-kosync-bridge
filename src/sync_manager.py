@@ -926,7 +926,9 @@ class SyncManager:
         for k, v in config.items():
             client = self.sync_clients[k]
             if client.can_be_leader():
-                vals[k] = v.current.get('pct')
+                pct = v.current.get('pct')
+                if pct is not None:
+                    vals[k] = pct
 
         # Ensure we have at least one potential leader
         if not vals:
