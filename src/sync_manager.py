@@ -85,6 +85,7 @@ class SyncManager:
         self._job_lock = threading.Lock()
         self._sync_lock = threading.Lock()
         self._job_thread = None
+        self._last_library_sync = 0
 
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
@@ -1016,9 +1017,10 @@ class SyncManager:
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
                 
-        # Refresh Library Metadata (Booklore)
-        if self.library_service:
+        # Refresh Library Metadata (Booklore) — throttle to once per 15 minutes
+        if self.library_service and (time.time() - self._last_library_sync > 900):
             self.library_service.sync_library_books()
+            self._last_library_sync = time.time()
     
         # Get active books directly from database service
         active_books = []
