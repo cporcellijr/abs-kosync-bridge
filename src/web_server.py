@@ -419,14 +419,14 @@ def run_processing_scan(manual=False):
                     try:
                         result = subprocess.run(['lsof', '+D', str(folder)], capture_output=True, text=True, timeout=5)
                         if result.stdout.strip(): storyteller_active = True
-                    except:
+                    except Exception:
                         try:
                             ps_result = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=5)
                             for line in ps_result.stdout.split('\n'):
                                 if folder_name in line and ('node' in line.lower() or 'storyteller' in line.lower()):
                                     storyteller_active = True
                                     break
-                        except:
+                        except Exception:
                             pass
 
                     if storyteller_active:
@@ -453,7 +453,7 @@ def run_processing_scan(manual=False):
                         try:
                             file.unlink()
                             deleted_count += 1
-                        except:
+                        except Exception:
                             pass
 
                     ingest_dest = STORYTELLER_INGEST / folder.name
@@ -1382,7 +1382,7 @@ def delete_mapping(abs_id):
         if book.transcript_file:
             try:
                 Path(book.transcript_file).unlink()
-            except:
+            except Exception:
                 pass
 
         # Clean up cached ebook if it exists
@@ -1830,7 +1830,7 @@ def get_suggestions():
     for s in suggestions:
         try:
             matches = json.loads(s.matches_json) if s.matches_json else []
-        except:
+        except Exception:
             matches = []
 
         result.append({
