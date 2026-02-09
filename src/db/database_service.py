@@ -422,7 +422,7 @@ class DatabaseService:
         with self.get_session() as session:
             doc.last_updated = datetime.utcnow()
             merged = session.merge(doc)
-            session.commit()
+            session.flush()
             session.refresh(merged)
             session.expunge(merged)
             return merged
@@ -466,7 +466,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = abs_id
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -479,7 +478,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = None
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -491,7 +489,6 @@ class DatabaseService:
             ).first()
             if doc:
                 session.delete(doc)
-                session.commit()
                 return True
             return False
 
