@@ -1128,7 +1128,7 @@ class SyncManager:
                          if client_state.delta > 0:
                              try:
                                  # Ensure file is available locally (download if needed)
-                                 epub_path = self._get_local_epub(book.ebook_filename)
+                                 epub_path = self._get_local_epub(book.original_ebook_filename or book.ebook_filename)
                                  if not epub_path:
                                      logger.warning(f"Could not locate or download EPUB for {book.ebook_filename}")
                                      continue
