@@ -277,7 +277,7 @@ class HardcoverClient:
         return None
 
     def get_default_edition(self, book_id: int) -> Optional[Dict]:
-        """Get default edition for a book."""
+        """Get default edition for a book. Tries ebook, physical, then audiobook."""
         query = """
         query ($bookId: Int!) {
             books_by_pk(id: $bookId) {
@@ -289,16 +289,23 @@ class HardcoverClient:
                     id
                     pages
                 }
+                default_audio_edition {
+                    id
+                    audio_seconds
+                }
             }
         }
         """
 
         result = self.query(query, {"bookId": book_id})
         if result and result.get("books_by_pk"):
-            if result["books_by_pk"].get("default_ebook_edition"):
-                return result["books_by_pk"]["default_ebook_edition"]
-            elif result["books_by_pk"].get("default_physical_edition"):
-                return result["books_by_pk"]["default_physical_edition"]
+            book = result["books_by_pk"]
+            if book.get("default_ebook_edition"):
+                return book["default_ebook_edition"]
+            elif book.get("default_physical_edition"):
+                return book["default_physical_edition"]
+            elif book.get("default_audio_edition"):
+                return book["default_audio_edition"]
 
         return None
 
@@ -419,6 +426,10 @@ class HardcoverClient:
                             id
                             pages
                         }
+                        default_audio_edition {
+                            id
+                            audio_seconds
+                        }
                     }
                 }
                 """
@@ -447,6 +458,10 @@ class HardcoverClient:
                         id
                         pages
                     }
+                    default_audio_edition {
+                        id
+                        audio_seconds
+                    }
                 }
             }
             """
@@ -457,16 +472,21 @@ class HardcoverClient:
                 return None
 
         edition = None
+        audio_seconds = None
         if book.get("default_ebook_edition"):
             edition = book["default_ebook_edition"]
         elif book.get("default_physical_edition"):
             edition = book["default_physical_edition"]
+        elif book.get("default_audio_edition"):
+            edition = book["default_audio_edition"]
+            audio_seconds = edition.get("audio_seconds")
 
         return {
             "book_id": book.get("id"),
             "slug": book.get("slug"),
             "edition_id": edition.get("id") if edition else None,
             "pages": edition.get("pages") if edition else None,
+            "audio_seconds": audio_seconds,
             "title": book.get("title"),
         }
 
@@ -483,6 +503,7 @@ class HardcoverClient:
                     started_at
                     finished_at
                     progress_pages
+                    progress_seconds
                 }
             }
         }
@@ -546,10 +567,12 @@ class HardcoverClient:
         edition_id: int = None,
         is_finished: bool = False,
         current_percentage: float = 0.0,
+        audio_seconds: int = None,
     ) -> bool:
         """
         Update reading progress.
         Uses current_percentage > 0.02 (2%) to decide when to set 'started_at'.
+        For audiobook editions, pass audio_seconds to use progress_seconds instead of progress_pages.
         """
         # First check if there's an existing read
         read_query = """
@@ -592,30 +615,52 @@ class HardcoverClient:
                 finished_at_val = today
                 logger.info(f"Hardcover: Setting finished_at to {today}")
 
-            query = """
-            mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
-                update_user_book_read(id: $id, object: {
-                    progress_pages: $pages,
-                    edition_id: $editionId,
-                    started_at: $startedAt,
-                    finished_at: $finishedAt
-                }) {
-                    error
-                    user_book_read { id }
+            # Use progress_seconds for audiobooks, progress_pages for page-based editions
+            if audio_seconds and audio_seconds > 0:
+                progress_seconds = int(audio_seconds * current_percentage)
+                query = """
+                mutation UpdateBookProgress($id: Int!, $seconds: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                    update_user_book_read(id: $id, object: {
+                        progress_seconds: $seconds,
+                        edition_id: $editionId,
+                        started_at: $startedAt,
+                        finished_at: $finishedAt
+                    }) {
+                        error
+                        user_book_read { id }
+                    }
                 }
-            }
-            """
-
-            result = self.query(
-                query,
-                {
+                """
+                variables = {
+                    "id": read_id,
+                    "seconds": progress_seconds,
+                    "editionId": int(edition_id),
+                    "startedAt": started_at_val,
+                    "finishedAt": finished_at_val,
+                }
+            else:
+                query = """
+                mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                    update_user_book_read(id: $id, object: {
+                        progress_pages: $pages,
+                        edition_id: $editionId,
+                        started_at: $startedAt,
+                        finished_at: $finishedAt
+                    }) {
+                        error
+                        user_book_read { id }
+                    }
+                }
+                """
+                variables = {
                     "id": read_id,
                     "pages": page,
                     "editionId": int(edition_id),
                     "startedAt": started_at_val,
                     "finishedAt": finished_at_val,
-                },
-            )
+                }
+
+            result = self.query(query, variables)
 
             if result and result.get("update_user_book_read"):
                 if result["update_user_book_read"].get("error"):
@@ -625,34 +670,56 @@ class HardcoverClient:
 
         else:
             # --- CREATE NEW READ ---
-            query = """
-            mutation InsertUserBookRead($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
-                insert_user_book_read(user_book_id: $id, user_book_read: {
-                    progress_pages: $pages,
-                    edition_id: $editionId,
-                    started_at: $startedAt,
-                    finished_at: $finishedAt
-                }) {
-                    error
-                    user_book_read { id }
-                }
-            }
-            """
-
             # Apply logic to new reads too
             started_at_val = today if should_start else None
             finished_at_val = today if is_finished else None
 
-            result = self.query(
-                query,
-                {
+            # Use progress_seconds for audiobooks, progress_pages for page-based editions
+            if audio_seconds and audio_seconds > 0:
+                progress_seconds = int(audio_seconds * current_percentage)
+                query = """
+                mutation InsertUserBookRead($id: Int!, $seconds: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                    insert_user_book_read(user_book_id: $id, user_book_read: {
+                        progress_seconds: $seconds,
+                        edition_id: $editionId,
+                        started_at: $startedAt,
+                        finished_at: $finishedAt
+                    }) {
+                        error
+                        user_book_read { id }
+                    }
+                }
+                """
+                variables = {
+                    "id": user_book_id,
+                    "seconds": progress_seconds,
+                    "editionId": int(edition_id),
+                    "startedAt": started_at_val,
+                    "finishedAt": finished_at_val,
+                }
+            else:
+                query = """
+                mutation InsertUserBookRead($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+                    insert_user_book_read(user_book_id: $id, user_book_read: {
+                        progress_pages: $pages,
+                        edition_id: $editionId,
+                        started_at: $startedAt,
+                        finished_at: $finishedAt
+                    }) {
+                        error
+                        user_book_read { id }
+                    }
+                }
+                """
+                variables = {
                     "id": user_book_id,
                     "pages": page,
                     "editionId": int(edition_id),
                     "startedAt": started_at_val,
                     "finishedAt": finished_at_val,
-                },
-            )
+                }
+
+            result = self.query(query, variables)
 
             if result and result.get("insert_user_book_read"):
                 if result["insert_user_book_read"].get("error"):
