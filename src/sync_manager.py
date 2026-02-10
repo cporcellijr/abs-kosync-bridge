@@ -734,6 +734,10 @@ class SyncManager:
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
+            
+            # [FIX] Ensure epub_path is a Path object (acquire_ebook returns str)
+            if epub_path:
+                epub_path = Path(epub_path)
 
             # Step 2: Try Fast-Path (SMIL Extraction)
             raw_transcript = None
