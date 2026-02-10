@@ -885,7 +885,18 @@ def audiobook_matches_search(ab, search_term):
     author = normalize(get_abs_author(ab))
     search_norm = normalize(search_term)
 
-    return (search_norm in title or title in search_norm) or (search_norm in author or author in search_norm)
+    # 1. Standard Search: Search term is in Title or Author (e.g. "Harry" in "Harry Potter")
+    if search_norm in title or search_norm in author:
+        return True
+
+    # 2. Reverse Search: Title/Author is in Search term (e.g. "Dune" in "Dune Messiah")
+    # FIX: Enforce minimum length to prevent short/empty matches (e.g. "The", "It", "")
+    MIN_LEN = 4
+    
+    if len(title) >= MIN_LEN and title in search_norm: return True
+    if len(author) >= MIN_LEN and author in search_norm: return True
+
+    return False
 
 # ---------------- ROUTES ----------------
 def index():
@@ -1317,6 +1328,17 @@ def delete_mapping(abs_id):
         if book.sync_mode == 'ebook_only' and book.kosync_doc_id:
             logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
             database_service.delete_kosync_document(book.kosync_doc_id)
+
+        # [NEW] Delete cached ebook file
+        if book.ebook_filename:
+            try:
+                # Use manager's cache dir which is already configured
+                cache_file = manager.epub_cache_dir / book.ebook_filename
+                if cache_file.exists():
+                    cache_file.unlink()
+                    logger.info(f"🗑️ Deleted ebook cache file: {book.ebook_filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete ebook cache file: {e}")
 
         # Remove from ABS collection
         collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
