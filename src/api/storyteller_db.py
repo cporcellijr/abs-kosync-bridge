@@ -35,7 +35,9 @@ class StorytellerDB:
         try:
             self.conn.execute("SELECT 1").fetchone()
             return True
-        except: return False
+        except sqlite3.Error as e:
+            logger.debug(f"Storyteller DB connection check failed: {e}")
+            return False
 
     def get_progress(self, ebook_filename):
         if not self.conn: return None, None
@@ -50,7 +52,9 @@ class StorytellerDB:
                 data = json.loads(pos['locator'])
                 return float(data.get('locations', {}).get('totalProgression', 0)), pos['timestamp']
             return None, None
-        except: return None, None
+        except (sqlite3.Error, json.JSONDecodeError, KeyError) as e:
+            logger.debug(f"Storyteller get_progress failed: {e}")
+            return None, None
 
     def get_progress_with_fragment(self, ebook_filename):
         if not self.conn: return None, None, None, None
@@ -67,7 +71,9 @@ class StorytellerDB:
                 frag = href.split('#')[1] if '#' in href else None
                 return float(data.get('locations', {}).get('totalProgression', 0)), pos['timestamp'], href.split('#')[0], frag
             return None, None, None, None
-        except: return None, None, None, None
+        except (sqlite3.Error, json.JSONDecodeError, KeyError) as e:
+            logger.debug(f"Storyteller get_progress_with_fragment failed: {e}")
+            return None, None, None, None
 
     def update_progress(self, ebook_filename, percentage, rich_locator: LocatorResult = None):
         if not self.db_path.exists():
@@ -92,7 +98,7 @@ class StorytellerDB:
                 locator = {}
                 if pos_row and pos_row['locator']:
                     try: locator = json.loads(pos_row['locator'])
-                    except: pass
+                    except json.JSONDecodeError: pass
 
                 if 'locations' not in locator: locator['locations'] = {}
                 locator['locations']['totalProgression'] = float(percentage)
@@ -129,9 +135,11 @@ class StorytellerDB:
                     if pct > min_progress:
                         results.append({"id": row['uuid'], "title": row['title'], "source": "STORYTELLER"})
                         seen.add(row['uuid'])
-                except: pass
+                except (json.JSONDecodeError, KeyError): pass
             return results
-        except: return []
+        except sqlite3.Error as e:
+            logger.warning(f"Storyteller get_recent_activity query failed: {e}")
+            return []
 
     def add_to_collection(self, ebook_filename): pass
 
@@ -142,7 +150,9 @@ class StorytellerDB:
             cursor.execute("SELECT uuid FROM book WHERE title LIKE ?", (f"%{Path(ebook_filename).stem}%",))
             row = cursor.fetchone()
             return row['uuid'] if row else None
-        except: return None
+        except sqlite3.Error as e:
+            logger.debug(f"Storyteller get_book_uuid failed: {e}")
+            return None
 
     def force_position_update(self, ebook_filename, percentage, target_href=None):
         try:
@@ -164,5 +174,7 @@ class StorytellerDB:
                 cursor.execute("UPDATE position SET locator = ?, timestamp = ? WHERE uuid = ?", (json.dumps(locator), new_ts, uuid))
                 conn.commit()
                 return True
-        except: return False
+        except sqlite3.Error as e:
+            logger.warning(f"Storyteller force_position_update failed: {e}")
+            return False
 # [END FILE]

@@ -291,8 +291,8 @@ def kosync_put_progress():
                                                 ab_progress = _container.abs_client().get_progress(ab['id'])
                                                 if ab_progress:
                                                     progress_pct = ab_progress.get('progress', 0) * 100
-                                            except:
-                                                pass
+                                            except Exception as e:
+                                                logger.debug(f"Failed to get ABS progress during auto-discovery: {e}")
                                         
                                         if progress_pct > 75:
                                             logger.debug(f"Auto-discovery: Skipping '{ab_title}' - already {progress_pct:.0f}% complete")
@@ -479,7 +479,8 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                         try:
                             meta = json.loads(book.raw_metadata)
                             book_id = str(meta.get('id'))
-                        except:
+                        except (json.JSONDecodeError, AttributeError) as e:
+                            logger.debug(f"Failed to parse raw_metadata JSON: {e}")
                             continue
 
                     # Check if we have a KosyncDocument for this Booklore ID

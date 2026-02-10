@@ -690,18 +690,18 @@ class EbookParser:
             # [Fallback logic from original code for finding elements...]
             if not elements and clean_xpath.startswith('./'):
                 try: elements = tree.xpath(clean_xpath[2:])
-                except: pass
+                except Exception: pass
 
             if not elements:
                 id_match = re.search(r"@id='([^']+)'", clean_xpath)
                 if id_match:
                     try: elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
-                    except: pass
+                    except Exception: pass
 
             if not elements:
                 simple_path = re.sub(r'\[\d+]', '', clean_xpath)
                 try: elements = tree.xpath(simple_path)
-                except: pass
+                except Exception: pass
 
             if not elements:
                 logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
