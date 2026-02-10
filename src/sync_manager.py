@@ -142,7 +142,7 @@ class SyncManager:
             self.migration_service.migrate_legacy_data()
 
         # [NEW] Cleanup orphaned cache files
-        self.cleanup_cache()
+        # self.cleanup_cache()  # Disabled: User reported it's too aggressive; rely on explicit delete.
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
