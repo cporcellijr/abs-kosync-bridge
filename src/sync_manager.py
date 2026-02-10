@@ -85,6 +85,7 @@ class SyncManager:
         self._job_lock = threading.Lock()
         self._sync_lock = threading.Lock()
         self._job_thread = None
+        self._last_library_sync = 0
 
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
@@ -926,7 +927,9 @@ class SyncManager:
         for k, v in config.items():
             client = self.sync_clients[k]
             if client.can_be_leader():
-                vals[k] = v.current.get('pct')
+                pct = v.current.get('pct')
+                if pct is not None:
+                    vals[k] = pct
 
         # Ensure we have at least one potential leader
         if not vals:
@@ -1014,9 +1017,10 @@ class SyncManager:
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
                 
-        # Refresh Library Metadata (Booklore)
-        if self.library_service:
+        # Refresh Library Metadata (Booklore) — throttle to once per 15 minutes
+        if self.library_service and (time.time() - self._last_library_sync > 900):
             self.library_service.sync_library_books()
+            self._last_library_sync = time.time()
     
         # Get active books directly from database service
         active_books = []
@@ -1126,7 +1130,7 @@ class SyncManager:
                          if client_state.delta > 0:
                              try:
                                  # Ensure file is available locally (download if needed)
-                                 epub_path = self._get_local_epub(book.ebook_filename)
+                                 epub_path = self._get_local_epub(book.original_ebook_filename or book.ebook_filename)
                                  if not epub_path:
                                      logger.warning(f"Could not locate or download EPUB for {book.ebook_filename}")
                                      continue

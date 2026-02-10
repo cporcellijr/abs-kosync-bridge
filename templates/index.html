@@ -108,7 +108,7 @@
                     <span class="service-name">Storyteller</span>
                     {% if mapping.storyteller_legacy_link %}
                     <span class="service-value cursor-pointer" style="color: #FF9800;"
-                        onclick="openStorytellerModal('{{ mapping.abs_id }}', '{{ mapping.abs_title|escape }}')"
+                        onclick='openStorytellerModal({{ mapping.abs_id|tojson }}, {{ mapping.abs_title|tojson }})'
                         title="Legacy Link: Click to fix">
                         Fix Link
                     </span>
