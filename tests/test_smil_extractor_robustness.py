@@ -19,18 +19,24 @@ class TestSmilExtractorRobustness(unittest.TestCase):
         # Test 500ms -> 0.5s
         res = self.extractor._parse_timestamp("500ms")
         self.assertEqual(res, 0.5)
-        
+
         # Test 1s
         res = self.extractor._parse_timestamp("1s")
         self.assertEqual(res, 1.0)
-        
+
         # Test 1000ms
         res = self.extractor._parse_timestamp("1000ms")
         self.assertEqual(res, 1.0)
-        
+
         # Test mixed/invalid
         self.assertEqual(self.extractor._parse_timestamp(""), 0.0)
         self.assertEqual(self.extractor._parse_timestamp("invalid"), 0.0)
+
+    def test_malformed_ms_timestamp_returns_zero(self):
+        """Verify non-numeric ms values return 0.0 instead of raising."""
+        self.assertEqual(self.extractor._parse_timestamp("abcms"), 0.0)
+        self.assertEqual(self.extractor._parse_timestamp("ms"), 0.0)
+        self.assertEqual(self.extractor._parse_timestamp("12.34.56ms"), 0.0)
 
     def test_strip_namespaces(self):
         """Verify namespaces and prefixes are stripped correctly."""
