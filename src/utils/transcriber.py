@@ -328,8 +328,8 @@ class AudioTranscriber:
         if new_files:
             try:
                 file_path.unlink()
-            except:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove original file after splitting: {e}")
 
         return new_files if new_files else [file_path]
 
@@ -361,8 +361,8 @@ class AudioTranscriber:
                 if progress.get('chunks_completed', 0) > 0 and progress.get('done', False):
                     logger.info(f"⚡ Resuming from completed local cache for {abs_id}")
                     return progress.get('transcript', [])
-             except:
-                 pass
+             except (json.JSONDecodeError, OSError) as e:
+                 logger.debug(f"Failed to read progress cache file: {e}")
 
         MAX_DURATION_SECONDS = 45 * 60
 

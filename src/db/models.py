@@ -232,7 +232,7 @@ class PendingSuggestion(Base):
         import json
         try:
             return json.loads(self.matches_json) if self.matches_json else []
-        except:
+        except json.JSONDecodeError:
             return []
     
     @property
@@ -298,7 +298,7 @@ class BookloreBook(Base):
         import json
         try:
             return json.loads(self.raw_metadata) if self.raw_metadata else {}
-        except:
+        except json.JSONDecodeError:
             return {}
 
     def __init__(self, filename: str, title: str = None, authors: str = None, raw_metadata: str = None):

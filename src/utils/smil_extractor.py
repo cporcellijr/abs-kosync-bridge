@@ -507,7 +507,8 @@ class SmilExtractor:
             for rootfile in root.iter():
                 if rootfile.tag.endswith('rootfile'):
                     return rootfile.get('full-path')
-        except: pass
+        except (KeyError, UnicodeDecodeError, ET.ParseError) as e:
+            logger.debug(f"Failed to read OPF path from container.xml: {e}")
         return None
 
     def _natural_sort_key(self, s):
@@ -574,7 +575,7 @@ class SmilExtractor:
         ts_str = ts_str.strip()
         if ts_str.endswith('ms'):
             try: return float(ts_str.replace('ms', '')) / 1000.0
-            except: return 0.0
+            except ValueError: return 0.0
         
         ts_str = ts_str.replace('s', '')
         if ':' in ts_str:

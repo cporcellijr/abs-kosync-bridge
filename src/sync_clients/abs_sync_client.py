@@ -104,7 +104,8 @@ class ABSSyncClient(SyncClient):
                 data = json.load(f)
                 dur = data[-1]['end'] if isinstance(data, list) else data.get('duration', 0)
                 return min(max(abs_seconds / dur, 0.0), 1.0) if dur > 0 else None
-        except:
+        except Exception as e:
+            logger.debug(f"Failed to parse transcript for duration calculation: {e}")
             return None
 
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
