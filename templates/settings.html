@@ -693,6 +693,16 @@
                         <label>Shelf Name</label>
                         <input type="text" name="BOOKLORE_SHELF_NAME" value="{{ get_val('BOOKLORE_SHELF_NAME') }}">
                     </div>
+                    <div class="form-group full-width">
+                        <label>Booklore Library ID (Optional)</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" name="BOOKLORE_LIBRARY_ID" value="{{ get_val('BOOKLORE_LIBRARY_ID') }}"
+                                placeholder="e.g. 1" style="flex: 1;">
+                            <button class="btn" type="button" onclick="checkBookloreLibs()">🔍 Find IDs</button>
+                        </div>
+                        <div class="help-text">Restricts sync to a specific library (e.g., 1). Leave empty to sync all.
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1101,6 +1111,37 @@
     </div>
 
     <script>
+        function checkBookloreLibs() {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⌛ Scanning...';
+            btn.disabled = true;
+
+            fetch('/api/booklore/libraries')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+                    if (data.length === 0) {
+                        alert('No libraries found. Check connection or try syncing first.');
+                        return;
+                    }
+
+                    let msg = "Found Libraries:\n\n";
+                    data.forEach(lib => {
+                        msg += `🆔 ID: ${lib.id}\n📁 Name: ${lib.name}\n------------------\n`;
+                    });
+                    alert(msg);
+                })
+                .catch(err => alert('Failed to fetch libraries: ' + err))
+                .finally(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                });
+        }
+
         function toggleSection(bodyId, isChecked) {
             const body = document.getElementById(bodyId);
             if (isChecked) {

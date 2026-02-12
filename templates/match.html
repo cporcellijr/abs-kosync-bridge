@@ -289,7 +289,12 @@
         }
 
         input[type="radio"] {
-            display: none;
+            opacity: 0;
+            position: absolute;
+            width: 0;
+            height: 0;
+            margin: 0;
+            padding: 0;
         }
 
         /* Ebook Dropdown */
@@ -526,9 +531,10 @@
                     <div class="scrollable-content">
                         {% if audiobooks %}
                         <div class="audiobook-grid">
+                            {% set single_match = audiobooks|length == 1 %}
                             {% for ab in audiobooks %}
-                            <label class="audiobook-option ab-option" onclick="selectItem(this, 'audiobook_id')">
-                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
+                            <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}" onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if ab.cover_url %}
                                     <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"

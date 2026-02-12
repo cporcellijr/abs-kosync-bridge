@@ -1926,6 +1926,14 @@ def proxy_cover(abs_id):
 # --- Logger setup (already present) ---
 logger = logging.getLogger(__name__)
 
+def get_booklore_libraries():
+    """Return available Booklore libraries."""
+    if not container.booklore_client().is_configured():
+        return jsonify({"error": "Booklore not configured"}), 400
+    
+    libraries = container.booklore_client().get_libraries()
+    return jsonify(libraries)
+
 # --- Application Factory ---
 def create_app(test_container=None):
     STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
@@ -1965,6 +1973,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/clear_stale', 'clear_stale_suggestions', clear_stale_suggestions, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
+    app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
 
     # Storyteller API routes
     app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])

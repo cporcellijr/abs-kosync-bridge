@@ -34,6 +34,7 @@ class BookloreClient:
         self.legacy_cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
 
         # Load cache from DB (and migrate if needed)
+        self.target_library_id = os.environ.get("BOOKLORE_LIBRARY_ID")
         self._load_cache()
 
     def _load_cache(self):
@@ -199,6 +200,43 @@ class BookloreClient:
         logger.warning("❌ Booklore connection failed: could not obtain auth token")
         return False
 
+    def get_libraries(self):
+        """Fetch all available libraries to help user configure the bridge."""
+        self._get_fresh_token()
+        
+        # Strategy 1: Try direct libraries endpoint
+        try:
+            response = self._make_request("GET", "/api/v1/libraries")
+            if response and response.status_code == 200:
+                libs = response.json()
+                # Return standardized list
+                return [{'id': l.get('id'), 'name': l.get('name'), 'path': l.get('root', {}).get('path') or l.get('path')} for l in libs]
+        except Exception as e:
+            logger.debug(f"Booklore: Failed to fetch /api/v1/libraries: {e}")
+
+        # Strategy 2: Fallback - Scan a few books to find unique libraries
+        try:
+            logger.info("Booklore: Scanning books to discover libraries...")
+            response = self._make_request("GET", "/api/v1/books?page=0&size=50")
+            if response and response.status_code == 200:
+                data = response.json()
+                books = data if isinstance(data, list) else data.get('content', [])
+                
+                unique_libs = {}
+                for b in books:
+                    lid = b.get('libraryId')
+                    if lid and lid not in unique_libs:
+                        unique_libs[lid] = {
+                            'id': lid,
+                            'name': b.get('libraryName', 'Unknown Library'),
+                            'path': 'Path not available in book scan'
+                        }
+                return list(unique_libs.values())
+        except Exception as e:
+            logger.error(f"Booklore: Failed to discover libraries via book scan: {e}")
+            
+        return []
+
     def _fetch_book_detail(self, book_id, token):
         """Fetch individual book details to get fileName.
 
@@ -253,7 +291,25 @@ class BookloreClient:
             
             if not current_batch:
                 break  # No more books, we are done
-                
+            
+            # Filter by libraryId if configured
+            if self.target_library_id and current_batch:
+                filtered_batch = []
+                for b in current_batch:
+                    lid = b.get('libraryId')
+                    lname = b.get('libraryName', 'Unknown')
+
+                    # Robust comparison (str vs int)
+                    if lid is not None and str(lid) == str(self.target_library_id):
+                        filtered_batch.append(b)
+                    elif lid is None:
+                        # Conservative: Keep if ID missing, verify later
+                        filtered_batch.append(b)
+                    else:
+                        # Log exclusion at DEBUG
+                        logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
+                current_batch = filtered_batch
+
             all_books_list.extend(current_batch)
             logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
             
@@ -386,6 +442,12 @@ class BookloreClient:
 
     def _process_book_detail(self, detail):
         """Process a book detail response and add to cache."""
+        # Library ID Filter
+        if self.target_library_id:
+            lid = detail.get('libraryId')
+            if lid is not None and str(lid) != str(self.target_library_id):
+                return None
+
         filename = detail.get('fileName', '')
         if not filename:
             return
