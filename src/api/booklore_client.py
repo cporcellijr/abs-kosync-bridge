@@ -101,7 +101,8 @@ class BookloreClient:
                     if bid:
                         self._book_id_cache[bid] = book_info
                         
-                self._cache_timestamp = time.time()
+                # Set to 0 to force a refresh/validation against API on next access
+                self._cache_timestamp = 0
                 logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from database")
             except Exception as e:
                 logger.error(f"Failed to load Booklore cache from DB: {e}")
@@ -273,9 +274,82 @@ class BookloreClient:
 
         logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
 
-        # Sync deleted books (Remove from DB if not in scan)
-        # Note: This is an expensive operation, so maybe unnecessary unless strict sync needed.
-        # For now, we just Add/Update.
+        # --- Pruning Stale Data ---
+        if self.db and all_books_list:
+            # 1. Map valid IDs to their live data for strict verification
+            live_map = {str(b['id']): b for b in all_books_list if b.get('id')}
+            
+            # 2. Check existing cache for ghosts
+            cached_filenames = list(self._book_cache.keys())
+            stale_count = 0
+            
+            for fname in cached_filenames:
+                book_info = self._book_cache[fname]
+                bid = book_info.get('id')
+                
+                is_stale = False
+                
+                # Check 1: ID Validity
+                if not bid or str(bid) not in live_map:
+                    is_stale = True
+                    logger.debug(f"   Pruning {fname}: ID {bid} not in live map")
+                else:
+                    # Check 2: Content Consistency
+                    
+                    # A. Filename Check
+                    # Ideally, we compare the Live filename with the Cached filename.
+                    # Problem 1: The Live API 'List' view might return empty filenames (Live: '').
+                    # Problem 2: Cache Key 'fname' is lowercase, but real filename is in book_info['fileName'].
+                    
+                    live_book = live_map[str(bid)]
+                    raw_live_filename = live_book.get('fileName', '')
+                    # Clean filename to ensure we don't treat whitespace/control chars as valid names
+                    live_filename = str(raw_live_filename).strip() if raw_live_filename else ''
+                    
+                    cached_real_filename = book_info.get('fileName', fname)
+                    
+                    # Only prune if we HAVE a valid, non-empty live filename to compare against
+                    if live_filename:
+                        # Strict check: If API returns explicit filename, it must match.
+                        # We compare against the REAL cached filename (preserving case if possible)
+                        # Normalize both sides to be safe (strip)
+                        if live_filename != str(cached_real_filename).strip():
+                             is_stale = True
+                             # Use repr() to reveal any invisible characters/whitespace in debug logs
+                             logger.debug(f"   Pruning {fname}: Filename mismatch. Live: {repr(raw_live_filename)} vs Cache: {repr(cached_real_filename)}")
+                    else:
+                        # B. Fallback Title Check (if filename is missing in List View)
+                        # If titles differ significantly, it's likely a reused ID (Ghost)
+                        live_title = live_book.get('title')
+                        cached_title = book_info.get('title')
+                        
+                        if live_title and cached_title:
+                            # Normalize for safety (ignore case/whitespace/symbols)
+                            # This catches "The Book" vs "Another Book" (ID Reuse)
+                            lt_norm = self._normalize_string(live_title)
+                            ct_norm = self._normalize_string(cached_title)
+                            
+                            # Use a generous equality check to avoid false positives on minor edits
+                            if lt_norm and ct_norm and lt_norm != ct_norm:
+                                 is_stale = True
+                                 logger.debug(f"   Pruning {fname}: Title mismatch (ID Reuse?). Live: '{live_title}' vs Cache: '{cached_title}'")
+
+                if is_stale:
+                    stale_count += 1
+                    # Remove from Memory
+                    self._book_cache.pop(fname, None)
+                    if bid:
+                        self._book_id_cache.pop(bid, None)
+                    
+                    # Remove from Database
+                    try:
+                        # Use the CACHE KEY (fname) which corresponds to the database `filename` column (lowercase)
+                        self.db.delete_booklore_book(fname)
+                    except Exception as e:
+                        logger.error(f"Failed to prune stale book {fname}: {e}")
+
+            if stale_count > 0:
+                logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
 
         # --- Proceed with Step 2: Detail Fetching (Same as before) ---
         

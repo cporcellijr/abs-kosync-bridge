@@ -277,9 +277,9 @@ class StorytellerAPIClient:
 
     def download_book(self, book_uuid: str, output_path: Path) -> bool:
         """Download the processed EPUB3 artifact."""
-        # Endpoint: GET /api/v2/books/{uuid}/file?format=readaloud
+        # Endpoint: GET /api/v2/books/{uuid}/files?format=readaloud
         # Note: 'readaloud' format usually implies the processed EPUB3
-        url = f"{self.base_url}/api/v2/books/{book_uuid}/file"
+        url = f"{self.base_url}/api/v2/books/{book_uuid}/files"
         # We need to manually construct the request to handle streaming
         token = self._get_fresh_token()
         if not token: return False

@@ -151,26 +151,19 @@ class LibraryService:
         logger.info("✅ Booklore integration enabled - ebooks sourced from API")
         
         # Trigger cache refresh by calling get_all_books()
-        # This will refresh the internal JSON-based cache if stale
+        # This will refresh the internal JSON-based cache if stale and PRUNE ghosts
         try:
-            from src.db.models import BookloreBook
-            import json
-
+            # Note: get_all_books() triggers _refresh_book_cache() if needed.
+            # The client now handles persistence of new/pruned items internally.
+            # We do NOT need to iterate and save everything again, as that is redundant
+            # and could mask pruning operations.
+            
             all_books = self.booklore.get_all_books()
-            logger.info(f"   📚 Booklore API returned {len(all_books)} books. Persisting to DB...")
+            logger.info(f"   📚 Booklore cache is active with {len(all_books)} books.")
             
-            persisted_count = 0
-            for b in all_books:
-                booklore_book = BookloreBook(
-                    filename=b.get('fileName'),
-                    title=b.get('title'),
-                    authors=b.get('authors'),
-                    raw_metadata=json.dumps(b)
-                )
-                self.database_service.save_booklore_book(booklore_book)
-                persisted_count += 1
+            # FUTURE: If we want to ensure DB sync for fields that changed without ID change,
+            # we could do it here, but efficiently. For now, trust the client's cache logic.
             
-            logger.info(f"   ✅ Successfully persisted {persisted_count} books to BookloreBook table")
         except Exception as e:
             logger.error(f"   Library sync failed: {e}")
 

@@ -182,6 +182,31 @@ class DatabaseService:
                 session.expunge(book)
                 return book
 
+    def migrate_book_data(self, old_abs_id: str, new_abs_id: str):
+        """
+        Migrate all associated data (States, Jobs, Links) from one book ID to another.
+        Used when merging an existing ebook-only entry into a new audiobook entry.
+        """
+        with self.get_session() as session:
+            try:
+                # Migrate Foreign Keys
+                # synchronize_session=False is required for updates on collections
+                session.query(State).filter(State.abs_id == old_abs_id).update({State.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(Job).filter(Job.abs_id == old_abs_id).update({Job.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(KosyncDocument).filter(KosyncDocument.linked_abs_id == old_abs_id).update({KosyncDocument.linked_abs_id: new_abs_id}, synchronize_session=False)
+                
+                # Cleanup non-migratable data (Alignment/Hardcover)
+                from .models import BookAlignment # Import here to avoid circulars if any, though likely safe at top
+                try:
+                    session.query(BookAlignment).filter(BookAlignment.abs_id == old_abs_id).delete(synchronize_session=False)
+                    session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == old_abs_id).delete(synchronize_session=False)
+                except Exception: pass
+                
+                logger.info(f"✅ Migrated data from {old_abs_id} to {new_abs_id}")
+            except Exception as e:
+                logger.error(f"Failed to migrate book data: {e}")
+                raise
+
     def delete_book(self, abs_id: str) -> bool:
         """Delete a book and all its related data."""
         with self.get_session() as session:
@@ -666,12 +691,17 @@ class DatabaseService:
                 return booklore_book
 
     def delete_booklore_book(self, filename: str) -> bool:
-        """Delete a Booklore book from cache."""
-        with self.get_session() as session:
-            book = session.query(BookloreBook).filter(BookloreBook.filename == filename).first()
-            if book:
-                session.delete(book)
+        """Delete a Booklore book from the cache table."""
+        try:
+            from src.db.models import BookloreBook
+            # Use safe session context manager
+            with self.get_session() as session:
+                # STRICT DELETION: Use exact filename as passed by client
+                # This ensures we delete "mybook.epub" but not "MyBook.epub" if both exist
+                session.query(BookloreBook).filter(BookloreBook.filename == filename).delete(synchronize_session=False)
                 return True
+        except Exception as e:
+            logger.error(f"Failed to delete Booklore book {filename}: {e}")
             return False
 
 

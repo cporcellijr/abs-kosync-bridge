@@ -15,6 +15,10 @@ import os
 import re
 import glob
 import rapidfuzz
+import zipfile
+import shutil
+import tempfile
+import rapidfuzz
 from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult
@@ -915,9 +919,84 @@ class EbookParser:
             end_pos = min(len(full_text), global_offset + context)
 
             snippet = full_text[start_pos:end_pos]
-            logger.debug(f"epubcfi CFI resolved: spine_index={spine_index}, local_offset={local_offset}, global_offset={global_offset}")
+            logger.info(f"Snippet extracted: {snippet[:30]}...")
             return snippet
 
         except Exception as e:
             logger.error(f"Error using epubcfi library for {cfi}: {e}")
             return None
+
+
+def sanitize_storyteller_artifacts(epub_path: Path) -> bool:
+    """
+    Sanitize Storyteller EPUBs by removing specific <span> tags that break alignment.
+    Removes <span id="par..."> and <span id="sent..."> tags while preserving content.
+    """
+    try:
+        epub_path = Path(epub_path)
+        logger.info(f"Sanitizing Storyteller artifacts in: {epub_path.name}")
+        
+        # Create temp dir
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Extract EPUB
+            with zipfile.ZipFile(epub_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_path)
+                
+            # Iterate through HTML/XHTML files
+            modified_count = 0
+            for root, dirs, files in os.walk(temp_path):
+                for file in files:
+                    if file.endswith(('.html', '.xhtml', '.htm')):
+                        file_path = Path(root) / file
+                        
+                        try:
+                            # Read with utf-8
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                                
+                            soup = BeautifulSoup(content, 'html.parser')
+                            file_modified = False
+                            
+                            # Find spans with ids starting with 'par' or 'sent'
+                            # Storyteller uses id="par0", id="sent0", etc. which break our specific alignment engines
+                            for span in soup.find_all('span', id=re.compile(r'^(par|sent)\d+')):
+                                span.unwrap() # Remove the tag but keep contents
+                                file_modified = True
+                                modified_count += 1
+                                
+                            if file_modified:
+                                with open(file_path, 'w', encoding='utf-8') as f:
+                                    f.write(str(soup))
+                                    
+                        except Exception as e:
+                            logger.warning(f"Failed to sanitize file {file}: {e}")
+                            
+            if modified_count > 0:
+                logger.info(f"Removed {modified_count} Storyteller tags. Repacking...")
+                
+                # Create a new zip file
+                temp_epub = temp_path / "sanitized.epub"
+                with zipfile.ZipFile(temp_epub, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                    for root, dirs, files in os.walk(temp_path):
+                        for file in files:
+                            file_path = Path(root) / file
+                            if file == "sanitized.epub": continue
+                            
+                            # Archive name should be relative to temp_path
+                            arcname = file_path.relative_to(temp_path)
+                            zip_out.write(file_path, arcname)
+                            
+                # Replace original
+                # Force move (replace)
+                shutil.move(str(temp_epub), str(epub_path))
+                logger.info(f"✅ Successfully sanitized: {epub_path.name}")
+                return True
+            else:
+                logger.debug(f"No Storyteller tags found in {epub_path.name}. Skipping repack.")
+                return True # It's valid, just didn't need changes
+            
+    except Exception as e:
+        logger.error(f"❌ Error sanitizing EPUB {epub_path}: {e}")
+        return False

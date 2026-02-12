@@ -1226,6 +1226,30 @@ def match():
             logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
 
+        # [DUPLICATE MERGE] Check if this ebook is already linked to another ABS ID (e.g. ebook-only entry)
+        existing_book = database_service.get_book_by_kosync_id(kosync_doc_id)
+        migration_source_id = None
+        
+        if existing_book and existing_book.abs_id != abs_id:
+            logger.info(f"🔄 Found existing book entry {existing_book.abs_id} for this ebook. Merging into {abs_id}...")
+            migration_source_id = existing_book.abs_id
+            
+            # [ID SHADOWING] CAPTURE the old ID to use for Ebook sync
+            abs_ebook_item_id = existing_book.abs_ebook_item_id or existing_book.abs_id
+            
+            # Preserve filename if available
+            if not original_ebook_filename:
+                original_ebook_filename = existing_book.original_ebook_filename or existing_book.ebook_filename
+        else:
+            # If no existing book, we assume this is a fresh link
+            # [ID SHADOWING] But wait, if we are linking a pure ebook file, we don't have an item ID unless...
+            # The logic relies on capturing it from the OLD book entry. 
+            # If there is no old entry, we default to abs_id? 
+            # Actually, per user instruction: "When existing_book is found... CAPTURE the old ID".
+            # So if it's a fresh match, abs_ebook_item_id is None, which is fine (uses default behavior or assumes same).
+            # But the user said "Add abs_ebook_item_id to Book model", which we did.
+            abs_ebook_item_id = None
+
         # Create Book object and save to database service
         from src.db.models import Book
         book = Book(
@@ -1237,10 +1261,20 @@ def match():
             status="pending",
             duration=manager.get_duration(selected_ab),
             storyteller_uuid=storyteller_uuid, # Save UUID
-            original_ebook_filename=original_ebook_filename
+            original_ebook_filename=original_ebook_filename,
+            abs_ebook_item_id=abs_ebook_item_id # [ID SHADOWING]
         )
 
         database_service.save_book(book)
+
+        # [DUPLICATE MERGE] Perform Migration if needed
+        if migration_source_id:
+            try:
+                database_service.migrate_book_data(migration_source_id, abs_id)
+                database_service.delete_book(migration_source_id)
+                logger.info(f"✅ Successfully merged {migration_source_id} into {abs_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to merge book data: {e}")
 
         # Trigger Hardcover Automatch
         hardcover_sync_client = container.sync_clients().get('Hardcover')
@@ -1564,6 +1598,10 @@ def api_storyteller_link(abs_id):
         target_path = epub_cache / f"storyteller_{storyteller_uuid}.epub"
         
         if container.storyteller_client().download_book(storyteller_uuid, target_path):
+            # [FIX] Sanitize Storyteller artifacts to remove <span> tags that break alignment
+            from src.utils.ebook_utils import sanitize_storyteller_artifacts
+            sanitize_storyteller_artifacts(target_path)
+
             # Preserve OLD filename as original if not already set
             if not book.original_ebook_filename:
                 book.original_ebook_filename = book.ebook_filename
