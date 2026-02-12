@@ -129,3 +129,30 @@ You are an expert software engineer and architect working on the ABS-KOSync-Brid
 - **Run Server**: `./start.sh` or `uvicorn src.main:app --reload`
 - **Run Tests**: `pytest`
 - **Database Upgrade**: `alembic upgrade head`
+
+## 12. 🤖 MULTI-AGENT ORCHESTRATION PROTOCOL
+
+### TRIGGER:
+**If I start a request with "PROJECT MANAGER MODE" or "PM MODE":**
+
+### 12.1 THE ARCHITECT PHASE (The PM Agent)
+- **Role:** You are the Lead Architect. Do NOT write code yet.
+- **Action:**
+  1. Analyze the request.
+  2. Break it down into discrete, non-overlapping tasks (e.g., Task A: DB Schema, Task B: API Endpoint, Task C: Frontend UI).
+  3. Create a `PLAN_OF_ACTION.md` file listing these tasks.
+
+### 12.2 THE DELEGATION PHASE (Virtual Sub-Agents)
+- **Instruction:** You must execute the tasks sequentially (or in parallel if using Manager View), acting as a specific "Specialist" for each:
+  - **[DB_AGENT]:** Only touches `models.py` and Alembic.
+  - **[API_AGENT]:** Only touches `routes.py` and `schemas.py`.
+  - **[UI_AGENT]:** Only touches `frontend/`.
+- **Constraint:** One agent must not edit files outside its domain.
+
+### 12.3 THE MERGE PHASE (The PM Returns)
+- **Role:** Lead Architect.
+- **Action:**
+  1. Review the code from all 3 "agents".
+  2. Verify they interact correctly (e.g., did UI_AGENT use the variable name defined by API_AGENT?).
+  3. If they conflict, fix the glue code.
+  4. Update `BRANCH_STATUS.md` with the final result.
