@@ -169,15 +169,24 @@
             border-radius: 12px;
             padding: 24px;
             margin: 30px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .search-section form {
+            display: flex;
+            gap: 0;
+            max-width: 800px;
+            width: 100%;
         }
 
         .search-box {
-            width: 100%;
-            max-width: 600px;
+            flex: 1;
             padding: 16px 20px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border-radius: 8px 0 0 8px;
             color: #ffffff;
             font-size: 16px;
             transition: all 0.3s;
@@ -191,6 +200,11 @@
 
         .search-box::placeholder {
             color: rgba(255, 255, 255, 0.4);
+        }
+
+        .search-section .btn {
+            border-radius: 0 8px 8px 0;
+            margin-top: 0 !important;
         }
 
         /* Section Styling */
@@ -234,6 +248,7 @@
             transition: all 0.3s;
             background: rgba(255, 255, 255, 0.03);
             overflow: hidden;
+            position: relative;
         }
 
         .audiobook-option:hover {
@@ -243,9 +258,66 @@
         }
 
         .audiobook-option.selected {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.15);
-            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+            border: 3px solid #6366f1 !important;
+            background: rgba(102, 126, 234, 0.1);
+            box-shadow: none;
+        }
+
+        /* Checkmark badge for selected items */
+        .audiobook-option.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            background: #6366f1;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+        }
+
+        /* Ghost card styling for None/Skip option */
+        .ghost-card {
+            border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+            background: transparent !important;
+        }
+
+        .ghost-card:hover {
+            border-color: rgba(102, 126, 234, 0.4) !important;
+            background: rgba(102, 126, 234, 0.05) !important;
+        }
+
+        .ghost-card.selected {
+            border-color: rgba(102, 126, 234, 0.6) !important;
+            background: rgba(102, 126, 234, 0.08) !important;
+        }
+
+        .ghost-card-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 200px;
+            gap: 12px;
+        }
+
+        .ghost-icon {
+            font-size: 48px;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .ghost-text {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 600;
         }
 
         .audiobook-cover-container {
@@ -264,12 +336,17 @@
         .audiobook-cover-placeholder {
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
+            color: rgba(255, 255, 255, 0.6);
             font-size: 56px;
+        }
+
+        /* Specific styling for ebook placeholders */
+        .eb-option .audiobook-cover-placeholder {
+            background: linear-gradient(135deg, #2d3436 0%, #1e272e 100%);
         }
 
         .audiobook-info {
@@ -398,27 +475,54 @@
         .selection-container {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 30px;
+            gap: 40px;
             margin-bottom: 40px;
+            position: relative;
+        }
+
+        /* Stepper line connecting numbered circles */
+        .selection-container::before {
+            content: '';
+            position: absolute;
+            top: 35px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg,
+                    transparent 0%,
+                    rgba(102, 126, 234, 0.3) 15%,
+                    rgba(102, 126, 234, 0.3) 85%,
+                    transparent 100%);
+            z-index: 0;
         }
 
         @media (max-width: 1024px) {
             .selection-container {
                 grid-template-columns: 1fr;
             }
+
+            /* Hide stepper line on mobile */
+            .selection-container::before {
+                display: none;
+            }
         }
 
         .section {
-            background: rgba(255, 255, 255, 0.03);
+            background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 12px;
             padding: 24px;
             height: 100%;
-            /* Full height for equal columns */
             margin: 0;
-            /* Override old margin */
             display: flex;
             flex-direction: column;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Alternating backgrounds for visual separation */
+        .section:nth-child(2) {
+            background: rgba(255, 255, 255, 0.02);
         }
 
         .section h3 {
@@ -533,8 +637,10 @@
                         <div class="audiobook-grid">
                             {% set single_match = audiobooks|length == 1 %}
                             {% for ab in audiobooks %}
-                            <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}" onclick="selectItem(this, 'audiobook_id')">
-                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match %}checked{% endif %}>
+                            <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match
+                                    %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if ab.cover_url %}
                                     <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
@@ -567,12 +673,12 @@
                         {% if storyteller_books %}
                         <div class="audiobook-grid">
                             <!-- None Option -->
-                            <label class="audiobook-option st-option selected"
+                            <label class="audiobook-option st-option ghost-card selected"
                                 onclick="selectItem(this, 'storyteller_uuid')">
                                 <input type="radio" name="storyteller_uuid" value="" checked>
-                                <div class="audiobook-info"
-                                    style="height: 100%; display: flex; align-items: center; justify-content: center;">
-                                    <div class="audiobook-title" style="font-size: 16px; color: #aaa;">None / Skip</div>
+                                <div class="ghost-card-content">
+                                    <div class="ghost-icon">⊘</div>
+                                    <div class="ghost-text">None / Skip</div>
                                 </div>
                             </label>
 
