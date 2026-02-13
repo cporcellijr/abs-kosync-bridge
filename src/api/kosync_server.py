@@ -206,7 +206,7 @@ def kosync_put_progress():
             logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.4f} < {existing_pct:.4f} for {doc_hash[:8]}")
             return jsonify({
                 "document": doc_hash,
-                "timestamp": kosync_doc.timestamp.isoformat() + "Z" if kosync_doc.timestamp else now.isoformat() + "Z"
+                "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(now.timestamp())
             }), 200
 
     if kosync_doc is None:
@@ -370,7 +370,7 @@ def kosync_put_progress():
 
     return jsonify({
         "document": doc_hash,
-        "timestamp": now.isoformat() + "Z"
+        "timestamp": int(now.timestamp())
     }), 200
 
 
