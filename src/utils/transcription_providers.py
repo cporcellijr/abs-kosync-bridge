@@ -212,9 +212,10 @@ class WhisperCppServerProvider(TranscriptionProvider):
                 "WHISPER_CPP_URL is not configured. Set it in Settings → Advanced Options."
             )
         self.server_url = url
+        self.model = os.environ.get("WHISPER_MODEL", "small")
 
     def get_name(self) -> str:
-        return "Whisper.cpp (server)"
+        return f"Whisper.cpp (server) - {self.model}"
 
     def transcribe(self, audio_path: Path, progress_callback=None) -> list[dict]:
         import requests
@@ -225,7 +226,7 @@ class WhisperCppServerProvider(TranscriptionProvider):
             files = {
                 "file": (audio_path.name, f, "audio/wav")
             }
-            data = {"response_format": "verbose_json"}
+            data = {"model": self.model, "response_format": "verbose_json"}
 
             response = requests.post(
                 self.server_url,
