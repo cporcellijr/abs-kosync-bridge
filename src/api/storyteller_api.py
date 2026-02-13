@@ -85,7 +85,7 @@ class StorytellerAPIClient:
                     response = self.session.put(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
-            logger.error(f"Storyteller API request failed: {e}")
+            logger.error(f"Storyteller API request failed ({method} {endpoint}): {e}")
             return None
 
     def check_connection(self) -> bool:
@@ -300,6 +300,20 @@ class StorytellerAPIClient:
         except Exception as e:
             logger.warning(f"API download raised exception: {e}")
 
+    def trigger_processing(self, book_uuid: str) -> bool:
+        """Trigger the Storyteller processing for a book."""
+        try:
+            response = self._make_request("POST", f"/api/v2/books/{book_uuid}/process", {})
+            if response and response.status_code in [200, 201, 202, 204]:
+                logger.info(f"✅ Triggered Storyteller processing for {book_uuid}")
+                return True
+            else:
+                logger.warning(f"Failed to trigger processing: {response.status_code if response else 'No Resp'}")
+                return False
+        except Exception as e:
+            logger.error(f"Error triggering processing: {e}")
+            return False
+
         # Fallback: Local File Copy
         try:
             # 1. Get Book Details for Filepath
@@ -431,6 +445,10 @@ class StorytellerDBWithAPI:
 
     def download_book(self, book_uuid: str, output_path: Path) -> bool:
         if self.api_client: return self.api_client.download_book(book_uuid, output_path)
+        return False
+
+    def trigger_processing(self, book_uuid: str) -> bool:
+        if self.api_client: return self.api_client.trigger_processing(book_uuid)
         return False
 
 def create_storyteller_client():

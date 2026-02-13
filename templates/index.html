@@ -1460,7 +1460,7 @@
                 rel="noopener noreferrer">📚 Docs</a>
             <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
-            <a href="/book-linker" class="btn">🔗 Book Linker</a>
+            <a href="/forge" class="btn">⚡ Forge</a>
 
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>
@@ -1468,6 +1468,72 @@
     </div>
 
     <div class="container">
+        <!-- Forge Status Banner -->
+        <div id="forge-status-banner" class="forge-banner" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="spinner-sm"></div>
+                <span id="forge-task-list">Hammering...</span>
+            </div>
+            <small style="opacity: 0.8">Processing in background</small>
+        </div>
+        <style>
+            .forge-banner {
+                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 20px;
+                border-radius: 12px;
+                margin-bottom: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                animation: slideDown 0.3s ease-out;
+                box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .spinner-sm {
+                width: 16px;
+                height: 16px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        </style>
+        <script>
+            function checkForgeStatus() {
+                fetch('/api/forge/active')
+                    .then(r => r.json())
+                    .then(tasks => {
+                        const banner = document.getElementById('forge-status-banner');
+                        const list = document.getElementById('forge-task-list');
+                        if (tasks && tasks.length > 0) {
+                            banner.style.display = 'flex';
+                            const text = tasks.length === 1 ? `Forging: ${tasks[0]}` : `Forging ${tasks.length} editions...`;
+                            list.textContent = text;
+                        } else {
+                            banner.style.display = 'none';
+                        }
+                    })
+                    .catch(e => console.debug("Forge status check failed", e));
+            }
+            // Poll every 5s
+            setInterval(checkForgeStatus, 5000);
+            // Initial check
+            document.addEventListener('DOMContentLoaded', checkForgeStatus);
+        </script>
         {% if suggestions %}
         <div id="suggestions-section">
             <div class="suggestions-banner" id="suggestions-banner">
