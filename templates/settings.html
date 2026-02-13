@@ -577,14 +577,14 @@
                             KOReader)</h4>
 
                         <div style="display: flex; gap: 10px;">
-                            <input type="text" id="public_kosync_url" aria-label="Public KOSync URL" readonly value=""
+                            <input type="text" id="public_kosync_url" aria-label="Public KOSync URL" value=""
                                 onclick="this.select()"
-                                style="flex: 1; cursor: pointer; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.4);">
+                                style="flex: 1; cursor: text; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.2);">
                             <button type="button" class="btn" onclick="copyPublicUrl()"
                                 title="Copy to clipboard">📋</button>
                         </div>
-                        <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Detected from
-                            your browser. Append path (e.g. /koreader) if using a proxy.</div>
+                        <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Replace
+                            'localhost' with your server IP or Domain if accessing remotely.</div>
                     </div>
 
                     <div class="form-group full-width">
@@ -1161,7 +1161,7 @@
                 if (publicGroup) publicGroup.classList.remove('hidden');
 
                 // Force internal value and make readonly
-                internalInput.value = "http://127.0.0.1:5757";
+                internalInput.value = "http://127.0.0.1:{{ get_val('KOSYNC_PORT', '5757') }}";
                 internalInput.setAttribute('readonly', 'readonly');
                 internalInput.style.opacity = "0.7";
                 internalInput.style.cursor = "not-allowed";
@@ -1217,14 +1217,18 @@
 
         // Auto-calculate public URL on load
         document.addEventListener('DOMContentLoaded', function () {
-            const protocol = window.location.protocol;
-            const host = window.location.host; // includes port if present
-            // We strip /settings if present, or just use origin
-            // But window.location.origin is safest base
-            let baseUrl = window.location.origin;
+            const configuredPort = "{{ get_val('KOSYNC_PORT', '5757') }}";
 
-            // Try to be smart mostly for display
-            document.getElementById('public_kosync_url').value = baseUrl + "/";
+            // Simple generic suggestion as requested
+            let suggestedUrl = `http://localhost:${configuredPort}`;
+
+            const publicUrlInput = document.getElementById('public_kosync_url');
+            publicUrlInput.value = suggestedUrl;
+
+            // Make it editable
+            publicUrlInput.removeAttribute('readonly');
+            publicUrlInput.style.backgroundColor = "rgba(0,0,0,0.2)";
+            publicUrlInput.style.cursor = "text";
 
             // Initialize Dynamic Logic
             initDynamicForms();
@@ -1233,7 +1237,7 @@
             const kosyncServerVal = document.getElementById('kosync_server_input').value;
             // If it matches localhost, check the box. Else uncheck.
             const builtinCheckbox = document.getElementById('kosync_use_builtin');
-            if (kosyncServerVal === "http://127.0.0.1:5757" || kosyncServerVal === "") {
+            if (kosyncServerVal === "http://127.0.0.1:{{ get_val('KOSYNC_PORT', '5757') }}" || kosyncServerVal === "") {
                 builtinCheckbox.checked = true;
             } else {
                 builtinCheckbox.checked = false;
