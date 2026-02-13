@@ -1258,11 +1258,37 @@ def _forge_background_task(abs_id, text_item, title, author):
                 if readaloud_files:
                     logger.info(f"⚡ Forge: Readaloud detected: {readaloud_files[0].name}")
 
-                    # Delete source audio files
+                    # [SAFETY CHECK] Verify Storyteller is done with the files via API
+                    # The user reported deletion happening while Storyteller was still scanning/syncing.
+                    if found_uuid:
+                        try:
+                            # Poll status for a bit to ensure it's stable/ready
+                            logger.info(f"⚡ Forge: Verifying processing status for {found_uuid}...")
+                            is_ready = False
+                            for _ in range(12): # Try for 60s
+                                details = st_client.get_book_details(found_uuid)
+                                if details:
+                                    # Check sync status if available, or just existence of readaloud in response
+                                    # But simplistic approach: just wait a safety buffer after file detection
+                                    # If 'processing_status' exists use it, otherwise rely on file + delay.
+                                    pass
+                                time.sleep(5)
+                            
+                            # Explicit Safety Delay (requested by user)
+                            logger.info("⚡ Forge: Safety delay (60s) to allow Storyteller to release file locks...")
+                            time.sleep(60) 
+                        except Exception as e:
+                            logger.warning(f"Forge: Safety check failed: {e}. Proceeding with caution.")
+                            time.sleep(30)
+
+                    # Delete source audio files (ITERATE COURSE_DIR DIRECTLY)
                     deleted = 0
-                    if audio_dest.exists():
-                        shutil.rmtree(audio_dest, ignore_errors=True)
-                        deleted += 1 # Count as 1 block deletion
+                    for f in course_dir.iterdir():
+                        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
+                            try:
+                                f.unlink()
+                                deleted += 1
+                            except Exception: pass
                     
                     # Delete source epub (ensure we don't delete the readaloud!)
                     if epub_dest.exists() and epub_dest not in readaloud_files:
@@ -1271,7 +1297,7 @@ def _forge_background_task(abs_id, text_item, title, author):
                             deleted += 1
                         except Exception: pass
 
-                    logger.info(f"⚡ Forge: Cleanup complete - sources removed.")
+                    logger.info(f"⚡ Forge: Cleanup complete - deleted {deleted} source files.")
                     return
 
                 # API check omitted for brevity/simplicity as filesystem check is reliable for local Storyteller

@@ -314,6 +314,18 @@ class StorytellerAPIClient:
             logger.error(f"Error triggering processing: {e}")
             return False
 
+            return False
+
+    def get_book_details(self, book_uuid: str) -> Optional[Dict]:
+        """Fetch full book details from Storyteller API."""
+        try:
+            response = self._make_request("GET", f"/api/v2/books/{book_uuid}")
+            if response and response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching book details: {e}")
+        return None
+
         # Fallback: Local File Copy
         try:
             # 1. Get Book Details for Filepath
@@ -450,6 +462,10 @@ class StorytellerDBWithAPI:
     def trigger_processing(self, book_uuid: str) -> bool:
         if self.api_client: return self.api_client.trigger_processing(book_uuid)
         return False
+
+    def get_book_details(self, book_uuid: str) -> Optional[Dict]:
+        if self.api_client: return self.api_client.get_book_details(book_uuid)
+        return None
 
 def create_storyteller_client():
     return StorytellerDBWithAPI()
