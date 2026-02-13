@@ -25,6 +25,7 @@
 - **Five-Way Sync**: Syncs Audiobookshelf, KOReader, Storyteller, Booklore, and Hardcover.
 - **AI-Powered**: Uses Whisper for precise audio-to-text alignment.
 - **Web UI**: Full management dashboard for tracking syncs and matching books.
+- **Split-Port Security**: Expose only the sync API to the internet while keeping the dashboard on your LAN.
 - **Self-Hosted**: Runs entirely in Docker on your own server.
 
 ## 🚀 Quick Start
@@ -35,8 +36,10 @@ services:
     image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
     ports:
       - "8080:5757"
+      # - "5758:5758"  # Optional: Expose sync-only port for internet access
     environment:
       - TZ=America/New_York
+      # - KOSYNC_PORT=5758  # Optional: Enable split-port mode
       # NOTE: All configuration is managed in the Web UI.
     volumes:
       - ./data:/data
