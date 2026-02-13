@@ -22,7 +22,6 @@ from src.utils.config_loader import ConfigLoader
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.logging_utils import sanitize_log_data
-# from src.utils.hash_cache import HashCache
 from src.api.kosync_server import kosync_sync_bp, kosync_admin_bp, init_kosync_server
 from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 
@@ -130,9 +129,6 @@ def setup_dependencies(app, test_container=None):
     COVERS_DIR = DATA_DIR / "covers"
     if not COVERS_DIR.exists():
         COVERS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Initialize hash cache (DEPRECATED - now in DB)
-    # hash_cache = HashCache(DATA_DIR / "kosync_hash_cache.json")
 
     # Register KoSync Blueprint and initialize with dependencies
     init_kosync_server(database_service, container, manager, EBOOK_DIR)
@@ -667,19 +663,10 @@ def settings():
 
             clean_value = value.strip()
 
-            # Special handling: If empty, deciding whether to delete or save empty
-            # Strategy: If it was previously set, allow clearing it?
-            # Or just save empty string?
-            # User snippet logic: Only save non-empty. Let's stick to that for now,
-            # BUT if it's in DB and now empty, we probably want to update it to empty/delete?
-            # Let's save standard string representation.
-
             if clean_value:
                 database_service.set_setting(key, clean_value)
                 os.environ[key] = clean_value # Immediate update for current process
             elif key in current_settings:
-                # If key exists in DB but user cleared it, set to empty (or delete?)
-                # Setting to empty string is safer than deleting if defaults exist
                 database_service.set_setting(key, "")
                 os.environ[key] = "" # Immediate update for current process
 

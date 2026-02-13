@@ -83,8 +83,7 @@ class AlignmentService:
         target_offset = char_offset_hint
         
         if target_offset is None:
-            # TODO: If we ever need reverse lookup (Text -> Time without offset), implements normalized search here.
-            # For now, KOSync always provides an offset or we calculate it.
+            # Note: For now, KOSync always provides an offset or we calculate it.
             return None
 
         # 3. Interpolate Timestamp

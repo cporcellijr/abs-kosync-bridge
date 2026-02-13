@@ -90,7 +90,6 @@ class SyncManager:
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
-        # Scan for corrupted transcripts check removed
 
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
@@ -145,7 +144,6 @@ class SyncManager:
         # [NEW] Cleanup orphaned cache files
         # DISABLED: Current logic is too aggressive (deletes original_ebook_filename for linked books).
         # We rely on delete_mapping in web_server.py to handle explicit deletions.
-        # self.cleanup_cache()
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -787,9 +785,8 @@ class SyncManager:
             if not raw_transcript:
                 raise Exception("Failed to generate transcript from both SMIL and Whisper.")
 
-            # Step 4: Parse EPUB (Already did this for text, but ensure map is ready if needed?) 
-            # Actually ebook_parser caches result, so repeating is cheap.
-            # But we already have 'book_text'.
+            # Step 4: Parse EPUB - ebook_parser caches result, so repeating is cheap.
+
             
             # [NEW] Step 5: Align and Store using AlignmentService
             # This is where we commit the result to the DB
