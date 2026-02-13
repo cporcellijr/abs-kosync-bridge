@@ -741,6 +741,10 @@ class SyncManager:
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
+            
+            # [FIX] Ensure epub_path is a Path object (acquire_ebook returns str)
+            if epub_path:
+                epub_path = Path(epub_path)
 
             # Step 2: Try Fast-Path (SMIL Extraction)
             raw_transcript = None
@@ -1168,7 +1172,14 @@ class SyncManager:
                 # If there's a discrepancy but no client actually changed, skip
                 # (discrepancy will resolve next time someone reads)
                 # Exception: if character delta triggered, we have a real change
-                if significant_diff and not any_significant_delta and not char_delta_triggered:
+                # Exception: if a client just appeared for the first time (no prior
+                #   saved state), its appearance IS the activity — e.g. Storyteller
+                #   book exists at 0% but was never in config before.
+                new_client_in_config = any(
+                    client_name.lower() not in prev_states_by_client
+                    for client_name in config.keys()
+                )
+                if significant_diff and not any_significant_delta and not char_delta_triggered and not new_client_in_config:
                     logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader.")
                     continue
 

@@ -368,9 +368,14 @@ def kosync_put_progress():
         # This ensures proper delta detection between cycles.
         logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
 
+    response_timestamp = now.isoformat() + "Z"
+    if device and device.lower() == "booknexus":
+        # BookNexus expects an integer timestamp (Unix epoch)
+        response_timestamp = int(now.timestamp())
+
     return jsonify({
         "document": doc_hash,
-        "timestamp": int(now.timestamp())
+        "timestamp": response_timestamp
     }), 200
 
 

@@ -54,14 +54,27 @@ class StorytellerSyncClient(SyncClient):
         if not used_bulk:
             st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
 
+        no_position = False
         if st_pct is None:
-            logger.debug("⚠️ Storyteller percentage is None - returning None for service state")
-            return None
+            # Book may exist in Storyteller but have no reading position yet.
+            # Treat as 0% so the sync cycle can push progress from other services.
+            book_info = self.storyteller_client.find_book_by_title(epub)
+            if book_info:
+                st_pct = 0.0
+                st_ts = 0
+                no_position = True
+                logger.info(f"[{title_snip}] Storyteller: book exists but no position, treating as 0%")
+            else:
+                logger.debug(f"[{title_snip}] Storyteller: book not found in library")
+                return None
 
         # Get previous Storyteller state
         prev_storyteller_pct = prev_state.percentage if prev_state else 0
 
-        delta = abs(st_pct - prev_storyteller_pct)
+        # "No position" means absence of data, not a genuine move to 0%.
+        # Force delta to 0 so Storyteller doesn't become leader by appearing
+        # to have jumped backwards from a previously synced position.
+        delta = 0 if no_position else abs(st_pct - prev_storyteller_pct)
 
         return ServiceState(
             current={"pct": st_pct, "ts": st_ts, "href": st_href, "frag": st_frag},

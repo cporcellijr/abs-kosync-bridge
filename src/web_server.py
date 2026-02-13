@@ -723,13 +723,18 @@ def audiobook_matches_search(ab, search_term):
     author = normalize(get_abs_author(ab))
     search_norm = normalize(search_term)
 
-    # Match if search_norm is a substring of title or author
-    # We remove 'title in search_norm' because it causes false positives (e.g. empty title matches everything)
-    # and isn't typically desirable for a search bar.
-    title_match = search_norm in title if title else False
-    author_match = search_norm in author if author else False
+    # 1. Standard Search: Search term is in Title or Author (e.g. "Harry" in "Harry Potter")
+    if search_norm in title or search_norm in author:
+        return True
 
-    return title_match or author_match
+    # 2. Reverse Search: Title/Author is in Search term (e.g. "Dune" in "Dune Messiah")
+    # FIX: Enforce minimum length to prevent short/empty matches (e.g. "The", "It", "")
+    MIN_LEN = 4
+    
+    if len(title) >= MIN_LEN and title in search_norm: return True
+    if len(author) >= MIN_LEN and author in search_norm: return True
+
+    return False
 
 # ---------------- ROUTES ----------------
 def index():
@@ -1618,6 +1623,17 @@ def delete_mapping(abs_id):
         if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' and book.kosync_doc_id:
             logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
             database_service.delete_kosync_document(book.kosync_doc_id)
+
+        # [NEW] Delete cached ebook file
+        if book.ebook_filename:
+            try:
+                # Use manager's cache dir which is already configured
+                cache_file = manager.epub_cache_dir / book.ebook_filename
+                if cache_file.exists():
+                    cache_file.unlink()
+                    logger.info(f"🗑️ Deleted ebook cache file: {book.ebook_filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete ebook cache file: {e}")
 
         # Remove from ABS collection
         collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
