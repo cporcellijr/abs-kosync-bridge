@@ -402,6 +402,9 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.mock_booklore_client.add_to_shelf.return_value = True
             self.mock_storyteller_client.add_to_collection.return_value = True
 
+            # Configure get_book_by_kosync_id to return None (no existing book to merge)
+            self.mock_database_service.get_book_by_kosync_id.return_value = None
+            
             # Make HTTP POST request
             response = self.client.post('/match', data={
                 'audiobook_id': 'test-audiobook-123',
