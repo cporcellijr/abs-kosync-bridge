@@ -19,36 +19,34 @@ services:
     environment:
       # ============================================
       # General Settings
-      # ============================================
       - TZ=America/New_York
       - LOG_LEVEL=INFO
-      # ============================================
-      # Configuration Note
-      # ============================================
-      # All other configuration (ABS, KoSync, Providers, etc.) 
-      # is now managed via the Web UI variables at http://localhost:8080/settings
+      # - KOSYNC_PORT=5758 # Enable Split-Port Mode
+
+      # === OPTIONAL: Initial Configuration ===
+      # It is recommended to configure these in the Web UI, but you can bootstrap them here.
+
+      # Audiobookshelf
+      # - ABS_SERVER=http://your-abs-server:13378
+      # - ABS_TOKEN=your-api-token
+
+      # Integrations
+      # - KOSYNC_URL=https://koreader.example.com
+      # - BOOKLORE_URL=http://booklore.example.com
+
+      # CWA (Calibre-Web Automated) - For syncing ebooks without local files
+      # - CWA_ENABLED=true
+      # - CWA_SERVER=http://calibre-web.example.com/opds
+      # - CWA_USERNAME=user
+      # - CWA_PASSWORD=pass
 
     volumes:
-      # ============================================
-      # REQUIRED VOLUMES
-      # ============================================
-      # App data (database, transcripts, state)
-      - ./data:/data
+      # === REQUIRED ===
+      - ./data:/data # App data (database, cache)
+      - /path/to/ebooks:/books # Your EPUB library (Required unless using CWA/Booklore exclusively)
 
-      # Main ebook library (for sync matching)
-      - /path/to/your/ebooks:/books
-
-      # ============================================
-      # OPTIONAL VOLUMES
-      # ============================================
-      # Storyteller database (for SQLite fallback)
-      - /path/to/storyteller/data:/storyteller_data
-
-      # Book Linker volumes
-      - /path/to/source/ebooks:/linker_books
-      - /path/to/audiobooks:/audiobooks
-      - /path/to/processing/folder:/processing
-      - /path/to/storyteller/library:/storyteller/library
+      # === OPTIONAL: Forge (Storyteller) ===
+      - /path/to/storyteller/library:/storyteller_library
 
     ports:
       - "8080:5757"

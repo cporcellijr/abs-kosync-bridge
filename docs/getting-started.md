@@ -1,6 +1,7 @@
 # Getting Started
 
 ## 🎯 Goal
+
 Get your audiobooks and ebooks syncing in 10 minutes!
 
 ---
@@ -20,24 +21,31 @@ Before you begin, ensure you have the following:
 ## Step 1: Get Your API Keys
 
 ### Audiobookshelf API Key
+
 1. Log into your ABS server.
 2. Go to **Settings** → **Users** → Your user.
 3. Click **"Generate API Token"**.
 4. Copy the token.
 
 ### (Optional) Find Your ABS Library ID
+
 If you want to limit the sync mapping search to a specific library (recommended for performance):
+
 1. In ABS, go to your audiobook library.
 2. Look at the URL: `https://your-server.com/library/LIBRARY_ID_HERE`
 3. Copy that ID.
 
 ### (Optional) KOSync Credentials
+
 If using KOReader sync:
+
 - Your Calibre/KOSync username and password.
 - KOSync server URL (usually `https://your-calibre.com/api/koreader`).
 
 ### (Optional) Booklore Credentials
+
 If using Booklore:
+
 - Your Booklore server URL.
 - Username and password.
 
@@ -78,12 +86,24 @@ services:
       - ./data:/data                    # App data
       - /path/to/ebooks:/books          # Your EPUB library
       
-      # === OPTIONAL: Book Linker ===
-      # - /path/to/downloads/ebooks:/linker_books
-      # - /path/to/downloads/audio:/audiobooks
-      # - ./processing:/processing
-      # - /path/to/storyteller:/storyteller/library
+      # === OPTIONAL: Forge ===
+      # - /path/to/storyteller/library:/storyteller_library
 ```
+
+### Security Note: Split-Port Mode
+
+By default, the container listens on port **8080** (mapped to 5757 in the example). This port exposes **everything**: the Admin Dashboard, Settings, and API.
+
+If you want to expose the KOSync endpoint to the internet (for syncing on the go) but keep the Dashboard private, you can use **Split-Port Mode**:
+
+1. Set `KOSYNC_PORT=5758` (or any other port) in your environment variables.
+2. Map that port in `docker-compose.yml`:
+
+    ```yaml
+    ports:
+      - "8080:5757"  # Admin Dashboard (Keep Local)
+      - "5758:5758"  # Sync Protocol (Safe to Expose)
+    ```
 
 !!! tip "Optional Integrations"
     You can configure KOSync, Storyteller, and other integrations via enviroment variables during bootstrap, but it is easier to do it later in the Web UI!
