@@ -513,8 +513,9 @@ def get_searchable_ebooks(search_term):
 
     results = []
     found_filenames = set()
+    found_stems = set()  # To dedupe by title stem
 
-    # Try Booklore first if configured
+    # 1. Booklore
     if container.booklore_client().is_configured():
         try:
             books = container.booklore_client().search_books(search_term)
@@ -522,85 +523,85 @@ def get_searchable_ebooks(search_term):
                 for b in books:
                     fname = b.get('fileName', '')
                     if fname.lower().endswith('.epub'):
-                        found_filenames.add(fname)
+                        found_filenames.add(fname.lower())
+                        found_stems.add(Path(fname).stem.lower())
                         results.append(EbookResult(
                             name=fname,
                             title=b.get('title'),
                             subtitle=b.get('subtitle'),
                             authors=b.get('authors'),
-                            booklore_id=b.get('id')
+                            booklore_id=b.get('id'),
+                            source='Booklore'
                         ))
         except Exception as e:
             logger.warning(f"Booklore search failed: {e}")
 
-    # Search filesystem
-    if EBOOK_DIR.exists():
-        try:
-            all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
-            if not search_term:
-                # If no search term, list all (filtering done below)
-                pass
-
-            # Combine logic: if search_term, filter. always check duplicates
-            for eb in all_epubs:
-                 if eb.name in found_filenames:
-                     continue
-
-                 if not search_term or search_term.lower() in eb.name.lower():
-                     results.append(EbookResult(name=eb.name, path=eb))
-                     found_filenames.add(eb.name)
-
-        except Exception as e:
-            logger.warning(f"Filesystem search failed: {e}")
-
-    # Search ABS ebook libraries
+    # 2. ABS ebook libraries
     if search_term:
         try:
             abs_client = container.abs_client()
-            logger.debug(f"ABS Search: Starting search for '{search_term}'")
             if abs_client:
                 abs_ebooks = abs_client.search_ebooks(search_term)
-                logger.debug(f"ABS Search: Returned {len(abs_ebooks) if abs_ebooks else 0} results")
                 if abs_ebooks:
-                    logger.debug(f"ABS Search: Found {len(abs_ebooks)} ebook(s) for '{search_term}'")
                     for ab in abs_ebooks:
-                        # Check if this item has actual ebook files
                         ebook_files = abs_client.get_ebook_files(ab['id'])
-                        logger.debug(f"   ABS item {ab['id']} has {len(ebook_files) if ebook_files else 0} ebook files")
                         if ebook_files:
                             ef = ebook_files[0]
                             fname = f"{ab['id']}_abs.{ef['ext']}"
-                            if fname not in found_filenames:
+                            if fname.lower() not in found_filenames:
                                 results.append(EbookResult(
                                     name=fname,
                                     title=ab.get('title'),
                                     authors=ab.get('author'),
-                                    path=None  # Will need to be downloaded
+                                    source='ABS'
                                 ))
-                                found_filenames.add(fname)
+                                found_filenames.add(fname.lower())
+                                if ab.get('title'):
+                                    found_stems.add(ab['title'].lower().strip())
         except Exception as e:
             logger.warning(f"ABS ebook search failed: {e}")
 
-    # Search CWA (Calibre-Web Automated) via OPDS
+    # 3. CWA (Calibre-Web Automated)
     if search_term:
         try:
             library_service = container.library_service()
             if library_service and library_service.cwa_client and library_service.cwa_client.is_configured():
                 cwa_results = library_service.cwa_client.search_ebooks(search_term)
                 if cwa_results:
-                    logger.debug(f"CWA Search: Found {len(cwa_results)} ebook(s) for '{search_term}'")
                     for cr in cwa_results:
                         fname = f"cwa_{cr.get('id', 'unknown')}.{cr.get('ext', 'epub')}"
-                        if fname not in found_filenames:
+                        if fname.lower() not in found_filenames:
                             results.append(EbookResult(
                                 name=fname,
                                 title=cr.get('title'),
                                 authors=cr.get('author'),
-                                path=None  # Will need to be downloaded
+                                source='CWA'
                             ))
-                            found_filenames.add(fname)
+                            found_filenames.add(fname.lower())
+                            if cr.get('title'):
+                                found_stems.add(cr['title'].lower().strip())
         except Exception as e:
             logger.warning(f"CWA search failed: {e}")
+
+    # 4. Search filesystem (Local) - LOW PRIORITY
+    if EBOOK_DIR.exists():
+        try:
+            all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
+            for eb in all_epubs:
+                fname_lower = eb.name.lower()
+                stem_lower = eb.stem.lower()
+
+                # Dedupe: if already found in rich source, skip
+                if fname_lower in found_filenames or stem_lower in found_stems:
+                    continue
+
+                if not search_term or search_term.lower() in fname_lower:
+                    results.append(EbookResult(name=eb.name, path=eb, source='Local File'))
+                    found_filenames.add(fname_lower)
+                    found_stems.add(stem_lower)
+
+        except Exception as e:
+            logger.warning(f"Filesystem search failed: {e}")
 
     # Check if we have no sources at all
     if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
