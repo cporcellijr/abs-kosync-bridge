@@ -672,10 +672,13 @@
                     <div class="scrollable-content">
                         {% if storyteller_books %}
                         <div class="audiobook-grid">
+                            {% set single_st_match = storyteller_books|length == 1 %}
                             <!-- None Option -->
-                            <label class="audiobook-option st-option ghost-card selected"
+                            <label
+                                class="audiobook-option st-option ghost-card {% if not single_st_match %}selected{% endif %}"
                                 onclick="selectItem(this, 'storyteller_uuid')">
-                                <input type="radio" name="storyteller_uuid" value="" checked>
+                                <input type="radio" name="storyteller_uuid" value="" {% if not single_st_match
+                                    %}checked{% endif %}>
                                 <div class="ghost-card-content">
                                     <div class="ghost-icon">⊘</div>
                                     <div class="ghost-text">None / Skip</div>
@@ -683,8 +686,10 @@
                             </label>
 
                             {% for book in storyteller_books %}
-                            <label class="audiobook-option st-option" onclick="selectItem(this, 'storyteller_uuid')">
-                                <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}">
+                            <label class="audiobook-option st-option {% if single_st_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'storyteller_uuid')">
+                                <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}" {% if
+                                    single_st_match %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if book.cover_url %}
                                     <div class="audiobook-cover-placeholder">⚡</div>
@@ -717,9 +722,12 @@
                     <div class="scrollable-content">
                         {% if ebooks %}
                         <div class="audiobook-grid">
+                            {% set single_eb_match = ebooks|length == 1 %}
                             {% for eb in ebooks %}
-                            <label class="audiobook-option eb-option" onclick="selectItem(this, 'ebook_filename')">
-                                <input type="radio" name="ebook_filename" value="{{ eb.name }}">
+                            <label class="audiobook-option eb-option {% if single_eb_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'ebook_filename')">
+                                <input type="radio" name="ebook_filename" value="{{ eb.name }}" {% if single_eb_match
+                                    %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     <div class="audiobook-cover-placeholder"
                                         style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);">📖</div>
