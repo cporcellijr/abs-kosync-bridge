@@ -1114,7 +1114,9 @@ def _forge_background_task(abs_id, text_item, title, author):
             # Fallback to env or default
             st_lib_path = os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library")
             
-        course_dir = Path(st_lib_path) / safe_author / safe_title
+        # Flattened Structure: Library/Title/
+        # User requested to remove Author subfolder for Storyteller compatibility/preference
+        course_dir = Path(st_lib_path) / safe_title
         audio_dest = course_dir / "Audio"
         audio_dest.mkdir(parents=True, exist_ok=True)
         
@@ -1125,9 +1127,12 @@ def _forge_background_task(abs_id, text_item, title, author):
         if not audio_ok:
             logger.error(f"⚡ Forge: Failed to copy audio files for {abs_id}")
             # cleanup empty dir
+            # cleanup empty dir
             try:
-                audio_dest.rmdir()
-                course_dir.rmdir()
+                # If audio_dest was created, removing course_dir recursively might be safer/cleaner 
+                # or just rmdir audio_dest then course_dir
+                if audio_dest.exists(): audio_dest.rmdir()
+                if course_dir.exists(): course_dir.rmdir()
             except: pass
             return
         logger.info(f"⚡ Forge: Audio files copied for '{title}'")
