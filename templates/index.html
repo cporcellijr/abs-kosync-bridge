@@ -71,6 +71,7 @@
 
             {% if mapping.status == 'active' %}
             {# Service progress - always visible #}
+            {# [START REPLACEMENT BLOCK for service-progress] #}
             <div class="service-progress">
                 {% if integrations.abs %}
                 <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
@@ -87,6 +88,7 @@
                     {% endif %}
                 </a>
                 {% endif %}
+
                 {% if integrations.kosync %}
                 <div class="service-item cursor-pointer"
                     title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
@@ -102,7 +104,10 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if integrations.storyteller %}
+
+                {# [CHANGED] Only show Storyteller if state exists or it is a legacy link needing a fix #}
+                {% if integrations.storyteller and (mapping.states.storyteller is defined or
+                mapping.storyteller_legacy_link) %}
                 <div class="service-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
@@ -115,24 +120,18 @@
                     {% elif mapping.states.storyteller is defined %}
                     <span class="service-value">{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0))
                         }}%</span>
-                    {% else %}
-                    <span class="service-value">0.0%</span>
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if integrations.booklore %}
+
+                {# [CHANGED] Only show Booklore if state exists #}
+                {% if integrations.booklore and mapping.states.booklore is defined %}
                 <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener noreferrer"
-                    class="service-item {% if not mapping.booklore_id %}disabled{% endif %}"
-                    title="{% if mapping.booklore_id %}Open in Booklore{% else %}Not found in Booklore{% endif %}">
-                    <img src="/static/booklore.png" alt="BL"
-                        class="service-icon {% if not mapping.booklore_id %}grayscale-muted{% endif %}">
+                    class="service-item" title="Open in Booklore">
+                    <img src="/static/booklore.png" alt="BL" class="service-icon">
                     <span class="service-name">Booklore</span>
-                    {% if mapping.states.booklore is defined %}
                     <span class="service-value">{{ '%.1f' | format(mapping.states.booklore.percentage|default(0))
                         }}%</span>
-                    {% else %}
-                    <span class="service-value">0.0%</span>
-                    {% endif %}
                 </a>
                 {% endif %}
 
