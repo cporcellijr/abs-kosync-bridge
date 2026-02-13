@@ -23,7 +23,7 @@ from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.logging_utils import sanitize_log_data
 # from src.utils.hash_cache import HashCache
-from src.api.kosync_server import kosync_bp, init_kosync_server
+from src.api.kosync_server import kosync_sync_bp, kosync_admin_bp, init_kosync_server
 from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 
 def _reconfigure_logging():
@@ -133,7 +133,8 @@ def setup_dependencies(app, test_container=None):
 
     # Register KoSync Blueprint and initialize with dependencies
     init_kosync_server(database_service, container, manager, EBOOK_DIR)
-    app.register_blueprint(kosync_bp)
+    app.register_blueprint(kosync_sync_bp)
+    app.register_blueprint(kosync_admin_bp)
 
     # Register Hardcover Blueprint and initialize with dependencies
     init_hardcover_routes(database_service, container)
@@ -2030,6 +2031,20 @@ if __name__ == '__main__':
 
     logger.info(f"📁 Book Linker monitoring interval: {MONITOR_INTERVAL} seconds")
     logger.info(f"🌐 Web interface starting on port 5757")
+
+    # --- Split-Port Mode ---
+    sync_port = os.environ.get('KOSYNC_PORT')
+    if sync_port and int(sync_port) != 5757:
+        def run_sync_only_server(port):
+            sync_app = Flask(__name__)
+            sync_app.register_blueprint(kosync_sync_bp)
+            @sync_app.route('/')
+            def sync_health():
+                return "Sync Server OK", 200
+            sync_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+        threading.Thread(target=run_sync_only_server, args=(int(sync_port),), daemon=True).start()
+        logger.info(f"🚀 Split-Port Mode Active: Sync-only server on port {sync_port}")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
 

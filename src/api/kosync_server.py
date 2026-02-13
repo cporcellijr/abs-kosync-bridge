@@ -15,8 +15,11 @@ from src.utils.kosync_headers import hash_kosync_key
 
 logger = logging.getLogger(__name__)
 
-# Create Blueprint for KoSync endpoints
-kosync_bp = Blueprint('kosync', __name__)
+# Create Blueprints for KoSync endpoints
+# kosync_sync_bp: KOReader protocol routes (safe to expose to internet)
+# kosync_admin_bp: Dashboard management routes (LAN only)
+kosync_sync_bp = Blueprint('kosync', __name__)
+kosync_admin_bp = Blueprint('kosync_admin', __name__)
 
 # Module-level references - set via init_kosync_server()
 _database_service = None
@@ -62,15 +65,15 @@ def kosync_auth_required(f):
 
 # ---------------- KOSync Protocol Endpoints ----------------
 
-@kosync_bp.route('/healthcheck')
-@kosync_bp.route('/koreader/healthcheck')
+@kosync_sync_bp.route('/healthcheck')
+@kosync_sync_bp.route('/koreader/healthcheck')
 def kosync_healthcheck():
     """KOSync connectivity check"""
     return "OK", 200
 
 
-@kosync_bp.route('/users/auth', methods=['GET'])
-@kosync_bp.route('/koreader/users/auth', methods=['GET'])
+@kosync_sync_bp.route('/users/auth', methods=['GET'])
+@kosync_sync_bp.route('/koreader/users/auth', methods=['GET'])
 def kosync_users_auth():
     """KOReader auth check - validates credentials per kosync-dotnet spec"""
     user = request.headers.get('x-auth-user')
@@ -97,8 +100,8 @@ def kosync_users_auth():
     return jsonify({"message": "Unauthorized"}), 401
 
 
-@kosync_bp.route('/users/create', methods=['POST'])
-@kosync_bp.route('/koreader/users/create', methods=['POST'])
+@kosync_sync_bp.route('/users/create', methods=['POST'])
+@kosync_sync_bp.route('/koreader/users/create', methods=['POST'])
 def kosync_users_create():
     """Stub for KOReader user registration check"""
     return jsonify({
@@ -107,8 +110,8 @@ def kosync_users_create():
     }), 201
 
 
-@kosync_bp.route('/users/login', methods=['POST'])
-@kosync_bp.route('/koreader/users/login', methods=['POST'])
+@kosync_sync_bp.route('/users/login', methods=['POST'])
+@kosync_sync_bp.route('/koreader/users/login', methods=['POST'])
 def kosync_users_login():
     """Stub for KOReader login check"""
     return jsonify({
@@ -119,8 +122,8 @@ def kosync_users_login():
     }), 200
 
 
-@kosync_bp.route('/syncs/progress/<doc_id>', methods=['GET'])
-@kosync_bp.route('/koreader/syncs/progress/<doc_id>', methods=['GET'])
+@kosync_sync_bp.route('/syncs/progress/<doc_id>', methods=['GET'])
+@kosync_sync_bp.route('/koreader/syncs/progress/<doc_id>', methods=['GET'])
 @kosync_auth_required
 def kosync_get_progress(doc_id):
     """
@@ -165,8 +168,8 @@ def kosync_get_progress(doc_id):
     return jsonify({"message": "Document not found on server"}), 502
 
 
-@kosync_bp.route('/syncs/progress', methods=['PUT'])
-@kosync_bp.route('/koreader/syncs/progress', methods=['PUT'])
+@kosync_sync_bp.route('/syncs/progress', methods=['PUT'])
+@kosync_sync_bp.route('/koreader/syncs/progress', methods=['PUT'])
 @kosync_auth_required
 def kosync_put_progress():
     """
@@ -533,7 +536,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
 
 # ---------------- KOSync Document Management API ----------------
 
-@kosync_bp.route('/api/kosync-documents', methods=['GET'])
+@kosync_admin_bp.route('/api/kosync-documents', methods=['GET'])
 def api_get_kosync_documents():
     """Get all KOSync documents with their link status."""
     docs = _database_service.get_all_kosync_documents()
@@ -564,7 +567,7 @@ def api_get_kosync_documents():
     })
 
 
-@kosync_bp.route('/api/kosync-documents/<doc_hash>/link', methods=['POST'])
+@kosync_admin_bp.route('/api/kosync-documents/<doc_hash>/link', methods=['POST'])
 def api_link_kosync_document(doc_hash):
     """Link a KOSync document to an ABS book."""
     data = request.json
@@ -595,7 +598,7 @@ def api_link_kosync_document(doc_hash):
     return jsonify({'error': 'Failed to link document'}), 500
 
 
-@kosync_bp.route('/api/kosync-documents/<doc_hash>/unlink', methods=['POST'])
+@kosync_admin_bp.route('/api/kosync-documents/<doc_hash>/unlink', methods=['POST'])
 def api_unlink_kosync_document(doc_hash):
     """Remove the ABS book link from a KOSync document."""
     success = _database_service.unlink_kosync_document(doc_hash)
@@ -606,7 +609,7 @@ def api_unlink_kosync_document(doc_hash):
     return jsonify({'error': 'Document not found'}), 404
 
 
-@kosync_bp.route('/api/kosync-documents/<doc_hash>', methods=['DELETE'])
+@kosync_admin_bp.route('/api/kosync-documents/<doc_hash>', methods=['DELETE'])
 def api_delete_kosync_document(doc_hash):
     """Delete a KOSync document."""
     success = _database_service.delete_kosync_document(doc_hash)
