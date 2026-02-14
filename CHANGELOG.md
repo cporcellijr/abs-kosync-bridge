@@ -7,6 +7,8 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### Changed
 
 - Increased Forge Storyteller detection wait time from 5 minutes to 20 minutes to accommodate larger audiobooks.
+- Updated Storyteller API payload to include `fragments`, `progression` (chapter percentage), and `uuid` for better sync compatibility.
+- Added handling for Storyteller `409 Conflict` (timestamp) and `204 No Content` responses.
 
 ## [4.0.0] - 2024-12-31
 

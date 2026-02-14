@@ -184,21 +184,55 @@ class StorytellerAPIClient:
 
     def update_position(self, book_uuid: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
         new_ts = int(time.time() * 1000)
+        
+        # Base Payload with UUID (critical)
         payload = {
+            "uuid": book_uuid,
             "timestamp": new_ts,
             "locator": {
+                "href": "",
+                "type": "application/xhtml+xml",
                 "locations": {
                     "totalProgression": float(percentage)
                 }
             }
         }
-        if rich_locator and rich_locator.href is not None:
-            payload['locator']['href'] = rich_locator.href
-            payload['locator']['type'] = "application/xhtml+xml"
-            if rich_locator.css_selector is not None:
+
+        if rich_locator:
+            # 1. Href
+            if rich_locator.href:
+                payload['locator']['href'] = rich_locator.href
+
+            # 2. CSS Selector
+            if rich_locator.css_selector:
                 payload['locator']['locations']['cssSelector'] = rich_locator.css_selector
+                
+            # 3. Fragments (List)
+            if rich_locator.fragment:
+                payload['locator']['locations']['fragments'] = [rich_locator.fragment]
+            elif rich_locator.fragments: # Check if list already populated (future proof)
+                payload['locator']['locations']['fragments'] = rich_locator.fragments
+                
+            # 4. Chapter Progress (Critical for Storyteller)
+            if rich_locator.chapter_progress is not None:
+                payload['locator']['locations']['progression'] = rich_locator.chapter_progress
+            else:
+                 # Fallback: if we don't have chapter progress, maybe default to 0 or omit?
+                 # Storyteller logs show it as distinct. 
+                 # If we omit, it might calculate it? 
+                 # For now, let's leave it out if None to avoid sending null.
+                 pass
+
+            # 5. Position (Global Integer)
+            if rich_locator.match_index is not None:
+                payload['locator']['locations']['position'] = rich_locator.match_index
+                
+            # 6. CFI
+            if rich_locator.cfi:
+                payload['locator']['locations']['cfi'] = rich_locator.cfi
+
         else:
-            # Fallback to preserve existing href if we are just sending a % update
+            # Fallback for simple percentage update (legacy)
             try:
                 r = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
                 if r and r.status_code == 200:
@@ -208,9 +242,17 @@ class StorytellerAPIClient:
             except Exception: pass
 
         response = self._make_request("POST", f"/api/v2/books/{book_uuid}/positions", payload)
-        if response and response.status_code == 204:
-            logger.info(f"✅ Storyteller API: {book_uuid[:8]}... → {percentage:.1%} (TS: {new_ts})")
-            return True
+        
+        if response:
+            if response.status_code == 204:
+                logger.info(f"✅ Storyteller API: {book_uuid[:8]}... -> {percentage:.1%} (TS: {new_ts})")
+                return True
+            elif response.status_code == 409:
+                logger.warning(f"⚠️ Storyteller rejected update for {book_uuid[:8]}...: Timestamp older than server state. (Ignored)")
+                return True # Treat as 'handled' to prevent retry loops
+            else:
+                logger.warning(f"Storyteller API Error: {response.status_code} - {response.text[:100]}")
+        
         return False
 
     def get_progress_by_filename(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:

@@ -506,6 +506,17 @@ class EbookParser:
                             final_xpath = doc_frag_prefix + xpath_str
                         else:
                             final_xpath = f"{doc_frag_prefix}/{xpath_str}"
+                        # Calculate chapter progress (critical for Storyteller)
+                        chapter_len = len(item['content']) # Rough approximation using HTML length
+                        if hasattr(item, 'get_content'): # double check if item object available or just dict
+                             pass 
+                        
+                        # better: use start/end from map
+                        spine_item_len = item['end'] - item['start']
+                        chapter_progress = 0.0
+                        if spine_item_len > 0:
+                            chapter_progress = local_index / spine_item_len
+
                         return LocatorResult(
                             percentage=percentage,
                             xpath=final_xpath,
@@ -513,7 +524,8 @@ class EbookParser:
                             cfi=cfi,
                             href=item['href'],
                             fragment=None,
-                            css_selector=css_selector
+                            css_selector=css_selector,
+                            chapter_progress=chapter_progress
                         )
 
             return None
