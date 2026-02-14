@@ -622,6 +622,7 @@ class HardcoverClient:
                 mutation UpdateBookProgress($id: Int!, $seconds: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                     update_user_book_read(id: $id, object: {
                         progress_seconds: $seconds,
+                        progress_pages: null,
                         edition_id: $editionId,
                         started_at: $startedAt,
                         finished_at: $finishedAt
@@ -643,6 +644,7 @@ class HardcoverClient:
                 mutation UpdateBookProgress($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                     update_user_book_read(id: $id, object: {
                         progress_pages: $pages,
+                        progress_seconds: null,
                         edition_id: $editionId,
                         started_at: $startedAt,
                         finished_at: $finishedAt
@@ -681,6 +683,7 @@ class HardcoverClient:
                 mutation InsertUserBookRead($id: Int!, $seconds: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                     insert_user_book_read(user_book_id: $id, user_book_read: {
                         progress_seconds: $seconds,
+                        progress_pages: null,
                         edition_id: $editionId,
                         started_at: $startedAt,
                         finished_at: $finishedAt
@@ -702,6 +705,7 @@ class HardcoverClient:
                 mutation InsertUserBookRead($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
                     insert_user_book_read(user_book_id: $id, user_book_read: {
                         progress_pages: $pages,
+                        progress_seconds: null,
                         edition_id: $editionId,
                         started_at: $startedAt,
                         finished_at: $finishedAt
