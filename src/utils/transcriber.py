@@ -12,6 +12,7 @@ UPDATED VERSION with:
 """
 
 import json
+import requests
 import logging
 import os
 import shutil
