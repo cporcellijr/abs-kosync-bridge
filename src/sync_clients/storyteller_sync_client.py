@@ -30,15 +30,28 @@ class StorytellerSyncClient(SyncClient):
         return {'audiobook', 'ebook'}
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
-        epub = book.ebook_filename
+        # [Tri-Link Fix] Prefer UUID if available
+        uuid = book.storyteller_uuid
+        search_epub = book.original_ebook_filename or book.ebook_filename
         st_pct, st_ts, st_href, st_frag = None, None, None, None
 
-        # Try to use bulk context if available
         used_bulk = False
-        if bulk_context:
+        
+        # 1. Try UUID Direct Fetch (Fastest/Most Reliable)
+        if uuid:
             try:
-                # Use the encapsulated find_book_by_title method
-                book_info = self.storyteller_client.find_book_by_title(epub)
+                st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_position_details(uuid)
+                if st_pct is not None:
+                     used_bulk = True # Treated as success
+            except Exception as e:
+                logger.warning(f"[{title_snip}] Storyteller UUID fetch failed: {e}")
+
+        # 2. Try Bulk Context (Legacy/Fallback)
+        if not used_bulk and bulk_context:
+            try:
+                # Use the encapsulated find_book_by_title method using original filename if available
+                # (Storyteller might know it by original name if not renamed)
+                book_info = self.storyteller_client.find_book_by_title(search_epub)
                 if book_info:
                     title_key = book_info.get('title', '').lower()
                     if title_key in bulk_context:
@@ -51,15 +64,24 @@ class StorytellerSyncClient(SyncClient):
             except Exception as e:
                 logger.debug(f"[{title_snip}] Failed to use Storyteller bulk context: {e}")
 
-        if not used_bulk:
-            st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(epub)
+        # 3. Legacy Individual Fetch (Slowest)
+        if not used_bulk and st_pct is None:
+             # Use the CORRECT filename (original if tri-linked, else current)
+             st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(search_epub)
 
         no_position = False
         if st_pct is None:
             # Book may exist in Storyteller but have no reading position yet.
             # Treat as 0% so the sync cycle can push progress from other services.
-            book_info = self.storyteller_client.find_book_by_title(epub)
-            if book_info:
+            
+            # [Tri-Link Fix] Verify existence using method appropriate for the link type
+            exists = False
+            if uuid:
+                 exists = bool(self.storyteller_client.get_book_details(uuid))
+            else:
+                 exists = bool(self.storyteller_client.find_book_by_title(search_epub))
+
+            if exists:
                 st_pct = 0.0
                 st_ts = 0
                 no_position = True

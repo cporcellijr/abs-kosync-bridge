@@ -19,18 +19,14 @@ import subprocess
 import gc
 from pathlib import Path
 from typing import Optional
-
-from faster_whisper import WhisperModel
-import requests
 import math
-from collections import OrderedDict
 import re
+from collections import OrderedDict
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
 from src.utils.transcription_providers import get_transcription_provider
 from src.utils.polisher import Polisher
 # We keep the import for type hinting, but we don't instantiate it directly anymore
-from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 

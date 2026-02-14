@@ -18,7 +18,6 @@ import rapidfuzz
 import zipfile
 import shutil
 import tempfile
-import rapidfuzz
 from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult

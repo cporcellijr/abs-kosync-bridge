@@ -428,6 +428,11 @@ class StorytellerDBWithAPI:
             return self.db_fallback.get_progress_with_fragment(ebook_filename)
         return None, None, None, None
 
+    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+        if self.api_client:
+            return self.api_client.get_position_details(book_uuid)
+        return None, None, None, None
+
     def get_all_positions_bulk(self) -> dict:
         if self.api_client:
             return self.api_client.get_all_positions_bulk()

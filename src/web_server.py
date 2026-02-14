@@ -787,6 +787,7 @@ def index():
             'sync_mode': getattr(book, 'sync_mode', 'audiobook'),
             'unified_progress': 0,
             'duration': book.duration or 0,
+            'storyteller_uuid': book.storyteller_uuid,
             'states': {}
         }
 
@@ -1838,6 +1839,7 @@ def api_status():
             'status': book.status,
             'sync_mode': getattr(book, 'sync_mode', 'audiobook'), # Default to audiobook for existing
             'duration': book.duration,
+            'storyteller_uuid': book.storyteller_uuid,
             'states': {}
         }
 

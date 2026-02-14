@@ -7,7 +7,6 @@ Supports local Whisper and cloud providers like Deepgram.
 
 import logging
 import os
-import requests
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional

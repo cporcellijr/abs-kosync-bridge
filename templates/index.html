@@ -105,9 +105,9 @@
                 </div>
                 {% endif %}
 
-                {# [CHANGED] Only show Storyteller if state exists or it is a legacy link needing a fix #}
+                {# [CHANGED] Only show Storyteller if state exists, UUID link exists, or legacy link needs fix #}
                 {% if integrations.storyteller and (mapping.states.storyteller is defined or
-                mapping.storyteller_legacy_link) %}
+                mapping.storyteller_legacy_link or mapping.storyteller_uuid) %}
                 <div class="service-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
@@ -120,6 +120,8 @@
                     {% elif mapping.states.storyteller is defined %}
                     <span class="service-value">{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0))
                         }}%</span>
+                    {% elif mapping.storyteller_uuid %}
+                    <span class="service-value" title="Linked via UUID">0.0%</span>
                     {% endif %}
                 </div>
                 {% endif %}
