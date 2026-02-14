@@ -49,11 +49,23 @@ class HardcoverSyncClient(SyncClient):
         """
         return None
 
+    def _try_match_with_strategy(self, search_func, strategy_name, book_title):
+        """Try a single search strategy and validate it has pages or audio_seconds."""
+        match = search_func()
+        if not match:
+            return None, None
+
+        pages = match.get('pages')
+        if not pages or pages <= 0:
+            logger.info(f"[{book_title}] could not find valid page count using {strategy_name} match")
+            return None, match  # Return None for valid match, but keep rejected match
+
+        return match, None  # Return valid match, no rejected match
 
     def _automatch_hardcover(self, book):
         """
         Match a book with Hardcover using various search strategies.
-        Moved from sync_manager.py to make hardcover a proper sync client.
+        Tries page-based editions first, falls back to audiobook editions.
         """
         if not self.hardcover_client.is_configured():
             return
@@ -68,88 +80,50 @@ class HardcoverSyncClient(SyncClient):
             return
 
         meta = item.get('media', {}).get('metadata', {})
-        match = None
-        matched_by = None
-
-        # Extract metadata fields for clarity
         isbn = meta.get('isbn')
         asin = meta.get('asin')
         title = meta.get('title')
         author = meta.get('authorName')
 
         # Try different search strategies in order of preference
-        # Track first rejected match (had no pages) for audiobook fallback
-        rejected_match = None
-        rejected_matched_by = None
+        match = None
+        matched_by = None
+        first_rejected = None
+        first_rejected_by = None
 
-        if isbn:
-            match = self.hardcover_client.search_by_isbn(isbn)
-            if match:
-                pages = match.get('pages')
-                if not pages or pages <= 0:
-                    logger.info(f"[{book.abs_title}] could not find valid page count using ISBN match")
-                    if not rejected_match:
-                        rejected_match = match
-                        rejected_matched_by = 'isbn'
-                    match = None
-                else:
-                    matched_by = 'isbn'
+        search_strategies = [
+            (lambda: self.hardcover_client.search_by_isbn(isbn) if isbn else None, 'isbn', isbn),
+            (lambda: self.hardcover_client.search_by_isbn(asin) if asin else None, 'asin', asin),
+            (lambda: self.hardcover_client.search_by_title_author(title, author) if (title and author) else None, 'title_author', title and author),
+            (lambda: self.hardcover_client.search_by_title_author(title, "") if title else None, 'title', title),
+        ]
 
-        if not match and asin:
-            match = self.hardcover_client.search_by_isbn(asin)
-            if match:
-                pages = match.get('pages')
-                if not pages or pages <= 0:
-                    logger.info(f"[{book.abs_title}] could not find valid page count using ASIN match")
-                    if not rejected_match:
-                        rejected_match = match
-                        rejected_matched_by = 'asin'
-                    match = None
-                else:
-                    matched_by = 'asin'
+        for search_func, strategy_name, condition in search_strategies:
+            if not match and condition:
+                valid_match, rejected_match = self._try_match_with_strategy(search_func, strategy_name, book.abs_title)
+                if valid_match:
+                    match = valid_match
+                    matched_by = strategy_name
+                    break
+                elif rejected_match and not first_rejected:
+                    first_rejected = rejected_match
+                    first_rejected_by = strategy_name
 
-        if not match and title and author:
-            match = self.hardcover_client.search_by_title_author(title, author)
-            if match:
-                pages = match.get('pages')
-                if not pages or pages <= 0:
-                    logger.info(f"[{book.abs_title}] could not find valid page count using Title+Author match")
-                    if not rejected_match:
-                        rejected_match = match
-                        rejected_matched_by = 'title_author'
-                    match = None
-                else:
-                    matched_by = 'title_author'
-
-        if not match and title:
-            match = self.hardcover_client.search_by_title_author(title, "")
-            if match:
-                pages = match.get('pages')
-                if not pages or pages <= 0:
-                    logger.info(f"[{book.abs_title}] could not find valid page count using Title match")
-                    if not rejected_match:
-                        rejected_match = match
-                        rejected_matched_by = 'title'
-                    match = None
-                else:
-                    matched_by = 'title'
-
-        # If no page-based match found, check if a rejected match has an audiobook edition
+        # If no page-based match found, check if first rejected match has an audiobook edition
         audio_seconds = None
-        if not match and rejected_match:
-            book_id = rejected_match.get('book_id')
+        if not match and first_rejected:
+            book_id = first_rejected.get('book_id')
             if book_id:
                 edition = self.hardcover_client.get_default_edition(book_id)
                 if edition and edition.get('audio_seconds') and edition['audio_seconds'] > 0:
-                    match = rejected_match
-                    matched_by = rejected_matched_by
+                    match = first_rejected
+                    matched_by = first_rejected_by
                     audio_seconds = edition['audio_seconds']
                     match['edition_id'] = edition['id']
                     match['pages'] = -1  # Sentinel: audiobook, no pages
                     logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched as audiobook ({audio_seconds}s)")
 
         if match:
-            # Create HardcoverDetails model
             hardcover_details = HardcoverDetails(
                 abs_id=book.abs_id,
                 hardcover_book_id=match.get('book_id'),
@@ -162,9 +136,7 @@ class HardcoverSyncClient(SyncClient):
                 matched_by=matched_by
             )
 
-            # Save to database
             self.database_service.save_hardcover_details(hardcover_details)
-
             self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
             logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
         else:
@@ -187,7 +159,7 @@ class HardcoverSyncClient(SyncClient):
         # Try to get existing metadata from ABS for completeness
         isbn = None
         asin = None
-        
+
         if self.abs_client:
             try:
                 item = self.abs_client.get_item_details(book_abs_id)
@@ -199,7 +171,6 @@ class HardcoverSyncClient(SyncClient):
                 logger.warning(f"Failed to fetch ABS details during manual match: {e}")
 
         # Create/Update HardcoverDetails
-        # We need to upsert. save_hardcover_details likely handles upsert (merging/replacing).
         details = HardcoverDetails(
             abs_id=book_abs_id,
             hardcover_book_id=match['book_id'],
@@ -211,10 +182,10 @@ class HardcoverSyncClient(SyncClient):
             asin=asin,
             matched_by='manual'
         )
-        
+
         self.database_service.save_hardcover_details(details)
         logger.info(f"✅ Manually matched ABS {book_abs_id} to Hardcover {match['book_id']} ({match.get('title')})")
-        
+
         # Trigger an initial status update to ensure it's tracked
         self.hardcover_client.update_status(match['book_id'], 1, match.get('edition_id'))
         return True
@@ -225,6 +196,30 @@ class HardcoverSyncClient(SyncClient):
         This client is primarily for progress synchronization.
         """
         return None
+
+    def _handle_status_transition(self, book, hardcover_details, current_status, percentage, is_finished):
+        """Handle status transitions based on progress percentage."""
+        # If finished and not already marked as Read (3), promote to Read
+        if is_finished and current_status != 3:
+            self.hardcover_client.update_status(
+                hardcover_details.hardcover_book_id,
+                3,
+                hardcover_details.hardcover_edition_id
+            )
+            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Read")
+            return 3
+
+        # If progress > 2% and currently "Want to Read" (1), promote to "Currently Reading" (2)
+        elif percentage > 0.02 and current_status == 1:
+            self.hardcover_client.update_status(
+                hardcover_details.hardcover_book_id,
+                2,
+                hardcover_details.hardcover_edition_id
+            )
+            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Currently Reading")
+            return 2
+
+        return current_status
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         """
@@ -242,7 +237,6 @@ class HardcoverSyncClient(SyncClient):
         # Get hardcover details for this book
         hardcover_details = self.database_service.get_hardcover_details(book.abs_id)
         if not hardcover_details or not hardcover_details.hardcover_book_id:
-            # No match found and auto-matching failed
             return SyncResult(None, False)
 
         # Get user book from Hardcover
@@ -250,33 +244,32 @@ class HardcoverSyncClient(SyncClient):
         if not ub:
             return SyncResult(None, False)
 
-        # Check if this is an audiobook edition (has audio_seconds instead of pages)
+        # Check if this is an audiobook edition
         audio_seconds = getattr(hardcover_details, 'hardcover_audio_seconds', None) or 0
 
         if audio_seconds > 0:
-            # --- AUDIOBOOK PATH: use progress_seconds ---
             return self._update_audiobook_progress(book, hardcover_details, ub, percentage, audio_seconds)
 
         # --- PAGE-BASED PATH ---
         total_pages = hardcover_details.hardcover_pages or 0
 
-        # Safety check: If total_pages is zero we cannot compute a valid page number
+        # Attempt to refresh if pages are missing
         if total_pages <= 0:
             if total_pages == -1:
-                # Already verified no valid edition exists
-                return SyncResult(None, False)
+                return SyncResult(None, False)  # Already verified no valid edition exists
 
-            # Attempt to refresh — check for pages first, then fall back to audiobook edition
             logger.info(f"Hardcover: Pages are 0 for {sanitize_log_data(book.abs_title)}, attempting to refresh details...")
             refreshed_edition = self.hardcover_client.get_default_edition(hardcover_details.hardcover_book_id)
+
             if refreshed_edition and refreshed_edition.get('pages'):
+                # Found page-based edition
                 total_pages = refreshed_edition['pages']
                 hardcover_details.hardcover_pages = total_pages
                 hardcover_details.hardcover_edition_id = refreshed_edition['id']
                 self.database_service.save_hardcover_details(hardcover_details)
                 logger.info(f"Hardcover: Updated page count to {total_pages}")
             elif refreshed_edition and refreshed_edition.get('audio_seconds') and refreshed_edition['audio_seconds'] > 0:
-                # Found an audiobook edition — switch to audiobook path
+                # Found audiobook edition instead
                 audio_seconds = refreshed_edition['audio_seconds']
                 hardcover_details.hardcover_audio_seconds = audio_seconds
                 hardcover_details.hardcover_edition_id = refreshed_edition['id']
@@ -286,7 +279,7 @@ class HardcoverSyncClient(SyncClient):
                 return self._update_audiobook_progress(book, hardcover_details, ub, percentage, audio_seconds)
             else:
                 logger.info(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} still has 0 pages after refresh.")
-                hardcover_details.hardcover_pages = -1  # Sentinel for "no valid edition"
+                hardcover_details.hardcover_pages = -1
                 self.database_service.save_hardcover_details(hardcover_details)
                 return SyncResult(None, False)
 
@@ -294,28 +287,10 @@ class HardcoverSyncClient(SyncClient):
         is_finished = percentage > 0.99
         current_status = ub.get('status_id')
 
-        # Handle Status Changes
-        # If Finished, prefer marking as Read (3) first
-        if is_finished and current_status != 3:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                3,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Read")
-            current_status = 3
+        # Handle status transitions
+        current_status = self._handle_status_transition(book, hardcover_details, current_status, percentage, is_finished)
 
-        # If progress > 2% and currently "Want to Read" (1), switch to "Currently Reading" (2)
-        elif percentage > 0.02 and current_status == 1:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                2,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Currently Reading")
-            current_status = 2
-
-        # Update progress (Hardcover rejects page updates for Want to Read)
+        # Update progress
         try:
             self.hardcover_client.update_progress(
                 ub['id'],
@@ -325,7 +300,7 @@ class HardcoverSyncClient(SyncClient):
                 current_percentage=percentage
             )
 
-            # Calculate the actual percentage from the page number for state tracking
+            # Calculate actual percentage from page number for state tracking
             actual_pct = min(page_num / total_pages, 1.0) if total_pages > 0 else percentage
 
             updated_state = {
@@ -346,22 +321,8 @@ class HardcoverSyncClient(SyncClient):
         is_finished = percentage > 0.99
         current_status = ub.get('status_id')
 
-        if is_finished and current_status != 3:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                3,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Read")
-            current_status = 3
-        elif percentage > 0.02 and current_status == 1:
-            self.hardcover_client.update_status(
-                hardcover_details.hardcover_book_id,
-                2,
-                hardcover_details.hardcover_edition_id
-            )
-            logger.info(f"📚 Hardcover: '{sanitize_log_data(book.abs_title)}' status promoted to Currently Reading")
-            current_status = 2
+        # Handle status transitions
+        current_status = self._handle_status_transition(book, hardcover_details, current_status, percentage, is_finished)
 
         try:
             progress_seconds = int(audio_seconds * percentage)
