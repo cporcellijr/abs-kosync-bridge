@@ -1,5 +1,6 @@
 # [START FILE: abs-kosync-enhanced/storyteller_api.py]
 import os
+import re
 import time
 import logging
 import requests
@@ -112,7 +113,6 @@ class StorytellerAPIClient:
         if not self._book_cache: self._refresh_book_cache()
 
         stem = Path(ebook_filename).stem.lower()
-        import re
         clean_stem = re.sub(r'\s*\([^)]*\)\s*$', '', stem)
         clean_stem = re.sub(r'\s*\[[^\]]*\]\s*$', '', clean_stem)
         clean_stem = clean_stem.strip().lower()
@@ -260,17 +260,33 @@ class StorytellerAPIClient:
         response = self._make_request("GET", "/api/v2/books", None)
         if response and response.status_code == 200:
             all_books = response.json()
-            # Client-side filtering since API doesn't seem to support search query param
-            query = query.lower()
+            stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'is'}
+            query_lower = query.lower()
+            query_tokens = [w for w in re.split(r'\W+', query_lower) if w and w not in stopwords]
+
+            if not query_tokens:
+                return []
+
+            query_set = set(query_tokens)
             results = []
             for book in all_books:
-                if query in book.get('title', '').lower() or \
-                   any(query in author.get('name', '').lower() for author in book.get('authors', [])):
+                title = book.get('title', '')
+                author_names = ' '.join(a.get('name', '') for a in book.get('authors', []))
+                searchable = f"{title} {author_names}".lower()
+
+                if len(query_tokens) == 1:
+                    matched = query_tokens[0] in searchable
+                else:
+                    searchable_tokens = set(w for w in re.split(r'\W+', searchable) if w and w not in stopwords)
+                    overlap = len(query_set & searchable_tokens)
+                    matched = overlap >= min(len(query_set), len(searchable_tokens)) * 0.5
+
+                if matched:
                     results.append({
                         'uuid': book.get('uuid') or book.get('id'),
-                        'title': book.get('title'),
+                        'title': title,
                         'authors': [a.get('name') for a in book.get('authors', [])],
-                        'cover_url': f"/api/v2/books/{book.get('uuid') or book.get('id')}/cover" # Proxy might be needed
+                        'cover_url': f"/api/v2/books/{book.get('uuid') or book.get('id')}/cover"
                     })
             return results
         return []

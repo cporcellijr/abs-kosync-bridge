@@ -9,10 +9,11 @@ from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, Sy
 logger = logging.getLogger(__name__)
 
 class StorytellerSyncClient(SyncClient):
-    def __init__(self, storyteller_client: StorytellerDBWithAPI, ebook_parser: EbookParser):
+    def __init__(self, storyteller_client: StorytellerDBWithAPI, ebook_parser: EbookParser, database_service=None):
         super().__init__(ebook_parser)
         self.storyteller_client = storyteller_client
         self.ebook_parser = ebook_parser
+        self.database_service = database_service
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
 
     def is_configured(self) -> bool:
@@ -36,7 +37,8 @@ class StorytellerSyncClient(SyncClient):
         st_pct, st_ts, st_href, st_frag = None, None, None, None
 
         used_bulk = False
-        
+        discovered_uuid = None
+
         # 1. Try UUID Direct Fetch (Fastest/Most Reliable)
         if uuid:
             try:
@@ -49,10 +51,9 @@ class StorytellerSyncClient(SyncClient):
         # 2. Try Bulk Context (Legacy/Fallback)
         if not used_bulk and bulk_context:
             try:
-                # Use the encapsulated find_book_by_title method using original filename if available
-                # (Storyteller might know it by original name if not renamed)
                 book_info = self.storyteller_client.find_book_by_title(search_epub)
                 if book_info:
+                    discovered_uuid = book_info.get('uuid')
                     title_key = book_info.get('title', '').lower()
                     if title_key in bulk_context:
                         data = bulk_context[title_key]
@@ -66,20 +67,22 @@ class StorytellerSyncClient(SyncClient):
 
         # 3. Legacy Individual Fetch (Slowest)
         if not used_bulk and st_pct is None:
-             # Use the CORRECT filename (original if tri-linked, else current)
              st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(search_epub)
+             if st_pct is not None and not discovered_uuid:
+                 book_info = self.storyteller_client.find_book_by_title(search_epub)
+                 if book_info:
+                     discovered_uuid = book_info.get('uuid')
 
         no_position = False
         if st_pct is None:
-            # Book may exist in Storyteller but have no reading position yet.
-            # Treat as 0% so the sync cycle can push progress from other services.
-            
-            # [Tri-Link Fix] Verify existence using method appropriate for the link type
             exists = False
             if uuid:
                  exists = bool(self.storyteller_client.get_book_details(uuid))
             else:
-                 exists = bool(self.storyteller_client.find_book_by_title(search_epub))
+                 found = self.storyteller_client.find_book_by_title(search_epub)
+                 if found:
+                     exists = True
+                     discovered_uuid = discovered_uuid or found.get('uuid')
 
             if exists:
                 st_pct = 0.0
@@ -89,6 +92,15 @@ class StorytellerSyncClient(SyncClient):
             else:
                 logger.debug(f"[{title_snip}] Storyteller: book not found in library")
                 return None
+
+        # Auto-migrate legacy filename-based link to UUID
+        if discovered_uuid and not book.storyteller_uuid and self.database_service:
+            try:
+                book.storyteller_uuid = discovered_uuid
+                self.database_service.save_book(book)
+                logger.info(f"[{title_snip}] Migrated legacy Storyteller link -> UUID {discovered_uuid[:8]}...")
+            except Exception as e:
+                logger.warning(f"[{title_snip}] Failed to auto-migrate Storyteller UUID: {e}")
 
         # Get previous Storyteller state
         prev_storyteller_pct = prev_state.percentage if prev_state else 0
