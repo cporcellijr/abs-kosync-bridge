@@ -178,6 +178,7 @@ def link_hardcover(abs_id):
                 hardcover_slug=slug,
                 hardcover_edition_id=str(edition_id) if edition_id else None,
                 hardcover_pages=hardcover_pages,
+                hardcover_audio_seconds=audio_seconds if audio_seconds else None,
                 matched_by="manual",
             )
 
