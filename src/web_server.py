@@ -1206,7 +1206,7 @@ def _forge_background_task(abs_id, text_item, title, author):
         st_client = container.storyteller_client()
         found_uuid = None
         
-        for _ in range(60): 
+        for _ in range(240): 
             time.sleep(5)
             try:
                 results = st_client.search_books(title)
@@ -1231,7 +1231,7 @@ def _forge_background_task(abs_id, text_item, title, author):
             except Exception as e:
                  logger.error(f"⚡ Forge: Failed to trigger processing: {e}")
         else:
-            logger.warning(f"⚡ Forge: Storyteller scan timed out (book not found after 5m). Processing might happen automatically later.")
+            logger.warning(f"⚡ Forge: Storyteller scan timed out (book not found after 20m). Processing might happen automatically later.")
 
 
         # Step 3: Cleanup Monitor
@@ -1471,6 +1471,15 @@ def match():
         # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
         database_service.dismiss_suggestion(abs_id)
         database_service.dismiss_suggestion(kosync_doc_id)
+        
+        # [NEW] Robust Dismissal: Check if there's a different hash for this filename (e.g. from device)
+        try:
+            device_doc = database_service.get_kosync_doc_by_filename(ebook_filename)
+            if device_doc and device_doc.document_hash != kosync_doc_id:
+                logger.info(f"Dismissing additional suggestion/hash for {ebook_filename}: {device_doc.document_hash}")
+                database_service.dismiss_suggestion(device_doc.document_hash)
+        except Exception as e:
+            logger.warning(f"Failed to check/dismiss device hash: {e}")
 
         return redirect(url_for('index'))
 
@@ -1566,6 +1575,17 @@ def batch_match():
                     container.booklore_client().add_to_shelf(ebook_filename, BOOKLORE_SHELF_NAME)
                 if container.storyteller_client().is_configured():
                     container.storyteller_client().add_to_collection(ebook_filename)
+
+                # Auto-dismiss any pending suggestion
+                database_service.dismiss_suggestion(item['abs_id'])
+                database_service.dismiss_suggestion(kosync_doc_id)
+                
+                # [NEW] Robust Dismissal
+                try:
+                    device_doc = database_service.get_kosync_doc_by_filename(ebook_filename)
+                    if device_doc and device_doc.document_hash != kosync_doc_id:
+                         database_service.dismiss_suggestion(device_doc.document_hash)
+                except Exception: pass
 
             session['queue'] = []
             session.modified = True
