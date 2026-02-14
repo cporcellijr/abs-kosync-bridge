@@ -298,7 +298,13 @@ def copy_audio_files_for_forge(abs_id: str, dest_folder: Path):
                 copied += 1
             else:
                 logger.error(f"Could not find audio file: {filename}")
-        return copied > 0
+        
+        # STRICT CHECK: All files must be copied
+        if copied == len(audio_files):
+            return True
+        else:
+            logger.error(f"Forge Strict Check Failed: Expected {len(audio_files)} files, copied {copied}. Aborting.")
+            return False
     except Exception as e:
         logger.error(f"Failed to copy ABS {abs_id}: {e}", exc_info=True)
         return False
@@ -1109,24 +1115,29 @@ def _forge_background_task(abs_id, text_item, title, author):
             st_lib_path = os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library")
             
         # Flattened Structure: Library/Title/
-        # User requested to remove Author subfolder for Storyteller compatibility/preference
-        course_dir = Path(st_lib_path) / safe_title
-        audio_dest = course_dir / "Audio"
-        audio_dest.mkdir(parents=True, exist_ok=True)
+        # ATOMIC STAGING to prevent partial processing by Storyteller
+        final_course_dir = Path(st_lib_path) / safe_title
+        if final_course_dir.exists():
+            # If target exists, we can't do atomic staging easily without risk of overwriting or confusion.
+            # For now, log warning and use it directly (or could error out).
+            logger.warning(f"Target directory {final_course_dir} already exists. Using it (no atomic stage).")
+            course_dir = final_course_dir
+        else:
+            course_dir = Path(st_lib_path) / f".staging_{safe_title}"
+            course_dir.mkdir(parents=True, exist_ok=True)
+            
+        audio_dest = course_dir # Audio files go directly in root
         
-        logger.info(f"⚡ Forge: Staging files for '{title}' in '{course_dir}'")
+        logger.info(f"⚡ Forge: Staging files for '{title}' in '{course_dir}' (Atomic)")
 
         # Step 1: Copy audio files
         audio_ok = copy_audio_files_for_forge(abs_id, audio_dest)
         if not audio_ok:
             logger.error(f"⚡ Forge: Failed to copy audio files for {abs_id}")
             # cleanup empty dir
-            # cleanup empty dir
             try:
-                # If audio_dest was created, removing course_dir recursively might be safer/cleaner 
-                # or just rmdir audio_dest then course_dir
-                if audio_dest.exists(): audio_dest.rmdir()
-                if course_dir.exists(): course_dir.rmdir()
+                if course_dir.exists() and course_dir != final_course_dir: 
+                    shutil.rmtree(course_dir) # Safer cleanup for staging
             except: pass
             return
         logger.info(f"⚡ Forge: Audio files copied for '{title}'")
@@ -1194,11 +1205,26 @@ def _forge_background_task(abs_id, text_item, title, author):
 
         if not text_success:
             logger.error(f"⚡ Forge: Text acquisition failed. Aborting.")
-             # Cleanup audio
-            shutil.rmtree(audio_dest, ignore_errors=True)
-            try: course_dir.rmdir() 
+             # Cleanup
+            try:
+                if course_dir.exists() and course_dir != final_course_dir:
+                    shutil.rmtree(course_dir)
             except: pass
             return
+
+        # ATOMIC RENAME: If using staging, move to final location now that all files are ready
+        if course_dir != final_course_dir:
+            try:
+                logger.info(f"⚡ Forge: Atomically moving staging to {final_course_dir}")
+                if final_course_dir.exists():
+                     shutil.rmtree(final_course_dir) # Should not happen if we checked earlier, but safety
+                course_dir.rename(final_course_dir)
+                course_dir = final_course_dir # Update variable for downstream logging/logic
+            except Exception as e:
+                logger.error(f"⚡ Forge: Atomic move failed: {e}")
+                try: shutil.rmtree(course_dir)
+                except: pass
+                return
 
         logger.info(f"⚡ Forge: Files staged. Waiting for Storyteller to detect '{title}'...")
 
