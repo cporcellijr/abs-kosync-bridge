@@ -163,7 +163,8 @@ class Container(containers.DeclarativeContainer):
     storyteller_sync_client = providers.Singleton(
         StorytellerSyncClient,
         storyteller_client,
-        ebook_parser
+        ebook_parser,
+        database_service
     )
 
     booklore_sync_client = providers.Singleton(
