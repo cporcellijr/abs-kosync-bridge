@@ -743,6 +743,23 @@ class SyncManager:
             # [FIX] Ensure epub_path is a Path object (acquire_ebook returns str)
             if epub_path:
                 epub_path = Path(epub_path)
+                
+                # [NEW] Eagerly calculate and lock KOSync Hash from the ORIGINAL file
+                # This ensures we match what the user has on their device (KoReader)
+                # regardless of what Storyteller does later.
+                try:
+                    if not book.kosync_doc_id:
+                        logger.info(f"🔒 Locking KOSync ID from original EPUB: {epub_path.name}")
+                        computed_hash = self.ebook_parser.get_kosync_id(epub_path)
+                        if computed_hash:
+                            book.kosync_doc_id = computed_hash
+                            # Also ensure original filename is saved
+                            if not book.original_ebook_filename:
+                                book.original_ebook_filename = book.ebook_filename
+                            self.database_service.save_book(book)
+                            logger.info(f"✅ Locked KOSync ID: {computed_hash}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to eager-lock KOSync ID: {e}")
 
             # Step 2: Try Fast-Path (SMIL Extraction)
             raw_transcript = None

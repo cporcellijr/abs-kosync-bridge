@@ -597,11 +597,15 @@ class EbookParser:
             # Find the element that contains our target position
             target_element = None
             target_offset = 0
+            is_tail = False
+            target_text_len = 0
 
             for elem_info in text_elements:
                 if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
                     target_element = elem_info['element']
                     target_offset = local_pos - elem_info['start_pos']
+                    is_tail = elem_info.get('is_tail', False)
+                    target_text_len = elem_info.get('text_len', 0)
                     break
 
             if target_element is None:
@@ -609,21 +613,55 @@ class EbookParser:
                 if text_elements:
                     target_element = text_elements[0]['element']
                     target_offset = 0
+                    is_tail = text_elements[0].get('is_tail', False)
+                    target_text_len = text_elements[0].get('text_len', 0)
                 else:
                     # Last resort: find any element with text
                     for elem in tree.xpath('.//p | .//span | .//em | .//strong | .//st | .//div'):
                         if elem.text and elem.text.strip():
                             target_element = elem
                             target_offset = 0
+                            target_text_len = len(elem.text.strip())
                             break
 
             if target_element is None:
                 logger.warning(f"No text elements found in spine {target_item['spine_index']}")
                 return None
 
+            # Safety Check: Prevent Out-Of-Bounds offsets due to parser drift
+            if target_text_len > 0 and target_offset > target_text_len + 1:
+                logger.warning(f"KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for {target_element.tag}. Rejecting to prevent crash.")
+                return None
+
             # Build xpath for the target element
-            xpath = self._build_xpath(target_element)
-            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+            if is_tail:
+                # Tail text belongs to the parent container, not the element itself
+                parent = target_element.getparent()
+                if parent is None:
+                    # Should not happen for valid HTML body content
+                    xpath = self._build_xpath(target_element)
+                    return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+
+                xpath = self._build_xpath(parent)
+                
+                # Calculate which text node of the parent this is
+                # XPath text() nodes are 1-based indices of text children
+                text_node_index = 0
+                if parent.text: text_node_index += 1
+                
+                for child in parent:
+                    if child == target_element:
+                        if child.tail: text_node_index += 1
+                        break
+                    if child.tail: text_node_index += 1
+                
+                # Should be at least 1 since we found it in text_elements check
+                suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
+                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}{suffix}.{target_offset}"
+            else:
+                # Regular element text
+                xpath = self._build_xpath(target_element)
+                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
             logger.error(f"Error generating KOReader XPath: {e}")

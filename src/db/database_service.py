@@ -589,6 +589,16 @@ class DatabaseService:
                 session.expunge(suggestion)
                 return suggestion
 
+    def is_hash_linked_to_device(self, doc_hash: str) -> bool:
+        """Check if a document hash is actively linked to a device document."""
+        if not doc_hash:
+            return False
+            
+        with self.get_session() as session:
+            return session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == doc_hash
+            ).count() > 0
+
     def get_all_pending_suggestions(self) -> List[PendingSuggestion]:
         """Get all pending suggestions."""
         with self.get_session() as session:

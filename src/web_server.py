@@ -1430,6 +1430,13 @@ def match():
             logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
 
+        # [NEW] Hash Preservation: Check if existing book for this ABS ID has a valid device link
+        current_book_entry = database_service.get_book(abs_id)
+        if current_book_entry and current_book_entry.kosync_doc_id:
+             if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
+                  logger.info(f"Preserving existing linked hash {current_book_entry.kosync_doc_id} for '{abs_id}' instead of new hash {kosync_doc_id}")
+                  kosync_doc_id = current_book_entry.kosync_doc_id
+
         # [DUPLICATE MERGE] Check if this ebook is already linked to another ABS ID (e.g. ebook-only entry)
         existing_book = database_service.get_book_by_kosync_id(kosync_doc_id)
         migration_source_id = None
@@ -1576,6 +1583,13 @@ def batch_match():
                 if not kosync_doc_id:
                     logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
+
+                # [NEW] Hash Preservation for Batch Match
+                current_book_entry = database_service.get_book(item['abs_id'])
+                if current_book_entry and current_book_entry.kosync_doc_id:
+                     if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
+                          logger.info(f"Preserving existing linked hash {current_book_entry.kosync_doc_id} for '{item['abs_id']}' instead of new hash {kosync_doc_id}")
+                          kosync_doc_id = current_book_entry.kosync_doc_id
 
                 # Create Book object and save to database service
                 book = Book(
@@ -1731,14 +1745,21 @@ def update_hash(abs_id):
         updated = True
     else:
         # Auto-regenerate
+        # [NEW] User Request: If recalculating (empty input), prioritize the standard EPUB (original_ebook_filename)
+        # over the current filename (which might be a Storyteller artifact).
+        target_filename = book.original_ebook_filename or book.ebook_filename
+        
         booklore_id = None
         if container.booklore_client().is_configured():
-            bl_book = container.booklore_client().find_book_by_filename(book.ebook_filename)
+            bl_book = container.booklore_client().find_book_by_filename(target_filename)
             if bl_book:
                 booklore_id = bl_book.get('id')
 
-        recalc_hash = get_kosync_id_for_ebook(book.ebook_filename, booklore_id)
+        recalc_hash = get_kosync_id_for_ebook(target_filename, booklore_id, original_filename=book.ebook_filename)
+        
         if recalc_hash:
+            # [CHANGED] Manual update (via UI) should always succeed, even if it changes a linked hash.
+            # The protection logic remains in match() and batch_match() to prevent automated overwrites.
             book.kosync_doc_id = recalc_hash
             database_service.save_book(book)
             logger.info(f"Auto-regenerated KoSync hash for '{sanitize_log_data(book.abs_title)}': {recalc_hash}")

@@ -198,12 +198,19 @@ def kosync_put_progress():
 
     # Optional "furthest wins" protection
     furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
-    if furthest_wins and kosync_doc and kosync_doc.percentage:
+    force_update = data.get('force', False)
+    
+    # [NEW] Allow rewinds if:
+    # 1. Force flag is set (e.g. from SyncManager)
+    # 2. Update comes from the SAME device (user moved slider back)
+    same_device = (kosync_doc and kosync_doc.device_id == device_id)
+    
+    if furthest_wins and kosync_doc and kosync_doc.percentage and not force_update and not same_device:
         existing_pct = float(kosync_doc.percentage)
         new_pct = float(percentage)
 
         if new_pct < existing_pct - 0.0001:
-            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.4f} < {existing_pct:.4f} for {doc_hash[:8]}")
+            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.4f} < {existing_pct:.4f} for {doc_hash[:8]} (Device: {device})")
             return jsonify({
                 "document": doc_hash,
                 "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(now.timestamp())
@@ -417,6 +424,17 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                 return doc.filename
             except FileNotFoundError:
                 logger.debug(f"⚠️ DB suggested '{doc.filename}' but file is missing. Re-scanning...")
+        
+        # [NEW] Check if valid linked book exists with original filename
+        if doc and doc.linked_abs_id:
+             book = _database_service.get_book(doc.linked_abs_id)
+             if book and book.original_ebook_filename:
+                 try:
+                     _container.ebook_parser().resolve_book_path(book.original_ebook_filename)
+                     logger.info(f"📚 Matched EPUB via Linked Book Original Filename: {book.original_ebook_filename}")
+                     return book.original_ebook_filename
+                 except Exception:
+                     pass
 
         # Check filesystem
         if _ebook_dir and _ebook_dir.exists():
@@ -591,7 +609,15 @@ def api_link_kosync_document(doc_hash):
 
     success = _database_service.link_kosync_document(doc_hash, abs_id)
     if success:
-        if not book.kosync_doc_id:
+        # [FIX] Always update the book's KOSync ID to match what we just linked.
+        # This handles cases where the book had a "wrong" hash (e.g. from Storyteller artifact)
+        # and we want to align it with the actual device hash.
+        current_id = book.kosync_doc_id
+        if current_id != doc_hash:
+            logger.info(f"🔗 Updating Book {book.abs_title} KOSync ID: {current_id} -> {doc_hash}")
+            book.kosync_doc_id = doc_hash
+            _database_service.save_book(book)
+        elif not current_id:
             book.kosync_doc_id = doc_hash
             _database_service.save_book(book)
 
@@ -636,7 +662,7 @@ def _cleanup_cache_for_hash(doc_hash):
         if not filename and doc and doc.linked_abs_id:
             book = _database_service.get_book(doc.linked_abs_id)
             if book:
-                filename = book.ebook_filename
+                filename = book.original_ebook_filename or book.ebook_filename
 
         if filename:
             # Delete file if in epub_cache

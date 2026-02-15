@@ -593,7 +593,8 @@ class KoSyncClient:
             "progress": progress_val,
             "device": "abs-sync-bot",
             "device_id": "abs-sync-bot",
-            "timestamp": int(time.time())
+            "timestamp": int(time.time()),
+            "force": True  # [NEW] Force update to override server-side "furthest wins" logic
         }
         try:
             r = self.session.put(url, headers=headers, json=payload, timeout=10)
