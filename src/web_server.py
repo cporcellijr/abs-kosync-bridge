@@ -293,11 +293,19 @@ def copy_audio_files_for_forge(abs_id: str, dest_folder: Path):
                 if matches:
                     src_path = matches[0]
 
-            if src_path and src_path.exists():
-                shutil.copy2(str(src_path), dest_folder / src_path.name)
-                copied += 1
-            else:
-                logger.error(f"Could not find audio file: {filename}")
+                if src_path and src_path.exists():
+                    shutil.copy2(str(src_path), dest_folder / src_path.name)
+                    copied += 1
+                else:
+                    # 4. API Download Fallback
+                    logger.info(f"Local file not found, downloading via API: {filename}")
+                    stream_url = f"{ABS_API_URL.rstrip('/')}/api/items/{abs_id}/file/{f.get('ino')}?token={ABS_API_TOKEN}"
+                    dest_path = dest_folder / filename
+                    # Use the ABS Client to download the file directly
+                    if container.abs_client().download_file(stream_url, dest_path):
+                        copied += 1
+                    else:
+                        logger.error(f"Could not find or download audio file: {filename}")
         
         # STRICT CHECK: All files must be copied
         if copied == len(audio_files):
