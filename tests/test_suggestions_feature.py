@@ -139,6 +139,7 @@ class TestSuggestionsFeature(unittest.TestCase):
             self.mock_container.mock_sync_clients.items.return_value = {}.items()
             
             # Perform Match
+            self.mock_container.mock_database_service.get_book.return_value = None
             self.client.post('/match', data={
                 'audiobook_id': 'abc-123',
                 'ebook_filename': 'test.epub'

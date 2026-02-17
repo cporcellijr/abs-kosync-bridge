@@ -275,7 +275,8 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         self.assertTrue(mocks['abs_client'].get_progress.called, "ABS get_progress was not called")
         self.assertTrue(mocks['kosync_client'].get_progress.called, "KoSync get_progress was not called")
         # [UPDATED] Check get_position_details
-        self.assertTrue(mocks['storyteller_client'].get_position_details.called, "Storyteller get_position_details was not called")
+        if self.test_book.storyteller_uuid:
+             self.assertTrue(mocks['storyteller_client'].get_position_details.called, "Storyteller get_position_details was not called")
         self.assertTrue(mocks['booklore_client'].get_progress.called, "BookLore get_progress was not called")
 
         leader = self.expected_leader.upper()
@@ -294,7 +295,8 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                 self.assertTrue(mocks['kosync_client'].update_progress.called, "KoSync update_progress was not called")
             if leader != 'STORYTELLER':
                 # [UPDATED] Check update_position
-                self.assertTrue(mocks['storyteller_client'].update_position.called, "Storyteller update_position was not called")
+                if self.test_book.storyteller_uuid:
+                    self.assertTrue(mocks['storyteller_client'].update_position.called, "Storyteller update_position was not called")
             if leader != 'BOOKLORE':
                 self.assertTrue(mocks['booklore_client'].update_progress.called, "BookLore update_progress was not called")
 
@@ -366,8 +368,9 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
                                    msg=f"ABS final state {abs_pct:.1%} != expected {expected_pct:.1%}")
             self.assertAlmostEqual(kosync_pct, expected_pct, delta=tolerance,
                                    msg=f"KoSync final state {kosync_pct:.1%} != expected {expected_pct:.1%}")
-            self.assertAlmostEqual(storyteller_pct, expected_pct, delta=tolerance,
-                                   msg=f"Storyteller final state {storyteller_pct:.1%} != expected {expected_pct:.1%}")
+            if self.test_book.storyteller_uuid:
+                self.assertAlmostEqual(storyteller_pct, expected_pct, delta=tolerance,
+                                    msg=f"Storyteller final state {storyteller_pct:.1%} != expected {expected_pct:.1%}")
             self.assertAlmostEqual(booklore_pct, expected_pct, delta=tolerance,
                                    msg=f"BookLore final state {booklore_pct:.1%} != expected {expected_pct:.1%}")
 

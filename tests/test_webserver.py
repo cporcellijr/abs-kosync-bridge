@@ -404,6 +404,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
             # Configure get_book_by_kosync_id to return None (no existing book to merge)
             self.mock_database_service.get_book_by_kosync_id.return_value = None
+            self.mock_database_service.get_book.return_value = None
             
             # Make HTTP POST request
             response = self.client.post('/match', data={
