@@ -431,105 +431,15 @@ class StorytellerAPIClient:
             logger.error(f"Failed to download Storyteller book {book_uuid} (API & Fallback): {e}")
             raise e
 
-class StorytellerDBWithAPI:
-    def __init__(self):
-        self.api_client = None
-        self.db_fallback = None
-
-        api_url = os.environ.get("STORYTELLER_API_URL")
-        api_user = os.environ.get("STORYTELLER_USER")
-        api_pass = os.environ.get("STORYTELLER_PASSWORD")
-
-        if api_url and api_user and api_pass:
-            self.api_client = StorytellerAPIClient()
-            if self.api_client.check_connection():
-                logger.info("Using Storyteller REST API for sync")
-            else:
-                self.api_client = None
-        if not self.api_client:
-            try:
-                from storyteller_db import StorytellerDB
-                self.db_fallback = StorytellerDB()
-                if not self.db_fallback.is_configured():
-                    self.db_fallback = None
-            except Exception: pass
-
-    def is_configured(self) -> bool:
-        return bool(self.api_client or self.db_fallback)
-
-    def check_connection(self) -> bool:
-        if self.api_client: return self.api_client.check_connection()
-        elif self.db_fallback: return self.db_fallback.check_connection()
-        return False
-
-    def find_book_by_title(self, ebook_filename: str) -> Optional[Dict]:
-        """Find book by title/filename. Delegates to API client if available."""
-        if self.api_client:
-            return self.api_client.find_book_by_title(ebook_filename)
-        return None  # DB fallback doesn't support title lookup
-
-    def clear_cache(self):
-        """Call at start of each sync cycle to refresh caches."""
-        if self.api_client:
-            self.api_client.clear_cache()
-
-    def get_progress(self, ebook_filename: str):
-        # Legacy Wrapper
-        pct, ts, _, _ = self.get_progress_with_fragment(ebook_filename)
+    def get_progress(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int]]:
+        """Legacy compatibility wrapper."""
+        pct, ts, _, _ = self.get_progress_by_filename(ebook_filename)
         return pct, ts
 
-    def get_progress_with_fragment(self, ebook_filename: str):
-        # --- FIXED: Return real fragment data ---
-        if self.api_client:
-            return self.api_client.get_progress_by_filename(ebook_filename)
-        elif self.db_fallback:
-            return self.db_fallback.get_progress_with_fragment(ebook_filename)
-        return None, None, None, None
-
-    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
-        if self.api_client:
-            return self.api_client.get_position_details(book_uuid)
-        return None, None, None, None
-
-    def get_all_positions_bulk(self) -> dict:
-        if self.api_client:
-            return self.api_client.get_all_positions_bulk()
-        # SQLite fallback - iterate through books
-        return {}
-
-    def update_progress(self, ebook_filename: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
-        if self.api_client: return self.api_client.update_progress_by_filename(ebook_filename, percentage, rich_locator)
-        elif self.db_fallback: return self.db_fallback.update_progress(ebook_filename, percentage, rich_locator)
-        return False
-
-    def update_position(self, book_uuid: str, percentage: float, rich_locator: LocatorResult = None) -> bool:
-        if self.api_client: return self.api_client.update_position(book_uuid, percentage, rich_locator)
-        return False
-
-    def get_recent_activity(self, hours: int = 24, min_progress: float = 0.01):
-        if self.db_fallback: return self.db_fallback.get_recent_activity(hours, min_progress)
-        return []
-
-    def add_to_collection(self, ebook_filename: str):
-        if self.api_client: self.api_client.add_to_collection(ebook_filename)
-        elif self.db_fallback: self.db_fallback.add_to_collection(ebook_filename)
-
-    def search_books(self, query: str) -> list:
-        if self.api_client: return self.api_client.search_books(query)
-        return []
-
-    def download_book(self, book_uuid: str, output_path: Path) -> bool:
-        if self.api_client: return self.api_client.download_book(book_uuid, output_path)
-        return False
-
-    def trigger_processing(self, book_uuid: str) -> bool:
-        if self.api_client: return self.api_client.trigger_processing(book_uuid)
-        return False
-
-    def get_book_details(self, book_uuid: str) -> Optional[Dict]:
-        if self.api_client: return self.api_client.get_book_details(book_uuid)
-        return None
+    def get_progress_with_fragment(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+        """Legacy compatibility wrapper."""
+        return self.get_progress_by_filename(ebook_filename)
 
 def create_storyteller_client():
-    return StorytellerDBWithAPI()
+    return StorytellerAPIClient()
 # [END FILE]

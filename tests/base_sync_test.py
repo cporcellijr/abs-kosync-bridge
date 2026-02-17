@@ -63,6 +63,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             abs_title=self.test_mapping.get('abs_title'),
             ebook_filename=self.test_mapping.get('ebook_filename'),
             kosync_doc_id=self.test_mapping.get('kosync_doc_id'),
+            storyteller_uuid=self.test_mapping.get('storyteller_uuid'), # [NEW] Added for strict sync
             transcript_file=self.test_mapping.get('transcript_file'),
             status=self.test_mapping.get('status', 'active'),
             duration=self.test_mapping.get('duration', 1000.0)  # Default 1000 second test duration
@@ -121,7 +122,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         booklore_client = Mock()
         booklore_client._cache_timestamp = 0
         hardcover_client = Mock()
-        storyteller_db = Mock()
+        storyteller_client = Mock() # Renamed from storyteller_db
         ebook_parser = Mock()
 
         # Configure client configurations
@@ -129,7 +130,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         kosync_client.is_configured.return_value = True
         booklore_client.is_configured.return_value = True
         hardcover_client.is_configured.return_value = False
-        storyteller_db.is_configured.return_value = True
+        storyteller_client.is_configured.return_value = True
 
         # Get test-specific progress returns
         progress_returns = self.get_progress_mock_returns()
@@ -138,19 +139,25 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         abs_client.get_progress.return_value = progress_returns['abs_progress']
         abs_client.get_in_progress.return_value = progress_returns['abs_in_progress']
         kosync_client.get_progress.return_value = progress_returns['kosync_progress']
-        storyteller_db.get_progress_with_fragment.return_value = progress_returns['storyteller_progress']
+        
+        # [UPDATED] Use get_position_details for strict sync
+        storyteller_client.get_position_details.return_value = progress_returns['storyteller_progress']
+        # Also keep legacy just in case, though strictly not needed
+        storyteller_client.get_progress_with_fragment.return_value = progress_returns['storyteller_progress']
+        
         booklore_client.get_progress.return_value = progress_returns['booklore_progress']
 
         # Configure update responses
         abs_client.update_progress.return_value = {"success": True}
         kosync_client.update_progress.return_value = {"success": True}
-        storyteller_db.update_progress.return_value = True
+        storyteller_client.update_position.return_value = True
+        storyteller_client.update_progress.return_value = True # Compatibility
         booklore_client.update_progress.return_value = True
         abs_client.create_session.return_value = f"test-session-{self.expected_leader.lower()}"
         
         # Configure bulk data mocks (return empty to force individual fetch fallback)
         abs_client.get_all_progress_raw.return_value = {}
-        storyteller_db.get_all_positions_bulk.return_value = {}
+        storyteller_client.get_all_positions_bulk.return_value = {}
 
         # Configure database service mock
         database_service = Mock()
@@ -166,7 +173,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             'kosync_client': kosync_client,
             'booklore_client': booklore_client,
             'hardcover_client': hardcover_client,
-            'storyteller_db': storyteller_db,
+            'storyteller_client': storyteller_client,
             'ebook_parser': ebook_parser,
             'database_service': database_service
         }
@@ -217,7 +224,7 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         )
         kosync_sync_client = KoSyncSyncClient(mocks['kosync_client'], mocks['ebook_parser'])
         abs_ebook_sync_client = ABSEbookSyncClient(mocks['abs_client'], mocks['ebook_parser'])
-        storyteller_sync_client = StorytellerSyncClient(mocks['storyteller_db'], mocks['ebook_parser'])
+        storyteller_sync_client = StorytellerSyncClient(mocks['storyteller_client'], mocks['ebook_parser'])
         booklore_sync_client = BookloreSyncClient(mocks['booklore_client'], mocks['ebook_parser'])
 
         # Create SyncManager with dependency injection (all mocks)
@@ -267,7 +274,8 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         # ASSERTIONS - Verify progress fetching calls
         self.assertTrue(mocks['abs_client'].get_progress.called, "ABS get_progress was not called")
         self.assertTrue(mocks['kosync_client'].get_progress.called, "KoSync get_progress was not called")
-        self.assertTrue(mocks['storyteller_db'].get_progress_with_fragment.called, "Storyteller get_progress was not called")
+        # [UPDATED] Check get_position_details
+        self.assertTrue(mocks['storyteller_client'].get_position_details.called, "Storyteller get_position_details was not called")
         self.assertTrue(mocks['booklore_client'].get_progress.called, "BookLore get_progress was not called")
 
         leader = self.expected_leader.upper()
@@ -285,7 +293,8 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
             if leader != 'KOSYNC':
                 self.assertTrue(mocks['kosync_client'].update_progress.called, "KoSync update_progress was not called")
             if leader != 'STORYTELLER':
-                self.assertTrue(mocks['storyteller_db'].update_progress.called, "Storyteller update_progress was not called")
+                # [UPDATED] Check update_position
+                self.assertTrue(mocks['storyteller_client'].update_position.called, "Storyteller update_position was not called")
             if leader != 'BOOKLORE':
                 self.assertTrue(mocks['booklore_client'].update_progress.called, "BookLore update_progress was not called")
 
@@ -295,7 +304,9 @@ class BaseSyncCycleTestCase(unittest.TestCase, ABC):
         # Verify specific call arguments
         mocks['abs_client'].get_progress.assert_called_with(abs_id)
         mocks['kosync_client'].get_progress.assert_called_with(kosync_doc)
-        mocks['storyteller_db'].get_progress_with_fragment.assert_called_with(ebook_file)
+        # [UPDATED] Check call arg for UUID
+        if self.test_book.storyteller_uuid:
+             mocks['storyteller_client'].get_position_details.assert_called_with(self.test_book.storyteller_uuid)
         mocks['booklore_client'].get_progress.assert_called_with(ebook_file)
 
     def verify_final_state(self, manager):

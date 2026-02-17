@@ -182,50 +182,6 @@ class TestStorytellerAPIClientDownload(unittest.TestCase):
             self.assertTrue(output_path.exists())
 
 
-class TestStorytellerDBWithAPIWrapper(unittest.TestCase):
-    """Test the StorytellerDBWithAPI wrapper methods."""
-
-    def test_update_position_delegates(self):
-        """update_position should delegate to api_client."""
-        from src.api.storyteller_api import StorytellerDBWithAPI
-        
-        wrapper = StorytellerDBWithAPI.__new__(StorytellerDBWithAPI)
-        wrapper.api_client = Mock()
-        wrapper.api_client.update_position = Mock(return_value=True)
-        wrapper.db_fallback = None
-        
-        result = wrapper.update_position('test-uuid', 0.5, None)
-        
-        self.assertTrue(result)
-        wrapper.api_client.update_position.assert_called_once_with('test-uuid', 0.5, None)
-
-    def test_search_books_delegates(self):
-        """search_books should delegate to api_client."""
-        from src.api.storyteller_api import StorytellerDBWithAPI
-        
-        wrapper = StorytellerDBWithAPI.__new__(StorytellerDBWithAPI)
-        wrapper.api_client = Mock()
-        wrapper.api_client.search_books = Mock(return_value=[{'uuid': 'test'}])
-        wrapper.db_fallback = None
-        
-        result = wrapper.search_books('test query')
-        
-        self.assertEqual(len(result), 1)
-        wrapper.api_client.search_books.assert_called_once_with('test query')
-    
-    def test_download_book_delegates(self):
-        """download_book should delegate to api_client."""
-        from src.api.storyteller_api import StorytellerDBWithAPI
-        
-        wrapper = StorytellerDBWithAPI.__new__(StorytellerDBWithAPI)
-        wrapper.api_client = Mock()
-        wrapper.api_client.download_book = Mock(return_value=True)
-        wrapper.db_fallback = None
-        
-        result = wrapper.download_book('test-uuid', Path('/tmp/test.epub'))
-        
-        self.assertTrue(result)
-        wrapper.api_client.download_book.assert_called_once()
 
 
 class TestWebServerAPIRoutes(unittest.TestCase):

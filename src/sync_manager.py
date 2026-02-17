@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
 import json
-from src.api.storyteller_api import StorytellerDBWithAPI
+from src.api.storyteller_api import StorytellerAPIClient
 from src.db.models import Job
 from src.db.models import State, Book, PendingSuggestion
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
@@ -45,7 +45,7 @@ class SyncManager:
                  transcriber=None,
                  ebook_parser=None,
                  database_service=None,
-                 storyteller_client: StorytellerDBWithAPI=None,
+                 storyteller_client: StorytellerAPIClient=None,
                  sync_clients: dict[str, SyncClient]=None,
                  alignment_service: AlignmentService = None,
                  library_service: LibraryService = None,

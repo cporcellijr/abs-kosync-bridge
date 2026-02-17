@@ -2,14 +2,14 @@ import os
 from typing import Optional
 import logging
 
-from src.api.storyteller_api import StorytellerDBWithAPI
+from src.api.storyteller_api import StorytellerAPIClient
 from src.db.models import Book, State
 from src.utils.ebook_utils import EbookParser
 from src.sync_clients.sync_client_interface import SyncClient, LocatorResult, SyncResult, UpdateProgressRequest, ServiceState
 logger = logging.getLogger(__name__)
 
 class StorytellerSyncClient(SyncClient):
-    def __init__(self, storyteller_client: StorytellerDBWithAPI, ebook_parser: EbookParser, database_service=None):
+    def __init__(self, storyteller_client: StorytellerAPIClient, ebook_parser: EbookParser, database_service=None):
         super().__init__(ebook_parser)
         self.storyteller_client = storyteller_client
         self.ebook_parser = ebook_parser

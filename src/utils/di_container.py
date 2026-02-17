@@ -15,7 +15,7 @@ from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.booklore_client import BookloreClient
 from src.api.cwa_client import CWAClient
 from src.api.hardcover_client import HardcoverClient
-from src.api.storyteller_api import StorytellerDBWithAPI
+from src.api.storyteller_api import StorytellerAPIClient
 from src.db.database_service import DatabaseService
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
@@ -134,7 +134,7 @@ class Container(containers.DeclarativeContainer):
 
     # Storyteller client with factory
     storyteller_client = providers.Singleton(
-        StorytellerDBWithAPI
+        StorytellerAPIClient
     )
 
     # Transcriber
