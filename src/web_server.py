@@ -1408,8 +1408,21 @@ def match():
                 if container.storyteller_client().download_book(storyteller_uuid, target_path):
                     ebook_filename = target_filename # Override filename
                     original_ebook_filename = selected_filename # Preserve original
-                    # We can also compute KOSync ID from this file now
-                    kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                    
+                    # [FIX] Conditionally compute KOSync ID
+                    if original_ebook_filename:
+                        # Tri-Link: Compute hash from the normal EPUB so it matches the user's device
+                        logger.info(f"Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                        booklore_id = None
+                        if container.booklore_client().is_configured():
+                            bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+                            if bl_book:
+                                booklore_id = bl_book.get('id')
+                        kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+                    else:
+                        # Storyteller-Only Link: Compute hash from the downloaded artifact
+                        logger.info("Storyteller-Only Link: Computing hash from downloaded artifact")
+                        kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
                 else:
                     return "Failed to download Storyteller artifact", 500
                     
