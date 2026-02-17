@@ -17,6 +17,12 @@ You can configure the system to listen on two separate ports:
 
 To enable this mode, set the `KOSYNC_PORT` environment variable (e.g., `KOSYNC_PORT=5758`) and map it in Docker.
 
+```yaml
+ports:
+  - "8080:5757"   # Admin Dashboard
+  - "5758:5758"   # Sync Protocol (Internet Safe)
+```
+
 ### Integrations
 
 #### KOSync (KOReader)
@@ -31,6 +37,9 @@ To enable this mode, set the `KOSYNC_PORT` environment variable (e.g., `KOSYNC_P
 - **Storyteller URL**: URL to your Storyteller instance.
 - **Storyteller API Key**: Your API key (if required).
 - **Sync Mode**: REST API (default).
+
+> [!NOTE]
+> The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.
 
 #### Booklore
 
@@ -84,19 +93,11 @@ Advanced settings to fine-tune the synchronization logic.
 | **Fuzzy Match Threshold** | `0.80` | (0.0-1.0) Confidence required for text matching (80%). |
 | **Job Retries** | `5` | How many times to retry failed transcription jobs. |
 
-### Forge (Storyteller)
-
-Required only if using the **Forge** tool to prepare files for Storyteller.
-
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `STORYTELLER_LIBRARY_DIR` | `/storyteller_library` | Destination directory where Storyteller books are stored. |
-| `AUDIOBOOKS_DIR` | `/audiobooks` | Source directory for audiobooks (usually read-only). |
-
-### Toggles
+### Advanced Toggles
 
 - **Sync ABS Ebook**: If enabled, also syncs progress to the *ebook* item in ABS (if you have both mapped). This allows you to read the ebook in the ABS web reader and have that progress sync to KOReader.
 - **XPath Fallback**: Strategy for handling position lookups when exact paths fail.
+- **Reprocess on Clear**: (`REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT`) If enabled, clearing a mapping in the UI will also delete the alignment cache, forcing a full re-transcription next time.
 
 ---
 

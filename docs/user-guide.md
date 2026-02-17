@@ -45,17 +45,39 @@ Links your ebook status across platforms.
 
 ## Matcher
 
-The **Matcher** allows you to link an Audiobookshelf audiobook to a specific EPUB file in your `/books` directory.
+The **Matcher** is where you link an Audiobookshelf audiobook to its corresponding text format. The new **3-Column Interface** makes it easy to select the best source for your needs.
 
-### Single Match
+### 1. The 3-Step Flow
 
-1. **Search**: Type the name of the audiobook. The system queries your ABS library.
-2. **Select Audio**: Click on the correct audiobook result.
-3. **Select Text**: (Optional if using Storyteller) Select your **standard/retail EPUB** here.
-    - *Note: You can skip this step if you only want to link the audio to a Storyteller artifact.*
-4. **Storyteller Tri-Link**: If you have a Storyteller artifact, paste its UUID or select it here.
-    - **Benefit**: If you linked a retail EPUB in step 3, you can read that lightweight file on your e-reader while maintaining sync. If you skipped step 3, the system will use the Storyteller file for syncing.
-5. **Create Mapping**: Click the button to confirm the link.
+#### Step 1: Select Audiobook (Required)
+
+First, search for your audiobook. The system queries your ABS library. Select the correct title to proceed.
+
+#### Step 2: Storyteller Link (Optional)
+
+If you use **Storyteller**, the system will try to find a matching "Artifact" (the processed ebook) in your Storyteller library.
+
+- **Match Found**: Select the card to link it via its precise UUID.
+- **No Match/Incorrect**: Select **"None - Do not link"**. This tells the system to ignore Storyteller for this book and use the standard ebook instead.
+
+> [!TIP]
+> **Tri-Link Feature**: You can link *both* a Storyteller Artifact (for voice-synced reading) AND a standard Retail EPUB (for lightweight reading on other devices). The progress will sync between all three!
+
+#### Step 3: Select Standard Ebook (Fallback)
+
+Select the standard EPUB file you want to use for regular sync. The system searches multiple sources:
+
+1. **ABS Direct**: Checks if the Audiobook item in ABS already contains an EPUB file.
+2. **Booklore**: Checks your curated metadata database.
+3. **CWA**: Searches your Calibre-Web Automated OPDS feed.
+4. **ABS Search**: Searches other ABS libraries for a matching title.
+5. **Filesystem**: Scans your local `/books` directory.
+
+**Source Badges**: Look for the colored badges on ebook cards to know where the file is coming from (e.g., `BOOKLORE`, `ABS`, `CWA`, `LOCAL`).
+
+### Creating the Mapping
+
+Once you've made your selections, click **Create Mapping**. The system will download any necessary files (from CWA/ABS) and begin the alignment process.
 
 ### Batch Match
 
@@ -68,9 +90,6 @@ For users with large libraries, the **Batch Matcher** speeds up the process.
 ---
 
 ## Forge (Storyteller Integration)
-
-> [!NOTE]
-> Forge replaces the legacy "Book Linker" tool.
 
 The **Forge** is a powerful tool designed to prepare "Synced Books" for **Storyteller**. It handles the complex file management required to get audio and text aligned.
 
@@ -85,7 +104,7 @@ The **Forge** is a powerful tool designed to prepare "Synced Books" for **Storyt
 Use Forge if you want the **immersive Read-Along experience** in the Storyteller app.
 
 > [!IMPORTANT]
-> **Active Processing**: Unlike the old Book Linker, Forge is an **active** tool. It communicates directly with the Storyteller API to trigger processing. Ensure your Storyteller integration is configured in Settings.
+> **Active Processing**: Forge is an **active** tool. It communicates directly with the Storyteller API to trigger processing. Ensure your Storyteller integration is configured in Settings.
 
 ---
 

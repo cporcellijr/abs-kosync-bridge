@@ -21,7 +21,7 @@ services:
       # General Settings
       - TZ=America/New_York
       - LOG_LEVEL=INFO
-      # - KOSYNC_PORT=5758 # Enable Split-Port Mode
+      # - KOSYNC_PORT=5758 # Enable Split-Port Mode (Safe for Internet Exposure)
 
       # === OPTIONAL: Initial Configuration ===
       # It is recommended to configure these in the Web UI, but you can bootstrap them here.
@@ -29,10 +29,12 @@ services:
       # Audiobookshelf
       # - ABS_SERVER=http://your-abs-server:13378
       # - ABS_TOKEN=your-api-token
+      # - ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID=false # Set to true to restrict search to one library
 
       # Integrations
       # - KOSYNC_URL=https://koreader.example.com
       # - BOOKLORE_URL=http://booklore.example.com
+      # - STORYTELLER_URL=http://storyteller.example.com
 
       # CWA (Calibre-Web Automated) - For syncing ebooks without local files
       # - CWA_ENABLED=true
@@ -42,14 +44,15 @@ services:
 
     volumes:
       # === REQUIRED ===
-      - ./data:/data # App data (database, cache)
-      - /path/to/ebooks:/books # Your EPUB library (Required unless using CWA/Booklore exclusively)
+      - ./data:/data                    # App data (database, cache)
+      - /path/to/ebooks:/books          # Your EPUB library (Required unless using CWA/Booklore exclusively)
 
       # === OPTIONAL: Forge (Storyteller) ===
       - /path/to/storyteller/library:/storyteller_library
 
     ports:
-      - "8080:5757"
+      - "8080:5757"   # Admin Dashboard (Keep Internal/LAN)
+      # - "5758:5758" # Sync Protocol (Enable if KOSync Port is set)
 
     networks:
       - your-network
