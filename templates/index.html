@@ -126,14 +126,19 @@
                 </div>
                 {% endif %}
 
-                {# [CHANGED] Only show Booklore if state exists #}
-                {% if integrations.booklore and mapping.states.booklore is defined %}
+                {# [CHANGED] Show Booklore if state exists OR if it was successfully linked/resolved #}
+                {% if integrations.booklore and (mapping.states.booklore is defined or mapping.booklore_id) %}
                 <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener noreferrer"
                     class="service-item" title="Open in Booklore">
                     <img src="/static/booklore.png" alt="BL" class="service-icon">
                     <span class="service-name">Booklore</span>
-                    <span class="service-value">{{ '%.1f' | format(mapping.states.booklore.percentage|default(0))
-                        }}%</span>
+                    <span class="service-value">
+                        {% if mapping.states.booklore is defined %}
+                        {{ '%.1f' | format(mapping.states.booklore.percentage) }}%
+                        {% else %}
+                        0.0%
+                        {% endif %}
+                    </span>
                 </a>
                 {% endif %}
 
