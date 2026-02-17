@@ -126,102 +126,129 @@ function displayBookWithEditions(data) {
     var container = document.getElementById('hc-editions');
     container.replaceChildren();
 
-    if (!data.editions || data.editions.length === 0) {
-        var p = document.createElement('p');
-        p.className = 'hc-text-muted';
-        p.textContent = 'No editions found for this book.';
-        container.appendChild(p);
-        document.getElementById('hc-link-btn').disabled = true;
-        showHcState('found');
-        return;
-    }
+    var hasEditions = data.editions && data.editions.length > 0;
 
-    // Determine which edition to pre-select (linked edition or first)
-    var linkedId = data.linked_edition_id ? String(data.linked_edition_id) : null;
-    var preSelectId = linkedId || String(data.editions[0].id);
+    if (hasEditions) {
+        // Determine which edition to pre-select (linked edition or first)
+        var linkedId = data.linked_edition_id ? String(data.linked_edition_id) : null;
+        var preSelectId = linkedId || String(data.editions[0].id);
 
-    // Sort editions so linked edition appears first
-    var sortedEditions = data.editions.slice();
-    if (linkedId) {
-        sortedEditions.sort(function(a, b) {
-            if (String(a.id) === linkedId) return -1;
-            if (String(b.id) === linkedId) return 1;
-            return 0;
+        // Sort editions so linked edition appears first
+        var sortedEditions = data.editions.slice();
+        if (linkedId) {
+            sortedEditions.sort(function(a, b) {
+                if (String(a.id) === linkedId) return -1;
+                if (String(b.id) === linkedId) return 1;
+                return 0;
+            });
+        }
+
+        sortedEditions.forEach(function(ed) {
+            var edId = String(ed.id);
+            var isSelected = (edId === preSelectId);
+            var isLinked = (edId === linkedId);
+
+            var div = document.createElement('div');
+            div.className = 'hc-edition-option' + (isSelected ? ' selected' : '');
+            div.dataset.editionId = ed.id;
+            div.dataset.pages = ed.pages || '';
+            div.dataset.audioSeconds = ed.audio_seconds || '';
+            div.onclick = function() { selectEdition(div); };
+
+            // Icon section
+            var iconDiv = document.createElement('div');
+            iconDiv.className = 'hc-edition-icon';
+            iconDiv.textContent = getFormatIcon(ed.format);
+
+            // Main content section
+            var mainDiv = document.createElement('div');
+            mainDiv.className = 'hc-edition-main';
+
+            var formatSpan = document.createElement('span');
+            formatSpan.className = 'hc-edition-format';
+            formatSpan.textContent = ed.format || 'Unknown';
+
+            // Add "Currently linked" badge if this is the linked edition
+            if (isLinked) {
+                var linkedBadge = document.createElement('span');
+                linkedBadge.className = 'hc-edition-linked';
+                linkedBadge.textContent = 'Linked';
+                formatSpan.appendChild(linkedBadge);
+            }
+
+            var detailsDiv = document.createElement('div');
+            detailsDiv.className = 'hc-edition-details';
+
+            // Add duration or pages
+            if (ed.audio_seconds && ed.audio_seconds > 0) {
+                var hours = Math.floor(ed.audio_seconds / 3600);
+                var mins = Math.floor((ed.audio_seconds % 3600) / 60);
+                var durDetail = document.createElement('span');
+                durDetail.className = 'hc-edition-detail';
+                durDetail.appendChild(createSvgIcon('clock'));
+                durDetail.appendChild(document.createTextNode(hours + 'h ' + mins + 'm'));
+                detailsDiv.appendChild(durDetail);
+            } else if (ed.pages && ed.pages > 0) {
+                var pageDetail = document.createElement('span');
+                pageDetail.className = 'hc-edition-detail';
+                pageDetail.appendChild(createSvgIcon('book'));
+                pageDetail.appendChild(document.createTextNode(ed.pages + ' pp'));
+                detailsDiv.appendChild(pageDetail);
+            }
+
+            // Add year
+            if (ed.year) {
+                var yearDetail = document.createElement('span');
+                yearDetail.className = 'hc-edition-detail';
+                yearDetail.textContent = ed.year;
+                detailsDiv.appendChild(yearDetail);
+            }
+
+            mainDiv.appendChild(formatSpan);
+            mainDiv.appendChild(detailsDiv);
+
+            div.appendChild(iconDiv);
+            div.appendChild(mainDiv);
+            container.appendChild(div);
+
+            if (isSelected) {
+                hardcoverModalState.selectedEditionId = ed.id;
+            }
         });
     }
 
-    sortedEditions.forEach(function(ed) {
-        var edId = String(ed.id);
-        var isSelected = (edId === preSelectId);
-        var isLinked = (edId === linkedId);
+    // "No specific edition" option — always appended at the end
+    var noneDiv = document.createElement('div');
+    noneDiv.className = 'hc-edition-option hc-edition-none' + (!hasEditions ? ' selected' : '');
+    noneDiv.dataset.editionId = '';
+    noneDiv.dataset.pages = '';
+    noneDiv.dataset.audioSeconds = '';
+    noneDiv.onclick = function() { selectEdition(noneDiv); };
 
-        var div = document.createElement('div');
-        div.className = 'hc-edition-option' + (isSelected ? ' selected' : '');
-        div.dataset.editionId = ed.id;
-        div.dataset.pages = ed.pages || '';
-        div.dataset.audioSeconds = ed.audio_seconds || '';
-        div.onclick = function() { selectEdition(div); };
+    var noneIcon = document.createElement('div');
+    noneIcon.className = 'hc-edition-icon';
+    noneIcon.textContent = '\u2014';
 
-        // Icon section
-        var iconDiv = document.createElement('div');
-        iconDiv.className = 'hc-edition-icon';
-        iconDiv.textContent = getFormatIcon(ed.format);
+    var noneMain = document.createElement('div');
+    noneMain.className = 'hc-edition-main';
 
-        // Main content section
-        var mainDiv = document.createElement('div');
-        mainDiv.className = 'hc-edition-main';
+    var noneFormat = document.createElement('span');
+    noneFormat.className = 'hc-edition-format';
+    noneFormat.textContent = 'No specific edition';
 
-        var formatSpan = document.createElement('span');
-        formatSpan.className = 'hc-edition-format';
-        formatSpan.textContent = ed.format || 'Unknown';
+    var noneDetails = document.createElement('div');
+    noneDetails.className = 'hc-edition-details';
+    noneDetails.textContent = 'Track on Hardcover without progress sync';
 
-        // Add "Currently linked" badge if this is the linked edition
-        if (isLinked) {
-            var linkedBadge = document.createElement('span');
-            linkedBadge.className = 'hc-edition-linked';
-            linkedBadge.textContent = 'Linked';
-            formatSpan.appendChild(linkedBadge);
-        }
+    noneMain.appendChild(noneFormat);
+    noneMain.appendChild(noneDetails);
+    noneDiv.appendChild(noneIcon);
+    noneDiv.appendChild(noneMain);
+    container.appendChild(noneDiv);
 
-        var detailsDiv = document.createElement('div');
-        detailsDiv.className = 'hc-edition-details';
-
-        // Add duration or pages
-        if (ed.audio_seconds && ed.audio_seconds > 0) {
-            var hours = Math.floor(ed.audio_seconds / 3600);
-            var mins = Math.floor((ed.audio_seconds % 3600) / 60);
-            var durDetail = document.createElement('span');
-            durDetail.className = 'hc-edition-detail';
-            durDetail.appendChild(createSvgIcon('clock'));
-            durDetail.appendChild(document.createTextNode(hours + 'h ' + mins + 'm'));
-            detailsDiv.appendChild(durDetail);
-        } else if (ed.pages && ed.pages > 0) {
-            var pageDetail = document.createElement('span');
-            pageDetail.className = 'hc-edition-detail';
-            pageDetail.appendChild(createSvgIcon('book'));
-            pageDetail.appendChild(document.createTextNode(ed.pages + ' pp'));
-            detailsDiv.appendChild(pageDetail);
-        }
-
-        // Add year
-        if (ed.year) {
-            var yearDetail = document.createElement('span');
-            yearDetail.className = 'hc-edition-detail';
-            yearDetail.textContent = ed.year;
-            detailsDiv.appendChild(yearDetail);
-        }
-
-        mainDiv.appendChild(formatSpan);
-        mainDiv.appendChild(detailsDiv);
-
-        div.appendChild(iconDiv);
-        div.appendChild(mainDiv);
-        container.appendChild(div);
-
-        if (isSelected) {
-            hardcoverModalState.selectedEditionId = ed.id;
-        }
-    });
+    if (!hasEditions) {
+        hardcoverModalState.selectedEditionId = null;
+    }
 
     document.getElementById('hc-link-btn').disabled = false;
     showHcState('found');
@@ -247,7 +274,7 @@ function selectEdition(div) {
         el.classList.remove('selected');
     });
     div.classList.add('selected');
-    hardcoverModalState.selectedEditionId = div.dataset.editionId;
+    hardcoverModalState.selectedEditionId = div.dataset.editionId || null;
 }
 
 async function linkSelectedEdition() {

@@ -176,6 +176,7 @@ class TestKosyncEndpoints(unittest.TestCase):
 
     def test_put_progress_creates_document(self):
         """Test that PUT creates a new document."""
+        # Case 1: Standard device (should return String timestamp)
         response = self.client.put(
             '/syncs/progress',
             headers=self.auth_headers,
@@ -195,6 +196,22 @@ class TestKosyncEndpoints(unittest.TestCase):
         # PUT response timestamp should be ISO 8601 string (kosync-dotnet behavior)
         self.assertIsInstance(data['timestamp'], str)
         self.assertIn('T', data['timestamp'])  # ISO format contains 'T'
+
+        # Case 2: BookNexus device (should return Int timestamp)
+        response_bn = self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'bn' * 16,
+                'progress': '/body/test2',
+                'percentage': 0.44,
+                'device': 'BookNexus',
+                'device_id': 'BN123'
+            }
+        )
+        self.assertEqual(response_bn.status_code, 200)
+        data_bn = response_bn.get_json()
+        self.assertIsInstance(data_bn['timestamp'], int)
 
     def test_get_progress_returns_502_for_missing(self):
         """Test that GET returns 502 (not 404) for missing document."""
