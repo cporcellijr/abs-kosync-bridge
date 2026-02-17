@@ -1860,6 +1860,20 @@ def api_storyteller_link(abs_id):
     if not book:
         return jsonify({"error": "Book not found"}), 404
 
+    # [NEW] Handle explicit unlinking
+    if storyteller_uuid == "none" or not storyteller_uuid:
+        logger.info(f"Unlinking Storyteller for '{book.abs_title}'")
+        book.storyteller_uuid = None
+        
+        # Revert to original filename if it exists
+        if book.original_ebook_filename:
+            book.ebook_filename = book.original_ebook_filename
+            
+        book.status = 'pending' # Force re-process to align with standard EPUB
+        database_service.save_book(book)
+        
+        return jsonify({"message": "Storyteller unlinked successfully", "filename": book.ebook_filename}), 200
+
     try:
         epub_cache = container.epub_cache_dir()
         if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)

@@ -87,8 +87,8 @@ class TestStorytellerSyncClientUUID(unittest.TestCase):
         self.assertEqual(call_args[0][0], 'st-uuid-12345')  # UUID
         self.mock_storyteller_client.update_progress.assert_not_called()
     
-    def test_update_progress_falls_back_when_no_uuid(self):
-        """When book has no storyteller_uuid, use update_progress with filename."""
+    def test_update_progress_skips_when_no_uuid(self):
+        """When book has no storyteller_uuid, do not update (Strict Mode)."""
         from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
         from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult
         from src.db.models import Book
@@ -111,9 +111,10 @@ class TestStorytellerSyncClientUUID(unittest.TestCase):
         # Execute
         result = client.update_progress(book, request)
         
-        # Verify: Should call update_progress with filename, not update_position
-        self.mock_storyteller_client.update_progress.assert_called_once()
+        # Verify: Should NOT call update_progress or update_position (Strict Mode)
+        self.mock_storyteller_client.update_progress.assert_not_called()
         self.mock_storyteller_client.update_position.assert_not_called()
+        self.assertFalse(result.success)
 
 
 class TestStorytellerAPIClientSearch(unittest.TestCase):

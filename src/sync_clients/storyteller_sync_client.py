@@ -31,84 +31,34 @@ class StorytellerSyncClient(SyncClient):
         return {'audiobook', 'ebook'}
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
-        # [Tri-Link Fix] Prefer UUID if available
+        # [Tri-Link Fix] Strict UUID Sync Only
         uuid = book.storyteller_uuid
-        search_epub = book.original_ebook_filename or book.ebook_filename
+        
+        if not uuid:
+            # Strict mode: If no UUID is linked, Storyteller is effectively disabled for this book.
+            # We do NOT fallback to filename search or legacy methods.
+            return None
+
         st_pct, st_ts, st_href, st_frag = None, None, None, None
+        
+        try:
+            st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_position_details(uuid)
+        except Exception as e:
+            logger.warning(f"[{title_snip}] Storyteller UUID fetch failed for {uuid}: {e}")
+            return None
 
-        used_bulk = False
-        discovered_uuid = None
-
-        # 1. Try UUID Direct Fetch (Fastest/Most Reliable)
-        if uuid:
-            try:
-                st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_position_details(uuid)
-                if st_pct is not None:
-                     used_bulk = True # Treated as success
-            except Exception as e:
-                logger.warning(f"[{title_snip}] Storyteller UUID fetch failed: {e}")
-
-        # 2. Try Bulk Context (Legacy/Fallback)
-        if not used_bulk and bulk_context:
-            try:
-                book_info = self.storyteller_client.find_book_by_title(search_epub)
-                if book_info:
-                    discovered_uuid = book_info.get('uuid')
-                    title_key = book_info.get('title', '').lower()
-                    if title_key in bulk_context:
-                        data = bulk_context[title_key]
-                        st_pct = data.get('pct')
-                        st_ts = data.get('ts')
-                        st_href = data.get('href')
-                        st_frag = data.get('frag')
-                        used_bulk = True
-            except Exception as e:
-                logger.debug(f"[{title_snip}] Failed to use Storyteller bulk context: {e}")
-
-        # 3. Legacy Individual Fetch (Slowest)
-        if not used_bulk and st_pct is None:
-             st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_progress_with_fragment(search_epub)
-             if st_pct is not None and not discovered_uuid:
-                 book_info = self.storyteller_client.find_book_by_title(search_epub)
-                 if book_info:
-                     discovered_uuid = book_info.get('uuid')
-
-        no_position = False
-        if st_pct is None:
-            exists = False
-            if uuid:
-                 exists = bool(self.storyteller_client.get_book_details(uuid))
-            else:
-                 found = self.storyteller_client.find_book_by_title(search_epub)
-                 if found:
-                     exists = True
-                     discovered_uuid = discovered_uuid or found.get('uuid')
-
-            if exists:
-                st_pct = 0.0
-                st_ts = 0
-                no_position = True
-                logger.info(f"[{title_snip}] Storyteller: book exists but no position, treating as 0%")
-            else:
-                logger.debug(f"[{title_snip}] Storyteller: book not found in library")
-                return None
-
-        # Auto-migrate legacy filename-based link to UUID
-        if discovered_uuid and not book.storyteller_uuid and self.database_service:
-            try:
-                book.storyteller_uuid = discovered_uuid
-                self.database_service.save_book(book)
-                logger.info(f"[{title_snip}] Migrated legacy Storyteller link -> UUID {discovered_uuid[:8]}...")
-            except Exception as e:
-                logger.warning(f"[{title_snip}] Failed to auto-migrate Storyteller UUID: {e}")
-
-        # Get previous Storyteller state
+        # Calculate delta
         prev_storyteller_pct = prev_state.percentage if prev_state else 0
-
-        # "No position" means absence of data, not a genuine move to 0%.
-        # Force delta to 0 so Storyteller doesn't become leader by appearing
-        # to have jumped backwards from a previously synced position.
-        delta = 0 if no_position else abs(st_pct - prev_storyteller_pct)
+        
+        # If st_pct is None here, it means the book exists but has no position yet (or fetch failed).
+        # We treat it as 0% for calculation if it returned valid None, or bail if it crashed.
+        # But get_position_details usually returns None tuple on failure, so we check st_pct.
+        if st_pct is None:
+             st_pct = 0.0
+             st_ts = 0
+             delta = 0 # No movement
+        else:
+             delta = abs(st_pct - prev_storyteller_pct)
 
         return ServiceState(
             current={"pct": st_pct, "ts": st_ts, "href": st_href, "frag": st_frag},
@@ -164,7 +114,9 @@ class StorytellerSyncClient(SyncClient):
         if book.storyteller_uuid:
             success = self.storyteller_client.update_position(book.storyteller_uuid, pct, locator)
         else:
-            success = self.storyteller_client.update_progress(epub, pct, locator)
+            # Strict mode: Do not update if not linked via UUID
+            logger.debug(f"Skipping Storyteller update for {book.abs_title}: No linked UUID")
+            success = False
         
         return SyncResult(pct, success)
 

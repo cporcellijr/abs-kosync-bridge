@@ -12,7 +12,7 @@ function openStorytellerModal(absId, title) {
     document.getElementById('st-search-input').value = title; // Pre-fill with title
     document.getElementById('st-search-input').focus();
     document.getElementById('st-results').innerHTML = ''; // Clear results
-    
+
     // Auto-search if title is present
     if (title) searchStoryteller();
 }
@@ -34,8 +34,25 @@ async function searchStoryteller() {
         const books = await response.json();
 
         resultsDiv.innerHTML = '';
+
+        // [NEW] Always show "None" option to allow unlinking
+        const noneCard = document.createElement('div');
+        noneCard.className = 'st-result-card st-none-option';
+        noneCard.style.border = '1px dashed #666';
+        noneCard.innerHTML = `
+            <div class="st-card-info">
+                <div class="st-card-title">None - Do not link</div>
+                <div class="st-card-author" style="font-style: italic; color: #888;">Unlink current Storyteller book</div>
+            </div>
+            <button class="action-btn secondary" onclick="linkStoryteller('none')">Unlink</button>
+        `;
+        resultsDiv.appendChild(noneCard);
+
         if (books.length === 0) {
-            resultsDiv.innerHTML = '<div class="st-no-results">No books found</div>';
+            const noRes = document.createElement('div');
+            noRes.className = 'st-no-results';
+            noRes.textContent = 'No matching books found via search.';
+            resultsDiv.appendChild(noRes);
             return;
         }
 
@@ -59,7 +76,7 @@ async function searchStoryteller() {
 
 async function linkStoryteller(uuid) {
     if (!currentAbsId) return;
-    
+
     const resultsDiv = document.getElementById('st-results');
     resultsDiv.innerHTML = '<div class="st-loading">Linking and downloading...</div>';
 
