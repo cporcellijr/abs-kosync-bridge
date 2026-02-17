@@ -210,7 +210,7 @@ def kosync_put_progress():
         new_pct = float(percentage)
 
         if new_pct < existing_pct - 0.0001:
-            logger.debug(f"KOSync: Rejecting backwards progress {new_pct:.4f} < {existing_pct:.4f} for {doc_hash[:8]} (Device: {device})")
+            logger.info(f"KOSync: Ignored progress from '{device}' for doc {doc_hash[:8]}... (server has higher: {existing_pct:.2f}% vs new {new_pct:.2f}%)")
             return jsonify({
                 "document": doc_hash,
                 "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else int(now.timestamp())
@@ -227,12 +227,12 @@ def kosync_put_progress():
         )
         logger.info(f"KOSync: New document tracked: {doc_hash[:8]}... from device '{device}'")
     else:
+        logger.info(f"KOSync: Received progress from '{device}' for doc {doc_hash[:8]}... -> {float(percentage):.2f}% (Updated from {float(kosync_doc.percentage) if kosync_doc.percentage else 0:.2f}%)")
         kosync_doc.progress = progress
         kosync_doc.percentage = percentage
         kosync_doc.device = device
         kosync_doc.device_id = device_id
         kosync_doc.timestamp = now
-        logger.debug(f"KOSync: Syncing document: {doc_hash[:8]}... ({percentage:.2f}%) from device '{device}'")
 
     _database_service.save_kosync_document(kosync_doc)
 
