@@ -26,6 +26,8 @@ class MockContainer:
         self.mock_database_service.get_all_settings.return_value = {}  # Default empty settings
         self.mock_ebook_parser = Mock()
         self.mock_sync_clients = Mock()
+        self.mock_forge_service = Mock()
+        self.mock_forge_service.active_tasks = set()
 
         # Configure the sync manager to return our mock clients
         self.mock_sync_manager.abs_client = self.mock_abs_client
@@ -52,6 +54,9 @@ class MockContainer:
 
     def database_service(self):
         return self.mock_database_service
+
+    def forge_service(self):
+        return self.mock_forge_service
 
     def sync_clients(self):
         """Return mock sync clients for integrations."""

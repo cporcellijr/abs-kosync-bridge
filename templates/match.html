@@ -659,6 +659,11 @@
         </div>
 
         <form method="POST" action="/match" id="mappingForm">
+            <!-- Hidden inputs for Forge -->
+            <input type="hidden" name="source_type" id="input_source_type">
+            <input type="hidden" name="source_path" id="input_source_path">
+            <input type="hidden" name="source_id" id="input_source_id">
+
             <div class="selection-container">
 
                 <!-- GRID COL 1: Audiobook -->
@@ -757,7 +762,8 @@
                             {% set single_eb_match = ebooks|length == 1 %}
                             {% for eb in ebooks %}
                             <label class="audiobook-option eb-option {% if single_eb_match %}selected{% endif %}"
-                                onclick="selectItem(this, 'ebook_filename')">
+                                data-source-type="{{ eb.source }}" data-source-path="{{ eb.path }}"
+                                data-source-id="{{ eb.source_id }}" onclick="selectItem(this, 'ebook_filename')">
                                 <input type="radio" name="ebook_filename" value="{{ eb.name }}" {% if single_eb_match
                                     %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
@@ -798,6 +804,11 @@
                 <button type="submit" class="btn btn-success" id="submitBtn" disabled>
                     ✅ Create Mapping
                 </button>
+                <button type="submit" name="action" value="forge_match" class="btn btn-primary" id="forgeBtn"
+                    style="margin-left: 10px; background: linear-gradient(135deg, #9C27B0 0%, #7B1FA2 100%); border: none;"
+                    disabled>
+                    🔨 Forge & Match
+                </button>
                 <div id="validationMsg" style="margin-top: 10px; color: #ff6b6b; display: none;">
                     Please select an Audiobook and a Text Source (Storyteller or Ebook)
                 </div>
@@ -824,6 +835,13 @@
             // Check the radio button
             const radio = element.querySelector('input[type="radio"]');
             if (radio) radio.checked = true;
+
+            // If ebook option, populate hidden inputs for Forge
+            if (groupName === 'ebook_filename') {
+                document.getElementById('input_source_type').value = element.dataset.sourceType || '';
+                document.getElementById('input_source_path').value = element.dataset.sourcePath || '';
+                document.getElementById('input_source_id').value = element.dataset.sourceId || '';
+            }
 
             validateForm();
         }
@@ -860,10 +878,33 @@
                     msg.style.display = "block";
                 }
             }
+
+            // Forge Validation
+            const forgeBtn = document.getElementById('forgeBtn');
+            // Forge requires Audio + Standard Ebook (NOT Storyteller)
+            if (hasAudio && (ebVal !== "")) {
+                forgeBtn.disabled = false;
+                forgeBtn.style.opacity = "1";
+            } else {
+                forgeBtn.disabled = true;
+                forgeBtn.style.opacity = "0.5";
+            }
         }
 
-        // Initial check
-        validateForm();
+        // Initial check and setup
+        document.addEventListener('DOMContentLoaded', () => {
+            const initialEb = document.querySelector('input[name="ebook_filename"]:checked');
+            if (initialEb) {
+                const label = initialEb.closest('.eb-option');
+                if (label) {
+                    // Manually populate since selectItem might toggle classes we don't need strictly, 
+                    // but calling it is safer to ensure consistency.
+                    // However, selectItem expects 'element' to be the label.
+                    selectItem(label, 'ebook_filename');
+                }
+            }
+            validateForm();
+        });
     </script>
 </body>
 

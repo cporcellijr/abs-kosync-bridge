@@ -39,6 +39,9 @@ def _reconfigure_logging():
             logger.warning(f"Failed to reconfigure logging: {e}")
 
 # ---------------- APP SETUP ----------------
+container = None
+manager = None
+database_service = None
 
 def setup_dependencies(app, test_container=None):
     """
@@ -168,8 +171,7 @@ SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 STORYTELLER_LIBRARY_DIR = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
 
 # Track active forge operations for UI status
-active_forge_tasks = set()
-forge_lock = threading.Lock()
+# Track active forge operations for UI status - MOVED TO FORGE SERVICE
 
 
 # ---------------- HELPER FUNCTIONS ----------------
@@ -240,82 +242,10 @@ def inject_global_vars():
 
 # ---------------- BOOK LINKER HELPERS ----------------
 
-def safe_folder_name(name: str) -> str:
-    invalid = '<>:"/\\|?*'
-    name = html.escape(str(name).strip())[:150]
-    for c in invalid:
-        name = name.replace(c, '_')
-    return name.strip() or "Unknown"
 
 
-def copy_audio_files_for_forge(abs_id: str, dest_folder: Path):
-    """Copy audiobook files from ABS - Book Linker version"""
-    headers = {"Authorization": f"Bearer {ABS_API_TOKEN}"}
-    url = urljoin(ABS_API_URL, f"/api/items/{abs_id}")
-    try:
-        r = requests.get(url, headers=headers, timeout=15)
-        r.raise_for_status()
-        item = r.json()
-        audio_files = item.get("media", {}).get("audioFiles", [])
-        if not audio_files:
-            logger.warning(f"No audio files found for ABS {abs_id}")
-            return False
 
-        dest_folder.mkdir(parents=True, exist_ok=True)
-        copied = 0
 
-        for f in audio_files:
-            meta = f.get("metadata", {})
-            full_path = meta.get("path", "")
-            filename = meta.get("filename", "")
-
-            src_path = None
-            # 1. Try exact path (rarely works across containers)
-            if full_path and Path(full_path).exists():
-                src_path = Path(full_path)
-
-            # 2. Smart Suffix Matching
-            # Tries to match the last 4, 3, 2, or 1 segments of the path (e.g. Author/Series/Book/file.mp3)
-            if not src_path and full_path:
-                parts = Path(full_path).parts
-                for i in range(4, 0, -1):
-                    if len(parts) < i: continue
-                    suffix = Path(*parts[-i:])
-                    candidate = ABS_AUDIO_ROOT / suffix
-                    if candidate.exists():
-                        src_path = candidate
-                        break
-
-            # 3. Filename fallback (slowest but most reliable)
-            if not src_path and filename:
-                # Limit search to avoid hanging on massive libraries
-                matches = list(ABS_AUDIO_ROOT.glob(f"**/{filename}"))
-                if matches:
-                    src_path = matches[0]
-
-                if src_path and src_path.exists():
-                    shutil.copy2(str(src_path), dest_folder / src_path.name)
-                    copied += 1
-                else:
-                    # 4. API Download Fallback
-                    logger.info(f"Local file not found, downloading via API: {filename}")
-                    stream_url = f"{ABS_API_URL.rstrip('/')}/api/items/{abs_id}/file/{f.get('ino')}?token={ABS_API_TOKEN}"
-                    dest_path = dest_folder / filename
-                    # Use the ABS Client to download the file directly
-                    if container.abs_client().download_file(stream_url, dest_path):
-                        copied += 1
-                    else:
-                        logger.error(f"Could not find or download audio file: {filename}")
-        
-        # STRICT CHECK: All files must be copied
-        if copied == len(audio_files):
-            return True
-        else:
-            logger.error(f"Forge Strict Check Failed: Expected {len(audio_files)} files, copied {copied}. Aborting.")
-            return False
-    except Exception as e:
-        logger.error(f"Failed to copy ABS {abs_id}: {e}", exc_info=True)
-        return False
 
 
 def sync_daemon():
@@ -486,14 +416,15 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
 class EbookResult:
     """Wrapper to provide consistent interface for ebooks from Booklore, CWA, ABS, or filesystem."""
 
-    def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None, source=None):
+    def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None, source=None, source_id=None):
         self.name = name
         self.title = title or Path(name).stem
         self.subtitle = subtitle or ''
         self.authors = authors or ''
         self.booklore_id = booklore_id
-        self._path = path
+        self.path = path # Public path
         self.source = source  # 'booklore', 'cwa', 'abs', 'filesystem'
+        self.source_id = source_id or booklore_id # Generic ID for any source
         # Has metadata if we have a real title (not just filename) or booklore_id
         self.has_metadata = booklore_id is not None or (title is not None and title != name)
 
@@ -563,7 +494,8 @@ def get_searchable_ebooks(search_term):
                                     name=fname,
                                     title=ab.get('title'),
                                     authors=ab.get('author'),
-                                    source='ABS'
+                                    source='ABS',
+                                    source_id=ab.get('id')
                                 ))
                                 found_filenames.add(fname.lower())
                                 if ab.get('title'):
@@ -585,7 +517,8 @@ def get_searchable_ebooks(search_term):
                                 name=fname,
                                 title=cr.get('title'),
                                 authors=cr.get('author'),
-                                source='CWA'
+                                source='CWA',
+                                source_id=cr.get('id')
                             ))
                             found_filenames.add(fname.lower())
                             if cr.get('title'):
@@ -1098,253 +1031,7 @@ def forge_search_text():
     return jsonify(results)
 
 
-def _forge_background_task(abs_id, text_item, title, author):
-    """
-    Background thread: copy files to Storyteller library, trigger processing, cleanup.
-    Tracks active status in active_forge_tasks global.
-    """
-    logger.info(f"🔨 Forge: Starting background task for '{title}'")
-    
-    with forge_lock:
-        active_forge_tasks.add(title)
 
-    try:
-        # Define paths
-        safe_author = safe_folder_name(author) if author else "Unknown"
-        safe_title = safe_folder_name(title) if title else "Unknown"
-        # [FIX] Get dynamic library path from config
-        try:
-            st_lib_path = container.config_service().get('STORYTELLER_LIBRARY_DIR')
-        except Exception:
-            st_lib_path = None
-            
-        if not st_lib_path:
-            # Fallback to env or default
-            st_lib_path = os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library")
-            
-        # Flattened Structure: Library/Title/
-        # ATOMIC STAGING to prevent partial processing by Storyteller
-        final_course_dir = Path(st_lib_path) / safe_title
-        if final_course_dir.exists():
-            # If target exists, we can't do atomic staging easily without risk of overwriting or confusion.
-            # For now, log warning and use it directly (or could error out).
-            logger.warning(f"Target directory {final_course_dir} already exists. Using it (no atomic stage).")
-            course_dir = final_course_dir
-        else:
-            course_dir = Path(st_lib_path) / f".staging_{safe_title}"
-            course_dir.mkdir(parents=True, exist_ok=True)
-            
-        audio_dest = course_dir # Audio files go directly in root
-        
-        logger.info(f"⚡ Forge: Staging files for '{title}' in '{course_dir}' (Atomic)")
-
-        # Step 1: Copy audio files
-        audio_ok = copy_audio_files_for_forge(abs_id, audio_dest)
-        if not audio_ok:
-            logger.error(f"⚡ Forge: Failed to copy audio files for {abs_id}")
-            # cleanup empty dir
-            try:
-                if course_dir.exists() and course_dir != final_course_dir: 
-                    shutil.rmtree(course_dir) # Safer cleanup for staging
-            except: pass
-            return
-        logger.info(f"⚡ Forge: Audio files copied for '{title}'")
-
-        # Step 2: Acquire text source (epub)
-        epub_dest = course_dir / f"{safe_title}.epub"
-        source = text_item.get('source', '')
-        
-        text_success = False
-
-        if source == 'Local File':
-            src_path = Path(text_item.get('path', ''))
-            if src_path.exists():
-                shutil.copy2(str(src_path), epub_dest)
-                text_success = True
-                logger.info(f"⚡ Forge: Local epub copied: {src_path.name}")
-            else:
-                logger.error(f"⚡ Forge: Local file not found: {src_path}")
-
-        elif source == 'Booklore':
-            booklore_id = text_item.get('booklore_id')
-            if booklore_id:
-                content = container.booklore_client().download_book(booklore_id)
-                if content:
-                    epub_dest.write_bytes(content)
-                    text_success = True
-                    logger.info(f"⚡ Forge: Booklore epub downloaded")
-                else:
-                    logger.error(f"⚡ Forge: Booklore download failed for {booklore_id}")
-
-        elif source == 'ABS':
-            abs_item_id = text_item.get('abs_id')
-            if abs_item_id:
-                abs_client = container.abs_client()
-                ebook_files = abs_client.get_ebook_files(abs_item_id)
-                if ebook_files:
-                    stream_url = ebook_files[0].get('stream_url', '')
-                    if stream_url and abs_client.download_file(stream_url, epub_dest):
-                        text_success = True
-                        logger.info(f"⚡ Forge: ABS epub downloaded")
-                    else:
-                        logger.error(f"⚡ Forge: ABS download failed for {abs_item_id}")
-        
-        elif source == 'CWA':
-            download_url = text_item.get('download_url', '')
-            cwa_id = text_item.get('cwa_id')
-            cwa_client = container.library_service().cwa_client
-            
-            if download_url and cwa_client:
-                if cwa_client.download_ebook(download_url, epub_dest):
-                    text_success = True
-                    logger.info(f"⚡ Forge: CWA epub downloaded")
-            elif cwa_id and cwa_client:
-                book_info = cwa_client.get_book_by_id(cwa_id)
-                if book_info and book_info.get('download_url'):
-                    if cwa_client.download_ebook(book_info['download_url'], epub_dest):
-                        text_success = True
-                        logger.info(f"⚡ Forge: CWA epub downloaded via ID lookup")
-            
-            if not text_success:
-                logger.error(f"⚡ Forge: CWA download failed")
-
-        else:
-            logger.error(f"⚡ Forge: Unknown text source: {source}")
-
-        if not text_success:
-            logger.error(f"⚡ Forge: Text acquisition failed. Aborting.")
-             # Cleanup
-            try:
-                if course_dir.exists() and course_dir != final_course_dir:
-                    shutil.rmtree(course_dir)
-            except: pass
-            return
-
-        # ATOMIC RENAME: If using staging, move to final location now that all files are ready
-        if course_dir != final_course_dir:
-            try:
-                logger.info(f"⚡ Forge: Atomically moving staging to {final_course_dir}")
-                if final_course_dir.exists():
-                     shutil.rmtree(final_course_dir) # Should not happen if we checked earlier, but safety
-                course_dir.rename(final_course_dir)
-                course_dir = final_course_dir # Update variable for downstream logging/logic
-            except Exception as e:
-                logger.error(f"⚡ Forge: Atomic move failed: {e}")
-                try: shutil.rmtree(course_dir)
-                except: pass
-                return
-
-        logger.info(f"⚡ Forge: Files staged. Waiting for Storyteller to detect '{title}'...")
-
-        # Trigger Storyteller Processing via API
-        st_client = container.storyteller_client()
-        found_uuid = None
-        
-        for _ in range(240): 
-            time.sleep(5)
-            try:
-                results = st_client.search_books(title)
-                for b in results:
-                    # simplistic match, or we could match path if available
-                    if b.get('title') == title:
-                        found_uuid = b.get('uuid')
-                        break
-                if found_uuid: break
-            except Exception as e:
-                logger.debug(f"Forge: Storyteller search error: {e}")
-                pass
-        
-        if found_uuid:
-            logger.info(f"⚡ Forge: Book detected ({found_uuid}). Triggering processing...")
-            try:
-                if hasattr(st_client, 'trigger_processing'):
-                    st_client.trigger_processing(found_uuid)
-                else:
-                    # Fallback if client update pending reload (shouldn't happen in prod but good for safety)
-                    logger.warning("Storyteller client missing trigger_processing method")
-            except Exception as e:
-                 logger.error(f"⚡ Forge: Failed to trigger processing: {e}")
-        else:
-            logger.warning(f"⚡ Forge: Storyteller scan timed out (book not found after 20m). Processing might happen automatically later.")
-
-
-        # Step 3: Cleanup Monitor
-        # We wait for Storyteller to generate the readaloud, then delete our source files.
-        # Storyteller usually outputs 'Book (readaloud).epub' or similar.
-        
-        AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
-        MAX_WAIT = 3600  # 60 minutes
-        POLL_INTERVAL = 30 # Check every 30s
-        elapsed = 0
-
-        logger.info(f"⚡ Forge: Starting cleanup monitor (polling every {POLL_INTERVAL}s, max {MAX_WAIT}s)")
-
-        while elapsed < MAX_WAIT:
-            time.sleep(POLL_INTERVAL)
-            elapsed += POLL_INTERVAL
-
-            try:
-                # Check for readaloud epub in the destination folder
-                # Storyteller naming: OriginalFilename (readaloud).epub
-                readaloud_files = list(course_dir.glob("*readaloud*.epub")) + list(course_dir.glob("*synced*/*.epub"))
-                
-                if readaloud_files:
-                    logger.info(f"⚡ Forge: Readaloud detected: {readaloud_files[0].name}")
-
-                    # [SAFETY CHECK] Verify Storyteller is done with the files via API
-                    # The user reported deletion happening while Storyteller was still scanning/syncing.
-                    if found_uuid:
-                        try:
-                            # Poll status for a bit to ensure it's stable/ready
-                            logger.info(f"⚡ Forge: Verifying processing status for {found_uuid}...")
-                            is_ready = False
-                            for _ in range(12): # Try for 60s
-                                details = st_client.get_book_details(found_uuid)
-                                if details:
-                                    # Check sync status if available, or just existence of readaloud in response
-                                    # But simplistic approach: just wait a safety buffer after file detection
-                                    # If 'processing_status' exists use it, otherwise rely on file + delay.
-                                    pass
-                                time.sleep(5)
-                            
-                            # Explicit Safety Delay (requested by user)
-                            logger.info("⚡ Forge: Safety delay (60s) to allow Storyteller to release file locks...")
-                            time.sleep(60) 
-                        except Exception as e:
-                            logger.warning(f"Forge: Safety check failed: {e}. Proceeding with caution.")
-                            time.sleep(30)
-
-                    # Delete source audio files (ITERATE COURSE_DIR DIRECTLY)
-                    deleted = 0
-                    for f in course_dir.iterdir():
-                        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-                            try:
-                                f.unlink()
-                                deleted += 1
-                            except Exception: pass
-                    
-                    # Delete source epub (ensure we don't delete the readaloud!)
-                    if epub_dest.exists() and epub_dest not in readaloud_files:
-                        try:
-                            epub_dest.unlink()
-                            deleted += 1
-                        except Exception: pass
-
-                    logger.info(f"⚡ Forge: Cleanup complete - deleted {deleted} source files.")
-                    return
-
-                # API check omitted for brevity/simplicity as filesystem check is reliable for local Storyteller
-                
-            except Exception as e:
-                logger.warning(f"⚡ Forge: Cleanup monitor error: {e}")
-
-        logger.warning(f"⚡ Forge: Cleanup monitor timed out after {MAX_WAIT}s for '{title}'. Source files remain.")
-
-    except Exception as e:
-        logger.error(f"❌ Forge: Background task failed for '{title}': {e}", exc_info=True)
-    finally:
-        with forge_lock:
-            active_forge_tasks.discard(title)
 
 
 def forge_process():
@@ -1371,16 +1058,16 @@ def forge_process():
     except Exception as e:
         logger.warning(f"Forge: Could not get ABS metadata for {abs_id}: {e}")
 
-    # Start background thread
-    thread = threading.Thread(
-        target=_forge_background_task,
-        args=(abs_id, text_item, title, author),
-        daemon=True
-    )
-    thread.start()
+    # Start manual forge in service
+    try:
+        container.forge_service().start_manual_forge(abs_id, text_item, title, author)
+        msg = f"Forge started for '{title}'. Processing and cleanup running in background."
+    except Exception as e:
+        logger.error(f"Failed to start forge: {e}")
+        return jsonify({"error": f"Failed to start forge: {e}"}), 500
 
     return jsonify({
-        "message": f"Forge started for '{title}'. Processing and cleanup running in background.",
+        "message": msg,
         "title": title,
         "author": author,
     }), 202
@@ -1399,6 +1086,95 @@ def match():
         # Get booklore_id if available for API-based hash computation
         booklore_id = None
         
+        # [NEW ACTION] Forge & Match
+        if request.form.get('action') == 'forge_match':
+            original_filename = request.form.get('ebook_filename')
+            if not original_filename:
+                return "Original ebook filename required for forge match", 400
+                
+            # 1. Prepare text item (reconstruct from form/source logic or assume passed)
+            # Actually, standard match doesn't have 'text_item' logic fully exposed in form? 
+            # The forge UI sends text_item JSON. 
+            # But here we are arguably coming from the match page. 
+            # If we add "Forge" button, we need to know the SOURCE of the text.
+            # Assuming the form includes necessary details or we can infer.
+            # [SIMPLIFICATION] For now, assume 'ebook_filename' is a valid Local text file from search?
+            # Or is this action coming from the Forge modal? No, "Forge & Match".
+            # If it's from the match page, the user selected an ebook result.
+            # We need to reconstruct the `text_item` dict expected by ForgeService.
+            
+            # Extract source details from form (hidden inputs?)
+            # We'll need to update match.html to send these.
+            source_type = request.form.get('source_type')
+            source_path = request.form.get('source_path') 
+            source_id = request.form.get('source_id') # booklore id, cwa id, etc
+            
+            text_item = {
+                "source": source_type,
+                "path": source_path,
+                "booklore_id": source_id,
+                "cwa_id": source_id,
+                "abs_id": source_id, # ambiguous but handled by specific keys
+                "filename": original_filename
+            }
+            
+            # Map specific keys based on source
+            if source_type == 'ABS': text_item['abs_id'] = source_id
+            if source_type == 'Booklore': text_item['booklore_id'] = source_id
+            if source_type == 'CWA': text_item['cwa_id'] = source_id
+            if source_type == 'Local File': text_item['path'] = source_path
+            
+            # 2. Calculate initial Kosync ID (Original) - strictly for DB record
+            # We use the ORIGINAL file for the ID initially (or forever if tri-linked).
+            kosync_doc_id = get_kosync_id_for_ebook(original_filename, None)
+            
+            if not kosync_doc_id:
+                # If we can't get ID from original (e.g. remote only?), we might rely on the forged one later.
+                # But we need a DB record now.
+                # Generate a temporary or hash-based ID? Or fail?
+                # Failing is safer.
+                logger.warning(f"Could not compute ID for original {original_filename}")
+                # return "Could not compute KOSync ID for original file", 400
+                # Actually, `start_auto_forge_match` can update it? 
+                # Let's proceed with a placeholder or fail.
+                # Use a specific error.
+                pass 
+
+            from src.db.models import Book
+            # Create dummy book record with status='forging'
+            book = Book(
+                abs_id=abs_id,
+                abs_title=manager.get_abs_title(selected_ab),
+                ebook_filename=original_filename,
+                original_ebook_filename=original_filename,
+                kosync_doc_id=kosync_doc_id or f"forging_{abs_id}", # temporary
+                status="forging",
+                duration=manager.get_duration(selected_ab)
+            )
+            database_service.save_book(book)
+            
+            # Start Auto-Forge
+            author = get_abs_author(selected_ab)
+            title = manager.get_abs_title(selected_ab)
+            
+            # Async launch
+            container.forge_service().start_auto_forge_match(
+                abs_id=abs_id,
+                text_item=text_item,
+                title=title,
+                author=author,
+                original_filename=original_filename,
+                original_hash=kosync_doc_id
+            )
+            
+            # Dismiss pending suggestion if it exists (for both ABS ID and potential KOSync ID)
+            # This cleans up the suggestions list immediately upon starting the forge process
+            database_service.dismiss_suggestion(abs_id)
+            if kosync_doc_id:
+                database_service.dismiss_suggestion(kosync_doc_id)
+
+            return redirect(url_for('index'))
+            
         # [NEW] Storyteller Tri-Link Logic
         storyteller_uuid = request.form.get('storyteller_uuid')
         
@@ -2226,6 +2002,15 @@ def get_booklore_libraries():
     libraries = container.booklore_client().get_libraries()
     return jsonify(libraries)
 
+# ---------------- HELPER FUNCTIONS ----------------
+def safe_folder_name(name: str) -> str:
+    """Sanitize folder name for file system safe usage."""
+    invalid = '<>:"/\\|?*'
+    name = html.escape(str(name).strip())[:150]
+    for c in invalid:
+        name = name.replace(c, '_')
+    return name.strip() or "Unknown"
+
 # --- Application Factory ---
 def create_app(test_container=None):
     STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
@@ -2276,8 +2061,7 @@ def create_app(test_container=None):
     
     @app.route('/api/forge/active', methods=['GET'])
     def forge_active_tasks():
-        with forge_lock:
-            return jsonify(list(active_forge_tasks))
+        return jsonify(list(container.forge_service().active_tasks))
 
     # Return both app and container for external reference
     return app, container

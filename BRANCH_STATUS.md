@@ -67,16 +67,20 @@
 
 ## 3. CRITICAL FILE MAP
 
-*(The AI must maintain this list. Add files here before editing them.)*
+**The AI must maintain this list. Add files here before editing them.**
 
 - `src/api/storyteller_api.py` (Main Client)
 - `src/web_server.py` (Routes)
 - `static/js/storyteller-modal.js` (Frontend)
 - `src/sync_clients/storyteller_sync_client.py`
-- `tests/test_trilink.py`
+- `src/services/forge_service.py` (New Service)
+- `tests/test_forge_service.py` (New Tests)
 
 ## 4. CHANGE LOG (Newest Top)
 
+- **[2026-02-17 19:35]**: [Antigravity] Enforced Tri-Link logic in `ForgeService`: Auto-Forge now preserves the `original_hash` (from the source EPUB) instead of recalculating it from the Storyteller artifact. This ensures KOReader compatibility.
+- **[2026-02-17 19:15]**: [Antigravity] Implemented suggestion dismissal in `forge_match` logic to auto-clear pending items.
+- **[2026-02-17 18:55]**: [Antigravity] Refactored Forge logic into `ForgeService`. Implemented "Auto-Forge & Match" pipeline. Verification passed: `test_webserver.py` (10/10), `test_forge_service.py` (2/2).
 - **[2026-02-17 18:30]**: [Antigravity] Verified successful server startup and sync cycle with new API-only architecture.
 - **[2026-02-17 18:25]**: [Antigravity] Removed legacy `storyteller_db.py` and refactored `StorytellerAPIClient` to be the sole client. Updated tests to remove legacy dependencies.
 - **[2026-02-17 18:10]**: [Antigravity] Implemented strict UUID enforcement in backend and frontend. verified with tests.` (no fallbacks).
@@ -117,3 +121,28 @@
   - Updated `configuration.md` with CWA, Split-Port, and Advanced Sync settings.
   - Synced `docker-compose.example.yml` with current architecture.
 - **[2026-02-17 18:45]**: [Antigravity] Fixed 6 failing tests by making Storyteller assertions conditional on `storyteller_uuid` in `base_sync_test.py` and mocking `get_book` in `test_webserver.py` and `test_suggestions_feature.py`. All 127 tests now passing.
+
+## 5. TESTING & DEBUGGING GUIDE
+
+### 5.1 Running Integration Tests
+
+To successfully run `test_webserver.py` and capture full error output without truncation or encoding issues:
+
+1. **Run with Redirection**:
+
+    ```powershell
+    pytest tests/test_webserver.py > result.log 2>&1
+    ```
+
+2. **Read Log Safely** (PowerShell default `type` may fail with encoding):
+
+    ```powershell
+    Get-Content result.log -Encoding UTF8 | Select-Object -First 100
+    ```
+
+    *Note: Python scripts using `open(..., encoding='utf-8', errors='ignore')` are also reliable.*
+
+### 5.2 Common Gotchas
+
+- **`safe_folder_name` Dependency**: `src/web_server.py` relies on `safe_folder_name` being available in the module scope for Jinja context processing. Ensure it is defined before `create_app`.
+- **Dependency Injection**: Tests must mock `forge_service` in the DI container to avoid `AttributeError: 'Mock' object has no attribute 'active_tasks'`.
