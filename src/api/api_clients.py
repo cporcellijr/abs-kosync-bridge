@@ -59,6 +59,7 @@ class ABSClient:
             return False
 
     def get_all_audiobooks(self):
+        if not self.is_configured(): return []
         lib_url = f"{self.base_url}/api/libraries"
         try:
             r = self.session.get(lib_url, timeout=self.timeout)
@@ -74,6 +75,7 @@ class ABSClient:
             return []
 
     def get_audiobooks_for_lib(self, lib: str):
+        if not self.is_configured(): return []
         items_url = f"{self.base_url}/api/libraries/{lib}/items"
         params = {"mediaType": "audiobook"}
         r_items = self.session.get(items_url, params=params, timeout=self.timeout)
@@ -83,6 +85,7 @@ class ABSClient:
         return []
 
     def get_audio_files(self, item_id):
+        if not self.is_configured(): return []
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -108,6 +111,7 @@ class ABSClient:
 
     def get_ebook_files(self, item_id):
         """Get ebook files for an item (from libraryFiles)."""
+        if not self.is_configured(): return []
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -134,6 +138,7 @@ class ABSClient:
 
     def search_ebooks(self, query):
         """Search for ebooks across all book libraries."""
+        if not self.is_configured(): return []
         results = []
         try:
             # Get all libraries first
@@ -215,6 +220,7 @@ class ABSClient:
             return False
 
     def get_item_details(self, item_id):
+        if not self.is_configured(): return None
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -224,6 +230,7 @@ class ABSClient:
         return None
 
     def get_progress(self, item_id):
+        if not self.is_configured(): return None
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -504,10 +511,23 @@ class ABSClient:
 
 class KoSyncClient:
     def __init__(self):
-        self.base_url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
-        self.user = os.environ.get("KOSYNC_USER")
-        self.auth_token = hash_kosync_key(os.environ.get("KOSYNC_KEY", ""))
+        # Configuration is now dynamic via properties
         self.session = requests.Session()
+
+    @property
+    def base_url(self):
+        return os.environ.get("KOSYNC_SERVER", "").rstrip('/')
+
+    @property
+    def user(self):
+        return os.environ.get("KOSYNC_USER")
+
+    @property
+    def auth_token(self):
+        key = os.environ.get("KOSYNC_KEY", "")
+        if not key:
+            return ""
+        return hash_kosync_key(key)
 
     def is_configured(self):
         enabled_val = os.environ.get("KOSYNC_ENABLED", "").lower()
@@ -593,7 +613,8 @@ class KoSyncClient:
             "progress": progress_val,
             "device": "abs-sync-bot",
             "device_id": "abs-sync-bot",
-            "timestamp": int(time.time())
+            "timestamp": int(time.time()),
+            "force": True  # [NEW] Force update to override server-side "furthest wins" logic
         }
         try:
             r = self.session.put(url, headers=headers, json=payload, timeout=10)

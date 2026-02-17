@@ -2,6 +2,36 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Increased Forge Storyteller detection wait time from 5 minutes to 20 minutes to accommodate larger audiobooks.
+- Updated Storyteller API payload to include `fragments`, `progression` (chapter percentage), and `uuid` for better sync compatibility.
+- Added handling for Storyteller `409 Conflict` (timestamp) and `204 No Content` responses.
+
+---
+
+## [6.2.0] - 2026-02-13
+
+### 🚀 Features
+
+#### Suggestion Logic (`b8527a4`)
+
+- Implemented core logic for `PendingSuggestion`
+- Added fallback matching using `difflib` for fuzzy text matching when exact matches fail
+- Added `SuggestionManager` service to handle auto-discovery of unmapped books
+
+### 🐛 Fixes
+
+#### Sync Path Fallback & XPath Support (`5a57355`)
+
+- Fixed `_get_sync_path` to properly handle `None` values
+- Added XPath support for more accurate position tracking in KOReader
+- Improved fallback logic when checking multiple sync paths
+
+---
+
 ## [4.0.0] - 2024-12-31
 
 ### 🚀 Major: Storyteller REST API Integration
@@ -9,6 +39,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 **Breaking Change:** Storyteller sync now uses the REST API instead of direct SQLite writes. This prevents the mobile app from overwriting synced positions.
 
 #### Added
+
 - **Storyteller REST API client** (`storyteller_api.py`)
   - Authenticates via `/api/token` endpoint
   - Updates positions via `/api/books/{uuid}/positions`
@@ -21,11 +52,13 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
   - `STORYTELLER_PASSWORD` - Storyteller password
 
 #### Changed
+
 - `main.py` now imports from `storyteller_api` with SQLite fallback
 - Dockerfile updated to include `storyteller_api.py`
 - Startup logs now indicate which Storyteller mode is active (API vs SQLite)
 
 #### Fixed
+
 - **Mobile app overwrite issue** - Storyteller mobile app's 8-second sync cycle can no longer overwrite positions set by the sync daemon
 - Uses timestamp leapfrog strategy for conflict resolution
 
@@ -36,6 +69,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### 🚀 Major: Hardcover Integration
 
 #### Added
+
 - **Hardcover.app integration** (`hardcover_client.py`)
   - Auto-matches books by ISBN or title/author
   - Syncs reading progress to Hardcover
@@ -46,6 +80,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
   - `HARDCOVER_TOKEN` - API token from hardcover.app/account/api
 
 #### Changed
+
 - Sync cycle now includes Hardcover as fourth sync target
 - Books are auto-matched to Hardcover on first sync
 
@@ -56,6 +91,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### 🚀 Major: Three-Way Sync & Web UI
 
 #### Added
+
 - **Three-way synchronization** between ABS, KOSync, and Storyteller
 - **Web management interface** on port 5757
   - Dashboard with progress visualization
@@ -76,6 +112,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
   - Auto-cleanup after processing
 
 #### Changed
+
 - Uses `token_sort_ratio` for more accurate fuzzy matching
 - LRU cache (capacity=3) prevents memory issues with large libraries
 - Thread-safe JSON database with file locking
@@ -87,6 +124,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### 🎉 Initial Release
 
 #### Features
+
 - Two-way sync between Audiobookshelf and KOSync
 - AI-powered transcription using Whisper
 - Fuzzy text matching for position alignment
@@ -101,6 +139,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### Upgrading to 4.0.0
 
 1. **Add new environment variables** to your `docker-compose.yml`:
+
    ```yaml
    - STORYTELLER_API_URL=http://host.docker.internal:8001
    - STORYTELLER_USER=your_username
@@ -108,6 +147,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
    ```
 
 2. **Rebuild the container:**
+
    ```bash
    docker compose down
    docker compose build --no-cache
@@ -115,6 +155,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
    ```
 
 3. **Verify API mode** in logs:
+
    ```
    ✅ Storyteller API connected at http://host.docker.internal:8001
    Using Storyteller REST API for sync

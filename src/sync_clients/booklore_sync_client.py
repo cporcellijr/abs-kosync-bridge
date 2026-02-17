@@ -26,7 +26,8 @@ class BookloreSyncClient(SyncClient):
         return {'audiobook', 'ebook'}
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
-        epub = book.ebook_filename
+        # FIX: Use original filename if available (Tri-Link), otherwise standard filename
+        epub = book.original_ebook_filename or book.ebook_filename
         bl_pct, _ = self.booklore_client.get_progress(epub)
 
         if bl_pct is None:
@@ -56,7 +57,8 @@ class BookloreSyncClient(SyncClient):
         return None
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
-        epub = book.ebook_filename
+        # FIX: Use original filename for updates too
+        epub = book.original_ebook_filename or book.ebook_filename
         pct = request.locator_result.percentage
         success = self.booklore_client.update_progress(epub, pct, request.locator_result)
         updated_state = {

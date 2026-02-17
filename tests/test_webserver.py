@@ -67,6 +67,9 @@ class MockContainer:
     def books_dir(self):
         return Path(tempfile.gettempdir()) / 'test_books'
 
+    def epub_cache_dir(self):
+        return Path(tempfile.gettempdir()) / 'test_epub_cache'
+
     def sync_clients(self):
         return self.mock_sync_clients
 
@@ -399,6 +402,10 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             self.mock_booklore_client.add_to_shelf.return_value = True
             self.mock_storyteller_client.add_to_collection.return_value = True
 
+            # Configure get_book_by_kosync_id to return None (no existing book to merge)
+            self.mock_database_service.get_book_by_kosync_id.return_value = None
+            self.mock_database_service.get_book.return_value = None
+            
             # Make HTTP POST request
             response = self.client.post('/match', data={
                 'audiobook_id': 'test-audiobook-123',
@@ -498,6 +505,25 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         finally:
             src.web_server.render_template = original_render
+
+    def test_clear_stale_suggestions_api(self):
+        """Test the clear-stale-suggestions API endpoint."""
+        # Setup mock return value
+        self.mock_database_service.clear_stale_suggestions.return_value = 5
+        
+        # Make POST request
+        response = self.client.post('/api/suggestions/clear_stale')
+        
+        # Verify response
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['count'], 5)
+        
+        # Verify service call
+        self.mock_database_service.clear_stale_suggestions.assert_called_once()
+        
+        print("[OK] Clear stale suggestions API test passed")
 
 
 class FindEbookFileTest(unittest.TestCase):

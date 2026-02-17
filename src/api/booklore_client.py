@@ -14,62 +14,108 @@ from src.sync_clients.sync_client_interface import LocatorResult
 logger = logging.getLogger(__name__)
 
 class BookloreClient:
-    def __init__(self):
+    def __init__(self, database_service=None):
         self.base_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
         self.username = os.environ.get("BOOKLORE_USER")
         self.password = os.environ.get("BOOKLORE_PASSWORD")
-        self._book_cache = {}
-        self._book_id_cache = {}  # Maps book_id -> book_info for quick lookups
+        self.db = database_service
+        
+        # In-memory cache for performance (populated from DB)
+        self._book_cache = {} 
+        self._book_id_cache = {}
         self._cache_timestamp = 0
+        
         self._token = None
         self._token_timestamp = 0
         self._token_max_age = 300
         self.session = requests.Session()
 
-        # Cache file path
-        self.cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
+        # Legacy Cache file path (for migration only)
+        self.legacy_cache_file = Path(os.environ.get("DATA_DIR", "/data")) / "booklore_cache.json"
 
-        # Load cache on init
+        # Load cache from DB (and migrate if needed)
+        self.target_library_id = os.environ.get("BOOKLORE_LIBRARY_ID")
         self._load_cache()
 
     def _load_cache(self):
-        """Load cache from disk."""
-        if not self.cache_file.exists():
-            return
+        """Load cache from DB, migrating legacy JSON if needed."""
+        # 1. Migrate Legacy JSON if it exists and DB is empty
+        if self.legacy_cache_file.exists():
+            try:
+                # Check if DB is empty to avoid overwriting newer SQL data
+                if self.db and not self.db.get_all_booklore_books():
+                    logger.info("📦 Booklore: Migrating legacy JSON cache to SQLite...")
+                    with open(self.legacy_cache_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        books = data.get('books', {})
+                        count = 0
+                        for filename, book_info in books.items():
+                            try:
+                                from src.db.models import BookloreBook
+                                import json as pyjson
+                                
+                                # Convert book_info to BookloreBook model
+                                b_model = BookloreBook(
+                                    filename=filename,
+                                    title=book_info.get('title'),
+                                    authors=book_info.get('authors'),
+                                    raw_metadata=pyjson.dumps(book_info)
+                                )
+                                self.db.save_booklore_book(b_model)
+                                count += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to migrate book {filename}: {e}")
+                        
+                        logger.info(f"✅ Booklore: Migrated {count} books to database.")
+                        
+                    # Rename legacy file to .bak after successful migration
+                    try:
+                        self.legacy_cache_file.rename(self.legacy_cache_file.with_suffix('.json.bak'))
+                        logger.info("📦 Booklore: Legacy cache file renamed to .bak")
+                    except Exception as e:
+                        logger.warning(f"Could not rename legacy cache file: {e}")
+            except Exception as e:
+                logger.error(f"Booklore migration failed: {e}")
 
-        try:
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self._book_cache = data.get('books', {})
-                self._cache_timestamp = data.get('timestamp', 0)
-
-                # Rebuild ID cache
+        # 2. Load from DB into memory
+        if self.db:
+            try:
+                db_books = self.db.get_all_booklore_books()
+                self._book_cache = {}
                 self._book_id_cache = {}
-                for book in self._book_cache.values():
-                    uid = book.get('id')
-                    if uid:
-                        self._book_id_cache[uid] = book
-
-            logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from disk cache")
-        except Exception as e:
-            logger.warning(f"Failed to load Booklore cache: {e}")
-            self._book_cache = {}
+                
+                for db_book in db_books:
+                    # Parse raw metadata back to dict
+                    book_info = db_book.raw_metadata_dict
+                    # Ensure minimal fields exist
+                    if not book_info:
+                        book_info = {
+                            'fileName': db_book.filename,
+                            'title': db_book.title,
+                            'authors': db_book.authors
+                        }
+                    
+                    self._book_cache[db_book.filename] = book_info
+                    
+                    # Update ID cache
+                    bid = book_info.get('id')
+                    if bid:
+                        self._book_id_cache[bid] = book_info
+                        
+                # Set to 0 to force a refresh/validation against API on next access
+                self._cache_timestamp = 0
+                logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from database")
+            except Exception as e:
+                logger.error(f"Failed to load Booklore cache from DB: {e}")
+                self._book_cache = {}
 
     def _save_cache(self):
-        """Save cache to disk."""
-        try:
-            data = {
-                'timestamp': self._cache_timestamp,
-                'books': self._book_cache
-            }
-            # Atomic write
-            temp_file = self.cache_file.with_suffix('.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f)
-            temp_file.replace(self.cache_file)
-            logger.debug("Saved Booklore cache to disk")
-        except Exception as e:
-            logger.error(f"Failed to save Booklore cache: {e}")
+        """
+        Save cache to DB.
+        Note: We now save individual books on update, so this is mostly a no-op 
+        or used for bulk updates/timestamp management.
+        """
+        pass # Database persistence is handled atomically per book elsewhere
 
     def _get_fresh_token(self):
         if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
@@ -154,6 +200,43 @@ class BookloreClient:
         logger.warning("❌ Booklore connection failed: could not obtain auth token")
         return False
 
+    def get_libraries(self):
+        """Fetch all available libraries to help user configure the bridge."""
+        self._get_fresh_token()
+        
+        # Strategy 1: Try direct libraries endpoint
+        try:
+            response = self._make_request("GET", "/api/v1/libraries")
+            if response and response.status_code == 200:
+                libs = response.json()
+                # Return standardized list
+                return [{'id': l.get('id'), 'name': l.get('name'), 'path': l.get('root', {}).get('path') or l.get('path')} for l in libs]
+        except Exception as e:
+            logger.debug(f"Booklore: Failed to fetch /api/v1/libraries: {e}")
+
+        # Strategy 2: Fallback - Scan a few books to find unique libraries
+        try:
+            logger.info("Booklore: Scanning books to discover libraries...")
+            response = self._make_request("GET", "/api/v1/books?page=0&size=50")
+            if response and response.status_code == 200:
+                data = response.json()
+                books = data if isinstance(data, list) else data.get('content', [])
+                
+                unique_libs = {}
+                for b in books:
+                    lid = b.get('libraryId')
+                    if lid and lid not in unique_libs:
+                        unique_libs[lid] = {
+                            'id': lid,
+                            'name': b.get('libraryName', 'Unknown Library'),
+                            'path': 'Path not available in book scan'
+                        }
+                return list(unique_libs.values())
+        except Exception as e:
+            logger.error(f"Booklore: Failed to discover libraries via book scan: {e}")
+            
+        return []
+
     def _fetch_book_detail(self, book_id, token):
         """Fetch individual book details to get fileName.
 
@@ -208,7 +291,25 @@ class BookloreClient:
             
             if not current_batch:
                 break  # No more books, we are done
-                
+            
+            # Filter by libraryId if configured
+            if self.target_library_id and current_batch:
+                filtered_batch = []
+                for b in current_batch:
+                    lid = b.get('libraryId')
+                    lname = b.get('libraryName', 'Unknown')
+
+                    # Robust comparison (str vs int)
+                    if lid is not None and str(lid) == str(self.target_library_id):
+                        filtered_batch.append(b)
+                    elif lid is None:
+                        # Conservative: Keep if ID missing, verify later
+                        filtered_batch.append(b)
+                    else:
+                        # Log exclusion at DEBUG
+                        logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
+                current_batch = filtered_batch
+
             all_books_list.extend(current_batch)
             logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
             
@@ -224,10 +325,87 @@ class BookloreClient:
             self._book_cache = {}
             self._book_id_cache = {}
             self._cache_timestamp = time.time()
-            self._save_cache()
+            self._save_cache() # No-op now
             return True
 
         logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+
+        # --- Pruning Stale Data ---
+        if self.db and all_books_list:
+            # 1. Map valid IDs to their live data for strict verification
+            live_map = {str(b['id']): b for b in all_books_list if b.get('id')}
+            
+            # 2. Check existing cache for ghosts
+            cached_filenames = list(self._book_cache.keys())
+            stale_count = 0
+            
+            for fname in cached_filenames:
+                book_info = self._book_cache[fname]
+                bid = book_info.get('id')
+                
+                is_stale = False
+                
+                # Check 1: ID Validity
+                if not bid or str(bid) not in live_map:
+                    is_stale = True
+                    logger.debug(f"   Pruning {fname}: ID {bid} not in live map")
+                else:
+                    # Check 2: Content Consistency
+                    
+                    # A. Filename Check
+                    # Ideally, we compare the Live filename with the Cached filename.
+                    # Problem 1: The Live API 'List' view might return empty filenames (Live: '').
+                    # Problem 2: Cache Key 'fname' is lowercase, but real filename is in book_info['fileName'].
+                    
+                    live_book = live_map[str(bid)]
+                    raw_live_filename = live_book.get('fileName', '')
+                    # Clean filename to ensure we don't treat whitespace/control chars as valid names
+                    live_filename = str(raw_live_filename).strip() if raw_live_filename else ''
+                    
+                    cached_real_filename = book_info.get('fileName', fname)
+                    
+                    # Only prune if we HAVE a valid, non-empty live filename to compare against
+                    if live_filename:
+                        # Strict check: If API returns explicit filename, it must match.
+                        # We compare against the REAL cached filename (preserving case if possible)
+                        # Normalize both sides to be safe (strip)
+                        if live_filename != str(cached_real_filename).strip():
+                             is_stale = True
+                             # Use repr() to reveal any invisible characters/whitespace in debug logs
+                             logger.debug(f"   Pruning {fname}: Filename mismatch. Live: {repr(raw_live_filename)} vs Cache: {repr(cached_real_filename)}")
+                    else:
+                        # B. Fallback Title Check (if filename is missing in List View)
+                        # If titles differ significantly, it's likely a reused ID (Ghost)
+                        live_title = live_book.get('title')
+                        cached_title = book_info.get('title')
+                        
+                        if live_title and cached_title:
+                            # Normalize for safety (ignore case/whitespace/symbols)
+                            # This catches "The Book" vs "Another Book" (ID Reuse)
+                            lt_norm = self._normalize_string(live_title)
+                            ct_norm = self._normalize_string(cached_title)
+                            
+                            # Use a generous equality check to avoid false positives on minor edits
+                            if lt_norm and ct_norm and lt_norm != ct_norm:
+                                 is_stale = True
+                                 logger.debug(f"   Pruning {fname}: Title mismatch (ID Reuse?). Live: '{live_title}' vs Cache: '{cached_title}'")
+
+                if is_stale:
+                    stale_count += 1
+                    # Remove from Memory
+                    self._book_cache.pop(fname, None)
+                    if bid:
+                        self._book_id_cache.pop(bid, None)
+                    
+                    # Remove from Database
+                    try:
+                        # Use the CACHE KEY (fname) which corresponds to the database `filename` column (lowercase)
+                        self.db.delete_booklore_book(fname)
+                    except Exception as e:
+                        logger.error(f"Failed to prune stale book {fname}: {e}")
+
+            if stale_count > 0:
+                logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
 
         # --- Proceed with Step 2: Detail Fetching (Same as before) ---
         
@@ -259,11 +437,17 @@ class BookloreClient:
                  pass
 
         self._cache_timestamp = time.time()
-        self._save_cache()
+        # self._save_cache() # DB is updated inside _process_book_detail
         return True
 
     def _process_book_detail(self, detail):
         """Process a book detail response and add to cache."""
+        # Library ID Filter
+        if self.target_library_id:
+            lid = detail.get('libraryId')
+            if lid is not None and str(lid) != str(self.target_library_id):
+                return None
+
         filename = detail.get('fileName', '')
         if not filename:
             return
@@ -297,8 +481,29 @@ class BookloreClient:
             'koreaderProgress': detail.get('koreaderProgress'),
         }
 
+        self._book_cache[filename] = book_info # Filename case sensitivity might issue used to be filename.lower()
+        # The key in _book_cache seems to be filename (exact) or lower? 
+        # Original code line 300: self._book_cache[filename.lower()] = book_info
+        # Let's keep it consistent with what we see in database migration
+        
         self._book_cache[filename.lower()] = book_info
         self._book_id_cache[detail['id']] = book_info
+
+        # Persist to DB
+        if self.db:
+            try:
+                from src.db.models import BookloreBook
+                import json as pyjson
+                
+                b_model = BookloreBook(
+                    filename=filename.lower(), # Store key as lowercase filename for consistency
+                    title=title,
+                    authors=author_str,
+                    raw_metadata=pyjson.dumps(book_info)
+                )
+                self.db.save_booklore_book(b_model)
+            except Exception as e:
+                logger.error(f"Failed to persist book {filename} to DB: {e}")
 
         return None
 
@@ -416,16 +621,24 @@ class BookloreClient:
 
         headers = {"Authorization": f"Bearer {token}"}
         url = f"{self.base_url}/api/v1/books/{book_id}/download"
+        logger.debug(f"Downloading book from {url}")
 
         try:
             response = self.session.get(url, headers=headers, timeout=60)
-            if response.status_code == 200:
-                return response.content
-            else:
-                logger.error(f"Booklore download failed: {response.status_code}")
+            
+            # Fallback for newer Booklore versions or different configurations
+            if response.status_code == 404:
+                file_url = f"{self.base_url}/api/v1/books/{book_id}/file"
+                logger.debug(f"404 on /download, trying fallback: {file_url}")
+                response = self.session.get(file_url, headers=headers, timeout=60)
+
+            if response.status_code != 200:
+                logger.error(f"Failed to download book: {response.status_code}")
                 return None
+
+            return response.content
         except Exception as e:
-            logger.error(f"Booklore download error: {e}")
+            logger.error(f"Download error: {e}")
             return None
 
     def get_progress(self, ebook_filename):

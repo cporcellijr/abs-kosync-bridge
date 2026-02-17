@@ -25,6 +25,8 @@ class LocatorResult:
     fragment: Optional[str] = None
     perfect_ko_xpath: Optional[str] = None
     css_selector: Optional[str] = None
+    chapter_progress: Optional[float] = None
+    fragments: Optional[list] = None
 
 @dataclass
 class UpdateProgressRequest:
@@ -121,5 +123,8 @@ class SyncClient:
             cfi=locator_result.cfi,
             href=locator_result.href,
             fragment=locator_result.fragment,
-            perfect_ko_xpath=perfect_xpath
+            perfect_ko_xpath=perfect_xpath,
+            css_selector=locator_result.css_selector,
+            chapter_progress=locator_result.chapter_progress,
+            fragments=locator_result.fragments
         )

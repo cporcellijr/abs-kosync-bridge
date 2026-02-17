@@ -12,6 +12,7 @@ UPDATED VERSION with:
 """
 
 import json
+import requests
 import logging
 import os
 import shutil
@@ -19,18 +20,14 @@ import subprocess
 import gc
 from pathlib import Path
 from typing import Optional
-
-from faster_whisper import WhisperModel
-import requests
 import math
-from collections import OrderedDict
 import re
+from collections import OrderedDict
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
 from src.utils.transcription_providers import get_transcription_provider
 from src.utils.polisher import Polisher
 # We keep the import for type hinting, but we don't instantiate it directly anymore
-from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 
@@ -328,8 +325,8 @@ class AudioTranscriber:
         if new_files:
             try:
                 file_path.unlink()
-            except:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove original file after splitting: {e}")
 
         return new_files if new_files else [file_path]
 
@@ -361,8 +358,8 @@ class AudioTranscriber:
                 if progress.get('chunks_completed', 0) > 0 and progress.get('done', False):
                     logger.info(f"⚡ Resuming from completed local cache for {abs_id}")
                     return progress.get('transcript', [])
-             except:
-                 pass
+             except (json.JSONDecodeError, OSError) as e:
+                 logger.debug(f"Failed to read progress cache file: {e}")
 
         MAX_DURATION_SECONDS = 45 * 60
 

@@ -7,6 +7,7 @@ from alembic import context
 
 # Import our models
 import sys
+import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -15,6 +16,13 @@ from src.db.models import Base
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# [FIX] Handle Windows vs Linux/Docker path mismatch for SQLite
+# If URL is absolute unix path ///data/ and we are on Windows, fallback to relative path
+url = config.get_main_option("sqlalchemy.url")
+if url and url.startswith("sqlite:////data/") and os.name == 'nt':
+    new_url = url.replace("sqlite:////data/", "sqlite:///data/")
+    config.set_main_option("sqlalchemy.url", new_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

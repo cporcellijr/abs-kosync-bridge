@@ -169,15 +169,24 @@
             border-radius: 12px;
             padding: 24px;
             margin: 30px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .search-section form {
+            display: flex;
+            gap: 0;
+            max-width: 800px;
+            width: 100%;
         }
 
         .search-box {
-            width: 100%;
-            max-width: 600px;
+            flex: 1;
             padding: 16px 20px;
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border-radius: 8px 0 0 8px;
             color: #ffffff;
             font-size: 16px;
             transition: all 0.3s;
@@ -191,6 +200,11 @@
 
         .search-box::placeholder {
             color: rgba(255, 255, 255, 0.4);
+        }
+
+        .search-section .btn {
+            border-radius: 0 8px 8px 0;
+            margin-top: 0 !important;
         }
 
         /* Section Styling */
@@ -234,6 +248,7 @@
             transition: all 0.3s;
             background: rgba(255, 255, 255, 0.03);
             overflow: hidden;
+            position: relative;
         }
 
         .audiobook-option:hover {
@@ -243,9 +258,66 @@
         }
 
         .audiobook-option.selected {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.15);
-            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+            border: 3px solid #6366f1 !important;
+            background: rgba(102, 126, 234, 0.1);
+            box-shadow: none;
+        }
+
+        /* Checkmark badge for selected items */
+        .audiobook-option.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            background: #6366f1;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+        }
+
+        /* Ghost card styling for None/Skip option */
+        .ghost-card {
+            border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+            background: transparent !important;
+        }
+
+        .ghost-card:hover {
+            border-color: rgba(102, 126, 234, 0.4) !important;
+            background: rgba(102, 126, 234, 0.05) !important;
+        }
+
+        .ghost-card.selected {
+            border-color: rgba(102, 126, 234, 0.6) !important;
+            background: rgba(102, 126, 234, 0.08) !important;
+        }
+
+        .ghost-card-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 200px;
+            gap: 12px;
+        }
+
+        .ghost-icon {
+            font-size: 48px;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .ghost-text {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 600;
         }
 
         .audiobook-cover-container {
@@ -264,12 +336,17 @@
         .audiobook-cover-placeholder {
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
+            color: rgba(255, 255, 255, 0.6);
             font-size: 56px;
+        }
+
+        /* Specific styling for ebook placeholders */
+        .eb-option .audiobook-cover-placeholder {
+            background: linear-gradient(135deg, #2d3436 0%, #1e272e 100%);
         }
 
         .audiobook-info {
@@ -289,7 +366,12 @@
         }
 
         input[type="radio"] {
-            display: none;
+            opacity: 0;
+            position: absolute;
+            width: 0;
+            height: 0;
+            margin: 0;
+            padding: 0;
         }
 
         /* Ebook Dropdown */
@@ -388,6 +470,124 @@
                 margin-top: 16px !important;
             }
         }
+
+        /* 3-Column Layout */
+        .selection-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        /* Stepper line connecting numbered circles */
+        .selection-container::before {
+            content: '';
+            position: absolute;
+            top: 35px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg,
+                    transparent 0%,
+                    rgba(102, 126, 234, 0.3) 15%,
+                    rgba(102, 126, 234, 0.3) 85%,
+                    transparent 100%);
+            z-index: 0;
+        }
+
+        @media (max-width: 1024px) {
+            .selection-container {
+                grid-template-columns: 1fr;
+            }
+
+            /* Hide stepper line on mobile */
+            .selection-container::before {
+                display: none;
+            }
+        }
+
+        .section {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 24px;
+            height: 100%;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Alternating backgrounds for visual separation */
+        .section:nth-child(2) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .section h3 {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 16px;
+        }
+
+        /* Scrollable content areas */
+        .scrollable-content {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 600px;
+            padding-right: 8px;
+            /* Space for scrollbar */
+        }
+
+        /* CustomScrollbar */
+        .scrollable-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .scrollable-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .scrollable-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .scrollable-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Source badge */
+        .source-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+        }
+
+        .source-badge.booklore {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+        }
+
+        .source-badge.abs {
+            background: rgba(102, 126, 234, 0.2);
+            color: #93a5f6;
+        }
+
+        .source-badge.cwa {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ffb74d;
+        }
+
+        .source-badge.localfile {
+            background: rgba(156, 39, 176, 0.2);
+            color: #ce93d8;
+        }
     </style>
 </head>
 
@@ -459,79 +659,211 @@
         </div>
 
         <form method="POST" action="/match" id="mappingForm">
-            <!-- Audiobook Selection -->
-            <div class="section">
-                <h3><span class="section-number">1</span>Select Audiobook</h3>
-                {% if audiobooks %}
-                <div class="audiobook-grid">
-                    {% for ab in audiobooks %}
-                    <label class="audiobook-option" onclick="selectAudiobook(this, '{{ ab.id }}')">
-                        <input type="radio" name="audiobook_id" value="{{ ab.id }}" required>
-                        <div class="audiobook-cover-container">
-                            {% if ab.cover_url %}
-                            <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
-                                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
-                            <div class="audiobook-cover-placeholder hidden">🎧</div>
-                            {% else %}
-                            <div class="audiobook-cover-placeholder">🎧</div>
-                            {% endif %}
-                        </div>
-                        <div class="audiobook-info">
-                            <div class="audiobook-title">{{ get_title(ab) }}</div>
-                        </div>
-                    </label>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">🎧</div>
-                    <h3>No audiobooks found</h3>
-                    <p>Try a different search term</p>
-                </div>
-                {% endif %}
-            </div>
+            <div class="selection-container">
 
-            <!-- Ebook Selection -->
-            <div class="section">
-                <h3><span class="section-number">2</span>Select Ebook</h3>
-                {% if ebooks %}
-                <select name="ebook_filename" required title="Select ebook to link">
-                    <option value="">-- Choose Ebook --</option>
-                    {% for eb in ebooks %}
-                    <option value="{{ eb.name }}">{{ eb.display_name }}</option>
-                    {% endfor %}
-                </select>
-                {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">📖</div>
-                    <h3>No ebooks found</h3>
-                    <p>Try a different search term</p>
+                <!-- GRID COL 1: Audiobook -->
+                <div class="section">
+                    <h3><span class="section-number">1</span>Audiobook (Required)</h3>
+                    <div class="scrollable-content">
+                        {% if audiobooks %}
+                        <div class="audiobook-grid">
+                            {% set single_match = audiobooks|length == 1 %}
+                            {% for ab in audiobooks %}
+                            <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match
+                                    %}checked{% endif %}>
+                                <div class="audiobook-cover-container">
+                                    {% if ab.cover_url %}
+                                    <img src="{{ ab.cover_url }}" alt="Cover" class="audiobook-cover"
+                                        onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
+                                    <div class="audiobook-cover-placeholder hidden">🎧</div>
+                                    {% else %}
+                                    <div class="audiobook-cover-placeholder">🎧</div>
+                                    {% endif %}
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">{{ get_title(ab) }}</div>
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🎧</div>
+                            <h3>No audiobooks found</h3>
+                            <p>Try a different search term</p>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
-                {% endif %}
+
+                <!-- GRID COL 2: Storyteller (Preferred) -->
+                <div class="section">
+                    <h3><span class="section-number">2</span>Storyteller (Preferred)</h3>
+                    <div class="scrollable-content">
+                        {% if storyteller_books %}
+                        <div class="audiobook-grid">
+                            {% set single_st_match = storyteller_books|length == 1 %}
+                            <!-- None Option -->
+                            <label
+                                class="audiobook-option st-option ghost-card {% if not single_st_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'storyteller_uuid')">
+                                <input type="radio" name="storyteller_uuid" value="" {% if not single_st_match
+                                    %}checked{% endif %}>
+                                <div class="ghost-card-content">
+                                    <div class="ghost-icon">⊘</div>
+                                    <div class="ghost-text">None / Skip</div>
+                                </div>
+                            </label>
+
+                            {% for book in storyteller_books %}
+                            <label class="audiobook-option st-option {% if single_st_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'storyteller_uuid')">
+                                <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}" {% if
+                                    single_st_match %}checked{% endif %}>
+                                <div class="audiobook-cover-container">
+                                    {% if book.cover_url %}
+                                    <div class="audiobook-cover-placeholder">⚡</div>
+                                    {% else %}
+                                    <div class="audiobook-cover-placeholder">⚡</div>
+                                    {% endif %}
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">{{ book.title }}</div>
+                                    <div class="audiobook-title" style="font-size: 12px; color: #aaa;">{{
+                                        book.authors|join(', ') }}</div>
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⚡</div>
+                            <h3>No Storyteller books</h3>
+                            <p>Select 'None' to use standard ebook</p>
+                        </div>
+                        <input type="hidden" name="storyteller_uuid" value="">
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- GRID COL 3: Standard Ebook (Fallback) -->
+                <div class="section">
+                    <h3><span class="section-number">3</span>Standard Ebook</h3>
+                    <div class="scrollable-content">
+                        {% if ebooks %}
+                        <div class="audiobook-grid">
+                            {% set single_eb_match = ebooks|length == 1 %}
+                            {% for eb in ebooks %}
+                            <label class="audiobook-option eb-option {% if single_eb_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'ebook_filename')">
+                                <input type="radio" name="ebook_filename" value="{{ eb.name }}" {% if single_eb_match
+                                    %}checked{% endif %}>
+                                <div class="audiobook-cover-container">
+                                    <div class="audiobook-cover-placeholder"
+                                        style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);">📖</div>
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title" title="{{ eb.display_name }}">{{ eb.display_name }}
+                                    </div>
+                                    {% if eb.authors %}
+                                    <div class="audiobook-title" style="font-size: 12px; color: #aaa; margin-top: 4px;">
+                                        {{ eb.authors }}</div>
+                                    {% endif %}
+                                    {% if eb.source %}
+                                    <div class="card-meta">
+                                        {% set badge_cls = eb.source.lower().replace(' ', '') %}
+                                        <span class="source-badge {{ badge_cls }}">{{ eb.source }}</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📖</div>
+                            <h3>No ebooks found</h3>
+                            <p>Try a different search term</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
             </div>
 
             <!-- Submit Button -->
-            {% if audiobooks and ebooks %}
             <div class="submit-container">
-                <button type="submit" class="btn btn-success">
+                <button type="submit" class="btn btn-success" id="submitBtn" disabled>
                     ✅ Create Mapping
                 </button>
+                <div id="validationMsg" style="margin-top: 10px; color: #ff6b6b; display: none;">
+                    Please select an Audiobook and a Text Source (Storyteller or Ebook)
+                </div>
             </div>
-            {% endif %}
         </form>
     </div>
 
     <script>
-        function selectAudiobook(element, id) {
-            // Remove selected class from all options
-            document.querySelectorAll('.audiobook-option').forEach(el => {
-                el.classList.remove('selected');
-            });
+        function selectItem(element, groupName) {
+            // Remove selected class from all options in this group
+            let wrapperClass = '';
+            if (groupName === 'audiobook_id') wrapperClass = '.ab-option';
+            if (groupName === 'storyteller_uuid') wrapperClass = '.st-option';
+            if (groupName === 'ebook_filename') wrapperClass = '.eb-option';
+
+            if (wrapperClass) {
+                document.querySelectorAll(wrapperClass).forEach(el => {
+                    el.classList.remove('selected');
+                });
+            }
+
             // Add selected class to clicked option
             element.classList.add('selected');
             // Check the radio button
-            element.querySelector('input[type="radio"]').checked = true;
+            const radio = element.querySelector('input[type="radio"]');
+            if (radio) radio.checked = true;
+
+            validateForm();
         }
+
+        function validateForm() {
+            const ab = document.querySelector('input[name="audiobook_id"]:checked');
+            const st = document.querySelector('input[name="storyteller_uuid"]:checked');
+            const eb = document.querySelector('input[name="ebook_filename"]:checked');
+
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('validationMsg');
+
+            let hasAudio = !!ab;
+            // Valid text source if: 
+            // 1. Storyteller UUID is selected AND NOT EMPTY
+            // 2. OR Ebook Filename is selected
+            let stVal = st ? st.value : "";
+            let ebVal = eb ? eb.value : "";
+
+            let hasText = (stVal !== "") || (ebVal !== "");
+
+            if (hasAudio && hasText) {
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                msg.style.display = "none";
+            } else {
+                btn.disabled = true;
+                btn.style.opacity = "0.5";
+                if (hasAudio && !hasText) {
+                    msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
+                    msg.style.display = "block";
+                } else if (!hasAudio) {
+                    msg.textContent = "Please select an Audiobook";
+                    msg.style.display = "block";
+                }
+            }
+        }
+
+        // Initial check
+        validateForm();
     </script>
 </body>
 

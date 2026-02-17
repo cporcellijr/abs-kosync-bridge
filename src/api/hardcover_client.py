@@ -124,6 +124,30 @@ class HardcoverClient:
 
         return None
 
+    def _extract_authors_from_cached(self, cached_contributors) -> list[str]:
+        """
+        Parses the JSON list of contributors from Hardcover API.
+        Handles both formats: {'author': {'name': '...'}} or {'name': '...'}
+        """
+        if not cached_contributors or not isinstance(cached_contributors, list):
+            return []
+
+        authors = []
+        for item in cached_contributors:
+            if not isinstance(item, dict):
+                continue
+            
+            # Case 1: {'author': {'name': 'Author Name'}}
+            if "author" in item and isinstance(item["author"], dict):
+                name = item["author"].get("name")
+                if name:
+                    authors.append(name)
+            # Case 2: {'name': 'Author Name'}
+            elif "name" in item:
+                authors.append(item["name"])
+        
+        return authors
+
     def search_by_isbn(self, isbn: str) -> Optional[Dict]:
         """Search by ISBN-13 or ISBN-10."""
         isbn_key = "isbn_13" if len(str(isbn)) == 13 else "isbn_10"
@@ -191,11 +215,7 @@ class HardcoverClient:
                 id
                 title
                 slug
-                contributions {
-                    author {
-                        name
-                    }
-                }
+                cached_contributors
             }
         }
         """
@@ -216,11 +236,10 @@ class HardcoverClient:
             # Author Score
             author_score = 0.0
             if clean_input_author:
-                # Get all authors for this book
+                # Get all authors for this book from cached_contributors
                 authors = [
-                    c["author"]["name"].lower().strip()
-                    for c in book.get("contributions", [])
-                    if c.get("author")
+                    a.lower().strip()
+                    for a in self._extract_authors_from_cached(book.get("cached_contributors"))
                 ]
                 if authors:
                     # Find best similarity among all authors
@@ -314,19 +333,16 @@ class HardcoverClient:
         query = """
         query ($bookId: Int!) {
             books_by_pk(id: $bookId) {
-                contributions(limit: 1) {
-                    author {
-                        name
-                    }
-                }
+                cached_contributors
             }
         }
         """
         result = self.query(query, {"bookId": book_id})
         if result and result.get("books_by_pk"):
-            contributions = result["books_by_pk"].get("contributions", [])
-            if contributions and contributions[0].get("author"):
-                return contributions[0]["author"].get("name")
+            cached_contributors = result["books_by_pk"].get("cached_contributors", [])
+            authors = self._extract_authors_from_cached(cached_contributors)
+            if authors:
+                return authors[0]
         return None
 
     def get_book_editions(self, book_id: int) -> list:

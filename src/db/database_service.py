@@ -166,8 +166,8 @@ class DatabaseService:
 
             if existing:
                 # Update existing book
-                for attr in ['abs_title', 'ebook_filename', 'kosync_doc_id',
-                           'transcript_file', 'status', 'duration']:
+                for attr in ['abs_title', 'ebook_filename', 'original_ebook_filename', 'kosync_doc_id',
+                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
@@ -181,6 +181,31 @@ class DatabaseService:
                 session.refresh(book)
                 session.expunge(book)
                 return book
+
+    def migrate_book_data(self, old_abs_id: str, new_abs_id: str):
+        """
+        Migrate all associated data (States, Jobs, Links) from one book ID to another.
+        Used when merging an existing ebook-only entry into a new audiobook entry.
+        """
+        with self.get_session() as session:
+            try:
+                # Migrate Foreign Keys
+                # synchronize_session=False is required for updates on collections
+                session.query(State).filter(State.abs_id == old_abs_id).update({State.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(Job).filter(Job.abs_id == old_abs_id).update({Job.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(KosyncDocument).filter(KosyncDocument.linked_abs_id == old_abs_id).update({KosyncDocument.linked_abs_id: new_abs_id}, synchronize_session=False)
+                
+                # Cleanup non-migratable data (Alignment/Hardcover)
+                from .models import BookAlignment # Import here to avoid circulars if any, though likely safe at top
+                try:
+                    session.query(BookAlignment).filter(BookAlignment.abs_id == old_abs_id).delete(synchronize_session=False)
+                    session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == old_abs_id).delete(synchronize_session=False)
+                except Exception: pass
+                
+                logger.info(f"✅ Migrated data from {old_abs_id} to {new_abs_id}")
+            except Exception as e:
+                logger.error(f"Failed to migrate book data: {e}")
+                raise
 
     def delete_book(self, abs_id: str) -> bool:
         """Delete a book and all its related data."""
@@ -422,7 +447,7 @@ class DatabaseService:
         with self.get_session() as session:
             doc.last_updated = datetime.utcnow()
             merged = session.merge(doc)
-            session.commit()
+            session.flush()
             session.refresh(merged)
             session.expunge(merged)
             return merged
@@ -466,7 +491,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = abs_id
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -479,7 +503,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = None
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -491,7 +514,6 @@ class DatabaseService:
             ).first()
             if doc:
                 session.delete(doc)
-                session.commit()
                 return True
             return False
 
@@ -567,6 +589,16 @@ class DatabaseService:
                 session.expunge(suggestion)
                 return suggestion
 
+    def is_hash_linked_to_device(self, doc_hash: str) -> bool:
+        """Check if a document hash is actively linked to a device document."""
+        if not doc_hash:
+            return False
+            
+        with self.get_session() as session:
+            return session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == doc_hash
+            ).count() > 0
+
     def get_all_pending_suggestions(self) -> List[PendingSuggestion]:
         """Get all pending suggestions."""
         with self.get_session() as session:
@@ -599,6 +631,35 @@ class DatabaseService:
                 suggestion.status = 'ignored'
                 return True
             return False
+
+    def clear_stale_suggestions(self) -> int:
+        """
+        Delete suggestions that are not for active books in our bridge.
+        A suggestion is 'stale' if its source_id (ABS ID) is not in our books table.
+        """
+        with self.get_session() as session:
+            # Subquery to get all IDs in books table
+            # We preserve ANY suggestion that corresponds to a book we tracking,
+            # regardless of its status. This ensures that if the user matched it
+            # or it's pending transcription, we don't wipe it accidentally.
+            # But junk suggestions for books they haven't touched are wiped.
+            from sqlalchemy import select
+            
+            # Using raw delete with subquery for efficiency
+            # We delete suggestions where source_id is not in the books table
+            from sqlalchemy import not_
+            
+            # Find all suggestions not in the books table
+            stale_query = session.query(PendingSuggestion).filter(
+                not_(PendingSuggestion.source_id.in_(
+                    session.query(Book.abs_id)
+                ))
+            )
+            
+            count = stale_query.count()
+            stale_query.delete(synchronize_session=False)
+            
+            return count
 
     # BookloreBook operations
     def get_booklore_book(self, filename: str) -> Optional[BookloreBook]:
@@ -640,12 +701,17 @@ class DatabaseService:
                 return booklore_book
 
     def delete_booklore_book(self, filename: str) -> bool:
-        """Delete a Booklore book from cache."""
-        with self.get_session() as session:
-            book = session.query(BookloreBook).filter(BookloreBook.filename == filename).first()
-            if book:
-                session.delete(book)
+        """Delete a Booklore book from the cache table."""
+        try:
+            from src.db.models import BookloreBook
+            # Use safe session context manager
+            with self.get_session() as session:
+                # STRICT DELETION: Use exact filename as passed by client
+                # This ensures we delete "mybook.epub" but not "MyBook.epub" if both exist
+                session.query(BookloreBook).filter(BookloreBook.filename == filename).delete(synchronize_session=False)
                 return True
+        except Exception as e:
+            logger.error(f"Failed to delete Booklore book {filename}: {e}")
             return False
 
 

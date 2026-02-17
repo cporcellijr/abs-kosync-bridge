@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
 import json
-from src.api.storyteller_api import StorytellerDBWithAPI
+from src.api.storyteller_api import StorytellerAPIClient
 from src.db.models import Job
 from src.db.models import State, Book, PendingSuggestion
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
@@ -45,7 +45,7 @@ class SyncManager:
                  transcriber=None,
                  ebook_parser=None,
                  database_service=None,
-                 storyteller_client: StorytellerDBWithAPI=None,
+                 storyteller_client: StorytellerAPIClient=None,
                  sync_clients: dict[str, SyncClient]=None,
                  alignment_service: AlignmentService = None,
                  library_service: LibraryService = None,
@@ -85,11 +85,11 @@ class SyncManager:
         self._job_lock = threading.Lock()
         self._sync_lock = threading.Lock()
         self._job_thread = None
+        self._last_library_sync = 0
 
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
-        # Scan for corrupted transcripts check removed
 
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
@@ -142,7 +142,8 @@ class SyncManager:
             self.migration_service.migrate_legacy_data()
 
         # [NEW] Cleanup orphaned cache files
-        # self.cleanup_cache()  # Disabled: User reported it's too aggressive; rely on explicit delete.
+        # DISABLED: Current logic is too aggressive (deletes original_ebook_filename for linked books).
+        # We rely on delete_mapping in web_server.py to handle explicit deletions.
 
     def cleanup_stale_jobs(self):
         """Reset jobs that were interrupted mid-process on restart."""
@@ -731,6 +732,10 @@ class SyncManager:
             if not epub_path:
                 epub_path = self._get_local_epub(ebook_filename)
                 
+            # [FIX] Ensure epub_path is a Path object (LibraryService returns str)
+            if epub_path:
+                epub_path = Path(epub_path)
+                
             update_progress(1.0, 1) # Done with step 1
             if not epub_path:
                 raise FileNotFoundError(f"Could not locate or download: {ebook_filename}")
@@ -738,6 +743,23 @@ class SyncManager:
             # [FIX] Ensure epub_path is a Path object (acquire_ebook returns str)
             if epub_path:
                 epub_path = Path(epub_path)
+                
+                # [NEW] Eagerly calculate and lock KOSync Hash from the ORIGINAL file
+                # This ensures we match what the user has on their device (KoReader)
+                # regardless of what Storyteller does later.
+                try:
+                    if not book.kosync_doc_id:
+                        logger.info(f"🔒 Locking KOSync ID from original EPUB: {epub_path.name}")
+                        computed_hash = self.ebook_parser.get_kosync_id(epub_path)
+                        if computed_hash:
+                            book.kosync_doc_id = computed_hash
+                            # Also ensure original filename is saved
+                            if not book.original_ebook_filename:
+                                book.original_ebook_filename = book.ebook_filename
+                            self.database_service.save_book(book)
+                            logger.info(f"✅ Locked KOSync ID: {computed_hash}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to eager-lock KOSync ID: {e}")
 
             # Step 2: Try Fast-Path (SMIL Extraction)
             raw_transcript = None
@@ -780,9 +802,8 @@ class SyncManager:
             if not raw_transcript:
                 raise Exception("Failed to generate transcript from both SMIL and Whisper.")
 
-            # Step 4: Parse EPUB (Already did this for text, but ensure map is ready if needed?) 
-            # Actually ebook_parser caches result, so repeating is cheap.
-            # But we already have 'book_text'.
+            # Step 4: Parse EPUB - ebook_parser caches result, so repeating is cheap.
+
             
             # [NEW] Step 5: Align and Store using AlignmentService
             # This is where we commit the result to the DB
@@ -813,7 +834,18 @@ class SyncManager:
             book.transcript_file = "DB_MANAGED"
             # [FIX] Save the filename so cache cleanup knows this file belongs to a book
             if epub_path:
-                book.ebook_filename = epub_path.name
+                new_filename = epub_path.name
+                
+                # Check if this is a Storyteller artifact (Tri-Link)
+                if "storyteller_" in new_filename and book.ebook_filename and "storyteller_" not in book.ebook_filename:
+                    # We are switching TO a Storyteller artifact from a standard EPUB.
+                    # Save the OLD filename as the original if it's not already set.
+                    if not book.original_ebook_filename:
+                        book.original_ebook_filename = book.ebook_filename
+                        logger.info(f"   [Tri-Link] Preserving original filename: {book.original_ebook_filename}")
+
+                # Update the active filename to the one we just used/downloaded
+                book.ebook_filename = new_filename
             
             book.status = 'active'
             self.database_service.save_book(book)
@@ -913,7 +945,9 @@ class SyncManager:
         for k, v in config.items():
             client = self.sync_clients[k]
             if client.can_be_leader():
-                vals[k] = v.current.get('pct')
+                pct = v.current.get('pct')
+                if pct is not None:
+                    vals[k] = pct
 
         # Ensure we have at least one potential leader
         if not vals:
@@ -1001,9 +1035,10 @@ class SyncManager:
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):
                 storyteller_client.storyteller_client.clear_cache()
                 
-        # Refresh Library Metadata (Booklore)
-        if self.library_service:
+        # Refresh Library Metadata (Booklore) — throttle to once per 15 minutes
+        if self.library_service and (time.time() - self._last_library_sync > 900):
             self.library_service.sync_library_books()
+            self._last_library_sync = time.time()
     
         # Get active books directly from database service
         active_books = []
@@ -1113,7 +1148,7 @@ class SyncManager:
                          if client_state.delta > 0:
                              try:
                                  # Ensure file is available locally (download if needed)
-                                 epub_path = self._get_local_epub(book.ebook_filename)
+                                 epub_path = self._get_local_epub(book.original_ebook_filename or book.ebook_filename)
                                  if not epub_path:
                                      logger.warning(f"Could not locate or download EPUB for {book.ebook_filename}")
                                      continue

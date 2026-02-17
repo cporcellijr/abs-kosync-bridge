@@ -122,6 +122,36 @@
             border-color: rgba(102, 126, 234, 0.6);
         }
 
+        .btn-danger {
+            background: rgba(244, 67, 54, 0.1);
+            border-color: rgba(244, 67, 54, 0.3);
+            color: #e57373 !important;
+        }
+
+        .btn-danger:hover {
+            background: rgba(244, 67, 54, 0.2);
+            border-color: rgba(244, 67, 54, 0.5);
+        }
+
+        .cleanup-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-top: 5px;
+        }
+
+        .mt-20 {
+            margin-top: 20px !important;
+        }
+
+        .flex-1 {
+            flex: 1;
+        }
+
+        .m-0 {
+            margin: 0 !important;
+        }
+
         /* Container */
         .container {
             max-width: 1000px;
@@ -430,7 +460,7 @@
                 rel="noopener noreferrer">📚 Docs</a>
             <a href="/" class="btn">← Dashboard</a>
             <a href="/logs" class="btn">📊 Logs</a>
-            <a href="/book-linker" class="btn">🔗 Book Linker</a>
+            <a href="/forge" class="btn">⚡ Forge</a>
         </div>
     </div>
 
@@ -547,14 +577,14 @@
                             KOReader)</h4>
 
                         <div style="display: flex; gap: 10px;">
-                            <input type="text" id="public_kosync_url" aria-label="Public KOSync URL" readonly value=""
+                            <input type="text" id="public_kosync_url" aria-label="Public KOSync URL" value=""
                                 onclick="this.select()"
-                                style="flex: 1; cursor: pointer; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.4);">
+                                style="flex: 1; cursor: text; font-family: monospace; color: #667eea; font-weight: bold; background: rgba(0,0,0,0.2);">
                             <button type="button" class="btn" onclick="copyPublicUrl()"
                                 title="Copy to clipboard">📋</button>
                         </div>
-                        <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Detected from
-                            your browser. Append path (e.g. /koreader) if using a proxy.</div>
+                        <div class="help-text" style="color: rgba(255,255,255,0.5); margin-top: 4px;">Replace
+                            'localhost' with your server IP or Domain if accessing remotely.</div>
                     </div>
 
                     <div class="form-group full-width">
@@ -662,6 +692,16 @@
                     <div class="form-group">
                         <label>Shelf Name</label>
                         <input type="text" name="BOOKLORE_SHELF_NAME" value="{{ get_val('BOOKLORE_SHELF_NAME') }}">
+                    </div>
+                    <div class="form-group full-width">
+                        <label>Booklore Library ID (Optional)</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" name="BOOKLORE_LIBRARY_ID" value="{{ get_val('BOOKLORE_LIBRARY_ID') }}"
+                                placeholder="e.g. 1" style="flex: 1;">
+                            <button class="btn" type="button" onclick="checkBookloreLibs()">🔍 Find IDs</button>
+                        </div>
+                        <div class="help-text">Restricts sync to a specific library (e.g., 1). Leave empty to sync all.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -872,18 +912,15 @@
                         <input type="text" name="BOOKS_DIR" value="{{ get_val('BOOKS_DIR') }}">
                     </div>
                     <div class="form-group">
-                        <label>Linker Books</label>
-                        <input type="text" name="LINKER_BOOKS_DIR" value="{{ get_val('LINKER_BOOKS_DIR') }}">
+                        <label>Storyteller Library Path</label>
+                        <input type="text" name="STORYTELLER_LIBRARY_DIR"
+                            value="{{ get_val('STORYTELLER_LIBRARY_DIR') }}"
+                            placeholder="Where Storyteller scans for books">
+                        <div class="help-text">Target directory where Forge writes files for Storyteller to process.
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Processing Dir</label>
-                        <input type="text" name="PROCESSING_DIR" value="{{ get_val('PROCESSING_DIR') }}">
-                    </div>
-                    <div class="form-group">
-                        <label>Ingest Dir</label>
-                        <input type="text" name="STORYTELLER_INGEST_DIR"
-                            value="{{ get_val('STORYTELLER_INGEST_DIR') }}">
-                    </div>
+
+
                     <div class="form-group">
                         <label>Audiobooks Dir</label>
                         <input type="text" name="AUDIOBOOKS_DIR" value="{{ get_val('AUDIOBOOKS_DIR') }}">
@@ -898,10 +935,7 @@
                 </div>
                 <div class="section-body">
                     <!-- System Settings (Moved to Top) -->
-                    <div class="form-group">
-                        <label>Ebook Cache Size</label>
-                        <input type="number" name="EBOOK_CACHE_SIZE" value="{{ get_val('EBOOK_CACHE_SIZE') }}">
-                    </div>
+
                     <div class="form-group">
                         <label>Job Max Retries</label>
                         <input type="number" name="JOB_MAX_RETRIES" value="{{ get_val('JOB_MAX_RETRIES') }}">
@@ -910,10 +944,7 @@
                         <label>Job Retry Delay (Mins)</label>
                         <input type="number" name="JOB_RETRY_DELAY_MINS" value="{{ get_val('JOB_RETRY_DELAY_MINS') }}">
                     </div>
-                    <div class="form-group">
-                        <label>Monitor Interval (Sec)</label>
-                        <input type="number" name="MONITOR_INTERVAL" value="{{ get_val('MONITOR_INTERVAL') }}">
-                    </div>
+
                     <div class="form-group">
                         <label>Fuzzy Match Threshold</label>
                         <input type="number" step="0.1" name="FUZZY_MATCH_THRESHOLD"
@@ -924,6 +955,20 @@
                         <input type="number" step="1" min="0" max="100" name="SMIL_VALIDATION_THRESHOLD"
                             value="{{ get_val('SMIL_VALIDATION_THRESHOLD', '60') }}">
                         <div class="help-text">Minimum token match % to accept EPUB SMIL data. Lower = more lenient.
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width mt-20">
+                        <label>Suggestion Cleanup</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-danger" onclick="clearStaleSuggestions()">
+                                🧹 Clear Stale Suggestions
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Deletes all suggestions for books that are not currently in your bridge library.
+                                This helps clear out junk suggestions and allows the bridge to re-suggest them if
+                                needed.
+                            </p>
                         </div>
                     </div>
 
@@ -1003,21 +1048,24 @@
                     </div>
 
 
-                    <!-- Wrapper: Local Whisper -->
-                    <div id="group_local" class="dynamic-group full-width" style="display:contents;">
+                    <!-- Wrapper: Whisper Model (shared by Local + Whisper.cpp Server) -->
+                    <div id="group_whisper_model" class="dynamic-group full-width" style="display:contents;">
                         <div class="form-group">
-                            <label>Whisper Model (Local)</label>
+                            <label>Whisper Model</label>
                             <select name="WHISPER_MODEL">
                                 {% for model in ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'] %}
                                 <option value="{{ model }}" {% if get_val('WHISPER_MODEL')==model %}selected{% endif %}>
-                                    {{
-                                    model }}</option>
+                                    {{ model }}</option>
                                 {% endfor %}
                             </select>
-                            <div class="help-text">Only used when provider is Local. Larger = better accuracy but
-                                slower.
+                            <div class="help-text">Model size for Local Whisper and Whisper.cpp Server. Larger =
+                                better accuracy but slower.
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Wrapper: Local Whisper (device + compute only) -->
+                    <div id="group_local" class="dynamic-group full-width" style="display:contents;">
                         <div class="form-group">
                             <label>Whisper Device</label>
                             <select name="WHISPER_DEVICE">
@@ -1059,6 +1107,37 @@
     </div>
 
     <script>
+        function checkBookloreLibs() {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⌛ Scanning...';
+            btn.disabled = true;
+
+            fetch('/api/booklore/libraries')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                        return;
+                    }
+                    if (data.length === 0) {
+                        alert('No libraries found. Check connection or try syncing first.');
+                        return;
+                    }
+
+                    let msg = "Found Libraries:\n\n";
+                    data.forEach(lib => {
+                        msg += `🆔 ID: ${lib.id}\n📁 Name: ${lib.name}\n------------------\n`;
+                    });
+                    alert(msg);
+                })
+                .catch(err => alert('Failed to fetch libraries: ' + err))
+                .finally(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                });
+        }
+
         function toggleSection(bodyId, isChecked) {
             const body = document.getElementById(bodyId);
             if (isChecked) {
@@ -1082,7 +1161,7 @@
                 if (publicGroup) publicGroup.classList.remove('hidden');
 
                 // Force internal value and make readonly
-                internalInput.value = "http://127.0.0.1:5757";
+                internalInput.value = "http://127.0.0.1:{{ get_val('KOSYNC_PORT', '5757') }}";
                 internalInput.setAttribute('readonly', 'readonly');
                 internalInput.style.opacity = "0.7";
                 internalInput.style.cursor = "not-allowed";
@@ -1111,16 +1190,45 @@
             setTimeout(() => copyText.style.backgroundColor = originalBg, 200);
         }
 
+        async function clearStaleSuggestions() {
+            if (!confirm("Are you sure you want to clear stale suggestions?\n\nThis will permanently delete all suggestions for books that are not currently matched in your bridge. Books you are already syncing will be preserved.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/suggestions/clear_stale', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`✅ Success! Cleared ${data.count} stale suggestions.`);
+                } else {
+                    alert(`❌ Failed to clear suggestions: ${data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                console.error('Error clearing suggestions:', err);
+                alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
+        }
+
         // Auto-calculate public URL on load
         document.addEventListener('DOMContentLoaded', function () {
-            const protocol = window.location.protocol;
-            const host = window.location.host; // includes port if present
-            // We strip /settings if present, or just use origin
-            // But window.location.origin is safest base
-            let baseUrl = window.location.origin;
+            const configuredPort = "{{ get_val('KOSYNC_PORT', '5757') }}";
 
-            // Try to be smart mostly for display
-            document.getElementById('public_kosync_url').value = baseUrl + "/";
+            // Simple generic suggestion as requested
+            let suggestedUrl = `http://localhost:${configuredPort}`;
+
+            const publicUrlInput = document.getElementById('public_kosync_url');
+            publicUrlInput.value = suggestedUrl;
+
+            // Make it editable
+            publicUrlInput.removeAttribute('readonly');
+            publicUrlInput.style.backgroundColor = "rgba(0,0,0,0.2)";
+            publicUrlInput.style.cursor = "text";
 
             // Initialize Dynamic Logic
             initDynamicForms();
@@ -1129,7 +1237,7 @@
             const kosyncServerVal = document.getElementById('kosync_server_input').value;
             // If it matches localhost, check the box. Else uncheck.
             const builtinCheckbox = document.getElementById('kosync_use_builtin');
-            if (kosyncServerVal === "http://127.0.0.1:5757" || kosyncServerVal === "") {
+            if (kosyncServerVal === "http://127.0.0.1:{{ get_val('KOSYNC_PORT', '5757') }}" || kosyncServerVal === "") {
                 builtinCheckbox.checked = true;
             } else {
                 builtinCheckbox.checked = false;
@@ -1186,19 +1294,23 @@
             const groupLocal = document.getElementById('group_local');
             const groupDeepgram = document.getElementById('group_deepgram');
             const groupWhisperCpp = document.getElementById('group_whispercpp');
+            const groupWhisperModel = document.getElementById('group_whisper_model');
 
             // Hide all first
             if (groupLocal) groupLocal.classList.add('hidden');
             if (groupDeepgram) groupDeepgram.classList.add('hidden');
             if (groupWhisperCpp) groupWhisperCpp.classList.add('hidden');
+            if (groupWhisperModel) groupWhisperModel.classList.add('hidden');
 
             // Show selected
-            if (provider === 'local' && groupLocal) {
-                groupLocal.classList.remove('hidden');
+            if (provider === 'local') {
+                if (groupLocal) groupLocal.classList.remove('hidden');
+                if (groupWhisperModel) groupWhisperModel.classList.remove('hidden');
             } else if (provider === 'deepgram' && groupDeepgram) {
                 groupDeepgram.classList.remove('hidden');
-            } else if (provider === 'whispercpp' && groupWhisperCpp) {
-                groupWhisperCpp.classList.remove('hidden');
+            } else if (provider === 'whispercpp') {
+                if (groupWhisperCpp) groupWhisperCpp.classList.remove('hidden');
+                if (groupWhisperModel) groupWhisperModel.classList.remove('hidden');
             }
         }
     </script>

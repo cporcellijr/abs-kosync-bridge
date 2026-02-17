@@ -15,6 +15,11 @@ trap cleanup SIGTERM SIGINT
 echo "🚀 Starting ABS-KoSync Enhanced (Integrated Mode)..."
 echo ""
 
+echo "🔄 Running Database Migrations..."
+alembic upgrade head
+echo "✅ Database Migrations Completed"
+echo ""
+
 # Main Supervisor Loop
 while true; do
     echo "  🌐 Starting unified service (web + sync daemon)..."

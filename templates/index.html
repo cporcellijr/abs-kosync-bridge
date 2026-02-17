@@ -71,6 +71,7 @@
 
             {% if mapping.status == 'active' %}
             {# Service progress - always visible #}
+            {# [START REPLACEMENT BLOCK for service-progress] #}
             <div class="service-progress">
                 {% if integrations.abs %}
                 <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
@@ -87,6 +88,7 @@
                     {% endif %}
                 </a>
                 {% endif %}
+
                 {% if integrations.kosync %}
                 <div class="service-item cursor-pointer"
                     title="Update KoReader Hash (Current: {{ mapping.kosync_doc_id }})"
@@ -102,31 +104,41 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if integrations.storyteller %}
+
+                {# [CHANGED] Only show Storyteller if state exists, UUID link exists, or legacy link needs fix #}
+                {% if integrations.storyteller and (mapping.states.storyteller is defined or
+                mapping.storyteller_legacy_link or mapping.storyteller_uuid) %}
                 <div class="service-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
-                    {% if mapping.states.storyteller is defined %}
+                    {% if mapping.storyteller_legacy_link %}
+                    <span class="service-value cursor-pointer" style="color: #FF9800;"
+                        onclick='openStorytellerModal({{ mapping.abs_id|tojson }}, {{ mapping.abs_title|tojson }})'
+                        title="Legacy Link: Click to fix">
+                        Fix Link
+                    </span>
+                    {% elif mapping.states.storyteller is defined %}
                     <span class="service-value">{{ '%.1f' | format(mapping.states.storyteller.percentage|default(0))
                         }}%</span>
-                    {% else %}
-                    <span class="service-value">0.0%</span>
+                    {% elif mapping.storyteller_uuid %}
+                    <span class="service-value" title="Linked via UUID">0.0%</span>
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if integrations.booklore %}
+
+                {# [CHANGED] Show Booklore if state exists OR if it was successfully linked/resolved #}
+                {% if integrations.booklore and (mapping.states.booklore is defined or mapping.booklore_id) %}
                 <a href="{{ mapping.booklore_url|default('#') }}" target="_blank" rel="noopener noreferrer"
-                    class="service-item {% if not mapping.booklore_id %}disabled{% endif %}"
-                    title="{% if mapping.booklore_id %}Open in Booklore{% else %}Not found in Booklore{% endif %}">
-                    <img src="/static/booklore.png" alt="BL"
-                        class="service-icon {% if not mapping.booklore_id %}grayscale-muted{% endif %}">
+                    class="service-item" title="Open in Booklore">
+                    <img src="/static/booklore.png" alt="BL" class="service-icon">
                     <span class="service-name">Booklore</span>
-                    {% if mapping.states.booklore is defined %}
-                    <span class="service-value">{{ '%.1f' | format(mapping.states.booklore.percentage|default(0))
-                        }}%</span>
-                    {% else %}
-                    <span class="service-value">0.0%</span>
-                    {% endif %}
+                    <span class="service-value">
+                        {% if mapping.states.booklore is defined %}
+                        {{ '%.1f' | format(mapping.states.booklore.percentage) }}%
+                        {% else %}
+                        0.0%
+                        {% endif %}
+                    </span>
                 </a>
                 {% endif %}
 
@@ -798,6 +810,94 @@
                 color: inherit !important;
             }
 
+            /* Storyteller Modal */
+            #st-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                backdrop-filter: blur(5px);
+            }
+
+            .st-modal-content {
+                background: #1a1a1a;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                width: 90%;
+                max-width: 600px;
+                max-height: 80vh;
+                display: flex;
+                flex-direction: column;
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            }
+
+            .st-modal-header {
+                padding: 20px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .st-modal-body {
+                padding: 20px;
+                overflow-y: auto;
+                flex: 1;
+            }
+
+            .st-search-bar {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+
+            .st-results {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .st-result-card {
+                background: rgba(255, 255, 255, 0.05);
+                padding: 12px;
+                border-radius: 8px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .st-card-info {
+                flex: 1;
+            }
+
+            .st-card-title {
+                font-weight: bold;
+                color: #fff;
+            }
+
+            .st-card-author {
+                font-size: 12px;
+                color: #aaa;
+            }
+
+            .st-loading,
+            .st-no-results,
+            .st-error {
+                text-align: center;
+                padding: 20px;
+                color: #aaa;
+            }
+
+            .st-error {
+                color: #ff6b6b;
+            }
+
             .pe-none {
                 pointer-events: none !important;
             }
@@ -1220,6 +1320,10 @@
                 font-size: 0.9rem;
             }
 
+            .hidden {
+                display: none !important;
+            }
+
             /* Suggestions Banner Styling */
             .suggestions-banner {
                 background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
@@ -1372,7 +1476,7 @@
                 rel="noopener noreferrer">📚 Docs</a>
             <a href="/settings" class="btn">⚙️ Settings</a>
             <a href="/logs" class="btn">📊 Logs</a>
-            <a href="/book-linker" class="btn">🔗 Book Linker</a>
+            <a href="/forge" class="btn">⚡ Forge</a>
 
             <a href="/match" class="btn btn-primary">➕ Add Book</a>
             <a href="/batch-match" class="btn">📋 Batch</a>
@@ -1380,6 +1484,72 @@
     </div>
 
     <div class="container">
+        <!-- Forge Status Banner -->
+        <div id="forge-status-banner" class="forge-banner" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="spinner-sm"></div>
+                <span id="forge-task-list">Hammering...</span>
+            </div>
+            <small style="opacity: 0.8">Processing in background</small>
+        </div>
+        <style>
+            .forge-banner {
+                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 20px;
+                border-radius: 12px;
+                margin-bottom: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                animation: slideDown 0.3s ease-out;
+                box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .spinner-sm {
+                width: 16px;
+                height: 16px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        </style>
+        <script>
+            function checkForgeStatus() {
+                fetch('/api/forge/active')
+                    .then(r => r.json())
+                    .then(tasks => {
+                        const banner = document.getElementById('forge-status-banner');
+                        const list = document.getElementById('forge-task-list');
+                        if (tasks && tasks.length > 0) {
+                            banner.style.display = 'flex';
+                            const text = tasks.length === 1 ? `Forging: ${tasks[0]}` : `Forging ${tasks.length} editions...`;
+                            list.textContent = text;
+                        } else {
+                            banner.style.display = 'none';
+                        }
+                    })
+                    .catch(e => console.debug("Forge status check failed", e));
+            }
+            // Poll every 5s
+            setInterval(checkForgeStatus, 5000);
+            // Initial check
+            document.addEventListener('DOMContentLoaded', checkForgeStatus);
+        </script>
         {% if suggestions %}
         <div id="suggestions-section">
             <div class="suggestions-banner" id="suggestions-banner">
@@ -1884,6 +2054,25 @@
             </div>
         </div>
         <script src="/static/js/hardcover-modal.js"></script>
+        <!-- Storyteller Link Modal -->
+        <div id="st-modal" class="hidden">
+            <div class="st-modal-content">
+                <div class="st-modal-header">
+                    <h3 id="st-modal-title">Link Storyteller</h3>
+                    <button class="action-btn" onclick="closeStorytellerModal()"
+                        style="background:none; border:none; color:white; font-size:1.2rem; cursor:pointer;">✕</button>
+                </div>
+                <div class="st-modal-body">
+                    <div class="st-search-bar">
+                        <input type="text" id="st-search-input" placeholder="Search Storyteller..." class="hc-input"
+                            style="flex:1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: white;">
+                        <button onclick="searchStoryteller()" class="btn btn-primary">Search</button>
+                    </div>
+                    <div id="st-results" class="st-results"></div>
+                </div>
+            </div>
+        </div>
+        <script src="/static/js/storyteller-modal.js"></script>
 </body>
 
 </html>

@@ -15,6 +15,9 @@ import os
 import re
 import glob
 import rapidfuzz
+import zipfile
+import shutil
+import tempfile
 from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult
@@ -503,6 +506,17 @@ class EbookParser:
                             final_xpath = doc_frag_prefix + xpath_str
                         else:
                             final_xpath = f"{doc_frag_prefix}/{xpath_str}"
+                        # Calculate chapter progress (critical for Storyteller)
+                        chapter_len = len(item['content']) # Rough approximation using HTML length
+                        if hasattr(item, 'get_content'): # double check if item object available or just dict
+                             pass 
+                        
+                        # better: use start/end from map
+                        spine_item_len = item['end'] - item['start']
+                        chapter_progress = 0.0
+                        if spine_item_len > 0:
+                            chapter_progress = local_index / spine_item_len
+
                         return LocatorResult(
                             percentage=percentage,
                             xpath=final_xpath,
@@ -510,7 +524,8 @@ class EbookParser:
                             cfi=cfi,
                             href=item['href'],
                             fragment=None,
-                            css_selector=css_selector
+                            css_selector=css_selector,
+                            chapter_progress=chapter_progress
                         )
 
             return None
@@ -582,11 +597,15 @@ class EbookParser:
             # Find the element that contains our target position
             target_element = None
             target_offset = 0
+            is_tail = False
+            target_text_len = 0
 
             for elem_info in text_elements:
                 if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
                     target_element = elem_info['element']
                     target_offset = local_pos - elem_info['start_pos']
+                    is_tail = elem_info.get('is_tail', False)
+                    target_text_len = elem_info.get('text_len', 0)
                     break
 
             if target_element is None:
@@ -594,21 +613,55 @@ class EbookParser:
                 if text_elements:
                     target_element = text_elements[0]['element']
                     target_offset = 0
+                    is_tail = text_elements[0].get('is_tail', False)
+                    target_text_len = text_elements[0].get('text_len', 0)
                 else:
                     # Last resort: find any element with text
                     for elem in tree.xpath('.//p | .//span | .//em | .//strong | .//st | .//div'):
                         if elem.text and elem.text.strip():
                             target_element = elem
                             target_offset = 0
+                            target_text_len = len(elem.text.strip())
                             break
 
             if target_element is None:
                 logger.warning(f"No text elements found in spine {target_item['spine_index']}")
                 return None
 
+            # Safety Check: Prevent Out-Of-Bounds offsets due to parser drift
+            if target_text_len > 0 and target_offset > target_text_len + 1:
+                logger.warning(f"KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for {target_element.tag}. Rejecting to prevent crash.")
+                return None
+
             # Build xpath for the target element
-            xpath = self._build_xpath(target_element)
-            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+            if is_tail:
+                # Tail text belongs to the parent container, not the element itself
+                parent = target_element.getparent()
+                if parent is None:
+                    # Should not happen for valid HTML body content
+                    xpath = self._build_xpath(target_element)
+                    return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+
+                xpath = self._build_xpath(parent)
+                
+                # Calculate which text node of the parent this is
+                # XPath text() nodes are 1-based indices of text children
+                text_node_index = 0
+                if parent.text: text_node_index += 1
+                
+                for child in parent:
+                    if child == target_element:
+                        if child.tail: text_node_index += 1
+                        break
+                    if child.tail: text_node_index += 1
+                
+                # Should be at least 1 since we found it in text_elements check
+                suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
+                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}{suffix}.{target_offset}"
+            else:
+                # Regular element text
+                xpath = self._build_xpath(target_element)
+                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
             logger.error(f"Error generating KOReader XPath: {e}")
@@ -690,18 +743,18 @@ class EbookParser:
             # [Fallback logic from original code for finding elements...]
             if not elements and clean_xpath.startswith('./'):
                 try: elements = tree.xpath(clean_xpath[2:])
-                except: pass
+                except Exception: pass
 
             if not elements:
                 id_match = re.search(r"@id='([^']+)'", clean_xpath)
                 if id_match:
                     try: elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
-                    except: pass
+                    except Exception: pass
 
             if not elements:
                 simple_path = re.sub(r'\[\d+]', '', clean_xpath)
                 try: elements = tree.xpath(simple_path)
-                except: pass
+                except Exception: pass
 
             if not elements:
                 logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
@@ -915,9 +968,84 @@ class EbookParser:
             end_pos = min(len(full_text), global_offset + context)
 
             snippet = full_text[start_pos:end_pos]
-            logger.debug(f"epubcfi CFI resolved: spine_index={spine_index}, local_offset={local_offset}, global_offset={global_offset}")
+            logger.info(f"Snippet extracted: {snippet[:30]}...")
             return snippet
 
         except Exception as e:
             logger.error(f"Error using epubcfi library for {cfi}: {e}")
             return None
+
+
+def sanitize_storyteller_artifacts(epub_path: Path) -> bool:
+    """
+    Sanitize Storyteller EPUBs by removing specific <span> tags that break alignment.
+    Removes <span id="par..."> and <span id="sent..."> tags while preserving content.
+    """
+    try:
+        epub_path = Path(epub_path)
+        logger.info(f"Sanitizing Storyteller artifacts in: {epub_path.name}")
+        
+        # Create temp dir
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # Extract EPUB
+            with zipfile.ZipFile(epub_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_path)
+                
+            # Iterate through HTML/XHTML files
+            modified_count = 0
+            for root, dirs, files in os.walk(temp_path):
+                for file in files:
+                    if file.endswith(('.html', '.xhtml', '.htm')):
+                        file_path = Path(root) / file
+                        
+                        try:
+                            # Read with utf-8
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                                
+                            soup = BeautifulSoup(content, 'html.parser')
+                            file_modified = False
+                            
+                            # Find spans with ids starting with 'par' or 'sent'
+                            # Storyteller uses id="par0", id="sent0", etc. which break our specific alignment engines
+                            for span in soup.find_all('span', id=re.compile(r'^(par|sent)\d+')):
+                                span.unwrap() # Remove the tag but keep contents
+                                file_modified = True
+                                modified_count += 1
+                                
+                            if file_modified:
+                                with open(file_path, 'w', encoding='utf-8') as f:
+                                    f.write(str(soup))
+                                    
+                        except Exception as e:
+                            logger.warning(f"Failed to sanitize file {file}: {e}")
+                            
+            if modified_count > 0:
+                logger.info(f"Removed {modified_count} Storyteller tags. Repacking...")
+                
+                # Create a new zip file
+                temp_epub = temp_path / "sanitized.epub"
+                with zipfile.ZipFile(temp_epub, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                    for root, dirs, files in os.walk(temp_path):
+                        for file in files:
+                            file_path = Path(root) / file
+                            if file == "sanitized.epub": continue
+                            
+                            # Archive name should be relative to temp_path
+                            arcname = file_path.relative_to(temp_path)
+                            zip_out.write(file_path, arcname)
+                            
+                # Replace original
+                # Force move (replace)
+                shutil.move(str(temp_epub), str(epub_path))
+                logger.info(f"✅ Successfully sanitized: {epub_path.name}")
+                return True
+            else:
+                logger.debug(f"No Storyteller tags found in {epub_path.name}. Skipping repack.")
+                return True # It's valid, just didn't need changes
+            
+    except Exception as e:
+        logger.error(f"❌ Error sanitizing EPUB {epub_path}: {e}")
+        return False

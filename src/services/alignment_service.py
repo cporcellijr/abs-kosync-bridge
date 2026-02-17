@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class AlignmentService:
     def __init__(self, database_service, polisher: Polisher):
-        self.db = database_service
+        self.database_service = database_service
         self.polisher = polisher
 
     @time_execution
@@ -83,8 +83,7 @@ class AlignmentService:
         target_offset = char_offset_hint
         
         if target_offset is None:
-            # TODO: If we ever need reverse lookup (Text -> Time without offset), implements normalized search here.
-            # For now, KOSync always provides an offset or we calculate it.
+            # Note: For now, KOSync always provides an offset or we calculate it.
             return None
 
         # 3. Interpolate Timestamp
@@ -314,7 +313,7 @@ class AlignmentService:
 
     def _save_alignment(self, abs_id: str, alignment_map: List[Dict]):
         """Upsert alignment to SQLite."""
-        with self.db.get_session() as session:
+        with self.database_service.get_session() as session:
             json_blob = json.dumps(alignment_map)
             
             # Check exist
@@ -328,9 +327,9 @@ class AlignmentService:
             
             # Context manager handles commit
             logger.info(f"   💾 Saved alignment for {abs_id} to DB.")
-
+ 
     def _get_alignment(self, abs_id: str) -> Optional[List[Dict]]:
-        with self.db.get_session() as session:
+        with self.database_service.get_session() as session:
             entry = session.query(BookAlignment).filter_by(abs_id=abs_id).first()
             if entry:
                 return json.loads(entry.alignment_map_json)

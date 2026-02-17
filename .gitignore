@@ -31,3 +31,7 @@ Thumbs.db
 # Logs
 *.log
 cwa_debug.log
+
+# Local System Rules
+.cursorrules
+BRANCH_STATUS.md
