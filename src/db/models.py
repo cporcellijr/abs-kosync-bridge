@@ -117,6 +117,7 @@ class HardcoverDetails(Base):
     hardcover_slug = Column(String(255))
     hardcover_edition_id = Column(String(255))
     hardcover_pages = Column(Integer)
+    hardcover_audio_seconds = Column(Integer)
     isbn = Column(String(255))
     asin = Column(String(255))
     matched_by = Column(String(50))  # 'isbn', 'asin', 'title_author', 'title'
@@ -126,12 +127,14 @@ class HardcoverDetails(Base):
 
     def __init__(self, abs_id: str, hardcover_book_id: str = None, hardcover_slug: str = None,
                  hardcover_edition_id: str = None,
-                 hardcover_pages: int = None, isbn: str = None, asin: str = None, matched_by: str = None):
+                 hardcover_pages: int = None, hardcover_audio_seconds: int = None,
+                 isbn: str = None, asin: str = None, matched_by: str = None):
         self.abs_id = abs_id
         self.hardcover_book_id = hardcover_book_id
         self.hardcover_slug = hardcover_slug
         self.hardcover_edition_id = hardcover_edition_id
         self.hardcover_pages = hardcover_pages
+        self.hardcover_audio_seconds = hardcover_audio_seconds
         self.isbn = isbn
         self.asin = asin
         self.matched_by = matched_by

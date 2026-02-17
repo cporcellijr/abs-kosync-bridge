@@ -361,7 +361,7 @@ class DatabaseService:
             if existing:
                 # Update existing details
                 for attr in ['hardcover_book_id', 'hardcover_slug', 'hardcover_edition_id', 'hardcover_pages',
-                           'isbn', 'asin', 'matched_by']:
+                           'hardcover_audio_seconds', 'isbn', 'asin', 'matched_by']:
                     if hasattr(details, attr):
                         setattr(existing, attr, getattr(details, attr))
                 session.flush()

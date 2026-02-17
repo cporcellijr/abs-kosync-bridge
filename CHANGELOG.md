@@ -10,6 +10,28 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 - Updated Storyteller API payload to include `fragments`, `progression` (chapter percentage), and `uuid` for better sync compatibility.
 - Added handling for Storyteller `409 Conflict` (timestamp) and `204 No Content` responses.
 
+---
+
+## [6.2.0] - 2026-02-13
+
+### 🚀 Features
+
+#### Suggestion Logic (`b8527a4`)
+
+- Implemented core logic for `PendingSuggestion`
+- Added fallback matching using `difflib` for fuzzy text matching when exact matches fail
+- Added `SuggestionManager` service to handle auto-discovery of unmapped books
+
+### 🐛 Fixes
+
+#### Sync Path Fallback & XPath Support (`5a57355`)
+
+- Fixed `_get_sync_path` to properly handle `None` values
+- Added XPath support for more accurate position tracking in KOReader
+- Improved fallback logic when checking multiple sync paths
+
+---
+
 ## [4.0.0] - 2024-12-31
 
 ### 🚀 Major: Storyteller REST API Integration
