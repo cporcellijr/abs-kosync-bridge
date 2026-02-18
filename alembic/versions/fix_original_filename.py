@@ -108,7 +108,12 @@ def upgrade():
         op.create_table('book_alignments',
             sa.Column('abs_id', sa.String(255), sa.ForeignKey('books.abs_id', ondelete='CASCADE'), primary_key=True),
             sa.Column('alignment_map_json', sa.Text(), nullable=True),
+            sa.Column('last_updated', sa.DateTime(), nullable=True),
         )
+    else:
+        ba_cols = _get_columns(inspector, 'book_alignments')
+        if 'last_updated' not in ba_cols:
+            op.add_column('book_alignments', sa.Column('last_updated', sa.DateTime(), nullable=True))
 
     # ── booklore_books table ─────────────────────────────────────────
     if 'booklore_books' not in tables:
