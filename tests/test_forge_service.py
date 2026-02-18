@@ -26,7 +26,9 @@ class TestForgeService(unittest.TestCase):
             booklore_client=self.mock_booklore,
             storyteller_client=self.mock_storyteller,
             library_service=self.mock_library,
-            ebook_parser=self.mock_ebook_parser
+            ebook_parser=self.mock_ebook_parser,
+            transcriber=MagicMock(),
+            alignment_service=MagicMock()
         )
         
         # Suppress logging during tests

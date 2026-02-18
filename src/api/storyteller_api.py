@@ -333,6 +333,48 @@ class StorytellerAPIClient:
             return results
         return []
 
+    def find_book_by_staged_path(self, staged_folder_name: str, staged_epub_name: str) -> Optional[str]:
+        """Find a book UUID by matching its ebook file path suffix.
+
+        Matches against the path suffix '/{folder}/{epub}' to avoid
+        dependence on absolute library paths which vary per user.
+        Returns the book UUID if found, None otherwise.
+        """
+        expected_suffix = f"/{staged_folder_name}/{staged_epub_name}"
+        response = self._make_request("GET", "/api/v2/books", None)
+        if not response or response.status_code != 200:
+            return None
+
+        all_books = response.json()
+        if all_books:
+            sample = all_books[0]
+            logger.debug(f"Storyteller book schema keys: {list(sample.keys())}")
+
+        # Try multiple known field names for the ebook path
+        path_fields = ['ebook', 'ebookFile', 'ebookFilePath', 'filepath', 'ebook_path', 'file']
+
+        for book in all_books:
+            # Check top-level path fields
+            for field in path_fields:
+                path_val = book.get(field)
+                if isinstance(path_val, str) and path_val.endswith(expected_suffix):
+                    uuid = book.get('uuid') or book.get('id')
+                    logger.info(f"⚡ Forge: Path match on field '{field}': {path_val}")
+                    return uuid
+
+            # Check nested objects (e.g., readaloud.filepath, media.ebook)
+            for nested_key in ['readaloud', 'media', 'files']:
+                nested = book.get(nested_key)
+                if isinstance(nested, dict):
+                    for field in path_fields:
+                        path_val = nested.get(field)
+                        if isinstance(path_val, str) and path_val.endswith(expected_suffix):
+                            uuid = book.get('uuid') or book.get('id')
+                            logger.info(f"⚡ Forge: Path match on field '{nested_key}.{field}': {path_val}")
+                            return uuid
+
+        return None
+
     def download_book(self, book_uuid: str, output_path: Path) -> bool:
         """Download the processed EPUB3 artifact."""
         # Endpoint: GET /api/v2/books/{uuid}/files?format=readaloud
