@@ -805,8 +805,11 @@
         // Toggle live mode
         function toggleLiveMode() {
             if (liveMode.checked) {
-                // Start live mode
-                displayedLinesStats.textContent = `Showing: ${logContent.children.length} lines (live mode)`;
+                // Load full history first so the user sees all lines, not just the last 50
+                fetchLogs().then(() => {
+                    displayedLinesStats.textContent = `Showing: ${logContent.children.length} lines (live mode)`;
+                });
+                // Start polling for new entries
                 liveRefreshInterval = setInterval(fetchLiveLogs, 2000); // Poll every 2 seconds
                 loadMore.style.display = 'none';
 
@@ -964,11 +967,11 @@
         linesCount.value = '1000';
         searchInput.value = '';
 
-        if (liveMode.checked) {
-            fetchLiveLogs();
-        } else {
-            fetchLogs();
-        }
+        // Call toggleLiveMode() instead of fetchLiveLogs() directly so that:
+        //   1. The polling interval is actually started (programmatic .checked = true
+        //      does not fire the 'change' event, so the listener never ran)
+        //   2. fetchLogs() is called first to populate the full history, not just 50 lines
+        toggleLiveMode();
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {

@@ -232,12 +232,20 @@
             font-weight: 700;
         }
 
-        /* Audiobook Grid */
-        .audiobook-grid {
+        /* Audiobook Grid (portrait 2/3 covers) */
+        .media-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             gap: 24px;
             margin: 20px 0;
+        }
+
+        /* Resource Grid (square cards for Storyteller + Ebook) */
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
         }
 
         .audiobook-option {
@@ -299,25 +307,55 @@
             background: rgba(102, 126, 234, 0.08) !important;
         }
 
-        .ghost-card-content {
+        /* Square Resource Card (Storyteller + Ebook) */
+        .resource-card {
+            aspect-ratio: 1/1;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100%;
-            min-height: 200px;
-            gap: 12px;
+            gap: 8px;
+            padding: 12px 8px;
+            text-align: center;
         }
 
-        .ghost-icon {
-            font-size: 48px;
+        .resource-icon {
+            font-size: 32px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        .resource-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+        }
+
+        .resource-subtitle {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            line-height: 1.2;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* Ghost card (None/Skip) as resource-card */
+        .resource-card.ghost-card .resource-icon {
             color: rgba(255, 255, 255, 0.3);
         }
 
-        .ghost-text {
-            font-size: 16px;
+        .resource-card.ghost-card .resource-title {
             color: rgba(255, 255, 255, 0.5);
-            font-weight: 600;
         }
 
         .audiobook-cover-container {
@@ -342,11 +380,6 @@
             justify-content: center;
             color: rgba(255, 255, 255, 0.6);
             font-size: 56px;
-        }
-
-        /* Specific styling for ebook placeholders */
-        .eb-option .audiobook-cover-placeholder {
-            background: linear-gradient(135deg, #2d3436 0%, #1e272e 100%);
         }
 
         .audiobook-info {
@@ -434,12 +467,6 @@
         }
 
         /* Responsive */
-        @media (max-width: 1200px) {
-            .audiobook-grid {
-                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            }
-        }
-
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
@@ -457,9 +484,14 @@
                 font-size: 24px;
             }
 
-            .audiobook-grid {
+            .media-grid {
                 grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
                 gap: 16px;
+            }
+
+            .resource-grid {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                gap: 10px;
             }
 
             .hidden {
@@ -671,7 +703,7 @@
                     <h3><span class="section-number">1</span>Audiobook (Required)</h3>
                     <div class="scrollable-content">
                         {% if audiobooks %}
-                        <div class="audiobook-grid">
+                        <div class="media-grid">
                             {% set single_match = audiobooks|length == 1 %}
                             {% for ab in audiobooks %}
                             <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
@@ -708,37 +740,29 @@
                     <h3><span class="section-number">2</span>Storyteller (Preferred)</h3>
                     <div class="scrollable-content">
                         {% if storyteller_books %}
-                        <div class="audiobook-grid">
+                        <div class="resource-grid">
                             {% set single_st_match = storyteller_books|length == 1 %}
                             <!-- None Option -->
                             <label
-                                class="audiobook-option st-option ghost-card {% if not single_st_match %}selected{% endif %}"
+                                class="audiobook-option st-option resource-card ghost-card {% if not single_st_match %}selected{% endif %}"
                                 onclick="selectItem(this, 'storyteller_uuid')">
                                 <input type="radio" name="storyteller_uuid" value="" {% if not single_st_match
                                     %}checked{% endif %}>
-                                <div class="ghost-card-content">
-                                    <div class="ghost-icon">⊘</div>
-                                    <div class="ghost-text">None / Skip</div>
-                                </div>
+                                <div class="resource-icon">⊘</div>
+                                <div class="resource-title">None / Skip</div>
                             </label>
 
                             {% for book in storyteller_books %}
-                            <label class="audiobook-option st-option {% if single_st_match %}selected{% endif %}"
+                            <label
+                                class="audiobook-option st-option resource-card {% if single_st_match %}selected{% endif %}"
                                 onclick="selectItem(this, 'storyteller_uuid')">
                                 <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}" {% if
                                     single_st_match %}checked{% endif %}>
-                                <div class="audiobook-cover-container">
-                                    {% if book.cover_url %}
-                                    <div class="audiobook-cover-placeholder">⚡</div>
-                                    {% else %}
-                                    <div class="audiobook-cover-placeholder">⚡</div>
-                                    {% endif %}
-                                </div>
-                                <div class="audiobook-info">
-                                    <div class="audiobook-title">{{ book.title }}</div>
-                                    <div class="audiobook-title" style="font-size: 12px; color: #aaa;">{{
-                                        book.authors|join(', ') }}</div>
-                                </div>
+                                <div class="resource-icon">⚡</div>
+                                <div class="resource-title">{{ book.title }}</div>
+                                {% if book.authors %}
+                                <div class="resource-subtitle">{{ book.authors|join(', ') }}</div>
+                                {% endif %}
                             </label>
                             {% endfor %}
                         </div>
@@ -758,32 +782,24 @@
                     <h3><span class="section-number">3</span>Standard Ebook</h3>
                     <div class="scrollable-content">
                         {% if ebooks %}
-                        <div class="audiobook-grid">
+                        <div class="resource-grid">
                             {% set single_eb_match = ebooks|length == 1 %}
                             {% for eb in ebooks %}
-                            <label class="audiobook-option eb-option {% if single_eb_match %}selected{% endif %}"
+                            <label
+                                class="audiobook-option eb-option resource-card {% if single_eb_match %}selected{% endif %}"
                                 data-source-type="{{ eb.source }}" data-source-path="{{ eb.path }}"
                                 data-source-id="{{ eb.source_id }}" onclick="selectItem(this, 'ebook_filename')">
                                 <input type="radio" name="ebook_filename" value="{{ eb.name }}" {% if single_eb_match
                                     %}checked{% endif %}>
-                                <div class="audiobook-cover-container">
-                                    <div class="audiobook-cover-placeholder"
-                                        style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);">📖</div>
-                                </div>
-                                <div class="audiobook-info">
-                                    <div class="audiobook-title" title="{{ eb.display_name }}">{{ eb.display_name }}
-                                    </div>
-                                    {% if eb.authors %}
-                                    <div class="audiobook-title" style="font-size: 12px; color: #aaa; margin-top: 4px;">
-                                        {{ eb.authors }}</div>
-                                    {% endif %}
-                                    {% if eb.source %}
-                                    <div class="card-meta">
-                                        {% set badge_cls = eb.source.lower().replace(' ', '') %}
-                                        <span class="source-badge {{ badge_cls }}">{{ eb.source }}</span>
-                                    </div>
-                                    {% endif %}
-                                </div>
+                                <div class="resource-icon">📖</div>
+                                <div class="resource-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
+                                {% if eb.authors %}
+                                <div class="resource-subtitle">{{ eb.authors }}</div>
+                                {% endif %}
+                                {% if eb.source %}
+                                {% set badge_cls = eb.source.lower().replace(' ', '') %}
+                                <span class="source-badge {{ badge_cls }}">{{ eb.source }}</span>
+                                {% endif %}
                             </label>
                             {% endfor %}
                         </div>

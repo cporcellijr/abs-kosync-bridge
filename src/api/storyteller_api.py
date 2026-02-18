@@ -56,7 +56,7 @@ class StorytellerAPIClient:
                 self._token_timestamp = time.time()
                 return self._token
         except Exception as e:
-            logger.error(f"Storyteller login error: {e}")
+            logger.error(f"❌ Storyteller login error: {e}")
         return None
 
     def _make_request(self, method: str, endpoint: str, json_data: dict = None) -> Optional[requests.Response]:
@@ -86,7 +86,7 @@ class StorytellerAPIClient:
                     response = self.session.put(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
-            logger.error(f"Storyteller API request failed ({method} {endpoint}): {e}")
+            logger.error(f"❌ Storyteller API request failed ('{method}' '{endpoint}'): {e}")
             return None
 
     def check_connection(self) -> bool:
@@ -248,10 +248,10 @@ class StorytellerAPIClient:
                 logger.info(f"✅ Storyteller API: {book_uuid[:8]}... -> {percentage:.1%} (TS: {new_ts})")
                 return True
             elif response.status_code == 409:
-                logger.warning(f"⚠️ Storyteller rejected update for {book_uuid[:8]}...: Timestamp older than server state. (Ignored)")
+                logger.warning(f"⚠️ Storyteller rejected update for '{book_uuid[:8]}...': Timestamp older than server state (Ignored)")
                 return True # Treat as 'handled' to prevent retry loops
             else:
-                logger.warning(f"Storyteller API Error: {response.status_code} - {response.text[:100]}")
+                logger.warning(f"⚠️ Storyteller API error: {response.status_code} - {response.text[:100]}")
         
         return False
 
@@ -292,7 +292,7 @@ class StorytellerAPIClient:
         payload = {"collections": [col_uuid], "books": [book_uuid]}
         r_add = self._make_request("POST", endpoint, payload)
         if r_add and r_add.status_code in [200, 204]:
-             logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Storyteller Collection: {collection_name}")
+             logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Storyteller Collection: '{collection_name}'")
              return True
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"
@@ -378,31 +378,31 @@ class StorytellerAPIClient:
         
         # Try API Download First
         try:
-            logger.info(f"Attempting download from {url}")
+            logger.info(f"⚡ Attempting download from '{url}'")
             with self.session.get(url, headers=headers, params={"format": "readaloud"}, stream=True, timeout=60) as r:
                 if r.status_code == 200:
                     with open(output_path, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=8192): 
                             f.write(chunk)
-                    logger.info(f"✅ Downloaded Storyteller artifact for {book_uuid} to {output_path}")
+                    logger.info(f"✅ Downloaded Storyteller artifact for '{book_uuid}' to '{output_path}'")
                     return True
                 else:
-                    logger.warning(f"Storyteller API download failed: {r.status_code} - {r.text[:200]}")
+                    logger.warning(f"⚠️ Storyteller API download failed: {r.status_code} - {r.text[:200]}")
         except Exception as e:
-            logger.warning(f"API download raised exception: {e}")
+            logger.warning(f"⚠️ API download raised exception: {e}")
 
     def trigger_processing(self, book_uuid: str) -> bool:
         """Trigger the Storyteller processing for a book."""
         try:
             response = self._make_request("POST", f"/api/v2/books/{book_uuid}/process", {})
             if response and response.status_code in [200, 201, 202, 204]:
-                logger.info(f"✅ Triggered Storyteller processing for {book_uuid}")
+                logger.info(f"✅ Triggered Storyteller processing for '{book_uuid}'")
                 return True
             else:
-                logger.warning(f"Failed to trigger processing: {response.status_code if response else 'No Resp'}")
+                logger.warning(f"⚠️ Failed to trigger processing: {response.status_code if response else 'No Resp'}")
                 return False
         except Exception as e:
-            logger.error(f"Error triggering processing: {e}")
+            logger.error(f"❌ Error triggering processing: {e}")
             return False
 
             return False
@@ -414,7 +414,7 @@ class StorytellerAPIClient:
             if response and response.status_code == 200:
                 return response.json()
         except Exception as e:
-            logger.error(f"Error fetching book details: {e}")
+            logger.error(f"❌ Error fetching book details: {e}")
         return None
 
         # Fallback: Local File Copy
@@ -422,7 +422,7 @@ class StorytellerAPIClient:
             # 1. Get Book Details for Filepath
             r_details = self._make_request("GET", f"/api/v2/books/{book_uuid}")
             if not r_details or r_details.status_code != 200:
-                logger.error(f"Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
+                logger.error(f"❌ Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
                 raise Exception("API download failed and could not fetch details for fallback.")
 
             book_data = r_details.json()
@@ -431,7 +431,7 @@ class StorytellerAPIClient:
             source_path = readaloud.get('filepath')
             
             if not source_path:
-                logger.error("No filepath found in book details for fallback.")
+                logger.error("❌ No filepath found in book details for fallback")
                 raise Exception("No filepath in book details")
 
             # 2. Map Path
@@ -443,15 +443,15 @@ class StorytellerAPIClient:
             
             local_path = Path(local_path_str)
             
-            logger.info(f"Attempting local fallback from: {local_path}")
+            logger.info(f"🔄 Attempting local fallback from: '{local_path}'")
             
             if local_path.exists():
                 import shutil
                 shutil.copy2(local_path, output_path)
-                logger.info(f"✅ Downloaded (via Local Copy) Storyteller artifact for {book_uuid}")
+                logger.info(f"✅ Downloaded (via Local Copy) Storyteller artifact for '{book_uuid}'")
                 return True
             else:
-                 logger.error(f"Local fallback file not found: {local_path}")
+                 logger.error(f"❌ Local fallback file not found: '{local_path}'")
                  # Try unmapped?
                  if Path(source_path).exists():
                      shutil.copy2(source_path, output_path)
@@ -461,7 +461,7 @@ class StorytellerAPIClient:
                  raise Exception(f"File not found at {local_path} or {source_path}")
 
         except Exception as e:
-            logger.error(f"Failed to download Storyteller book {book_uuid} (API & Fallback): {e}")
+            logger.error(f"❌ Failed to download Storyteller book '{book_uuid}' (API & Fallback): {e}")
             raise e
 
     def get_progress(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int]]:

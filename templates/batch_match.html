@@ -253,6 +253,7 @@
             overflow: hidden;
             transition: all 0.3s;
             background: rgba(255, 255, 255, 0.03);
+            position: relative;
         }
 
         .book-card:hover {
@@ -265,6 +266,25 @@
             border-color: #667eea;
             background: rgba(102, 126, 234, 0.15);
             box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+        }
+
+        .book-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            background: #6366f1;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
         }
 
         .book-cover-container {
@@ -303,7 +323,109 @@
             overflow: hidden;
         }
 
-        /* Ebook Select */
+        /* Resource Grid (square cards for Storyteller + Ebook) */
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+
+        .resource-card {
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            transition: all 0.25s;
+            background: rgba(255, 255, 255, 0.03);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 8px;
+            aspect-ratio: 1/1;
+            text-align: center;
+            gap: 8px;
+            position: relative;
+        }
+
+        .resource-card:hover {
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 14px rgba(102, 126, 234, 0.2);
+        }
+
+        .resource-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.15);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+        }
+
+        .resource-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            background: #6366f1;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+        }
+
+        .resource-card.ghost-card {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            background: transparent;
+        }
+
+        .resource-card.ghost-card:hover {
+            border-color: rgba(102, 126, 234, 0.4);
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .resource-card.ghost-card.selected {
+            border-color: rgba(102, 126, 234, 0.6);
+            background: rgba(102, 126, 234, 0.08);
+        }
+
+        .resource-icon {
+            font-size: 32px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        .resource-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+        }
+
+        .resource-subtitle {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            line-height: 1.2;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* Ebook Select (kept for fallback but hidden when cards shown) */
         select.ebook-select {
             width: 100%;
             padding: 16px 20px;
@@ -614,11 +736,14 @@
                     <input type="hidden" name="search" value="{{ search }}">
                     <input type="hidden" name="audiobook_id" id="selected_audiobook_id">
                     <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
+                    <input type="hidden" name="storyteller_uuid" id="selected_storyteller_uuid" value="">
 
+                    {% set single_ab_match = audiobooks|length == 1 %}
                     <h3 class="section-title"><span class="section-number">1</span>Select Audiobook</h3>
                     <div class="matching-grid">
                         {% for ab in audiobooks %}
-                        <div class="book-card" onclick="selectAudiobook(this, '{{ ab.id }}', '{{ get_title(ab) }}')">
+                        <div class="book-card {% if single_ab_match %}selected{% endif %}" data-value="{{ ab.id }}"
+                            onclick="selectAudiobook(this, '{{ ab.id }}', '{{ get_title(ab) }}')">
                             <div class="book-cover-container">
                                 {% if ab.cover_url %}
                                 <img src="{{ ab.cover_url }}" alt="Cover" class="book-cover"
@@ -633,14 +758,50 @@
                         {% endfor %}
                     </div>
 
-                    <h3 class="section-title"><span class="section-number">2</span>Select Ebook</h3>
-                    <select class="ebook-select" id="ebook_select" onchange="selectEbook(this.value)"
-                        title="Select ebook to match">
-                        <option value="">-- Choose Ebook --</option>
-                        {% for eb in ebooks %}
-                        <option value="{{ eb.name }}">{{ eb.display_name }}</option>
+                    {% if storyteller_books %}
+                    {% set single_st_match = storyteller_books|length == 1 %}
+                    <h3 class="section-title"><span class="section-number">2</span>Storyteller (Preferred)</h3>
+                    <div class="resource-grid">
+                        <div class="resource-card st-card ghost-card {% if not single_st_match %}selected{% endif %}"
+                            id="st-none-card" data-value="" onclick="selectStoryteller(this, '')">
+                            <div class="resource-icon" style="color: rgba(255,255,255,0.35);">⊘</div>
+                            <div class="resource-title" style="color: rgba(255,255,255,0.5);">None / Skip</div>
+                        </div>
+                        {% for st in storyteller_books %}
+                        <div class="resource-card st-card {% if single_st_match %}selected{% endif %}"
+                            data-value="{{ st.uuid }}" onclick="selectStoryteller(this, '{{ st.uuid }}')">
+                            <div class="resource-icon">⚡</div>
+                            <div class="resource-title">{{ st.title }}</div>
+                            {% if st.authors %}
+                            <div class="resource-subtitle">{{ st.authors|join(', ') }}</div>
+                            {% endif %}
+                        </div>
                         {% endfor %}
-                    </select>
+                    </div>
+                    {% endif %}
+
+                    {% set single_eb_match = ebooks|length == 1 %}
+                    <h3 class="section-title"><span class="section-number">{% if storyteller_books %}3{% else %}2{%
+                            endif %}</span>Select Ebook <span
+                            style="font-size:12px; color:#aaa; font-weight:normal;">(optional if Storyteller
+                            selected)</span></h3>
+                    {% if ebooks %}
+                    <div class="resource-grid" id="ebook-card-grid">
+                        {% for eb in ebooks %}
+                        <div class="resource-card eb-card {% if single_eb_match %}selected{% endif %}"
+                            data-value="{{ eb.name }}" onclick="selectEbookCard(this, '{{ eb.name }}')">
+                            <div class="resource-icon">📖</div>
+                            <div class="resource-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
+                            {% if eb.authors %}
+                            <div class="resource-subtitle">{{ eb.authors }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div style="color: rgba(255,255,255,0.4); font-size: 13px; margin: 12px 0;">No ebooks found for this
+                        search.</div>
+                    {% endif %}
 
                     <button type="submit" class="btn btn-success add-to-queue-btn" id="addToQueueBtn" disabled>
                         ➕ Add to Queue
@@ -662,7 +823,13 @@
                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 60%22%3E%3Crect fill=%22%23667eea%22 width=%2240%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2224%22 fill=%22white%22%3E📖%3C/text%3E%3C/svg%3E';">
                     <div class="queue-item-info">
                         <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
+                        {% if item.storyteller_uuid %}
+                        <p class="queue-item-ebook"><span style="color: #a78bfa; font-size: 11px;">⚡
+                                Storyteller</span>{% if item.ebook_filename %} + {{ item.ebook_filename }}{% endif %}
+                        </p>
+                        {% else %}
                         <p class="queue-item-ebook" title="{{ item.ebook_filename }}">{{ item.ebook_filename }}</p>
+                        {% endif %}
                     </div>
                     <form method="POST" action="/batch-match" class="d-inline">
                         <input type="hidden" name="action" value="remove_from_queue">
@@ -701,33 +868,62 @@
     <script>
         let selectedAudiobookId = null;
         let selectedEbookFilename = null;
+        let selectedStorytellerUuid = null;
+
+        // Initialise from server-side auto-selects (single-match logic)
+        (function init() {
+            const preSelectedAb = document.querySelector('.book-card.selected');
+            if (preSelectedAb) {
+                selectedAudiobookId = preSelectedAb.dataset.value;
+                document.getElementById('selected_audiobook_id').value = selectedAudiobookId;
+            }
+            const preSelectedEb = document.querySelector('.eb-card.selected');
+            if (preSelectedEb) {
+                selectedEbookFilename = preSelectedEb.dataset.value;
+                document.getElementById('selected_ebook_filename').value = selectedEbookFilename;
+            }
+            const preSelectedSt = document.querySelector('.st-card.selected');
+            if (preSelectedSt) {
+                selectedStorytellerUuid = preSelectedSt.dataset.value || '';
+                document.getElementById('selected_storyteller_uuid').value = selectedStorytellerUuid;
+            }
+            updateAddButton();
+        })();
 
         function selectAudiobook(element, id, title) {
-            // Remove selected class from all audiobooks
             document.querySelectorAll('.book-card').forEach(el => {
                 el.classList.remove('selected');
             });
-
-            // Add selected class to clicked audiobook
             element.classList.add('selected');
             selectedAudiobookId = id;
-
-            // Update hidden input
             document.getElementById('selected_audiobook_id').value = id;
-
-            // Enable button if both selected
             updateAddButton();
         }
 
-        function selectEbook(filename) {
+        function selectEbookCard(element, filename) {
+            document.querySelectorAll('.eb-card').forEach(el => {
+                el.classList.remove('selected');
+            });
+            element.classList.add('selected');
             selectedEbookFilename = filename;
             document.getElementById('selected_ebook_filename').value = filename;
             updateAddButton();
         }
 
+        function selectStoryteller(element, uuid) {
+            document.querySelectorAll('.st-card').forEach(el => {
+                el.classList.remove('selected');
+            });
+            element.classList.add('selected');
+            selectedStorytellerUuid = uuid;
+            document.getElementById('selected_storyteller_uuid').value = uuid;
+            updateAddButton();
+        }
+
         function updateAddButton() {
             const btn = document.getElementById('addToQueueBtn');
-            if (selectedAudiobookId && selectedEbookFilename) {
+            // Valid if: audiobook selected AND (ebook selected OR a real storyteller UUID selected)
+            if (selectedAudiobookId && (selectedEbookFilename || selectedStorytellerUuid)) {
                 btn.disabled = false;
             } else {
                 btn.disabled = true;

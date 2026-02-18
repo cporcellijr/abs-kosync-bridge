@@ -26,7 +26,7 @@ class CWAClient:
             masked = self.username[:2] + "***" if len(self.username) > 2 else "***"
             logger.debug(f"🔑 CWA Auth: Loaded credentials for user '{masked}'")
         else:
-            logger.debug("⚠️ CWA Auth: No username provided (Guest Mode?)")
+            logger.warning("⚠️ CWA Auth: No username provided (Guest Mode?)")
 
         self.session = requests.Session()
         
@@ -62,7 +62,7 @@ class CWAClient:
             kwargs.setdefault('timeout', self.timeout)
             return self.session.get(url, **kwargs)
         except Exception as e:
-            logger.error(f"CWA Request failed: {e}")
+            logger.error(f"❌ CWA Request failed: {e}")
             raise
 
     def is_configured(self):
@@ -93,7 +93,7 @@ class CWAClient:
                 logger.error(f"❌ CWA Connection Failed: Unauthorized ({r.status_code}). Check credentials.")
                 return False
             else:
-                logger.warning(f"❌ CWA Connection Failed: {r.status_code}")
+                logger.error(f"❌ CWA Connection Failed: {r.status_code}")
                 return False
 
         except Exception as e:
@@ -302,7 +302,7 @@ class CWAClient:
             return results
 
         except Exception as e:
-            logger.error(f"Error parsing CWA OPDS: {e}")
+            logger.error(f"❌ Error parsing CWA OPDS: {e}")
             logger.debug(f"Failed XML content (first 500 chars): {xml_content[:500]}")
             return []
 
@@ -334,12 +334,12 @@ class CWAClient:
                         if len(results) == 1:
                             return results[0]
             except Exception as e:
-                logger.warning(f"CWA ID lookup failed for {url}: {e}")
+                logger.warning(f"⚠️ CWA ID lookup failed for '{url}': {e}")
 
         # 2. Fallback: Direct Download Link Construction
         # If the server crashed (Author DB error) or lookup failed, assume the ID is valid 
         # and try to construct the download link blindly.
-        logger.warning(f"⚠️ CWA metadata lookup failed for ID {cwa_id}. Attempting direct download fallback.")
+        logger.warning(f"⚠️ CWA metadata lookup failed for ID '{cwa_id}' — Attempting direct download fallback")
         
         # Standard Calibre-Web OPDS download format: /opds/download/{id}/{format}/
         # We assume EPUB as it's the primary target
@@ -369,7 +369,7 @@ class CWAClient:
             
             # Verify file size
             if os.path.getsize(output_path) < 1024:
-                logger.warning(f"⚠️ Downloaded file is too small ({os.path.getsize(output_path)} bytes), likely failed.")
+                logger.warning(f"⚠️ Downloaded file is too small ({os.path.getsize(output_path)} bytes), likely failed")
                 return False
                 
             return True

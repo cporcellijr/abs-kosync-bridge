@@ -42,7 +42,7 @@ def setup_file_logging():
     """Setup file logging handler."""
     DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
     if not DATA_DIR.exists():
-        logger.warning("Not setting up file logging because missing data dir")
+        logger.warning("⚠️ Not setting up file logging because missing data dir")
         return ""
 
     LOG_DIR = DATA_DIR / "logs"

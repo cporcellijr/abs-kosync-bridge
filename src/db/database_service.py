@@ -48,7 +48,7 @@ class DatabaseService:
         alembic_cfg_path = project_root / "alembic.ini"
 
         if not alembic_cfg_path.exists():
-            logger.critical(f"alembic.ini not found at {alembic_cfg_path}. Cannot run migrations. Exiting.")
+            logger.critical(f"❌ alembic.ini not found at '{alembic_cfg_path}' — Cannot run migrations — Exiting")
             sys.exit(1)
 
         alembic_cfg = Config(str(alembic_cfg_path))
@@ -61,11 +61,11 @@ class DatabaseService:
                 try:
                     result = conn.execute(text("SELECT version_num FROM alembic_version"))
                     current_rev = result.scalar()
-                    logger.info(f"Current database revision before migration: {current_rev}")
+                    logger.info(f"🔍 Current database revision before migration: '{current_rev}'")
                 except Exception as e:
-                    logger.warning(f"Could not read alembic version: {e}")
+                    logger.warning(f"⚠️ Could not read alembic version: {e}")
             else:
-                logger.info("alembic_version table not found — database is new or unversioned")
+                logger.info("🔍 alembic_version table not found — database is new or unversioned")
 
         # Suppress massive stdout noise from Alembic, but keep errors
         alembic_cfg.attributes['output_buffer'] = io.StringIO()
@@ -75,14 +75,14 @@ class DatabaseService:
         original_level = alembic_logger.level
         alembic_logger.setLevel(logging.WARNING)
 
-        logger.info("Running Alembic migrations to head...")
+        logger.info("🔄 Running Alembic migrations to head")
         
         try:
             command.upgrade(alembic_cfg, "head")
-            logger.info("Database migrations completed successfully")
+            logger.info("✅ Database migrations completed successfully")
         except Exception as e:
-            logger.error(f"FATAL: Alembic migration failed: {e}")
-            logger.error(f"Migration error details: {traceback.format_exc()}")
+            logger.error(f"❌ FATAL: Alembic migration failed: {e}")
+            logger.error(f"❌ Migration error details: {traceback.format_exc()}")
             # Re-raise to prevent startup with invalid schema
             raise
         finally:
@@ -94,9 +94,9 @@ class DatabaseService:
             inspector = inspect(self.db_manager.engine)
             columns = [c['name'] for c in inspector.get_columns('books')]
             if 'original_ebook_filename' not in columns:
-                logger.warning("WARNING: 'original_ebook_filename' column missing in 'books' table after migration! Schema may be out of sync.")
+                logger.warning("⚠️ WARNING: 'original_ebook_filename' column missing in 'books' table after migration! Schema may be out of sync")
             else:
-                logger.debug("Schema verification passed: 'original_ebook_filename' exists.")
+                logger.debug("🔍 Schema verification passed: 'original_ebook_filename' exists")
 
     @contextmanager
     def get_session(self):
@@ -107,7 +107,7 @@ class DatabaseService:
             session.commit()
         except Exception as e:
             session.rollback()
-            logger.error(f"Database error: {e}")
+            logger.error(f"❌ Database error: {e}")
             raise
         finally:
             session.close()
@@ -231,9 +231,9 @@ class DatabaseService:
                     session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == old_abs_id).delete(synchronize_session=False)
                 except Exception: pass
                 
-                logger.info(f"✅ Migrated data from {old_abs_id} to {new_abs_id}")
+                logger.info(f"✅ Migrated data from '{old_abs_id}' to '{new_abs_id}'")
             except Exception as e:
-                logger.error(f"Failed to migrate book data: {e}")
+                logger.error(f"❌ Failed to migrate book data: {e}")
                 raise
 
     def delete_book(self, abs_id: str) -> bool:
@@ -740,7 +740,7 @@ class DatabaseService:
                 session.query(BookloreBook).filter(BookloreBook.filename == filename).delete(synchronize_session=False)
                 return True
         except Exception as e:
-            logger.error(f"Failed to delete Booklore book {filename}: {e}")
+            logger.error(f"❌ Failed to delete Booklore book '{filename}': {e}")
             return False
 
 
@@ -754,7 +754,7 @@ class DatabaseMigrator:
 
     def migrate(self):
         """Perform migration from JSON to SQLAlchemy database."""
-        logger.info("Starting migration from JSON to SQLAlchemy database...")
+        logger.info("🔄 Starting migration from JSON to SQLAlchemy database")
 
         # Migrate mappings/books
         if self.json_db_path.exists():
@@ -764,10 +764,10 @@ class DatabaseMigrator:
 
                 if 'mappings' in mapping_data:
                     self._migrate_books(mapping_data['mappings'])
-                    logger.info(f"Migrated {len(mapping_data['mappings'])} book mappings")
+                    logger.info(f"✅ Migrated {len(mapping_data['mappings'])} book mappings")
 
             except Exception as e:
-                logger.error(f"Failed to migrate mapping data: {e}")
+                logger.error(f"❌ Failed to migrate mapping data: {e}")
 
         # Migrate state
         if self.json_state_path.exists():
@@ -776,12 +776,12 @@ class DatabaseMigrator:
                     state_data = json.load(f)
 
                 self._migrate_states(state_data)
-                logger.info(f"Migrated state for {len(state_data)} books")
+                logger.info(f"✅ Migrated state for {len(state_data)} books")
 
             except Exception as e:
-                logger.error(f"Failed to migrate state data: {e}")
+                logger.error(f"❌ Failed to migrate state data: {e}")
 
-        logger.info("Migration completed")
+        logger.info("✅ Migration completed")
 
     def _migrate_books(self, mappings_list: List[dict]):
         """Migrate book mappings to Book models."""

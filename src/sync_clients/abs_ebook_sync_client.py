@@ -74,7 +74,7 @@ class ABSEbookSyncClient(SyncClient):
             self.abs_client.update_ebook_progress(book.abs_id, 0, "")
             return SyncResult(0, True, {'pct': 0, 'cfi': ""})
         if locator.cfi is None:
-            logger.error("⚠️ Cannot update ABS eBook progress - cfi is not set")
+            logger.warning("⚠️ Cannot update ABS eBook progress - cfi is not set")
             return SyncResult(0, False)
 
         pct = locator.percentage

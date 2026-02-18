@@ -75,7 +75,7 @@ class SyncManager:
         try:
             val = float(os.getenv("SYNC_DELTA_BETWEEN_CLIENTS_PERCENT", 1))
         except (ValueError, TypeError):
-            logger.warning("Invalid SYNC_DELTA_BETWEEN_CLIENTS_PERCENT value, defaulting to 1")
+            logger.warning("⚠️ Invalid SYNC_DELTA_BETWEEN_CLIENTS_PERCENT value, defaulting to 1")
             val = 1.0
         self.sync_delta_between_clients = val / 100.0
         self.delta_chars_thresh = 2000  # ~400 words
@@ -97,18 +97,18 @@ class SyncManager:
         for name, client in clients.items():
             if client.is_configured():
                 self.sync_clients[name] = client
-                logger.info(f"[INIT] Sync client enabled: {name}")
+                logger.info(f"🚀 Sync client enabled: '{name}'")
             else:
-                logger.info(f"[SKIP] Sync client disabled/unconfigured: {name}")
+                logger.debug(f"Sync client disabled/unconfigured: '{name}'")
 
     def startup_checks(self):
         # Check configured sync clients
         for client_name, client in (self.sync_clients or {}).items():
             try:
                 client.check_connection()
-                logger.info(f"[OK] {client_name} connection verified")
+                logger.info(f"✅ '{client_name}' connection verified")
             except Exception as e:
-                logger.warning(f"[WARN] {client_name} connection failed: {e}")
+                logger.warning(f"⚠️ '{client_name}' connection failed: {e}")
         
         # [NEW] Check CWA Integration Status
         if self.library_service and self.library_service.cwa_client:
@@ -121,20 +121,20 @@ class SyncManager:
                     if template:
                         logger.info(f"   📚 CWA search template: {template}")
             else:
-                logger.info("[SKIP] CWA not configured (disabled or missing server URL)")
+                logger.debug("CWA not configured (disabled or missing server URL)")
         else:
-            logger.debug("[SKIP] CWA not available (library_service or cwa_client missing)")
+            logger.debug("CWA not available (library_service or cwa_client missing)")
         
         # [NEW] Check ABS ebook search capability
         if self.abs_client:
             try:
                 # Just verify methods exist (don't actually search during startup)
                 if hasattr(self.abs_client, 'get_ebook_files') and hasattr(self.abs_client, 'search_ebooks'):
-                    logger.info("[OK] ABS ebook methods available (get_ebook_files, search_ebooks)")
+                    logger.info("✅ ABS ebook methods available (get_ebook_files, search_ebooks)")
                 else:
-                    logger.warning("[WARN] ABS ebook methods missing - ebook search may not work")
+                    logger.warning("⚠️ ABS ebook methods missing - ebook search may not work")
             except Exception as e:
-                logger.warning(f"[WARN] ABS ebook check failed: {e}")
+                logger.warning(f"⚠️ ABS ebook check failed: {e}")
 
         # [NEW] Run one-time migration
         if self.migration_service:
@@ -153,7 +153,7 @@ class SyncManager:
             for book in crashed_books:
                 book.status = 'active'
                 self.database_service.save_book(book)
-                logger.info(f"[JOB] Reset crashed book status: {sanitize_log_data(book.abs_title)}")
+                logger.info(f"✅ Reset crashed book status: {sanitize_log_data(book.abs_title)}")
 
             # Get books with processing status and mark them for retry
             # Get books with processing status OR failed_retry_later and check if they actually finished
@@ -170,12 +170,12 @@ class SyncManager:
                 if has_alignment:
                     # Only log if we are CHANGING status (active is goal)
                     if book.status != 'active':
-                        logger.info(f"[JOB] Found orphan alignment for {book.status} book: {sanitize_log_data(book.abs_title)}. Marking ACTIVE.")
+                        logger.info(f"✅ Found orphan alignment for '{book.status}' book: {sanitize_log_data(book.abs_title)} — Marking ACTIVE")
                         book.status = 'active'
                         self.database_service.save_book(book)
                 elif book.status == 'processing':
                      # Only mark processing checks as failed (failed are already failed)
-                    logger.info(f"[JOB] Recovering interrupted job: {sanitize_log_data(book.abs_title)}")
+                    logger.info(f"⚡ Recovering interrupted job: {sanitize_log_data(book.abs_title)}")
                     book.status = 'failed_retry_later'
                     self.database_service.save_book(book)
 
@@ -189,7 +189,7 @@ class SyncManager:
                     self.database_service.save_job(job)
 
         except Exception as e:
-            logger.error(f"Error cleaning up stale jobs: {e}")
+            logger.error(f"❌ Error cleaning up stale jobs: {e}")
 
     def cleanup_cache(self):
         """Delete files from ebook cache that are not referenced in the DB."""
@@ -236,10 +236,10 @@ class SyncManager:
                 mb = reclaimed_bytes / (1024 * 1024)
                 logger.info(f"✨ Cache cleanup complete: Removed {deleted_count} files ({mb:.2f} MB)")
             else:
-                logger.info("✨ Cache is clean (no orphaned files found).")
+                logger.info("✨ Cache is clean (no orphaned files found)")
                 
         except Exception as e:
-            logger.error(f"Error during cache cleanup: {e}")
+            logger.error(f"❌ Error during cache cleanup: {e}")
 
     def get_abs_title(self, ab):
         media = ab.get('media', {})
@@ -277,7 +277,7 @@ class SyncManager:
             return None
             
         if not book.transcript_file:
-            logger.debug(f"[{book.abs_id}] No transcript available for cross-format normalization")
+            logger.debug(f"'{book.abs_id}' No transcript available for cross-format normalization")
             return None
             
         normalized = {}
@@ -306,7 +306,7 @@ class SyncManager:
                 txt = full_text[max(0, char_offset - 400):min(total_text_len, char_offset + 400)]
                 
                 if not txt:
-                    logger.debug(f"[{book.abs_id}] Could not get text from {client_name} for normalization")
+                    logger.debug(f"'{book.abs_id}' Could not get text from '{client_name}' for normalization")
                     continue
                     
                 # Find equivalent timestamp in audiobook using the precise aligner if available
@@ -321,11 +321,11 @@ class SyncManager:
                 
                 if ts_for_text is not None:
                     normalized[client_name] = ts_for_text
-                    logger.debug(f"[{book.abs_id}] Normalized {client_name} {client_pct:.2%} -> {ts_for_text:.1f}s")
+                    logger.debug(f"'{book.abs_id}' Normalized '{client_name}' {client_pct:.2%} -> {ts_for_text:.1f}s")
                 else:
-                    logger.debug(f"[{book.abs_id}] Could not find timestamp for {client_name} text")
+                    logger.debug(f"'{book.abs_id}' Could not find timestamp for '{client_name}' text")
             except Exception as e:
-                logger.warning(f"[{book.abs_id}] Cross-format normalization failed for {client_name}: {e}")
+                logger.warning(f"⚠️ '{book.abs_id}' Cross-format normalization failed for '{client_name}': {e}")
                 
         # Only return if we successfully normalized at least one ebook client
         if len(normalized) > 1:
@@ -359,7 +359,7 @@ class SyncManager:
                     if state is not None:
                         config[client_name] = state
                 except Exception as e:
-                    logger.warning(f"⚠️ {client_name} state fetch failed: {e}")
+                    logger.warning(f"⚠️ '{client_name}' state fetch failed: {e}")
 
         return config
 
@@ -376,14 +376,14 @@ class SyncManager:
         escaped_filename = glob.escape(ebook_filename)
         filesystem_matches = list(books_search_dir.glob(f"**/{escaped_filename}"))
         if filesystem_matches:
-            logger.info(f"[FS] Found EPUB on filesystem: {filesystem_matches[0]}")
+            logger.info(f"🔍 Found EPUB on filesystem: {filesystem_matches[0]}")
             return filesystem_matches[0]
         
         # Check persistent EPUB cache
         self.epub_cache_dir.mkdir(parents=True, exist_ok=True)
         cached_path = self.epub_cache_dir / ebook_filename
         if cached_path.exists():
-            logger.info(f"[CACHE] Found EPUB in cache: {cached_path}")
+            logger.info(f"🔍 Found EPUB in cache: '{cached_path}'")
             return cached_path
 
         # Try to download from Booklore API
@@ -391,20 +391,20 @@ class SyncManager:
         if hasattr(self.booklore_client, 'is_configured') and self.booklore_client.is_configured():
             book = self.booklore_client.find_book_by_filename(ebook_filename)
             if book:
-                logger.info(f"[DL] Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
+                logger.info(f"⚡ Downloading EPUB from Booklore: {sanitize_log_data(ebook_filename)}")
                 if hasattr(self.booklore_client, 'download_book'):
                     content = self.booklore_client.download_book(book['id'])
                     if content:
                         with open(cached_path, 'wb') as f:
                             f.write(content)
-                        logger.info(f"[OK] Downloaded EPUB to cache: {cached_path}")
+                        logger.info(f"✅ Downloaded EPUB to cache: '{cached_path}'")
                         return cached_path
                     else:
-                        logger.error(f"Failed to download EPUB content from Booklore")
+                        logger.error(f"❌ Failed to download EPUB content from Booklore")
             else:
-                logger.error(f"EPUB not found in Booklore: {sanitize_log_data(ebook_filename)}")
+                logger.error(f"❌ EPUB not found in Booklore: {sanitize_log_data(ebook_filename)}")
             if not filesystem_matches:
-                logger.error(f"EPUB not found on filesystem and Booklore not configured")
+                logger.error(f"❌ EPUB not found on filesystem and Booklore not configured")
 
         return None
 
@@ -412,7 +412,7 @@ class SyncManager:
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
         suggestions_enabled_val = os.environ.get("SUGGESTIONS_ENABLED", "true")
-        logger.debug(f"DEBUG: SUGGESTIONS_ENABLED env var is: '{suggestions_enabled_val}'")
+        logger.debug(f"SUGGESTIONS_ENABLED env var is: '{suggestions_enabled_val}'")
         
         if suggestions_enabled_val.lower() != "true":
             return
@@ -453,11 +453,11 @@ class SyncManager:
                 else:
                     logger.debug(f"Skipping {abs_id}: no duration")
         except Exception as e:
-            logger.error(f"Error checking suggestions: {e}")
+            logger.error(f"❌ Error checking suggestions: {e}")
 
     def _create_suggestion(self, abs_id, progress_data):
         """Create a new suggestion for an unmapped book."""
-        logger.info(f"[IDEA] Found potential new book for suggestion: {abs_id}")
+        logger.info(f"🔍 Found potential new book for suggestion: '{abs_id}'")
         
         try:
             # 1. Get Details from ABS
@@ -506,7 +506,7 @@ class SyncManager:
                                  "confidence": "high" if search_title.lower() in b.get('title', '').lower() else "medium"
                              })
                 except Exception as e:
-                    logger.warning(f"Booklore search failed during suggestion: {e}")
+                    logger.warning(f"⚠️ Booklore search failed during suggestion: {e}")
 
             # 2b. Search Local Filesystem
             if self.books_dir and self.books_dir.exists():
@@ -526,7 +526,7 @@ class SyncManager:
                              })
                     logger.debug(f"Filesystem found {fs_matches} matches")
                 except Exception as e:
-                    logger.warning(f"Filesystem search failed during suggestion: {e}")
+                    logger.warning(f"⚠️ Filesystem search failed during suggestion: {e}")
             
             # 2c. ABS Direct Match (check if audiobook item has ebook files)
             if self.abs_client:
@@ -545,7 +545,7 @@ class SyncManager:
                                 "confidence": "high"
                             })
                 except Exception as e:
-                    logger.warning(f"ABS Direct search failed during suggestion: {e}")
+                    logger.warning(f"⚠️ ABS Direct search failed during suggestion: {e}")
             
             # 2d. CWA Search (Calibre-Web Automated via OPDS)
             if self.library_service and self.library_service.cwa_client and self.library_service.cwa_client.is_configured():
@@ -567,7 +567,7 @@ class SyncManager:
                                 "confidence": "high" if search_title.lower() in cr.get('title', '').lower() else "medium"
                             })
                 except Exception as e:
-                    logger.warning(f"CWA search failed during suggestion: {e}")
+                    logger.warning(f"⚠️ CWA search failed during suggestion: {e}")
 
             # 2e. ABS Search (search other libraries for matching ebook)
             if self.abs_client:
@@ -590,11 +590,11 @@ class SyncManager:
                                     "confidence": "medium"
                                 })
                 except Exception as e:
-                    logger.warning(f"ABS Search failed during suggestion: {e}")
+                    logger.warning(f"⚠️ ABS Search failed during suggestion: {e}")
             
             # 3. Save to DB
             if not matches:
-                logger.debug(f"[INFO] No matches found for '{title}', skipping suggestion creation.")
+                logger.debug(f"No matches found for '{title}', skipping suggestion creation")
                 return
 
             suggestion = PendingSuggestion(
@@ -606,10 +606,10 @@ class SyncManager:
             )
             self.database_service.save_pending_suggestion(suggestion)
             match_count = len(matches)
-            logger.info(f"[OK] Created suggestion for '{title}' with {match_count} matches")
+            logger.info(f"✅ Created suggestion for '{title}' with {match_count} matches")
 
         except Exception as e:
-            logger.error(f"Failed to create suggestion for {abs_id}: {e}")
+            logger.error(f"❌ Failed to create suggestion for '{abs_id}': {e}")
             logger.debug(traceback.format_exc())
 
     def check_pending_jobs(self):
@@ -661,7 +661,7 @@ class SyncManager:
         job_idx = (eligible_books.index(target_book) + 1) if total_jobs else 1
 
         # 3. Mark book as 'processing' and create/update job record
-        logger.info(f"[JOB {job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_book.abs_title)}")
+        logger.info(f"⚡ [{job_idx}/{total_jobs}] Starting background transcription: {sanitize_log_data(target_book.abs_title)}")
 
         # Update book status to processing
         target_book.status = 'processing'
@@ -695,7 +695,7 @@ class SyncManager:
         max_retries = int(os.getenv("JOB_MAX_RETRIES", 5))
 
         # Milestone log for background job
-        logger.info(f"[JOB {job_idx}/{job_total}] Processing '{sanitize_log_data(abs_title)}'...")
+        logger.info(f"⚡ [{job_idx}/{job_total}] Processing '{sanitize_log_data(abs_title)}'")
 
         try:
             def update_progress(local_pct, phase):
@@ -785,7 +785,7 @@ class SyncManager:
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
             if not raw_transcript:
-                logger.info("[INFO] SMIL extraction skipped/failed, falling back to Whisper transcription.")
+                logger.info("🔄 SMIL extraction skipped/failed, falling back to Whisper transcription")
                 
                 audio_files = self.abs_client.get_audio_files(abs_id)
                 raw_transcript = self.transcriber.process_audio(
@@ -842,7 +842,7 @@ class SyncManager:
                     # Save the OLD filename as the original if it's not already set.
                     if not book.original_ebook_filename:
                         book.original_ebook_filename = book.ebook_filename
-                        logger.info(f"   [Tri-Link] Preserving original filename: {book.original_ebook_filename}")
+                        logger.info(f"   ⚡ Preserving original filename: '{book.original_ebook_filename}'")
 
                 # Update the active filename to the one we just used/downloaded
                 book.ebook_filename = new_filename
@@ -859,10 +859,10 @@ class SyncManager:
                 self.database_service.save_job(job)
 
 
-            logger.info(f"[JOB] Completed: {sanitize_log_data(abs_title)}")
+            logger.info(f"✅ Completed: {sanitize_log_data(abs_title)}")
 
         except Exception as e:
-            logger.error(f"[FAIL] {sanitize_log_data(abs_title)}: {e}")
+            logger.error(f"❌ {sanitize_log_data(abs_title)}: {e}")
 
             # --- Failure Update using database service ---
             # Get current job to increment retry count
@@ -884,7 +884,7 @@ class SyncManager:
             # Update book status based on retry count
             if new_retry_count >= max_retries:
                 book.status = 'failed_permanent'
-                logger.warning(f"[JOB] {sanitize_log_data(abs_title)}: Max retries exceeded")
+                logger.warning(f"⚠️ {sanitize_log_data(abs_title)}: Max retries exceeded")
                 
                 # Clean up audio cache on permanent failure to free disk space
                 if self.data_dir:
@@ -893,9 +893,9 @@ class SyncManager:
                     if audio_cache_dir.exists():
                         try:
                             shutil.rmtree(audio_cache_dir)
-                            logger.info(f"[JOB] Cleaned up audio cache for {sanitize_log_data(abs_title)}")
+                            logger.info(f"✅ Cleaned up audio cache for {sanitize_log_data(abs_title)}")
                         except Exception as cleanup_err:
-                            logger.warning(f"[JOB] Failed to clean audio cache: {cleanup_err}")
+                            logger.warning(f"⚠️ Failed to clean audio cache: {cleanup_err}")
             else:
                 book.status = 'failed_retry_later'
 
@@ -951,7 +951,7 @@ class SyncManager:
 
         # Ensure we have at least one potential leader
         if not vals:
-            logger.warning(f"[WARN] [{abs_id}] [{title_snip}] No clients available to be leader")
+            logger.warning(f"⚠️ '{abs_id}' '{title_snip}' No clients available to be leader")
             return None, None
 
         # Check which clients have changed (delta > minimum threshold)
@@ -966,7 +966,7 @@ class SyncManager:
             # Only one client changed - that client is the leader (most recent change wins)
             leader = list(clients_with_delta.keys())[0]
             leader_pct = vals[leader]
-            logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
+            logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
         else:
             # Multiple clients changed or this is a discrepancy resolution
             # Use "furthest wins" logic among changed clients (or all if none changed)
@@ -982,17 +982,17 @@ class SyncManager:
                     leader = max(normalized_candidates, key=normalized_candidates.get)
                     leader_ts = normalized_candidates[leader]
                     leader_pct = vals[leader]
-                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                    logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
                 else:
                     # Fallback to percentage-based comparison among candidates
                     leader = max(candidates, key=candidates.get)
                     leader_pct = vals[leader]
-                    logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                    logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)}")
             else:
                 # Same-format sync or normalization failed - use raw percentages
                 leader = max(candidates, key=candidates.get)
                 leader_pct = vals[leader]
-                logger.info(f"[LEADER] [{abs_id}] [{title_snip}] {leader} leads at {config[leader].value_formatter(leader_pct)}")
+                logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)}")
                 
         return leader, leader_pct
 
@@ -1010,7 +1010,7 @@ class SyncManager:
              # Instant Sync: Block and wait for lock (up to 10s)
              acquired = self._sync_lock.acquire(timeout=10)
              if not acquired:
-                 logger.warning(f"[WARN] Sync lock timeout for {target_abs_id} - skipping")
+                 logger.warning(f"⚠️ Sync lock timeout for '{target_abs_id}' - skipping")
                  return
         else:
              # Daemon: Non-blocking attempt
@@ -1022,7 +1022,7 @@ class SyncManager:
         try:
             self._sync_cycle_internal(target_abs_id)
         except Exception as e:
-            logger.error(f"Sync cycle internal error: {e}")
+            logger.error(f"❌ Sync cycle internal error: {e}")
             # Log traceback for robust debugging
             logger.error(traceback.format_exc())
         finally:
@@ -1043,7 +1043,7 @@ class SyncManager:
         # Get active books directly from database service
         active_books = []
         if target_abs_id:
-            logger.info(f"[JOB] Instant Sync triggered for {target_abs_id}")
+            logger.info(f"⚡ Instant Sync triggered for '{target_abs_id}'")
             book = self.database_service.get_book(target_abs_id)
             if book and book.status == 'active':
                 active_books = [book]
@@ -1072,7 +1072,7 @@ class SyncManager:
         # Main sync loop - process each active book
         for book in active_books:
             abs_id = book.abs_id
-            logger.info(f"🔄 [{abs_id}] Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
+            logger.info(f"🔄 '{abs_id}' Syncing '{sanitize_log_data(book.abs_title or 'Unknown')}'")
             title_snip = sanitize_log_data(book.abs_title or 'Unknown')
 
             try:
@@ -1094,7 +1094,7 @@ class SyncManager:
                     if sync_type in client.get_supported_sync_types()
                 }
                 if sync_type == 'ebook':
-                    logger.debug(f"[{abs_id}] [{title_snip}] Ebook-only mode - using clients: {list(active_clients.keys())}")
+                    logger.debug(f"'{abs_id}' '{title_snip}' Ebook-only mode - using clients: {list(active_clients.keys())}")
 
                 # Build config using active_clients - parallel fetch
                 config = self._fetch_states_parallel(book, prev_states_by_client, title_snip, bulk_states_per_client, active_clients)
@@ -1111,9 +1111,9 @@ class SyncManager:
                         # Fallback logic: If ABS is missing but we have ebook clients, try to sync them as ebook-only
                         ebook_clients_active = [k for k in config.keys() if k != 'ABS']
                         if ebook_clients_active:
-                             logger.info(f"[{abs_id}] [{title_snip}] ABS audiobook not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
+                             logger.info(f"'{abs_id}' '{title_snip}' ABS audiobook not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
                         else:
-                             logger.debug(f"[{abs_id}] [{title_snip}] ABS audiobook offline and no other clients, skipping")
+                             logger.debug(f"'{abs_id}' '{title_snip}' ABS audiobook offline and no other clients, skipping")
                              continue  # ABS offline and no fallback possible
 
 
@@ -1131,10 +1131,10 @@ class SyncManager:
                         significant_diff = True
                         # If we have a significant diff, we verify it's not just noise
                         # by checking if we have at least one valid state
-                        logger.debug(f"[{abs_id}] [{title_snip}] Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
-                        logger.debug(f"[{abs_id}] [{title_snip}] Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
+                        logger.debug(f"'{abs_id}' '{title_snip}' Detected discrepancies between clients ({progress_diff:.2%}), forcing sync check even if deltas are 0")
+                        logger.debug(f"'{abs_id}' '{title_snip}' Client discrepancy detected: {min_progress:.1%} to {max_progress:.1%}")
                     else:
-                        logger.debug(f"[{abs_id}] [{title_snip}] Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
+                        logger.debug(f"'{abs_id}' '{title_snip}' Progress difference {progress_diff:.2%} below threshold {self.sync_delta_between_clients:.2%} - skipping sync")
                         # Do not continue here, let the consolidated check handle it
 
                 # Check for Character Delta Threshold (Fix 2B)
@@ -1150,7 +1150,7 @@ class SyncManager:
                                  # Ensure file is available locally (download if needed)
                                  epub_path = self._get_local_epub(book.original_ebook_filename or book.ebook_filename)
                                  if not epub_path:
-                                     logger.warning(f"Could not locate or download EPUB for {book.ebook_filename}")
+                                     logger.warning(f"⚠️ Could not locate or download EPUB for '{book.ebook_filename}'")
                                      continue
 
                                  # Use existing ebook_parser which has caching
@@ -1160,12 +1160,12 @@ class SyncManager:
                                      char_delta = int(client_state.delta * total_chars)
 
                                      if char_delta >= self.delta_chars_thresh:
-                                         logger.info(f"[{abs_id}] [{title_snip}] Significant character change detected for {client_name_key}: {char_delta} chars (Threshold: {self.delta_chars_thresh})")
+                                         logger.info(f"'{abs_id}' '{title_snip}' Significant character change detected for '{client_name_key}': {char_delta} chars (Threshold: {self.delta_chars_thresh})")
                                          significant_diff = True
                                          char_delta_triggered = True  # Mark that this came from char delta
                                          break
                              except Exception as e:
-                                 logger.warning(f"Failed to check char delta for {client_name_key}: {e}")
+                                 logger.warning(f"⚠️ Failed to check char delta for '{client_name_key}': {e}")
 
                 # Check if all 'delta' fields in config are zero
                 # We typically skip if nothing changed, BUT if there is a significant discrepancy
@@ -1180,7 +1180,7 @@ class SyncManager:
 
                 # If nothing changed AND clients are effectively in sync, skip
                 if deltas_zero and not significant_diff:
-                    logger.debug(f"[{abs_id}] [{title_snip}] No changes and clients in sync, skipping")
+                    logger.debug(f"'{abs_id}' '{title_snip}' No changes and clients in sync, skipping")
                     continue
                 
                 # If there's a discrepancy but no client actually changed, skip
@@ -1194,11 +1194,11 @@ class SyncManager:
                     for client_name in config.keys()
                 )
                 if significant_diff and not any_significant_delta and not char_delta_triggered and not new_client_in_config:
-                    logger.debug(f"[{abs_id}] [{title_snip}] Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader.")
+                    logger.debug(f"'{abs_id}' '{title_snip}' Discrepancy exists ({max_progress*100:.1f}% vs {min_progress*100:.1f}%) but no recent client activity detected. Waiting for a new read event to determine true leader")
                     continue
 
                 if significant_diff:
-                    logger.debug(f"[{abs_id}] [{title_snip}] Proceeding due to client discrepancy")
+                    logger.debug(f"'{abs_id}' '{title_snip}' Proceeding due to client discrepancy")
 
                 # Small changes (below thresholds) should be noisy-reduced
                 small_changes = []
@@ -1208,7 +1208,7 @@ class SyncManager:
 
                     # Debug logging for potential None values
                     if delta is None or threshold is None:
-                         logger.debug(f"[{title_snip}] {key} delta={delta}, threshold={threshold}")
+                         logger.debug(f"'{title_snip}' '{key}' delta={delta}, threshold={threshold}")
 
                     if delta is not None and threshold is not None and 0 < delta < threshold:
                         label, fmt = cfg.display
@@ -1219,7 +1219,7 @@ class SyncManager:
                     # If we have significant discrepancies between clients, we MUST NOT skip,
                     # even if individual deltas are small (e.g. from DB pre-update).
                     if significant_diff:
-                        logger.debug(f"[{abs_id}] [{title_snip}] Proceeding with sync despite small deltas due to client discrepancies.")
+                        logger.debug(f"'{abs_id}' '{title_snip}' Proceeding with sync despite small deltas due to client discrepancies")
                     else:
                         for s in small_changes:
                             logger.info(s)
@@ -1227,7 +1227,7 @@ class SyncManager:
                         continue
 
                 # At this point we have a significant change to act on
-                logger.info(f"🔄 [{abs_id}] [{title_snip}] Change detected")
+                logger.info(f"🔄 '{abs_id}' '{title_snip}' Change detected")
 
                 # Status block - show only changed lines
                 status_lines = []
@@ -1254,7 +1254,7 @@ class SyncManager:
                 # Get canonical text from leader
                 txt = leader_client.get_text_from_current_state(book, leader_state)
                 if not txt:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not get text from leader {leader}")
+                    logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
                     continue
 
                 # Get locator (percentage, xpath, etc) from text
@@ -1265,13 +1265,13 @@ class SyncManager:
                     if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
                         fallback_txt = leader_client.get_fallback_text(book, leader_state)
                         if fallback_txt and fallback_txt != txt:
-                            logger.info(f"🔄 [{abs_id}] [{title_snip}] Primary text match failed. Trying previous segment fallback...")
+                            logger.info(f"🔄 '{abs_id}' '{title_snip}' Primary text match failed. Trying previous segment fallback...")
                             locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
                             if locator:
-                                logger.info(f"✅ [{abs_id}] [{title_snip}] Fallback successful!")
+                                logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
 
                 if not locator:
-                    logger.warning(f"⚠️ [{abs_id}] [{title_snip}] Could not resolve locator from text for leader {leader}, falling back to percentage of leader.")
+                    logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not resolve locator from text for leader '{leader}', falling back to percentage of leader")
                     locator = LocatorResult(percentage=leader_pct)
 
                 # Update all other clients and store results
@@ -1288,7 +1288,7 @@ class SyncManager:
                         result = client.update_progress(book, request)
                         results[client_name] = result
                     except Exception as e:
-                        logger.error(f"⚠️ Failed to update {client_name}: {e}")
+                        logger.warning(f"⚠️ Failed to update '{client_name}': {e}")
                         results[client_name] = SyncResult(None, False)
 
                 # Save states directly to database service using State models
@@ -1313,7 +1313,7 @@ class SyncManager:
                     if result.success:
                         # Use updated_state if provided, otherwise fall back to basic state
                         state_data = result.updated_state if result.updated_state else {'pct': result.location}
-                        logger.info(f"[{abs_id}] [{title_snip}] Updated state data for {client_name}: " + str(state_data))
+                        logger.info(f"'{abs_id}' '{title_snip}' Updated state data for '{client_name}': {state_data}")
                         client_state_model = State(
                             abs_id=book.abs_id,
                             client_name=client_name.lower(),
@@ -1325,7 +1325,7 @@ class SyncManager:
                         )
                         self.database_service.save_state(client_state_model)
 
-                logger.info(f"💾 [{abs_id}] [{title_snip}] States saved to database")
+                logger.info(f"💾 '{abs_id}' '{title_snip}' States saved to database")
 
                 # Debugging crash: Flush logs to ensure we see this before any potential hard crash
                 for handler in logger.handlers:
@@ -1336,9 +1336,9 @@ class SyncManager:
 
             except Exception as e:
                 logger.error(traceback.format_exc())
-                logger.error(f"Sync error: {e}")
+                logger.error(f"❌ Sync error: {e}")
 
-        logger.debug(f"End of sync cycle for active books")
+        logger.debug("End of sync cycle for active books")
 
     def clear_progress(self, abs_id):
         """
@@ -1379,7 +1379,7 @@ class SyncManager:
 
                 for client_name, client in self.sync_clients.items():
                     if client_name == 'ABS' and book.sync_mode == 'ebook_only':
-                        logger.debug(f"[{book.abs_title}] Ebook-only mode - skipping ABS progress reset")
+                        logger.debug(f"'{book.abs_title}' Ebook-only mode - skipping ABS progress reset")
                         continue
                     try:
                         result = client.update_progress(book, request)
@@ -1388,15 +1388,15 @@ class SyncManager:
                             'message': 'Reset to 0%' if result.success else 'Failed to reset'
                         }
                         if result.success:
-                            logger.info(f"✅ Reset {client_name} to 0%")
+                            logger.info(f"✅ Reset '{client_name}' to 0%")
                         else:
-                            logger.warning(f"⚠️ Failed to reset {client_name}")
+                            logger.warning(f"⚠️ Failed to reset '{client_name}'")
                     except Exception as e:
                         reset_results[client_name] = {
                             'success': False,
                             'message': str(e)
                         }
-                        logger.warning(f"⚠️ Error resetting {client_name}: {e}")
+                        logger.warning(f"⚠️ Error resetting '{client_name}': {e}")
 
                 summary = {
                     'book_id': abs_id,
@@ -1422,19 +1422,19 @@ class SyncManager:
                         if book.status != 'active':
                             book.status = 'active'
                             self.database_service.save_book(book)
-                        logger.info(f"   [OK] Alignment map exists. Reset progress to 0% without triggering re-transcription.")
+                        logger.info("   ✅ Alignment map exists — Reset progress to 0% without triggering re-transcription")
                     else:
                         # Only trigger a full re-process if we lack alignment data
                         book.status = 'pending'
                         self.database_service.save_book(book)
-                        logger.info(f"   [JOB] Book marked as 'pending' to trigger alignment check.")
+                        logger.info("   ⚡ Book marked as 'pending' to trigger alignment check")
                 else:
                     # Legacy or explicit "just clear 0" behavior
                     # If smart reset is disabled, we still want to ensure it's at least active
                     if book.status != 'active':
                         book.status = 'active'
                         self.database_service.save_book(book)
-                    logger.info(f"   [OK] Reset progress to 0%. (Smart re-process disabled)")
+                    logger.info("   ✅ Reset progress to 0% (Smart re-process disabled)")
 
                 logger.info(f"✅ Progress clearing completed for '{sanitize_log_data(book.abs_title)}'")
                 logger.info(f"   Database states cleared: {cleared_count}")
@@ -1450,10 +1450,10 @@ class SyncManager:
 
     def run_daemon(self):
         """Legacy method - daemon is now run from web_server.py"""
-        logger.warning("run_daemon() called - daemon should be started from web_server.py instead")
+        logger.warning("⚠️ run_daemon() called — daemon should be started from web_server.py instead")
         schedule.every(int(os.getenv("SYNC_PERIOD_MINS", 5))).minutes.do(self.sync_cycle)
         schedule.every(1).minutes.do(self.check_pending_jobs)
-        logger.info("Daemon started.")
+        logger.info("🚀 Daemon started")
         self.sync_cycle()
         while True:
             schedule.run_pending()

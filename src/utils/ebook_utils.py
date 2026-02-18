@@ -60,7 +60,7 @@ class EbookParser:
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
         self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
 
-        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
+        logger.info(f"✅ EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
     def resolve_book_path(self, filename):
         try:
@@ -100,7 +100,7 @@ class EbookParser:
                     md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing hash for {filepath}: {e}")
+            logger.error(f"❌ Error computing hash for {filepath}: {e}")
             return None
 
     def _compute_koreader_hash_from_bytes(self, content):
@@ -116,7 +116,7 @@ class EbookParser:
                 md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing KOReader hash from bytes: {e}")
+            logger.error(f"❌ Error computing KOReader hash from bytes: {e}")
             return None
 
     def get_kosync_id_from_bytes(self, filename, content):
@@ -166,7 +166,7 @@ class EbookParser:
             return False
 
         except Exception as e:
-            logger.error(f"Error extracting cover from {filepath}: {e}")
+            logger.error(f"❌ Error extracting cover from '{filepath}': {e}")
             return False
 
     def extract_text_and_map(self, filepath, progress_callback=None):
@@ -223,7 +223,7 @@ class EbookParser:
             return combined_text, spine_map
 
         except Exception as e:
-            logger.error(f"Failed to parse EPUB {filepath}: {e}")
+            logger.error(f"❌ Failed to parse EPUB '{filepath}': {e}")
             return "", []
 
     def get_text_at_percentage(self, filename, percentage):
@@ -242,7 +242,7 @@ class EbookParser:
 
             return full_text[start:end]
         except Exception as e:
-            logger.error(f"Error getting text at percentage: {e}")
+            logger.error(f"❌ Error getting text at percentage: {e}")
             return None
 
     def get_character_delta(self, filename, percentage_prev, percentage_new):
@@ -255,7 +255,7 @@ class EbookParser:
             total_len = len(full_text)
             return abs(int(total_len * percentage_prev) - int(total_len * percentage_new))
         except Exception as e:
-            logger.error(f"Error calculating character delta: {e}")
+            logger.error(f"❌ Error calculating character delta: {e}")
             return None
 
     # =========================================================================
@@ -313,7 +313,7 @@ class EbookParser:
             return full_text[start:end]
 
         except Exception as e:
-            logger.error(f"Error resolving locator ID {fragment_id} in {filename}: {e}")
+            logger.error(f"❌ Error resolving locator ID '{fragment_id}' in '{filename}': {e}")
             return None
 
     def _generate_css_selector(self, target_tag):
@@ -530,7 +530,7 @@ class EbookParser:
 
             return None
         except Exception as e:
-            logger.error(f"Error finding text in {filename}: {e}")
+            logger.error(f"❌ Error finding text in '{filename}': {e}")
             return None
 
     def _normalize(self, text):
@@ -625,12 +625,12 @@ class EbookParser:
                             break
 
             if target_element is None:
-                logger.warning(f"No text elements found in spine {target_item['spine_index']}")
+                logger.warning(f"⚠️ No text elements found in spine {target_item['spine_index']}")
                 return None
 
             # Safety Check: Prevent Out-Of-Bounds offsets due to parser drift
             if target_text_len > 0 and target_offset > target_text_len + 1:
-                logger.warning(f"KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for {target_element.tag}. Rejecting to prevent crash.")
+                logger.warning(f"⚠️ KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for '{target_element.tag}' — Rejecting to prevent crash")
                 return None
 
             # Build xpath for the target element
@@ -664,7 +664,7 @@ class EbookParser:
                 return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
-            logger.error(f"Error generating KOReader XPath: {e}")
+            logger.error(f"❌ Error generating KOReader XPath: {e}")
             return None
 
     def _has_text_content(self, element):
@@ -757,7 +757,7 @@ class EbookParser:
                 except Exception: pass
 
             if not elements:
-                logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
+                logger.warning(f"⚠️ Could not resolve XPath in {filename}: {clean_xpath}")
                 return None
 
             target_node = elements[0]
@@ -801,7 +801,7 @@ class EbookParser:
             else:
                 # Fallback: If exact match fails (rare), try the old calculation method
                 # (This preserves old behavior if the new matching fails)
-                logger.debug("⚠️ Exact text match failed, falling back to LXML offset calculation")
+                logger.debug("Exact text match failed, falling back to LXML offset calculation")
                 # Falling back to strict calculation (Logic from original implementation)
                 
                 preceding_len = 0
@@ -833,7 +833,7 @@ class EbookParser:
                 return None
 
         except Exception as e:
-            logger.error(f"Error resolving XPath {xpath_str}: {e}")
+            logger.error(f"❌ Error resolving XPath '{xpath_str}': {e}")
             return None
 
     def get_text_around_cfi(self, filename, cfi, context=50):
@@ -864,7 +864,7 @@ class EbookParser:
             char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
 
             if not spine_step:
-                logger.error(f"Could not extract spine step from CFI: {cfi}")
+                logger.error(f"❌ Could not extract spine step from CFI: '{cfi}'")
                 return None
 
             # Load the EPUB and find the spine item
@@ -874,7 +874,7 @@ class EbookParser:
             # Calculate spine index (CFI spine steps are 2x the actual index)
             spine_index = (spine_step // 2) - 1
             if not (0 <= spine_index < len(spine_map)):
-                logger.error(f"Spine index {spine_index} out of range for CFI {cfi}")
+                logger.error(f"❌ Spine index {spine_index} out of range for CFI '{cfi}'")
                 return None
 
             item = spine_map[spine_index]
@@ -914,7 +914,7 @@ class EbookParser:
                         current_element = children[element_index]
                         logger.debug(f"Navigated to child element {element_index}: {current_element.tag}")
                     else:
-                        logger.warning(f"Element index {element_index} out of range (have {len(children)} children)")
+                        logger.warning(f"⚠️ Element index {element_index} out of range (have {len(children)} children)")
                         break
                 else:  # Odd number = text node
                     text_index = (step_index // 2)
@@ -972,7 +972,7 @@ class EbookParser:
             return snippet
 
         except Exception as e:
-            logger.error(f"Error using epubcfi library for {cfi}: {e}")
+            logger.error(f"❌ Error using epubcfi library for '{cfi}': {e}")
             return None
 
 
@@ -1020,7 +1020,7 @@ def sanitize_storyteller_artifacts(epub_path: Path) -> bool:
                                     f.write(str(soup))
                                     
                         except Exception as e:
-                            logger.warning(f"Failed to sanitize file {file}: {e}")
+                            logger.warning(f"⚠️ Failed to sanitize file '{file}': {e}")
                             
             if modified_count > 0:
                 logger.info(f"Removed {modified_count} Storyteller tags. Repacking...")

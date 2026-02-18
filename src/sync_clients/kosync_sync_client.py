@@ -30,10 +30,10 @@ class KoSyncSyncClient(SyncClient):
         ko_id = book.kosync_doc_id
         ko_pct, ko_xpath = self.kosync_client.get_progress(ko_id)
         if ko_xpath is None:
-            logger.debug(f"⚠️ [{title_snip}] KoSync xpath is None - will use fallback text extraction")
+            logger.warning(f"⚠️ '{title_snip}' KoSync xpath is None - will use fallback text extraction")
 
         if ko_pct is None:
-            logger.debug("⚠️ KoSync percentage is None - returning None for service state")
+            logger.warning("⚠️ KoSync percentage is None - returning None for service state")
             return None
 
         # Get previous KoSync state

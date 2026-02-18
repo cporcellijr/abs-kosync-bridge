@@ -36,7 +36,7 @@ def _reconfigure_logging():
 
             logger.info(f"📝 Logging level updated to {new_level_str}")
     except Exception as e:
-            logger.warning(f"Failed to reconfigure logging: {e}")
+            logger.warning(f"⚠️ Failed to reconfigure logging: {e}")
 
 # ---------------- APP SETUP ----------------
 container = None
@@ -91,7 +91,7 @@ def setup_dependencies(app, test_container=None):
         try:
             return float(os.environ.get(key, str(default)))
         except (ValueError, TypeError):
-            logger.warning(f"Invalid {key} value, defaulting to {default}")
+            logger.warning(f"⚠️ Invalid '{key}' value, defaulting to {default}")
             return float(default)
 
     SYNC_PERIOD_MINS = _get_float_env("SYNC_PERIOD_MINS", 5)
@@ -142,7 +142,7 @@ def setup_dependencies(app, test_container=None):
     init_hardcover_routes(database_service, container)
     app.register_blueprint(hardcover_bp)
 
-    logger.info(f"Web server dependencies initialized (DATA_DIR={DATA_DIR})")
+    logger.info(f"🚀 Web server dependencies initialized (DATA_DIR={DATA_DIR})")
 
 
 
@@ -262,7 +262,7 @@ def sync_daemon():
         try:
             manager.sync_cycle()
         except Exception as e:
-            logger.error(f"Initial sync cycle failed: {e}")
+            logger.error(f"❌ Initial sync cycle failed: {e}")
 
         # Main daemon loop
         while True:
@@ -271,11 +271,11 @@ def sync_daemon():
                 schedule.run_pending()
                 time.sleep(30)  # Check every 30 seconds
             except Exception as e:
-                logger.error(f"Sync daemon error: {e}")
+                logger.error(f"❌ Sync daemon error: {e}")
                 time.sleep(60)  # Wait longer on error
 
     except Exception as e:
-        logger.error(f"Sync daemon crashed: {e}")
+        logger.error(f"❌ Sync daemon crashed: {e}")
 
 
 # ---------------- ORIGINAL ABS-KOSYNC HELPERS ----------------
@@ -299,10 +299,10 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
             if content:
                 kosync_id = container.ebook_parser().get_kosync_id_from_bytes(ebook_filename, content)
                 if kosync_id:
-                    logger.debug(f"Computed KOSync ID from Booklore download: {kosync_id}")
+                    logger.debug(f"🔍 Computed KOSync ID from Booklore download: '{kosync_id}'")
                     return kosync_id
         except Exception as e:
-            logger.warning(f"Failed to get KOSync ID from Booklore, falling back to filesystem: {e}")
+            logger.warning(f"⚠️ Failed to get KOSync ID from Booklore, falling back to filesystem: {e}")
 
     # Fall back to filesystem
     ebook_path = find_ebook_file(ebook_filename)
@@ -328,17 +328,17 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
              abs_id = ebook_filename.split("_abs.")[0]
              abs_client = container.abs_client()
              if abs_client and abs_client.is_configured():
-                 logger.info(f"📥 Attempting on-demand ABS download for {abs_id}...")
+                 logger.info(f"📥 Attempting on-demand ABS download for '{abs_id}'")
                  ebook_files = abs_client.get_ebook_files(abs_id)
                  if ebook_files:
                      target = ebook_files[0]
                      if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
                      
                      if abs_client.download_file(target['stream_url'], cached_path):
-                         logger.info(f"   ✅ Downloaded ABS ebook to {cached_path}")
+                         logger.info(f"   ✅ Downloaded ABS ebook to '{cached_path}'")
                          return container.ebook_parser().get_kosync_id(cached_path)
                  else:
-                     logger.warning(f"   ⚠️ No ebook files found in ABS for item {abs_id}")
+                     logger.warning(f"   ⚠️ No ebook files found in ABS for item '{abs_id}'")
         except Exception as e:
             logger.error(f"   ❌ Failed ABS on-demand download: {e}")
 
@@ -363,7 +363,7 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
              if cwa_id:
                  cwa_client = container.cwa_client()
                  if cwa_client and cwa_client.is_configured():
-                     logger.info(f"📥 Attempting on-demand CWA download for ID {cwa_id}...")
+                     logger.info(f"📥 Attempting on-demand CWA download for ID '{cwa_id}'")
                      
                      target = None
                      
@@ -386,29 +386,29 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
                      else:
                          # Priority 3: Fallback to get_book_by_id only if search didn't provide a URL
                          # This may crash server on metadata page, but includes a blind URL fallback
-                         logger.debug(f"🔍 Search did not return a usable result, trying direct ID lookup...")
+                         logger.debug(f"🔍 Search did not return a usable result, trying direct ID lookup")
                          target = cwa_client.get_book_by_id(cwa_id)
 
                      if target and target.get('download_url'):
                          if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
                          if cwa_client.download_ebook(target['download_url'], cached_path):
-                             logger.info(f"   ✅ Downloaded CWA ebook to {cached_path}")
+                             logger.info(f"   ✅ Downloaded CWA ebook to '{cached_path}'")
                              return container.ebook_parser().get_kosync_id(cached_path)
                      else:
-                         logger.warning(f"   ⚠️ Could not find CWA book for ID {cwa_id}")
+                         logger.warning(f"   ⚠️ Could not find CWA book for ID '{cwa_id}'")
         except Exception as e:
             logger.error(f"   ❌ Failed CWA on-demand download: {e}")
 
     # Neither source available - log helpful warning
     if not container.booklore_client().is_configured() and not EBOOK_DIR.exists():
         logger.warning(
-            f"Cannot compute KOSync ID for '{ebook_filename}': "
+            f"⚠️ Cannot compute KOSync ID for '{ebook_filename}': "
             "Neither Booklore integration nor /books volume is configured. "
             "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
-            "or mount the ebooks directory to /books."
+            "or mount the ebooks directory to /books"
         )
     elif not booklore_id and not ebook_path:
-        logger.warning(f"Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore, filesystem, or remote sources.")
+        logger.warning(f"⚠️ Cannot compute KOSync ID for '{ebook_filename}': File not found in Booklore, filesystem, or remote sources")
 
     return None
 
@@ -475,7 +475,7 @@ def get_searchable_ebooks(search_term):
                             source='Booklore'
                         ))
         except Exception as e:
-            logger.warning(f"Booklore search failed: {e}")
+            logger.warning(f"⚠️ Booklore search failed: {e}")
 
     # 2. ABS ebook libraries
     if search_term:
@@ -501,7 +501,7 @@ def get_searchable_ebooks(search_term):
                                 if ab.get('title'):
                                     found_stems.add(ab['title'].lower().strip())
         except Exception as e:
-            logger.warning(f"ABS ebook search failed: {e}")
+            logger.warning(f"⚠️ ABS ebook search failed: {e}")
 
     # 3. CWA (Calibre-Web Automated)
     if search_term:
@@ -524,7 +524,7 @@ def get_searchable_ebooks(search_term):
                             if cr.get('title'):
                                 found_stems.add(cr['title'].lower().strip())
         except Exception as e:
-            logger.warning(f"CWA search failed: {e}")
+            logger.warning(f"⚠️ CWA search failed: {e}")
 
     # 4. Search filesystem (Local) - LOW PRIORITY
     if EBOOK_DIR.exists():
@@ -544,14 +544,14 @@ def get_searchable_ebooks(search_term):
                     found_stems.add(stem_lower)
 
         except Exception as e:
-            logger.warning(f"Filesystem search failed: {e}")
+            logger.warning(f"⚠️ Filesystem search failed: {e}")
 
     # Check if we have no sources at all
     if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
         logger.warning(
-            "No ebooks available: Neither Booklore integration nor /books volume is configured. "
+            "⚠️ No ebooks available: Neither Booklore integration nor /books volume is configured. "
             "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
-            "or mount the ebooks directory to /books."
+            "or mount the ebooks directory to /books"
         )
 
     return results
@@ -626,7 +626,7 @@ def settings():
         except Exception as e:
             session['message'] = f"Error saving settings: {e}"
             session['is_error'] = True
-            logger.error(f"Error saving settings: {e}")
+            logger.error(f"❌ Error saving settings: {e}")
 
         return redirect(url_for('settings'))
 
@@ -924,7 +924,7 @@ def forge_search_audio():
 
         return jsonify(results)
     except Exception as e:
-        logger.error(f"Forge audio search failed: {e}", exc_info=True)
+        logger.error(f"❌ Forge audio search failed: {e}", exc_info=True)
         return jsonify([])
 
 
@@ -958,7 +958,7 @@ def forge_search_text():
                                 "booklore_id": b.get('id'),
                             })
         except Exception as e:
-            logger.warning(f"Forge: Booklore search failed: {e}")
+            logger.warning(f"⚠️ Forge: Booklore search failed: {e}")
 
     # 2. ABS Ebooks
     try:
@@ -982,7 +982,7 @@ def forge_search_text():
                                 "ext": ef.get('ext', 'epub'),
                             })
     except Exception as e:
-        logger.warning(f"Forge: ABS ebook search failed: {e}")
+        logger.warning(f"⚠️ Forge: ABS ebook search failed: {e}")
 
     # 3. CWA
     try:
@@ -1004,7 +1004,7 @@ def forge_search_text():
                             "download_url": cr.get('download_url', ''),
                         })
     except Exception as e:
-        logger.warning(f"Forge: CWA search failed: {e}")
+        logger.warning(f"⚠️ Forge: CWA search failed: {e}")
 
     # 4. Local files from BOOKS_DIR
     try:
@@ -1026,7 +1026,7 @@ def forge_search_text():
                             "file_size_mb": round(epub.stat().st_size / (1024 * 1024), 2),
                         })
     except Exception as e:
-        logger.warning(f"Forge: Local file search failed: {e}")
+        logger.warning(f"⚠️ Forge: Local file search failed: {e}")
 
     return jsonify(results)
 
@@ -1056,14 +1056,14 @@ def forge_process():
             title = metadata.get('title', 'Unknown')
             author = metadata.get('authorName', '') or get_abs_author(item_details) or 'Unknown'
     except Exception as e:
-        logger.warning(f"Forge: Could not get ABS metadata for {abs_id}: {e}")
+        logger.warning(f"⚠️ Forge: Could not get ABS metadata for '{abs_id}': {e}")
 
     # Start manual forge in service
     try:
         container.forge_service().start_manual_forge(abs_id, text_item, title, author)
         msg = f"Forge started for '{title}'. Processing and cleanup running in background."
     except Exception as e:
-        logger.error(f"Failed to start forge: {e}")
+        logger.error(f"❌ Failed to start forge: {e}")
         return jsonify({"error": f"Failed to start forge: {e}"}), 500
 
     return jsonify({
@@ -1133,7 +1133,7 @@ def match():
                 # But we need a DB record now.
                 # Generate a temporary or hash-based ID? Or fail?
                 # Failing is safer.
-                logger.warning(f"Could not compute ID for original {original_filename}")
+                logger.warning(f"⚠️ Could not compute ID for original '{original_filename}'")
                 # return "Could not compute KOSync ID for original file", 400
                 # Actually, `start_auto_forge_match` can update it? 
                 # Let's proceed with a placeholder or fail.
@@ -1187,7 +1187,7 @@ def match():
                 target_filename = f"storyteller_{storyteller_uuid}.epub"
                 target_path = epub_cache / target_filename
                 
-                logger.info(f"Using Storyteller Artifact: {storyteller_uuid}")
+                logger.info(f"🔍 Using Storyteller Artifact: '{storyteller_uuid}'")
                 
                 if container.storyteller_client().download_book(storyteller_uuid, target_path):
                     ebook_filename = target_filename # Override filename
@@ -1196,7 +1196,7 @@ def match():
                     # [FIX] Conditionally compute KOSync ID
                     if original_ebook_filename:
                         # Tri-Link: Compute hash from the normal EPUB so it matches the user's device
-                        logger.info(f"Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                        logger.info(f"⚡ Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
                         booklore_id = None
                         if container.booklore_client().is_configured():
                             bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
@@ -1205,13 +1205,13 @@ def match():
                         kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
                     else:
                         # Storyteller-Only Link: Compute hash from the downloaded artifact
-                        logger.info("Storyteller-Only Link: Computing hash from downloaded artifact")
+                        logger.info("⚡ Storyteller-Only Link: Computing hash from downloaded artifact")
                         kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
                 else:
                     return "Failed to download Storyteller artifact", 500
                     
             except Exception as e:
-                logger.error(f"Storyteller Link failed: {e}")
+                logger.error(f"❌ Storyteller Link failed: {e}")
                 return f"Storyteller Link failed: {e}", 500
         else:
             # Fallback to Standard Logic
@@ -1224,14 +1224,14 @@ def match():
             kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
             
         if not kosync_doc_id:
-            logger.warning(f"Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
+            logger.warning(f"⚠️ Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
 
         # [NEW] Hash Preservation: Check if existing book for this ABS ID has a valid device link
         current_book_entry = database_service.get_book(abs_id)
         if current_book_entry and current_book_entry.kosync_doc_id:
              if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
-                  logger.info(f"Preserving existing linked hash {current_book_entry.kosync_doc_id} for '{abs_id}' instead of new hash {kosync_doc_id}")
+                  logger.info(f"🔄 Preserving existing linked hash '{current_book_entry.kosync_doc_id}' for '{abs_id}' instead of new hash '{kosync_doc_id}'")
                   kosync_doc_id = current_book_entry.kosync_doc_id
 
         # [DUPLICATE MERGE] Check if this ebook is already linked to another ABS ID (e.g. ebook-only entry)
@@ -1239,7 +1239,7 @@ def match():
         migration_source_id = None
         
         if existing_book and existing_book.abs_id != abs_id:
-            logger.info(f"🔄 Found existing book entry {existing_book.abs_id} for this ebook. Merging into {abs_id}...")
+            logger.info(f"🔄 Found existing book entry '{existing_book.abs_id}' for this ebook — Merging into '{abs_id}'")
             migration_source_id = existing_book.abs_id
             
             # [ID SHADOWING] CAPTURE the old ID to use for Ebook sync
@@ -1306,10 +1306,10 @@ def match():
         try:
             device_doc = database_service.get_kosync_doc_by_filename(ebook_filename)
             if device_doc and device_doc.document_hash != kosync_doc_id:
-                logger.info(f"Dismissing additional suggestion/hash for {ebook_filename}: {device_doc.document_hash}")
+                logger.info(f"🔄 Dismissing additional suggestion/hash for '{ebook_filename}': '{device_doc.document_hash}'")
                 database_service.dismiss_suggestion(device_doc.document_hash)
         except Exception as e:
-            logger.warning(f"Failed to check/dismiss device hash: {e}")
+            logger.warning(f"⚠️ Failed to check/dismiss device hash: {e}")
 
         return redirect(url_for('index'))
 
@@ -1329,7 +1329,7 @@ def match():
             try:
                 storyteller_books = container.storyteller_client().search_books(search)
             except Exception as e:
-                logger.warning(f"Storyteller search failed in match route: {e}")
+                logger.warning(f"⚠️ Storyteller search failed in match route: {e}")
 
     return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books, search=search, get_title=manager.get_abs_title)
 
@@ -1340,14 +1340,17 @@ def batch_match():
         if action == 'add_to_queue':
             session.setdefault('queue', [])
             abs_id = request.form.get('audiobook_id')
-            ebook_filename = request.form.get('ebook_filename')
+            ebook_filename = request.form.get('ebook_filename', '')
+            storyteller_uuid = request.form.get('storyteller_uuid', '')
             audiobooks = container.abs_client().get_all_audiobooks()
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
-            if selected_ab and ebook_filename:
+            # Allow queue entry if audiobook selected and either an ebook or a storyteller UUID is provided
+            if selected_ab and (ebook_filename or storyteller_uuid):
                 if not any(item['abs_id'] == abs_id for item in session['queue']):
                     session['queue'].append({"abs_id": abs_id,
                                              "abs_title": manager.get_abs_title(selected_ab),
                                              "ebook_filename": ebook_filename,
+                                             "storyteller_uuid": storyteller_uuid,
                                              "duration": manager.get_duration(selected_ab),
                                              "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"})
                     session.modified = True
@@ -1366,26 +1369,64 @@ def batch_match():
 
             for item in session.get('queue', []):
                 ebook_filename = item['ebook_filename']
+                storyteller_uuid = item.get('storyteller_uuid', '')
+                original_ebook_filename = None
                 duration = item['duration']
-
-                # Get booklore_id if available for API-based hash computation
                 booklore_id = None
-                if container.booklore_client().is_configured():
-                    book = container.booklore_client().find_book_by_filename(ebook_filename)
-                    if book:
-                        booklore_id = book.get('id')
+                kosync_doc_id = None
 
-                # Compute KOSync ID (Booklore API first, filesystem fallback)
-                kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+                if storyteller_uuid:
+                    # Storyteller Tri-Link Logic (mirrors match POST handler)
+                    try:
+                        epub_cache = container.epub_cache_dir()
+                        if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+
+                        target_filename = f"storyteller_{storyteller_uuid}.epub"
+                        target_path = epub_cache / target_filename
+
+                        logger.info(f"🔍 Batch Match: Using Storyteller Artifact '{storyteller_uuid}' for '{item['abs_title']}'")
+
+                        if container.storyteller_client().download_book(storyteller_uuid, target_path):
+                            original_ebook_filename = ebook_filename  # Preserve original (may be empty for storyteller-only)
+                            ebook_filename = target_filename  # Override filename to cached artifact
+
+                            if original_ebook_filename:
+                                # Tri-Link: Compute hash from the original EPUB so it matches the user's device
+                                logger.info(f"⚡ Batch Match Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                                if container.booklore_client().is_configured():
+                                    bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+                                    if bl_book:
+                                        booklore_id = bl_book.get('id')
+                                kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+                            else:
+                                # Storyteller-Only Link: Compute hash from the downloaded artifact
+                                logger.info("⚡ Batch Match Storyteller-Only Link: Computing hash from downloaded artifact")
+                                kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                        else:
+                            logger.warning(f"⚠️ Failed to download Storyteller artifact '{storyteller_uuid}' for '{item['abs_title']}', skipping")
+                            continue
+                    except Exception as e:
+                        logger.error(f"❌ Storyteller Tri-Link failed for '{item['abs_title']}': {e}")
+                        continue
+                else:
+                    # Standard path: Get booklore_id if available for API-based hash computation
+                    if container.booklore_client().is_configured():
+                        book = container.booklore_client().find_book_by_filename(ebook_filename)
+                        if book:
+                            booklore_id = book.get('id')
+
+                    # Compute KOSync ID (Booklore API first, filesystem fallback)
+                    kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+
                 if not kosync_doc_id:
-                    logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
+                    logger.warning(f"⚠️ Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
 
                 # [NEW] Hash Preservation for Batch Match
                 current_book_entry = database_service.get_book(item['abs_id'])
                 if current_book_entry and current_book_entry.kosync_doc_id:
                      if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
-                          logger.info(f"Preserving existing linked hash {current_book_entry.kosync_doc_id} for '{item['abs_id']}' instead of new hash {kosync_doc_id}")
+                          logger.info(f"🔄 Preserving existing linked hash '{current_book_entry.kosync_doc_id}' for '{item['abs_id']}' instead of new hash '{kosync_doc_id}'")
                           kosync_doc_id = current_book_entry.kosync_doc_id
 
                 # Create Book object and save to database service
@@ -1397,7 +1438,8 @@ def batch_match():
                     transcript_file=None,
                     status="pending",
                     duration=duration,
-                    original_ebook_filename=None # Batch match currently only standard ebooks
+                    storyteller_uuid=storyteller_uuid or None,
+                    original_ebook_filename=original_ebook_filename
                 )
 
                 database_service.save_book(book)
@@ -1429,7 +1471,7 @@ def batch_match():
             return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
-    audiobooks, ebooks = [], []
+    audiobooks, ebooks, storyteller_books = [], [], []
     if search:
         audiobooks = get_audiobooks_conditionally()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
@@ -1439,8 +1481,15 @@ def batch_match():
         ebooks = get_searchable_ebooks(search)
         ebooks.sort(key=lambda x: x.name.lower())
 
-    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search,
-                           get_title=manager.get_abs_title)
+        # Search Storyteller
+        if container.storyteller_client().is_configured():
+            try:
+                storyteller_books = container.storyteller_client().search_books(search)
+            except Exception as e:
+                logger.warning(f"⚠️ Storyteller search failed in batch_match route: {e}")
+
+    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books,
+                           queue=session.get('queue', []), search=search, get_title=manager.get_abs_title)
 
 
 def delete_mapping(abs_id):
@@ -1467,7 +1516,7 @@ def delete_mapping(abs_id):
 
         # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
         if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' and book.kosync_doc_id:
-            logger.info(f"Deleting KOSync document record for ebook-only mapping: {book.kosync_doc_id[:8]}")
+            logger.info(f"🗑️ Deleting KOSync document record for ebook-only mapping: '{book.kosync_doc_id[:8]}'")
             database_service.delete_kosync_document(book.kosync_doc_id)
 
         # [NEW] Delete cached ebook file
@@ -1509,17 +1558,17 @@ def clear_progress(abs_id):
     book = database_service.get_book(abs_id)
 
     if not book:
-        logger.warning(f"Cannot clear progress: book not found for {abs_id}")
+        logger.warning(f"⚠️ Cannot clear progress: book not found for '{abs_id}'")
         return redirect(url_for('index'))
 
     try:
         # Reset progress to 0 in all three systems
-        logger.info(f"Clearing progress for {sanitize_log_data(book.abs_title or abs_id)}")
+        logger.info(f"🔄 Clearing progress for {sanitize_log_data(book.abs_title or abs_id)}")
         manager.clear_progress(abs_id)
         logger.info(f"✅ Progress cleared successfully for {sanitize_log_data(book.abs_title or abs_id)}")
 
     except Exception as e:
-        logger.error(f"Failed to clear progress for {abs_id}: {e}")
+        logger.error(f"❌ Failed to clear progress for '{abs_id}': {e}")
 
     return redirect(url_for('index'))
 
@@ -1538,7 +1587,7 @@ def update_hash(abs_id):
     if new_hash:
         book.kosync_doc_id = new_hash
         database_service.save_book(book)
-        logger.info(f"Updated KoSync hash for '{sanitize_log_data(book.abs_title)}' to manual input: {new_hash}")
+        logger.info(f"✅ Updated KoSync hash for '{sanitize_log_data(book.abs_title)}' to manual input: '{new_hash}'")
         updated = True
     else:
         # Auto-regenerate
@@ -1559,7 +1608,7 @@ def update_hash(abs_id):
             # The protection logic remains in match() and batch_match() to prevent automated overwrites.
             book.kosync_doc_id = recalc_hash
             database_service.save_book(book)
-            logger.info(f"Auto-regenerated KoSync hash for '{sanitize_log_data(book.abs_title)}': {recalc_hash}")
+            logger.info(f"✅ Auto-regenerated KoSync hash for '{sanitize_log_data(book.abs_title)}': '{recalc_hash}'")
             updated = True
         else:
             flash("❌ Could not recalculate hash (file not found?)", "error")
@@ -1579,7 +1628,7 @@ def update_hash(abs_id):
                     kosync_state.xpath
                 )
                 if success:
-                    logger.info(f"Migrated progress for '{sanitize_log_data(book.abs_title)}' to new hash {book.kosync_doc_id}")
+                    logger.info(f"✅ Migrated progress for '{sanitize_log_data(book.abs_title)}' to new hash '{book.kosync_doc_id}'")
 
     flash(f"✅ Updated KoSync Hash for {book.abs_title}", "success")
     return redirect(url_for('index'))
@@ -1646,7 +1695,7 @@ def api_storyteller_link(abs_id):
 
     # [NEW] Handle explicit unlinking
     if storyteller_uuid == "none" or not storyteller_uuid:
-        logger.info(f"Unlinking Storyteller for '{book.abs_title}'")
+        logger.info(f"🔄 Unlinking Storyteller for '{book.abs_title}'")
         book.storyteller_uuid = None
         
         # Revert to original filename if it exists
@@ -1672,7 +1721,7 @@ def api_storyteller_link(abs_id):
             # Preserve OLD filename as original if not already set
             if not book.original_ebook_filename:
                 book.original_ebook_filename = book.ebook_filename
-                logger.info(f"   [Tri-Link] Preserving original filename: {book.original_ebook_filename}")
+                logger.info(f"   ⚡ Preserving original filename: '{book.original_ebook_filename}'")
 
             book.ebook_filename = target_path.name
             book.storyteller_uuid = storyteller_uuid
@@ -1693,7 +1742,7 @@ def api_storyteller_link(abs_id):
         else:
             return jsonify({"error": "Failed to download Storyteller artifact"}), 500
     except Exception as e:
-        logger.error(f"Error linking Storyteller book for {abs_id}: {e}")
+        logger.error(f"❌ Error linking Storyteller book for '{abs_id}': {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1878,7 +1927,7 @@ def api_logs():
         })
 
     except Exception as e:
-        logger.error(f"Error fetching logs: {e}")
+        logger.error(f"❌ Error fetching logs: {e}")
         return jsonify({'error': 'Failed to fetch logs', 'logs': [], 'total_lines': 0, 'displayed_lines': 0}), 500
 
 
@@ -1920,7 +1969,7 @@ def api_logs_live():
         })
 
     except Exception as e:
-        logger.error(f"Error fetching live logs: {e}")
+        logger.error(f"❌ Error fetching live logs: {e}")
         return jsonify({'error': 'Failed to fetch live logs', 'logs': [], 'timestamp': datetime.now().isoformat()}), 500
 
 
@@ -1987,7 +2036,7 @@ def proxy_cover(abs_id):
         else:
             return "Cover not found", 404
     except Exception as e:
-        logger.error(f"Error proxying cover for {abs_id}: {e}")
+        logger.error(f"❌ Error proxying cover for '{abs_id}': {e}")
         return "Error loading cover", 500
 
 
@@ -2091,7 +2140,7 @@ if __name__ == '__main__':
     # Start sync daemon in background thread
     sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
     sync_daemon_thread.start()
-    logger.info("Sync daemon thread started")
+    logger.info("🚀 Sync daemon thread started")
 
 
 

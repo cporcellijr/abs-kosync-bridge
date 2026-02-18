@@ -44,7 +44,7 @@ class StorytellerSyncClient(SyncClient):
         try:
             st_pct, st_ts, st_href, st_frag = self.storyteller_client.get_position_details(uuid)
         except Exception as e:
-            logger.warning(f"[{title_snip}] Storyteller UUID fetch failed for {uuid}: {e}")
+            logger.warning(f"⚠️ '{title_snip}' Storyteller UUID fetch failed for '{uuid}': {e}")
             return None
 
         # Calculate delta

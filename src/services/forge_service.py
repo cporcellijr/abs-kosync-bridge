@@ -47,7 +47,7 @@ class ForgeService:
             item = r.json()
             audio_files = item.get("media", {}).get("audioFiles", [])
             if not audio_files:
-                logger.warning(f"No audio files found for ABS {abs_id}")
+                logger.warning(f"⚠️ No audio files found for ABS '{abs_id}'")
                 return False
 
             dest_folder.mkdir(parents=True, exist_ok=True)
@@ -85,22 +85,22 @@ class ForgeService:
                         copied += 1
                     else:
                         # 4. API Download Fallback
-                        logger.info(f"Local file not found, downloading via API: {filename}")
+                        logger.info(f"⚡ Local file not found, downloading via API: '{filename}'")
                         stream_url = f"{self.ABS_API_URL.rstrip('/')}/api/items/{abs_id}/file/{f.get('ino')}?token={self.ABS_API_TOKEN}"
                         dest_path = dest_folder / filename
                         # Use the ABS Client
                         if self.abs_client.download_file(stream_url, dest_path):
                             copied += 1
                         else:
-                            logger.error(f"Could not find or download audio file: {filename}")
+                            logger.error(f"❌ Could not find or download audio file: '{filename}'")
             
             if copied == len(audio_files):
                 return True
             else:
-                logger.error(f"Forge Strict Check Failed: Expected {len(audio_files)} files, copied {copied}. Aborting.")
+                logger.error(f"❌ Forge Strict Check Failed: Expected {len(audio_files)} files, copied {copied} — Aborting")
                 return False
         except Exception as e:
-            logger.error(f"Failed to copy ABS {abs_id}: {e}", exc_info=True)
+            logger.error(f"❌ Failed to copy ABS '{abs_id}': {e}", exc_info=True)
             return False
 
     def start_manual_forge(self, abs_id, text_item, title, author):
@@ -135,20 +135,20 @@ class ForgeService:
             processing_dir = dest_base / f"forge_staging_{safe_title}"
 
             if final_course_dir.exists():
-                logger.warning(f"Target directory {final_course_dir} already exists. Using it directly.")
+                logger.warning(f"⚠️ Target directory '{final_course_dir}' already exists. Using it directly")
                 course_dir = final_course_dir
             else:
                 course_dir = processing_dir
                 course_dir.mkdir(parents=True, exist_ok=True)
-                
-            audio_dest = course_dir 
+
+            audio_dest = course_dir
             
             logger.info(f"⚡ Forge: Staging files for '{title}' in '{course_dir}' (Atomic)")
 
             # Step 1: Copy audio files
             audio_ok = self._copy_audio_files(abs_id, audio_dest)
             if not audio_ok:
-                logger.error(f"⚡ Forge: Failed to copy audio files for {abs_id}")
+                logger.error(f"❌ Forge: Failed to copy audio files for '{abs_id}'")
                 try:
                     if course_dir.exists() and course_dir != final_course_dir: 
                         shutil.rmtree(course_dir) 
@@ -169,7 +169,7 @@ class ForgeService:
                     text_success = True
                     logger.info(f"⚡ Forge: Local epub copied: {src_path.name}")
                 else:
-                    logger.error(f"⚡ Forge: Local file not found: {src_path}")
+                    logger.error(f"❌ Forge: Local file not found: '{src_path}'")
 
             elif source == 'Booklore':
                 booklore_id = text_item.get('booklore_id')
@@ -180,7 +180,7 @@ class ForgeService:
                         text_success = True
                         logger.info(f"⚡ Forge: Booklore epub downloaded")
                     else:
-                        logger.error(f"⚡ Forge: Booklore download failed for {booklore_id}")
+                        logger.error(f"❌ Forge: Booklore download failed for '{booklore_id}'")
 
             elif source == 'ABS':
                 abs_item_id = text_item.get('abs_id')
@@ -192,7 +192,7 @@ class ForgeService:
                             text_success = True
                             logger.info(f"⚡ Forge: ABS epub downloaded")
                         else:
-                            logger.error(f"⚡ Forge: ABS download failed for {abs_item_id}")
+                            logger.error(f"❌ Forge: ABS download failed for '{abs_item_id}'")
             
             elif source == 'CWA':
                 download_url = text_item.get('download_url', '')
@@ -211,13 +211,13 @@ class ForgeService:
                             logger.info(f"⚡ Forge: CWA epub downloaded via ID lookup")
                 
                 if not text_success:
-                    logger.error(f"⚡ Forge: CWA download failed")
+                    logger.error(f"❌ Forge: CWA download failed")
 
             else:
-                logger.error(f"⚡ Forge: Unknown text source: {source}")
+                logger.error(f"❌ Forge: Unknown text source: '{source}'")
 
             if not text_success:
-                logger.error(f"⚡ Forge: Text acquisition failed. Aborting.")
+                logger.error(f"❌ Forge: Text acquisition failed — Aborting")
                 try:
                     if course_dir.exists() and course_dir != final_course_dir:
                         shutil.rmtree(course_dir)
@@ -241,7 +241,7 @@ class ForgeService:
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
                 except Exception as e:
-                    logger.error(f"⚡ Forge: Atomic transfer failed: {e}")
+                    logger.error(f"❌ Forge: Atomic transfer failed: {e}")
                     try: shutil.rmtree(course_dir)
                     except: pass
                     try: shutil.rmtree(hidden_staging_dir)
@@ -282,11 +282,11 @@ class ForgeService:
                     if hasattr(st_client, 'trigger_processing'):
                         st_client.trigger_processing(found_uuid)
                     else:
-                        logger.warning("Storyteller client missing trigger_processing method")
+                        logger.warning("⚠️ Storyteller client missing trigger_processing method")
                 except Exception as e:
-                     logger.error(f"⚡ Forge: Failed to trigger processing: {e}")
+                     logger.error(f"❌ Forge: Failed to trigger processing: {e}")
             else:
-                logger.warning(f"⚡ Forge: Storyteller scan timed out. Processing might happen automatically later.")
+                logger.warning(f"⚠️ Forge: Storyteller scan timed out — Processing might happen automatically later")
 
 
             # Step 3: Cleanup Monitor
@@ -318,7 +318,7 @@ class ForgeService:
                                 logger.info("⚡ Forge: Safety delay (60s) to allow Storyteller to release file locks...")
                                 time.sleep(60) 
                             except Exception as e:
-                                logger.warning(f"Forge: Safety check failed: {e}. Proceeding with caution.")
+                                logger.warning(f"⚠️ Forge: Safety check failed: {e} — Proceeding with caution")
                                 time.sleep(30)
 
                         # --- EXTRACT & ALIGN ---
@@ -332,15 +332,15 @@ class ForgeService:
                                 abs_id, completed_epub_path, chapters, full_book_text=book_text
                             )
                             if not raw_transcript:
-                                logger.error(f"⚡ Forge: SMIL extraction returned no transcript for {abs_id}. Alignment map not created.")
+                                logger.error(f"❌ Forge: SMIL extraction returned no transcript for '{abs_id}' — Alignment map not created")
                             else:
                                 success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
                                 if not success:
-                                    logger.error(f"⚡ Forge: align_and_store failed for {abs_id}. Alignment map not created.")
+                                    logger.error(f"❌ Forge: align_and_store failed for '{abs_id}' — Alignment map not created")
                                 else:
-                                    logger.info(f"✅ Forge: Alignment map stored for {abs_id}.")
+                                    logger.info(f"✅ Forge: Alignment map stored for '{abs_id}'")
                         except Exception as e:
-                            logger.error(f"⚡ Forge: Alignment extraction failed: {e}")
+                            logger.error(f"❌ Forge: Alignment extraction failed: {e}")
 
                         deleted = 0
                         for f in course_dir.iterdir():
@@ -360,9 +360,9 @@ class ForgeService:
                         return
 
                 except Exception as e:
-                    logger.warning(f"⚡ Forge: Cleanup monitor error: {e}")
+                    logger.warning(f"⚠️ Forge: Cleanup monitor error: {e}")
 
-            logger.warning(f"⚡ Forge: Cleanup monitor timed out after {MAX_WAIT}s for '{title}'. Source files remain.")
+            logger.warning(f"⚠️ Forge: Cleanup monitor timed out after {MAX_WAIT}s for '{title}' — Source files remain")
 
         except Exception as e:
             logger.error(f"❌ Forge: Background task failed for '{title}': {e}", exc_info=True)
@@ -404,7 +404,7 @@ class ForgeService:
             processing_dir = dest_base / f"forge_staging_{safe_title}"
 
             if final_course_dir.exists():
-                logger.warning(f"Target directory {final_course_dir} already exists. Using it directly.")
+                logger.warning(f"⚠️ Target directory '{final_course_dir}' already exists. Using it directly")
                 course_dir = final_course_dir
             else:
                 course_dir = processing_dir
@@ -452,7 +452,7 @@ class ForgeService:
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
                 except Exception as e:
-                    logger.error(f"⚡ Forge: Atomic transfer failed: {e}")
+                    logger.error(f"❌ Forge: Atomic transfer failed: {e}")
                     try: shutil.rmtree(course_dir)
                     except: pass
                     try: shutil.rmtree(hidden_staging_dir)
@@ -491,7 +491,7 @@ class ForgeService:
                 logger.info(f"⚡ Auto-Forge: Triggering processing for {found_uuid}")
                 st_client.trigger_processing(found_uuid)
             else:
-                logger.warning("⚡ Auto-Forge: Storyteller scan timed out, proceeding anyway in hopes it picks up.")
+                logger.warning("⚠️ Auto-Forge: Storyteller scan timed out — Proceeding anyway in hopes it picks up")
 
             # --- WAIT FOR COMPLETION ---
             MAX_WAIT = 3600
@@ -550,7 +550,7 @@ class ForgeService:
             success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
             if not success:
                 raise Exception("Auto-Forge: align_and_store failed to generate a valid alignment map.")
-            logger.info(f"✅ Auto-Forge: Alignment map stored for {abs_id}.")
+            logger.info(f"✅ Auto-Forge: Alignment map stored for '{abs_id}'")
 
             # --- UPDATE DATABASE ---
             # NOTE: DB service calls need connection. Assuming database_service handles its own session.

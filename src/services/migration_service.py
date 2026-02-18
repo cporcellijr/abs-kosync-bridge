@@ -74,7 +74,7 @@ class MigrationService:
                         session.add(new_entry)
                         count += 1
                     except Exception as e:
-                        logger.error(f"Failed to migrate {map_file.name}: {e}")
+                        logger.error(f"❌ Failed to migrate '{map_file.name}': {e}")
 
                 # session.commit() is handled by context manager
             
@@ -82,7 +82,7 @@ class MigrationService:
                 logger.info(f"✅ Migrated {count} alignment maps to database")
             
         except Exception as e:
-            logger.error(f"Migration error: {e}")
+            logger.error(f"❌ Migration error: {e}")
 
     def _migrate_booklore_cache(self):
         """Migrate booklore_cache.json to booklore_books table."""
@@ -117,7 +117,7 @@ class MigrationService:
                     self.database_service.save_booklore_book(b)
                     count += 1
                 except Exception as e:
-                    logger.warning(f"Failed to migrate book {filename}: {e}")
+                    logger.warning(f"⚠️ Failed to migrate book '{filename}': {e}")
             
             if count > 0:
                 logger.info(f"✅ Migrated {count} Booklore books to database")
@@ -126,10 +126,10 @@ class MigrationService:
                     cache_file.rename(cache_file.with_suffix('.json.bak'))
                     logger.info("📦 Renamed legacy booklore_cache.json to .bak")
                 except Exception as e:
-                    logger.warning(f"Failed to rename legacy cache file: {e}")
+                    logger.warning(f"⚠️ Failed to rename legacy cache file: {e}")
 
         except Exception as e:
-            logger.error(f"Booklore migration failed: {e}")
+            logger.error(f"❌ Booklore migration failed: {e}")
 
     def _cleanup_legacy_files(self):
         """Identify and optionally rename/delete obsolete JSON files."""
@@ -150,7 +150,7 @@ class MigrationService:
                         fpath.rename(bak_path)
                         logger.info(f"🧹 Renamed legacy file {fname} to .bak")
                 except Exception as e:
-                    logger.warning(f"Failed to cleanup {fname}: {e}")
+                    logger.warning(f"⚠️ Failed to cleanup '{fname}': {e}")
 
     def _delete_legacy_file(self, file_path: Path):
         """Delete legacy file after successful migration."""
@@ -158,4 +158,4 @@ class MigrationService:
             file_path.unlink()
             logger.debug(f"Deleted legacy file: {file_path.name}")
         except Exception as e:
-            logger.warning(f"Failed to delete legacy file {file_path.name}: {e}")
+            logger.warning(f"⚠️ Failed to delete legacy file '{file_path.name}': {e}")

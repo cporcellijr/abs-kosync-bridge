@@ -112,7 +112,7 @@ class AudioTranscriber:
         
         overlap_ratio = overlap_count / len(smil_segments)
         if overlap_ratio > 0.15: # 15% threshold
-            logger.warning(f"⚠️ SMIL contains explicit overlaps ({overlap_ratio:.1%}). Might be invalid.")
+            logger.warning(f"⚠️ SMIL contains explicit overlaps ({overlap_ratio:.1%}) — Might be invalid")
             # Don't fail just on overlap if text match is perfect (e.g. concurrent audio layers in SMIL)
             # But usually high overlap means bad SMIL.
         
@@ -178,7 +178,7 @@ class AudioTranscriber:
                     
                     # Reject if coverage is less than 85%
                     if coverage < 0.85:
-                        logger.warning(f"⛔ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s. Falling back to transcriber.")
+                        logger.warning(f"⚠️ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s — Falling back to transcriber")
                         return None
 
             # [NEW] Validate transcript against BOOK TEXT
@@ -187,18 +187,18 @@ class AudioTranscriber:
                 is_valid, score = self.validate_smil(transcript, full_book_text)
                 
                 if not is_valid:
-                    logger.warning(f"⚠️ SMIL validation failed: Match score {score:.1%} too low.")
+                    logger.warning(f"⚠️ SMIL validation failed: Match score {score:.1%} too low")
                     logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
                     return None
                 else:
                     logger.info(f"✅ SMIL Validated (Match: {score:.1%})")
             else:
-                logger.warning("⚠️ Skipping detailed SMIL validation (no ebook text provided).")
+                logger.warning("⚠️ Skipping detailed SMIL validation (no ebook text provided)")
 
-            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments.")
+            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments")
             return transcript # Return raw data!
         except Exception as e:
-            logger.error(f"Failed to extract SMIL transcript: {e}")
+            logger.error(f"❌ Failed to extract SMIL transcript: {e}")
             return None
 
     def _get_cached_transcript(self, path):
@@ -217,7 +217,7 @@ class AudioTranscriber:
                 self._transcript_cache.popitem(last=False)
             return data
         except Exception as e:
-            logger.error(f"Error loading transcript {path}: {e}")
+            logger.error(f"❌ Error loading transcript '{path}': {e}")
             return None
 
     def _clean_text(self, text):
@@ -236,7 +236,7 @@ class AudioTranscriber:
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             return float(result.stdout.strip())
         except (ValueError, subprocess.CalledProcessError) as e:
-            logger.error(f"Could not determine duration for {file_path}: {e}")
+            logger.error(f"❌ Could not determine duration for '{file_path}': {e}")
             return 0.0
 
     def normalize_audio_to_wav(self, input_path: Path) -> Optional[Path]:
@@ -282,7 +282,7 @@ class AudioTranscriber:
             return output_path
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg conversion failed for {input_path}: {e.stderr}")
+            logger.error(f"❌ FFmpeg conversion failed for '{input_path}': {e.stderr}")
             return None
 
     def split_audio_file(self, file_path, target_max_duration_sec=2700):
@@ -291,7 +291,7 @@ class AudioTranscriber:
         if duration <= target_max_duration_sec:
             return [file_path]
 
-        logger.info(f"   ⚠️ File {file_path.name} is {duration/60:.1f}m. Splitting...")
+        logger.warning(f"⚠️ File '{file_path.name}' is {duration/60:.1f}m — Splitting")
         num_parts = math.ceil(duration / target_max_duration_sec)
         segment_duration = duration / num_parts
         new_files = []
@@ -319,7 +319,7 @@ class AudioTranscriber:
                 new_files.append(new_path)
                 logger.info(f"      Created chunk {i+1}/{num_parts}: {new_filename}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"      Failed to create chunk {i+1}: {e}")
+                logger.error(f"❌ Failed to create chunk {i+1}: {e}")
 
         # Remove original file after splitting
         if new_files:
@@ -411,7 +411,7 @@ class AudioTranscriber:
                     downloaded_files = list(existing_files)
                 else:
                     if existing_files:
-                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh.")
+                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh")
                         shutil.rmtree(book_cache_dir)
                     
                     # Original logic: Wipe and Start Fresh
@@ -620,7 +620,7 @@ class AudioTranscriber:
             return self._clean_text(raw_text)
 
         except Exception as e:
-            logger.error(f"Error reading transcript {transcript_path}: {e}")
+            logger.error(f"❌ Error reading transcript '{transcript_path}': {e}")
         return None
 
     def get_previous_segment_text(self, transcript_path, timestamp):
@@ -655,7 +655,7 @@ class AudioTranscriber:
             return None
 
         except Exception as e:
-            logger.error(f"Error getting previous segment {transcript_path}: {e}")
+            logger.error(f"❌ Error getting previous segment '{transcript_path}': {e}")
             return None
 
     @time_execution
@@ -847,10 +847,10 @@ class AudioTranscriber:
                 logger.info(f"✅ {title_prefix}Match found at {best_match['start']:.1f}s | Confidence: {best_score}% - '{sanitize_log_data(clean_search)}'")
                 return best_match['start']
             else:
-                logger.warning(f"{title_prefix}No good match found (best: {best_score}% < {self.match_threshold}%)")
+                logger.warning(f"⚠️ {title_prefix}No good match found (best: {best_score}% < {self.match_threshold}%)")
                 return None
 
         except Exception as e:
-            logger.error(f"{title_prefix}Error searching transcript {transcript_path}: {e}")
+            logger.error(f"❌ {title_prefix}Error searching transcript '{transcript_path}': {e}")
         return None
 # [END FILE]
