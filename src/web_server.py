@@ -1227,12 +1227,13 @@ def match():
             logger.warning(f"⚠️ Cannot compute KOSync ID for '{sanitize_log_data(ebook_filename)}': File not found in Booklore or filesystem")
             return "Could not compute KOSync ID for ebook", 404
 
-        # [NEW] Hash Preservation: Check if existing book for this ABS ID has a valid device link
+        # Hash Preservation: If the book already has a kosync_doc_id set,
+        # preserve it. This respects manual overrides via update_hash and
+        # prevents re-match from reverting a user's custom hash.
         current_book_entry = database_service.get_book(abs_id)
         if current_book_entry and current_book_entry.kosync_doc_id:
-             if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
-                  logger.info(f"🔄 Preserving existing linked hash '{current_book_entry.kosync_doc_id}' for '{abs_id}' instead of new hash '{kosync_doc_id}'")
-                  kosync_doc_id = current_book_entry.kosync_doc_id
+            logger.info(f"🔄 Preserving existing hash '{current_book_entry.kosync_doc_id}' for '{abs_id}' instead of new hash '{kosync_doc_id}'")
+            kosync_doc_id = current_book_entry.kosync_doc_id
 
         # [DUPLICATE MERGE] Check if this ebook is already linked to another ABS ID (e.g. ebook-only entry)
         existing_book = database_service.get_book_by_kosync_id(kosync_doc_id)
@@ -1422,12 +1423,12 @@ def batch_match():
                     logger.warning(f"⚠️ Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
 
-                # [NEW] Hash Preservation for Batch Match
+                # Hash Preservation for Batch Match: respect existing hash
+                # (including manual overrides) to prevent re-match from reverting.
                 current_book_entry = database_service.get_book(item['abs_id'])
                 if current_book_entry and current_book_entry.kosync_doc_id:
-                     if database_service.is_hash_linked_to_device(current_book_entry.kosync_doc_id):
-                          logger.info(f"🔄 Preserving existing linked hash '{current_book_entry.kosync_doc_id}' for '{item['abs_id']}' instead of new hash '{kosync_doc_id}'")
-                          kosync_doc_id = current_book_entry.kosync_doc_id
+                    logger.info(f"🔄 Preserving existing hash '{current_book_entry.kosync_doc_id}' for '{item['abs_id']}' instead of new hash '{kosync_doc_id}'")
+                    kosync_doc_id = current_book_entry.kosync_doc_id
 
                 # Create Book object and save to database service
                 book = Book(
@@ -1614,21 +1615,12 @@ def update_hash(abs_id):
             flash("❌ Could not recalculate hash (file not found?)", "error")
             return redirect(url_for('index'))
 
-    # Migration: Push current progress to the NEW hash if it changed
+    # Trigger an instant sync cycle so the engine can reconcile progress
+    # using 'furthest wins' logic. This avoids overwriting newer progress
+    # that may already exist on the KOSync server (e.g., from BookNexus).
     if updated and book.kosync_doc_id != old_hash:
-        states = database_service.get_states_for_book(abs_id)
-        kosync_state = next((s for s in states if s.client_name == 'kosync'), None)
-
-        if kosync_state and kosync_state.percentage is not None:
-            kosync_client = container.sync_clients().get('KoSync')
-            if kosync_client and kosync_client.is_configured():
-                success = kosync_client.kosync_client.update_progress(
-                    book.kosync_doc_id,
-                    kosync_state.percentage,
-                    kosync_state.xpath
-                )
-                if success:
-                    logger.info(f"✅ Migrated progress for '{sanitize_log_data(book.abs_title)}' to new hash '{book.kosync_doc_id}'")
+        logger.info(f"🔄 Hash changed for '{sanitize_log_data(book.abs_title)}' — triggering instant sync to reconcile progress")
+        threading.Thread(target=manager.sync_cycle, kwargs={'target_abs_id': abs_id}, daemon=True).start()
 
     flash(f"✅ Updated KoSync Hash for {book.abs_title}", "success")
     return redirect(url_for('index'))
