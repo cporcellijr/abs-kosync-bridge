@@ -323,15 +323,15 @@
             overflow: hidden;
         }
 
-        /* Compact cards for Storyteller + Ebook sections */
-        .compact-grid {
+        /* Resource Grid (square cards for Storyteller + Ebook) */
+        .resource-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 10px;
-            margin: 12px 0;
+            gap: 16px;
+            margin: 16px 0;
         }
 
-        .compact-card {
+        .resource-card {
             cursor: pointer;
             border: 2px solid rgba(255, 255, 255, 0.1);
             border-radius: 10px;
@@ -342,66 +342,67 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 10px 8px;
-            min-height: 72px;
+            padding: 12px 8px;
+            aspect-ratio: 1/1;
             text-align: center;
-            gap: 6px;
+            gap: 8px;
             position: relative;
         }
 
-        .compact-card:hover {
+        .resource-card:hover {
             border-color: rgba(102, 126, 234, 0.5);
             transform: translateY(-2px);
             box-shadow: 0 4px 14px rgba(102, 126, 234, 0.2);
         }
 
-        .compact-card.selected {
+        .resource-card.selected {
             border-color: #667eea;
             background: rgba(102, 126, 234, 0.15);
-            box-shadow: 0 4px 14px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
         }
 
-        .compact-card.selected::after {
+        .resource-card.selected::after {
             content: '✓';
             position: absolute;
-            top: 6px;
-            right: 6px;
-            width: 20px;
-            height: 20px;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
             background: #6366f1;
             color: white;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 16px;
             font-weight: 700;
             z-index: 2;
-            box-shadow: 0 2px 6px rgba(99, 102, 241, 0.5);
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
         }
 
-        .compact-card.ghost-card {
+        .resource-card.ghost-card {
             border: 2px dashed rgba(255, 255, 255, 0.15);
             background: transparent;
         }
 
-        .compact-card.ghost-card:hover {
+        .resource-card.ghost-card:hover {
             border-color: rgba(102, 126, 234, 0.4);
             background: rgba(102, 126, 234, 0.05);
         }
 
-        .compact-card.ghost-card.selected {
+        .resource-card.ghost-card.selected {
             border-color: rgba(102, 126, 234, 0.6);
             background: rgba(102, 126, 234, 0.08);
         }
 
-        .compact-icon {
-            font-size: 22px;
+        .resource-icon {
+            font-size: 32px;
             line-height: 1;
+            flex-shrink: 0;
         }
 
-        .compact-title {
-            font-size: 11px;
+        .resource-title {
+            font-size: 14px;
             font-weight: 600;
             color: #ffffff;
             line-height: 1.3;
@@ -413,8 +414,8 @@
             word-break: break-word;
         }
 
-        .compact-subtitle {
-            font-size: 10px;
+        .resource-subtitle {
+            font-size: 12px;
             color: rgba(255, 255, 255, 0.5);
             line-height: 1.2;
             display: -webkit-box;
@@ -741,8 +742,8 @@
                     <h3 class="section-title"><span class="section-number">1</span>Select Audiobook</h3>
                     <div class="matching-grid">
                         {% for ab in audiobooks %}
-                        <div class="book-card {% if single_ab_match %}selected{% endif %}"
-                            data-value="{{ ab.id }}" onclick="selectAudiobook(this, '{{ ab.id }}', '{{ get_title(ab) }}')">
+                        <div class="book-card {% if single_ab_match %}selected{% endif %}" data-value="{{ ab.id }}"
+                            onclick="selectAudiobook(this, '{{ ab.id }}', '{{ get_title(ab) }}')">
                             <div class="book-cover-container">
                                 {% if ab.cover_url %}
                                 <img src="{{ ab.cover_url }}" alt="Cover" class="book-cover"
@@ -760,19 +761,19 @@
                     {% if storyteller_books %}
                     {% set single_st_match = storyteller_books|length == 1 %}
                     <h3 class="section-title"><span class="section-number">2</span>Storyteller (Preferred)</h3>
-                    <div class="compact-grid">
-                        <div class="compact-card st-card ghost-card {% if not single_st_match %}selected{% endif %}" id="st-none-card"
-                            data-value="" onclick="selectStoryteller(this, '')">
-                            <div class="compact-icon" style="color: rgba(255,255,255,0.35);">⊘</div>
-                            <div class="compact-title" style="color: rgba(255,255,255,0.5);">None / Skip</div>
+                    <div class="resource-grid">
+                        <div class="resource-card st-card ghost-card {% if not single_st_match %}selected{% endif %}"
+                            id="st-none-card" data-value="" onclick="selectStoryteller(this, '')">
+                            <div class="resource-icon" style="color: rgba(255,255,255,0.35);">⊘</div>
+                            <div class="resource-title" style="color: rgba(255,255,255,0.5);">None / Skip</div>
                         </div>
                         {% for st in storyteller_books %}
-                        <div class="compact-card st-card {% if single_st_match %}selected{% endif %}"
+                        <div class="resource-card st-card {% if single_st_match %}selected{% endif %}"
                             data-value="{{ st.uuid }}" onclick="selectStoryteller(this, '{{ st.uuid }}')">
-                            <div class="compact-icon">⚡</div>
-                            <div class="compact-title">{{ st.title }}</div>
+                            <div class="resource-icon">⚡</div>
+                            <div class="resource-title">{{ st.title }}</div>
                             {% if st.authors %}
-                            <div class="compact-subtitle">{{ st.authors|join(', ') }}</div>
+                            <div class="resource-subtitle">{{ st.authors|join(', ') }}</div>
                             {% endif %}
                         </div>
                         {% endfor %}
@@ -780,22 +781,26 @@
                     {% endif %}
 
                     {% set single_eb_match = ebooks|length == 1 %}
-                    <h3 class="section-title"><span class="section-number">{% if storyteller_books %}3{% else %}2{% endif %}</span>Select Ebook <span style="font-size:12px; color:#aaa; font-weight:normal;">(optional if Storyteller selected)</span></h3>
+                    <h3 class="section-title"><span class="section-number">{% if storyteller_books %}3{% else %}2{%
+                            endif %}</span>Select Ebook <span
+                            style="font-size:12px; color:#aaa; font-weight:normal;">(optional if Storyteller
+                            selected)</span></h3>
                     {% if ebooks %}
-                    <div class="compact-grid" id="ebook-card-grid">
+                    <div class="resource-grid" id="ebook-card-grid">
                         {% for eb in ebooks %}
-                        <div class="compact-card eb-card {% if single_eb_match %}selected{% endif %}"
+                        <div class="resource-card eb-card {% if single_eb_match %}selected{% endif %}"
                             data-value="{{ eb.name }}" onclick="selectEbookCard(this, '{{ eb.name }}')">
-                            <div class="compact-icon">📖</div>
-                            <div class="compact-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
+                            <div class="resource-icon">📖</div>
+                            <div class="resource-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
                             {% if eb.authors %}
-                            <div class="compact-subtitle">{{ eb.authors }}</div>
+                            <div class="resource-subtitle">{{ eb.authors }}</div>
                             {% endif %}
                         </div>
                         {% endfor %}
                     </div>
                     {% else %}
-                    <div style="color: rgba(255,255,255,0.4); font-size: 13px; margin: 12px 0;">No ebooks found for this search.</div>
+                    <div style="color: rgba(255,255,255,0.4); font-size: 13px; margin: 12px 0;">No ebooks found for this
+                        search.</div>
                     {% endif %}
 
                     <button type="submit" class="btn btn-success add-to-queue-btn" id="addToQueueBtn" disabled>
@@ -819,7 +824,9 @@
                     <div class="queue-item-info">
                         <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
                         {% if item.storyteller_uuid %}
-                        <p class="queue-item-ebook"><span style="color: #a78bfa; font-size: 11px;">⚡ Storyteller</span>{% if item.ebook_filename %} + {{ item.ebook_filename }}{% endif %}</p>
+                        <p class="queue-item-ebook"><span style="color: #a78bfa; font-size: 11px;">⚡
+                                Storyteller</span>{% if item.ebook_filename %} + {{ item.ebook_filename }}{% endif %}
+                        </p>
                         {% else %}
                         <p class="queue-item-ebook" title="{{ item.ebook_filename }}">{{ item.ebook_filename }}</p>
                         {% endif %}
