@@ -99,6 +99,21 @@ The **Forge** is a powerful tool designed to prepare "Synced Books" for **Storyt
 2. **Processing**: Automatically triggers Storyteller to scan and process the new book.
 3. **Cleanup**: Monitors the output folder. Once Storyteller finishes generating the "Readaloud" ebook, Forge automatically deletes the source files to save space.
 
+### Two Ways to Forge
+
+#### 1. Auto-Forge (from the Matcher — Recommended)
+
+When creating a mapping in the **Matcher**, you can choose **"Forge & Match"** instead of "Create Mapping". This:
+
+- Stages and processes the book through Storyteller automatically.
+- **Automatically creates the sync mapping** once Storyteller finishes, linking the ABS audiobook, the original EPUB, and the new Storyteller artifact in one step.
+
+This is the recommended workflow for most users.
+
+#### 2. Manual Forge (from the Forge page)
+
+The standalone **Forge** page (`/forge`) lets you stage and process a book through Storyteller without creating a sync mapping. Use this if you want to prepare a book for Storyteller independently and then link it manually via the Matcher later.
+
 ### When to use it
 
 Use Forge if you want the **immersive Read-Along experience** in the Storyteller app.
@@ -110,7 +125,10 @@ Use Forge if you want the **immersive Read-Along experience** in the Storyteller
 
 ## Auto-Discovery (Internal KOSync Only)
 
-If you configure your KOReader devices to sync directly to **this bridge** (using the Internal KOSync Server), the system can automatically detect and link books for you. This is the **only way** to automatically create Ebook-Only links without manual approval.
+If you configure your KOReader devices to sync directly to **this bridge** (using the Built-in KOSync Bridge), the system can automatically detect and link books for you. This is the **only way** to automatically create Ebook-Only links without manual approval.
+
+> [!TIP]
+> **Built-in KOSync Bridge**: In the Settings page, under **KOSync Integration**, enable the integration and check **"Use Built-in KOSync Bridge"**. The UI will display the URL to enter into KOReader's sync settings.
 
 ### How it works
 

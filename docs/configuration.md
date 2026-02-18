@@ -35,11 +35,28 @@ ports:
 #### Storyteller
 
 - **Storyteller URL**: URL to your Storyteller instance.
-- **Storyteller API Key**: Your API key (if required).
-- **Sync Mode**: REST API (default).
+- **Storyteller Username / Password**: Credentials for your Storyteller admin account.
+- **Sync Mode**: REST API only. The bridge communicates exclusively via the Storyteller API.
 
 > [!NOTE]
 > The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.
+
+#### Hardcover.app
+
+- **Enable**: Toggle `HARDCOVER_ENABLED` to `true`.
+- **API Token**: Your personal API token from [hardcover.app/account/api](https://hardcover.app/account/api).
+- **Behavior**: Write-only tracking. The bridge auto-matches books by title/author and updates your reading progress and status (e.g., marks as "Finished" when complete).
+
+#### Telegram Notifications
+
+- **Enable**: Toggle `TELEGRAM_ENABLED` to `true`.
+- **Bot Token**: Your Telegram bot token (from [@BotFather](https://t.me/botfather)).
+- **Chat ID**: The chat ID to send messages to (your user ID or a group ID).
+- **Min Log Level**: The minimum severity level to forward (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). Default: `ERROR`.
+
+#### Shelfmark
+
+- **Shelfmark URL**: URL to your Shelfmark instance. When configured, a Shelfmark icon appears in the navigation bar for quick access.
 
 #### Booklore
 
@@ -88,14 +105,17 @@ Advanced settings to fine-tune the synchronization logic.
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | **Sync Period (Minutes)** | `5` | How often the background sync runs. |
-| **ABS Delta (Seconds)** | `30` | Minimum progress change (in seconds) required to trigger an update *from* ABS. |
-| **KoSync Delta (%)** | `0.005` | Minimum progress change (0.5%) required to trigger an update *from* KOReader. |
+| **ABS Delta (Seconds)** | `60` | Minimum progress change (in seconds) required to trigger an update *from* ABS. |
+| **KoSync Delta (%)** | `0.5` | Minimum progress change (0.5%) required to trigger an update *from* KOReader. |
+| **KoSync Delta (Words)** | `400` | Minimum word-count change required to trigger a KOSync update (used alongside the % delta). |
 | **Fuzzy Match Threshold** | `0.80` | (0.0-1.0) Confidence required for text matching (80%). |
 | **Job Retries** | `5` | How many times to retry failed transcription jobs. |
+| **Job Retry Delay (Mins)** | `15` | Minutes to wait before retrying a failed transcription job. |
 
 ### Advanced Toggles
 
 - **Sync ABS Ebook**: If enabled, also syncs progress to the *ebook* item in ABS (if you have both mapped). This allows you to read the ebook in the ABS web reader and have that progress sync to KOReader.
+- **Use KOSync Percentage from Server**: If enabled, uses the raw percentage value returned by the KOSync server instead of performing text-based position matching. Useful if text matching is unreliable for a specific book.
 - **XPath Fallback**: Strategy for handling position lookups when exact paths fail.
 - **Reprocess on Clear**: (`REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT`) If enabled, clearing a mapping in the UI will also delete the alignment cache, forcing a full re-transcription next time.
 

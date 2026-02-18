@@ -1,5 +1,6 @@
 # ABS-KoSync Enhanced
 
+<!-- markdownlint-disable MD033 -->
 <div align="center">
 
 **The ultimate bridge for cross-platform reading and listening synchronization.**
@@ -8,6 +9,7 @@
 [View on GitHub](https://github.com/cporcellijr/abs-kosync-bridge){ .md-button }
 
 </div>
+<!-- markdownlint-enable MD033 -->
 
 ---
 
@@ -23,7 +25,7 @@ The system keeps your progress in sync across all major platforms:
 | :--- | :--- | :--- |
 | **Audiobookshelf** | Audiobooks | Full Read/Write Sync |
 | **KOReader / KOSync** | Ebooks | Full Read/Write Sync |
-| **Storyteller** | Enhanced Reader | Full Read/Write Sync (REST API & SQLite) |
+| **Storyteller** | Enhanced Reader | Full Read/Write Sync (REST API) |
 | **Booklore** | Library Management | Full Read/Write Sync |
 | **Hardcover.app** | Book Tracking | Write-Only Tracking (Auto-Update Finished Status) |
 
@@ -57,8 +59,6 @@ The system keeps your progress in sync across all major platforms:
 - **Error Recovery**: Automatic retry logic for failed transcription or sync tasks.
 
 ---
-
-## 🛠️ How It Works
 
 ## 🛠️ How It Works
 

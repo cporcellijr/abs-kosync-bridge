@@ -1,5 +1,7 @@
 # Changelog
 
+<!-- markdownlint-disable MD024 -->
+
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
 ## [6.3.0] - 2026-02-18
@@ -176,7 +178,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
 3. **Verify API mode** in logs:
 
-   ```
+   ```text
    ✅ Storyteller API connected at http://host.docker.internal:8001
    Using Storyteller REST API for sync
    ```
@@ -193,18 +195,120 @@ If you see "Using Storyteller SQLite fallback", check your credentials.
 
 ## Environment Variables Reference
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ABS_SERVER` | Yes | - | Audiobookshelf server URL |
-| `ABS_KEY` | Yes | - | ABS API token |
-| `ABS_LIBRARY_ID` | Yes | - | ABS library ID |
-| `KOSYNC_SERVER` | Yes | - | KOSync server URL |
-| `KOSYNC_USER` | Yes | - | KOSync username |
-| `KOSYNC_KEY` | Yes | - | KOSync password |
-| `HARDCOVER_TOKEN` | No | - | Hardcover API token |
-| `STORYTELLER_API_URL` | No | - | Storyteller REST API URL |
-| `STORYTELLER_USER` | No | - | Storyteller username |
-| `STORYTELLER_PASSWORD` | No | - | Storyteller password |
-| `STORYTELLER_DB_PATH` | No | - | SQLite path (fallback) |
-| `SYNC_PERIOD_MINS` | No | 5 | Sync interval in minutes |
-| `FUZZY_MATCH_THRESHOLD` | No | 88 | Text matching threshold |
+<!-- markdownlint-disable MD060 -->
+
+> [!NOTE]
+> All settings below can be configured via the **Web UI** at `/settings`. Environment variables are only used for initial bootstrapping on first launch.
+
+### Audiobookshelf (Required)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ABS_SERVER` | — | Audiobookshelf server URL |
+| `ABS_KEY` | — | ABS API token |
+| `ABS_LIBRARY_ID` | — | ABS library ID to sync from |
+| `ABS_COLLECTION_NAME` | `Synced with KOReader` | Name of the ABS collection to auto-add synced books to |
+| `ABS_PROGRESS_OFFSET_SECONDS` | `0` | Rewind progress sent to ABS by this many seconds |
+| `ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID` | `false` | Limit ebook searches to the configured ABS library only |
+
+### KOSync
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KOSYNC_ENABLED` | `false` | Enable KOSync integration |
+| `KOSYNC_SERVER` | — | Target KOSync server URL |
+| `KOSYNC_USER` | — | KOSync username |
+| `KOSYNC_KEY` | — | KOSync password |
+| `KOSYNC_HASH_METHOD` | `content` | Hash method: `content` (accurate) or `filename` (fast) |
+| `KOSYNC_USE_PERCENTAGE_FROM_SERVER` | `false` | Use raw % from server instead of text-based matching |
+
+### Storyteller
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORYTELLER_ENABLED` | `false` | Enable Storyteller integration |
+| `STORYTELLER_API_URL` | — | Storyteller server URL (e.g., `http://host.docker.internal:8001`) |
+| `STORYTELLER_USER` | — | Storyteller username |
+| `STORYTELLER_PASSWORD` | — | Storyteller password |
+
+### Booklore
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BOOKLORE_ENABLED` | `false` | Enable Booklore integration |
+| `BOOKLORE_SERVER` | — | Booklore server URL |
+| `BOOKLORE_USER` | — | Booklore username |
+| `BOOKLORE_PASSWORD` | — | Booklore password |
+| `BOOKLORE_SHELF_NAME` | `Kobo` | Name of the Booklore shelf to auto-add synced books to |
+| `BOOKLORE_LIBRARY_ID` | — | Restrict sync to a specific Booklore library ID |
+
+### CWA (Calibre-Web Automated)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CWA_ENABLED` | `false` | Enable CWA/OPDS integration |
+| `CWA_SERVER` | — | Calibre-Web server URL |
+| `CWA_USERNAME` | — | Calibre-Web username |
+| `CWA_PASSWORD` | — | Calibre-Web password |
+
+### Hardcover.app
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARDCOVER_ENABLED` | `false` | Enable Hardcover.app integration |
+| `HARDCOVER_TOKEN` | — | API token from hardcover.app/account/api |
+
+### Telegram Notifications
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_ENABLED` | `false` | Enable Telegram notifications |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | — | Telegram chat ID to send messages to |
+| `TELEGRAM_LOG_LEVEL` | `ERROR` | Minimum log level to forward (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`) |
+
+### Shelfmark
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SHELFMARK_URL` | — | URL to your Shelfmark instance (enables nav icon when set) |
+
+### Sync Behavior
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNC_PERIOD_MINS` | `5` | Background sync interval in minutes |
+| `SYNC_DELTA_ABS_SECONDS` | `60` | Min ABS progress change (seconds) to trigger an update |
+| `SYNC_DELTA_KOSYNC_PERCENT` | `0.5` | Min KOSync progress change (%) to trigger an update |
+| `SYNC_DELTA_KOSYNC_WORDS` | `400` | Min word-count change to trigger a KOSync update |
+| `SYNC_DELTA_BETWEEN_CLIENTS_PERCENT` | `0.5` | Min difference between clients (%) to trigger propagation |
+| `FUZZY_MATCH_THRESHOLD` | `80` | Text matching confidence threshold (0–100) |
+| `SYNC_ABS_EBOOK` | `false` | Also sync progress to the ABS ebook item |
+| `XPATH_FALLBACK_TO_PREVIOUS_SEGMENT` | `false` | Fall back to previous XPath segment on lookup failure |
+| `SUGGESTIONS_ENABLED` | `false` | Enable auto-discovery suggestions |
+
+### Transcription
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRANSCRIPTION_PROVIDER` | `local` | Provider: `local` (faster-whisper), `deepgram`, or `whisper_cpp` |
+| `WHISPER_MODEL` | `tiny` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large`) |
+| `WHISPER_DEVICE` | `auto` | Device: `auto`, `cpu`, or `cuda` |
+| `WHISPER_COMPUTE_TYPE` | `auto` | Precision: `int8`, `float16`, `float32` |
+| `WHISPER_CPP_URL` | — | URL to whisper.cpp server endpoint |
+| `DEEPGRAM_API_KEY` | — | Deepgram API key |
+| `DEEPGRAM_MODEL` | `nova-2` | Deepgram model tier |
+
+### System
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TZ` | `America/New_York` | Container timezone |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `DATA_DIR` | `/data` | Path to persistent data directory |
+| `BOOKS_DIR` | `/books` | Path to local ebook library |
+| `AUDIOBOOKS_DIR` | `/audiobooks` | Path to local audiobook files |
+| `STORYTELLER_LIBRARY_DIR` | `/storyteller_library` | Path to Storyteller library directory |
+| `EBOOK_CACHE_SIZE` | `3` | LRU cache size for parsed ebooks |
+| `JOB_MAX_RETRIES` | `5` | Max transcription job retry attempts |
+| `JOB_RETRY_DELAY_MINS` | `15` | Minutes to wait between job retries |
