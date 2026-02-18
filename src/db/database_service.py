@@ -65,7 +65,14 @@ class DatabaseService:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not read alembic version: {e}")
             else:
-                logger.info("🔍 alembic_version table not found — database is new or unversioned")
+                table_names = inspector.get_table_names()
+                if 'books' in table_names:
+                    logger.warning("⚠️ Legacy database detected: 'books' table exists but no 'alembic_version' table found")
+                    logger.info("🔧 Stamping legacy database with initial revision '76886bc89d6e' to prevent duplicate table creation")
+                    command.stamp(alembic_cfg, "76886bc89d6e")
+                    logger.info("✅ Legacy database stamped successfully — subsequent migrations will run from this baseline")
+                else:
+                    logger.info("🔍 alembic_version table not found — database is new or unversioned")
 
         # Suppress massive stdout noise from Alembic, but keep errors
         alembic_cfg.attributes['output_buffer'] = io.StringIO()
