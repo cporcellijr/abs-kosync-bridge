@@ -38,36 +38,48 @@ class DatabaseService:
         try:
             from alembic.config import Config
             from alembic import command
+            from sqlalchemy import inspect, text
             import io
 
             project_root = Path(__file__).parent.parent.parent
             alembic_cfg_path = project_root / "alembic.ini"
-            
+
             if not alembic_cfg_path.exists():
                 logger.warning("alembic.ini not found, skipping migrations")
                 return
 
             alembic_cfg = Config(str(alembic_cfg_path))
             alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
-            
+
+            # Log the current revision before upgrading so failures are diagnosable
+            with self.db_manager.engine.connect() as conn:
+                inspector = inspect(self.db_manager.engine)
+                if 'alembic_version' in inspector.get_table_names():
+                    result = conn.execute(text("SELECT version_num FROM alembic_version"))
+                    current_rev = result.scalar()
+                    logger.info(f"Current database revision before migration: {current_rev}")
+                else:
+                    logger.info("alembic_version table not found — database is new or unversioned")
+
             # Suppress stdout
             alembic_cfg.attributes['output_buffer'] = io.StringIO()
-            
+
             # Suppress Alembic logging noise
             alembic_logger = logging.getLogger('alembic')
             original_level = alembic_logger.level
             alembic_logger.setLevel(logging.WARNING)
-            
+
+            logger.info("Running Alembic migrations to head...")
             try:
                 command.upgrade(alembic_cfg, "head")
-                logger.debug("Database migrations completed successfully")
+                logger.info("Database migrations completed successfully")
             finally:
                 alembic_logger.setLevel(original_level)
-            
+
         except Exception as e:
             logger.error(f"Alembic migration failed: {e}")
             import traceback
-            logger.debug(f"Migration error details: {traceback.format_exc()}")
+            logger.error(f"Migration error details: {traceback.format_exc()}")
 
     @contextmanager
     def get_session(self):
