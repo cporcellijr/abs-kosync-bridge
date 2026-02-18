@@ -1340,14 +1340,17 @@ def batch_match():
         if action == 'add_to_queue':
             session.setdefault('queue', [])
             abs_id = request.form.get('audiobook_id')
-            ebook_filename = request.form.get('ebook_filename')
+            ebook_filename = request.form.get('ebook_filename', '')
+            storyteller_uuid = request.form.get('storyteller_uuid', '')
             audiobooks = container.abs_client().get_all_audiobooks()
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
-            if selected_ab and ebook_filename:
+            # Allow queue entry if audiobook selected and either an ebook or a storyteller UUID is provided
+            if selected_ab and (ebook_filename or storyteller_uuid):
                 if not any(item['abs_id'] == abs_id for item in session['queue']):
                     session['queue'].append({"abs_id": abs_id,
                                              "abs_title": manager.get_abs_title(selected_ab),
                                              "ebook_filename": ebook_filename,
+                                             "storyteller_uuid": storyteller_uuid,
                                              "duration": manager.get_duration(selected_ab),
                                              "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"})
                     session.modified = True
@@ -1366,17 +1369,55 @@ def batch_match():
 
             for item in session.get('queue', []):
                 ebook_filename = item['ebook_filename']
+                storyteller_uuid = item.get('storyteller_uuid', '')
+                original_ebook_filename = None
                 duration = item['duration']
-
-                # Get booklore_id if available for API-based hash computation
                 booklore_id = None
-                if container.booklore_client().is_configured():
-                    book = container.booklore_client().find_book_by_filename(ebook_filename)
-                    if book:
-                        booklore_id = book.get('id')
+                kosync_doc_id = None
 
-                # Compute KOSync ID (Booklore API first, filesystem fallback)
-                kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+                if storyteller_uuid:
+                    # Storyteller Tri-Link Logic (mirrors match POST handler)
+                    try:
+                        epub_cache = container.epub_cache_dir()
+                        if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
+
+                        target_filename = f"storyteller_{storyteller_uuid}.epub"
+                        target_path = epub_cache / target_filename
+
+                        logger.info(f"🔍 Batch Match: Using Storyteller Artifact '{storyteller_uuid}' for '{item['abs_title']}'")
+
+                        if container.storyteller_client().download_book(storyteller_uuid, target_path):
+                            original_ebook_filename = ebook_filename  # Preserve original (may be empty for storyteller-only)
+                            ebook_filename = target_filename  # Override filename to cached artifact
+
+                            if original_ebook_filename:
+                                # Tri-Link: Compute hash from the original EPUB so it matches the user's device
+                                logger.info(f"⚡ Batch Match Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                                if container.booklore_client().is_configured():
+                                    bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+                                    if bl_book:
+                                        booklore_id = bl_book.get('id')
+                                kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+                            else:
+                                # Storyteller-Only Link: Compute hash from the downloaded artifact
+                                logger.info("⚡ Batch Match Storyteller-Only Link: Computing hash from downloaded artifact")
+                                kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                        else:
+                            logger.warning(f"⚠️ Failed to download Storyteller artifact '{storyteller_uuid}' for '{item['abs_title']}', skipping")
+                            continue
+                    except Exception as e:
+                        logger.error(f"❌ Storyteller Tri-Link failed for '{item['abs_title']}': {e}")
+                        continue
+                else:
+                    # Standard path: Get booklore_id if available for API-based hash computation
+                    if container.booklore_client().is_configured():
+                        book = container.booklore_client().find_book_by_filename(ebook_filename)
+                        if book:
+                            booklore_id = book.get('id')
+
+                    # Compute KOSync ID (Booklore API first, filesystem fallback)
+                    kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+
                 if not kosync_doc_id:
                     logger.warning(f"⚠️ Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
                     continue
@@ -1397,7 +1438,8 @@ def batch_match():
                     transcript_file=None,
                     status="pending",
                     duration=duration,
-                    original_ebook_filename=None # Batch match currently only standard ebooks
+                    storyteller_uuid=storyteller_uuid or None,
+                    original_ebook_filename=original_ebook_filename
                 )
 
                 database_service.save_book(book)
@@ -1429,7 +1471,7 @@ def batch_match():
             return redirect(url_for('index'))
 
     search = request.args.get('search', '').strip().lower()
-    audiobooks, ebooks = [], []
+    audiobooks, ebooks, storyteller_books = [], [], []
     if search:
         audiobooks = get_audiobooks_conditionally()
         audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
@@ -1439,8 +1481,15 @@ def batch_match():
         ebooks = get_searchable_ebooks(search)
         ebooks.sort(key=lambda x: x.name.lower())
 
-    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, queue=session.get('queue', []), search=search,
-                           get_title=manager.get_abs_title)
+        # Search Storyteller
+        if container.storyteller_client().is_configured():
+            try:
+                storyteller_books = container.storyteller_client().search_books(search)
+            except Exception as e:
+                logger.warning(f"⚠️ Storyteller search failed in batch_match route: {e}")
+
+    return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books,
+                           queue=session.get('queue', []), search=search, get_title=manager.get_abs_title)
 
 
 def delete_mapping(abs_id):
