@@ -333,6 +333,39 @@ class StorytellerAPIClient:
             return results
         return []
 
+    def find_book_by_staged_path(self, staged_folder_name: str, staged_epub_name: str) -> Optional[str]:
+        """Find a book UUID by matching its ebook file path suffix.
+
+        Matches against the path suffix '/{folder}/{epub}' to avoid
+        dependence on absolute library paths which vary per user.
+        Returns the book UUID if found, None otherwise.
+        """
+        expected_suffix = f"/{staged_folder_name}/{staged_epub_name}"
+        response = self._make_request("GET", "/api/v2/books", None)
+        if not response or response.status_code != 200:
+            return None
+
+        all_books = response.json()
+        for book in all_books:
+            if self._check_path_match(book, expected_suffix):
+                return book.get('uuid') or book.get('id')
+
+        return None
+
+    def _check_path_match(self, book: dict, expected_suffix: str) -> bool:
+        """Check all fields in a book object for a path ending match."""
+        for key, val in book.items():
+            if isinstance(val, str) and val.endswith(expected_suffix):
+                logger.info(f"⚡ Forge: Path match on '{key}': {val}")
+                return True
+            if isinstance(val, dict):
+                for sub_key, sub_val in val.items():
+                    if isinstance(sub_val, str) and sub_val.endswith(expected_suffix):
+                        logger.info(f"⚡ Forge: Path match on '{key}.{sub_key}': {sub_val}")
+                        return True
+
+        return False
+
     def download_book(self, book_uuid: str, output_path: Path) -> bool:
         """Download the processed EPUB3 artifact."""
         # Endpoint: GET /api/v2/books/{uuid}/files?format=readaloud
