@@ -316,6 +316,27 @@ class ForgeService:
                                 logger.warning(f"Forge: Safety check failed: {e}. Proceeding with caution.")
                                 time.sleep(30)
 
+                        # --- EXTRACT & ALIGN ---
+                        completed_epub_path = readaloud_files[0]
+                        try:
+                            logger.info(f"⚡ Forge: Extracting SMIL transcript from {completed_epub_path.name}...")
+                            item_details = self.abs_client.get_item_details(abs_id)
+                            chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+                            book_text, _ = self.ebook_parser.extract_text_and_map(completed_epub_path)
+                            raw_transcript = self.transcriber.transcribe_from_smil(
+                                abs_id, completed_epub_path, chapters, full_book_text=book_text
+                            )
+                            if not raw_transcript:
+                                logger.error(f"⚡ Forge: SMIL extraction returned no transcript for {abs_id}. Alignment map not created.")
+                            else:
+                                success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
+                                if not success:
+                                    logger.error(f"⚡ Forge: align_and_store failed for {abs_id}. Alignment map not created.")
+                                else:
+                                    logger.info(f"✅ Forge: Alignment map stored for {abs_id}.")
+                        except Exception as e:
+                            logger.error(f"⚡ Forge: Alignment extraction failed: {e}")
+
                         deleted = 0
                         for f in course_dir.iterdir():
                             if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
@@ -323,7 +344,7 @@ class ForgeService:
                                     f.unlink()
                                     deleted += 1
                                 except Exception: pass
-                        
+
                         if epub_dest.exists() and epub_dest not in readaloud_files:
                             try:
                                 epub_dest.unlink()
