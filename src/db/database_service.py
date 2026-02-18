@@ -35,51 +35,68 @@ class DatabaseService:
 
     def _run_alembic_migrations(self):
         """Run Alembic migrations to ensure database schema is up to date."""
-        try:
-            from alembic.config import Config
-            from alembic import command
-            from sqlalchemy import inspect, text
-            import io
+        import sys
+        import traceback
+        from alembic.config import Config
+        from alembic import command
+        from sqlalchemy import inspect, text
+        import io
 
-            project_root = Path(__file__).parent.parent.parent
-            alembic_cfg_path = project_root / "alembic.ini"
+        # In Docker, we expect alembic.ini at /app/alembic.ini
+        # Calculate project root relative to this file: src/db/database_service.py -> ../../ -> project_root
+        project_root = Path(__file__).parent.parent.parent
+        alembic_cfg_path = project_root / "alembic.ini"
 
-            if not alembic_cfg_path.exists():
-                logger.warning("alembic.ini not found, skipping migrations")
-                return
+        if not alembic_cfg_path.exists():
+            logger.critical(f"alembic.ini not found at {alembic_cfg_path}. Cannot run migrations. Exiting.")
+            sys.exit(1)
 
-            alembic_cfg = Config(str(alembic_cfg_path))
-            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+        alembic_cfg = Config(str(alembic_cfg_path))
+        alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
 
-            # Log the current revision before upgrading so failures are diagnosable
-            with self.db_manager.engine.connect() as conn:
-                inspector = inspect(self.db_manager.engine)
-                if 'alembic_version' in inspector.get_table_names():
+        # Log the current revision before upgrading so failures are diagnosable
+        with self.db_manager.engine.connect() as conn:
+            inspector = inspect(self.db_manager.engine)
+            if 'alembic_version' in inspector.get_table_names():
+                try:
                     result = conn.execute(text("SELECT version_num FROM alembic_version"))
                     current_rev = result.scalar()
                     logger.info(f"Current database revision before migration: {current_rev}")
-                else:
-                    logger.info("alembic_version table not found — database is new or unversioned")
+                except Exception as e:
+                    logger.warning(f"Could not read alembic version: {e}")
+            else:
+                logger.info("alembic_version table not found — database is new or unversioned")
 
-            # Suppress stdout
-            alembic_cfg.attributes['output_buffer'] = io.StringIO()
+        # Suppress massive stdout noise from Alembic, but keep errors
+        alembic_cfg.attributes['output_buffer'] = io.StringIO()
 
-            # Suppress Alembic logging noise
-            alembic_logger = logging.getLogger('alembic')
-            original_level = alembic_logger.level
-            alembic_logger.setLevel(logging.WARNING)
+        # Suppress Alembic info logging noise, but keep WARNING/ERROR
+        alembic_logger = logging.getLogger('alembic')
+        original_level = alembic_logger.level
+        alembic_logger.setLevel(logging.WARNING)
 
-            logger.info("Running Alembic migrations to head...")
-            try:
-                command.upgrade(alembic_cfg, "head")
-                logger.info("Database migrations completed successfully")
-            finally:
-                alembic_logger.setLevel(original_level)
-
+        logger.info("Running Alembic migrations to head...")
+        
+        try:
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations completed successfully")
         except Exception as e:
-            logger.error(f"Alembic migration failed: {e}")
-            import traceback
+            logger.error(f"FATAL: Alembic migration failed: {e}")
             logger.error(f"Migration error details: {traceback.format_exc()}")
+            # Re-raise to prevent startup with invalid schema
+            raise
+        finally:
+            alembic_logger.setLevel(original_level)
+
+        # Post-migration verification: Check for critical columns
+        # This confirms that our migrations actually ran and took effect
+        with self.db_manager.engine.connect() as conn:
+            inspector = inspect(self.db_manager.engine)
+            columns = [c['name'] for c in inspector.get_columns('books')]
+            if 'original_ebook_filename' not in columns:
+                logger.warning("WARNING: 'original_ebook_filename' column missing in 'books' table after migration! Schema may be out of sync.")
+            else:
+                logger.debug("Schema verification passed: 'original_ebook_filename' exists.")
 
     @contextmanager
     def get_session(self):
