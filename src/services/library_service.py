@@ -165,5 +165,5 @@ class LibraryService:
             # we could do it here, but efficiently. For now, trust the client's cache logic.
             
         except Exception as e:
-            logger.error(f"   Library sync failed: {e}")
+            logger.error(f"   ❌ Library sync failed: {e}")
 

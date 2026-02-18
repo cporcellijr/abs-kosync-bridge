@@ -62,7 +62,7 @@ class CWAClient:
             kwargs.setdefault('timeout', self.timeout)
             return self.session.get(url, **kwargs)
         except Exception as e:
-            logger.error(f"CWA Request failed: {e}")
+            logger.error(f"❌ CWA Request failed: {e}")
             raise
 
     def is_configured(self):
@@ -302,7 +302,7 @@ class CWAClient:
             return results
 
         except Exception as e:
-            logger.error(f"Error parsing CWA OPDS: {e}")
+            logger.error(f"❌ Error parsing CWA OPDS: {e}")
             logger.debug(f"Failed XML content (first 500 chars): {xml_content[:500]}")
             return []
 
@@ -334,7 +334,7 @@ class CWAClient:
                         if len(results) == 1:
                             return results[0]
             except Exception as e:
-                logger.warning(f"CWA ID lookup failed for {url}: {e}")
+                logger.warning(f"⚠️ CWA ID lookup failed for '{url}': {e}")
 
         # 2. Fallback: Direct Download Link Construction
         # If the server crashed (Author DB error) or lookup failed, assume the ID is valid 

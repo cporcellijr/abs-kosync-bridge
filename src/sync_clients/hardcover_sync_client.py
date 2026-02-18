@@ -140,20 +140,20 @@ class HardcoverSyncClient(SyncClient):
             self.hardcover_client.update_status(int(match.get('book_id')), 1, match.get('edition_id'))
             logger.info(f"📚 Hardcover: '{sanitize_log_data(meta.get('title'))}' matched and set to Want to Read (matched by {matched_by})")
         else:
-            logger.warning(f"📚 Hardcover: No match found for '{sanitize_log_data(meta.get('title'))}'")
+            logger.warning(f"⚠️ Hardcover: No match found for '{sanitize_log_data(meta.get('title'))}'")
 
     def set_manual_match(self, book_abs_id: str, input_str: str) -> bool:
         """
         Manually match an ABS book to a Hardcover book via URL, ID, or Slug.
         """
         if not self.hardcover_client.is_configured():
-            logger.error("Hardcover client not configured")
+            logger.error("❌ Hardcover client not configured")
             return False
 
         # Resolve the input string to a Hardcover book
         match = self.hardcover_client.resolve_book_from_input(input_str)
         if not match:
-            logger.error(f"Could not resolve Hardcover book from '{input_str}'")
+            logger.error(f"❌ Could not resolve Hardcover book from '{input_str}'")
             return False
 
         # Try to get existing metadata from ABS for completeness
@@ -168,7 +168,7 @@ class HardcoverSyncClient(SyncClient):
                     isbn = meta.get('isbn')
                     asin = meta.get('asin')
             except Exception as e:
-                logger.warning(f"Failed to fetch ABS details during manual match: {e}")
+                logger.warning(f"⚠️ Failed to fetch ABS details during manual match: {e}")
 
         # Create/Update HardcoverDetails
         details = HardcoverDetails(
@@ -313,7 +313,7 @@ class HardcoverSyncClient(SyncClient):
             return SyncResult(actual_pct, True, updated_state)
 
         except Exception as e:
-            logger.error(f"Failed to update Hardcover progress: {e}")
+            logger.error(f"❌ Failed to update Hardcover progress: {e}")
             return SyncResult(None, False)
 
     def _update_audiobook_progress(self, book, hardcover_details, ub, percentage, audio_seconds):
@@ -345,5 +345,5 @@ class HardcoverSyncClient(SyncClient):
             return SyncResult(percentage, True, updated_state)
 
         except Exception as e:
-            logger.error(f"Failed to update Hardcover audiobook progress: {e}")
+            logger.error(f"❌ Failed to update Hardcover audiobook progress: {e}")
             return SyncResult(None, False)

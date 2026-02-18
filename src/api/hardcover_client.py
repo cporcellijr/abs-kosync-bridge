@@ -73,11 +73,11 @@ class HardcoverClient:
                 if data.get("data"):
                     return data["data"]
                 elif data.get("errors"):
-                    logger.error(f"GraphQL errors: {data['errors']}")
+                    logger.error(f"❌ GraphQL errors: {data['errors']}")
             else:
-                logger.error(f"HTTP {r.status_code}: {r.text}")
+                logger.error(f"❌ HTTP {r.status_code}: {r.text}")
         except Exception as e:
-            logger.error(f"Hardcover query failed: {e}")
+            logger.error(f"❌ Hardcover query failed: {e}")
 
         return None
 
@@ -120,7 +120,7 @@ class HardcoverClient:
                     return books[0]
 
         except Exception as e:
-            logger.error(f"Error fetching user book: {e}")
+            logger.error(f"❌ Error fetching user book: {e}")
 
         return None
 
@@ -455,7 +455,7 @@ class HardcoverClient:
                 else:
                     return None
             except Exception as e:
-                logger.error(f"resolve_book_from_input error (id): {e}")
+                logger.error(f"❌ resolve_book_from_input error (id): {e}")
                 return None
         else:
             # Treat as slug
@@ -568,7 +568,7 @@ class HardcoverClient:
         if result and result.get("insert_user_book"):
             error = result["insert_user_book"].get("error")
             if error:
-                logger.error(f"Hardcover update_status error: {error}")
+                logger.error(f"❌ Hardcover update_status error: {error}")
             return result["insert_user_book"].get("user_book")
         return None
 

@@ -50,7 +50,7 @@ def kosync_auth_required(f):
         expected_password = os.environ.get("KOSYNC_KEY")
 
         if not expected_user or not expected_password:
-            logger.error("KOSync Integrated Server: Credentials not configured in settings")
+            logger.error("❌ KOSync Integrated Server: Credentials not configured in settings")
             return jsonify({"error": "Server not configured"}), 500
 
         expected_hash = hash_kosync_key(expected_password)
@@ -319,7 +319,7 @@ def kosync_put_progress():
                                         })
                                         
                             except Exception as e:
-                                logger.warning(f"Error searching ABS for audiobooks: {e}")
+                                logger.warning(f"⚠️ Error searching ABS for audiobooks: {e}")
                         
                         # Step 2: If audiobook matches found, create a suggestion for user review
                         if audiobook_matches:
@@ -362,7 +362,7 @@ def kosync_put_progress():
                             _manager.sync_cycle(target_abs_id=book_id)
                             
                     except Exception as e:
-                        logger.error(f"Error in auto-discovery background task: {e}")
+                        logger.error(f"❌ Error in auto-discovery background task: {e}")
                     finally:
                         if doc_hash_val in _active_scans:
                             _active_scans.remove(doc_hash_val)
@@ -543,7 +543,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                                 logger.info(f"📚 Matched EPUB via Booklore download: {safe_title}")
                                 return safe_title
                     except Exception as e:
-                        logger.warning(f"Failed to check Booklore book {book.title}: {e}")
+                        logger.warning(f"⚠️ Failed to check Booklore book '{book.title}': {e}")
 
                 logger.info(f"🔍 Booklore search finished. Checked {len(books)} books. No match found")
 
@@ -551,7 +551,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                 logger.debug(f"Error querying Booklore for EPUB matching: {e}")
 
     except Exception as e:
-        logger.error(f"Error in EPUB auto-discovery: {e}")
+        logger.error(f"❌ Error in EPUB auto-discovery: {e}")
 
     logger.info("🔍 Auto-discovery finished. No match found")
     return None
@@ -674,11 +674,11 @@ def _cleanup_cache_for_hash(doc_hash):
                         os.remove(file_path)
                         logger.info(f"🗑️ Deleted cached EPUB: {filename}")
                     except Exception as e:
-                        logger.warning(f"Failed to delete cached file {filename}: {e}")
+                        logger.warning(f"⚠️ Failed to delete cached file '{filename}': {e}")
         
         # Note: We don't delete the KosyncDocument record here, 
         # as it may contain important progress data. 
         # The filename/mtime/source fields just become stale or are cleared if unlinked.
 
     except Exception as e:
-        logger.error(f"Error cleaning up cache for {doc_hash}: {e}")
+        logger.error(f"❌ Error cleaning up cache for '{doc_hash}': {e}")

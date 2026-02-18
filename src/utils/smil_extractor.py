@@ -75,7 +75,7 @@ class SmilExtractor:
             with zipfile.ZipFile(epub_path, 'r') as zf:
                 opf_path = self._find_opf_path(zf)
                 if not opf_path:
-                    logger.error(f"Could not find OPF file in EPUB: {epub_path}")
+                    logger.error(f"❌ Could not find OPF file in EPUB: '{epub_path}'")
                     return []
                 
                 opf_dir = str(Path(opf_path).parent)
@@ -159,7 +159,7 @@ class SmilExtractor:
                 return transcript
                 
         except Exception as e:
-            logger.error(f"Error extracting SMIL transcript: {e}")
+            logger.error(f"❌ Error extracting SMIL transcript: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return []
@@ -247,7 +247,7 @@ class SmilExtractor:
             if starts:
                 return min(starts), max(ends), audio_src
         except Exception as e:
-            logger.warning(f"Error parsing raw info for {smil_path}: {e}")
+            logger.warning(f"⚠️ Error parsing raw info for '{smil_path}': {e}")
             pass
         return 0.0, 0.0, None
 
@@ -286,7 +286,7 @@ class SmilExtractor:
                     logger.debug(f"       🔍 Text content empty for '{text_src}' (decoded)")
 
         except Exception as e:
-            logger.warning(f"Error processing SMIL {smil_path}: {e}")
+            logger.warning(f"⚠️ Error processing SMIL '{smil_path}': {e}")
             import traceback
             logger.debug(traceback.format_exc())
         
@@ -456,7 +456,7 @@ class SmilExtractor:
                     })
         
         except Exception as e:
-            logger.warning(f"Error processing SMIL {smil_path}: {e}")
+            logger.warning(f"⚠️ Error processing SMIL '{smil_path}': {e}")
             import traceback
             logger.debug(traceback.format_exc())
         

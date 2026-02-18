@@ -107,7 +107,7 @@ class DatabaseService:
             session.commit()
         except Exception as e:
             session.rollback()
-            logger.error(f"Database error: {e}")
+            logger.error(f"❌ Database error: {e}")
             raise
         finally:
             session.close()
