@@ -459,7 +459,7 @@ class ForgeService:
             # Trigger Storyteller
             st_client = self.storyteller_client
             found_uuid = None
-            for _ in range(60): # Wait up to 5 mins for initial detection
+            for _ in range(240): # Wait up to 20 mins for initial detection (matching manual forge)
                 time.sleep(5)
                 try:
                     results = st_client.search_books(title)
@@ -472,7 +472,8 @@ class ForgeService:
                         logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
                         time.sleep(60)
                         break
-                except: pass
+                except Exception as e:
+                    logger.debug(f"Forge: Storyteller search error (retrying): {e}")
             
             if found_uuid:
                 logger.info(f"⚡ Auto-Forge: Triggering processing for {found_uuid}")
