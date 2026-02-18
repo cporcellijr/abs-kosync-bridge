@@ -558,6 +558,28 @@
                 border: 1px solid rgba(244, 67, 54, 0.3);
             }
 
+            .status-forging,
+            .status-manual_forge {
+                background: rgba(156, 39, 176, 0.2);
+                color: #e040fb;
+                border: 1px solid rgba(156, 39, 176, 0.3);
+                animation: pulse 2s infinite;
+            }
+
+            @keyframes pulse {
+                0% {
+                    opacity: 0.7;
+                }
+
+                50% {
+                    opacity: 1;
+                }
+
+                100% {
+                    opacity: 0.7;
+                }
+            }
+
             /* Unified Progress */
             .unified-progress {
                 display: flex;

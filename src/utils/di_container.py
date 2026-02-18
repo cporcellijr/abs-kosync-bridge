@@ -24,6 +24,7 @@ from src.utils.polisher import Polisher # [NEW]
 from src.services.alignment_service import AlignmentService # [NEW]
 from src.services.library_service import LibraryService # [NEW]
 from src.services.migration_service import MigrationService # [NEW]
+from src.services.forge_service import ForgeService
 from src.sync_clients.abs_sync_client import ABSSyncClient
 from src.sync_clients.kosync_sync_client import KoSyncSyncClient
 from src.sync_clients.storyteller_sync_client import StorytellerSyncClient
@@ -143,6 +144,18 @@ class Container(containers.DeclarativeContainer):
         data_dir,
         smil_extractor,
         polisher  # [UPDATED] Injected dependency
+    )
+
+    forge_service = providers.Singleton(
+        ForgeService,
+        database_service=database_service,
+        abs_client=abs_client,
+        booklore_client=booklore_client,
+        storyteller_client=storyteller_client,
+        library_service=library_service,
+        ebook_parser=ebook_parser,
+        transcriber=transcriber,
+        alignment_service=alignment_service
     )
 
     # Sync clients
