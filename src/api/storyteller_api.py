@@ -346,34 +346,38 @@ class StorytellerAPIClient:
             return None
 
         all_books = response.json()
-        if all_books:
+        if all_books and not hasattr(self, '_schema_logged'):
             sample = all_books[0]
-            logger.debug(f"Storyteller book schema keys: {list(sample.keys())}")
-
-        # Try multiple known field names for the ebook path
-        path_fields = ['ebook', 'ebookFile', 'ebookFilePath', 'filepath', 'ebook_path', 'file']
+            for key in ['ebook', 'audiobook', 'readaloud']:
+                val = sample.get(key)
+                if val is not None:
+                    logger.debug(f"Storyteller schema '{key}' type={type(val).__name__}: {str(val)[:200]}")
+            self._schema_logged = True
 
         for book in all_books:
-            # Check top-level path fields
-            for field in path_fields:
-                path_val = book.get(field)
-                if isinstance(path_val, str) and path_val.endswith(expected_suffix):
-                    uuid = book.get('uuid') or book.get('id')
-                    logger.info(f"⚡ Forge: Path match on field '{field}': {path_val}")
-                    return uuid
-
-            # Check nested objects (e.g., readaloud.filepath, media.ebook)
-            for nested_key in ['readaloud', 'media', 'files']:
-                nested = book.get(nested_key)
-                if isinstance(nested, dict):
-                    for field in path_fields:
-                        path_val = nested.get(field)
-                        if isinstance(path_val, str) and path_val.endswith(expected_suffix):
-                            uuid = book.get('uuid') or book.get('id')
-                            logger.info(f"⚡ Forge: Path match on field '{nested_key}.{field}': {path_val}")
-                            return uuid
+            if self._check_path_match(book, expected_suffix):
+                uuid = book.get('uuid') or book.get('id')
+                return uuid
 
         return None
+
+    def _check_path_match(self, book: dict, expected_suffix: str) -> bool:
+        """Recursively check all fields in a book object for a path match."""
+        uuid = book.get('uuid', book.get('id', ''))[:8]
+
+        for key, val in book.items():
+            # Direct string match
+            if isinstance(val, str) and val.endswith(expected_suffix):
+                logger.info(f"⚡ Forge: Path match on '{key}': {val}")
+                return True
+            # Nested dict — check all string values inside
+            if isinstance(val, dict):
+                for sub_key, sub_val in val.items():
+                    if isinstance(sub_val, str) and sub_val.endswith(expected_suffix):
+                        logger.info(f"⚡ Forge: Path match on '{key}.{sub_key}': {sub_val}")
+                        return True
+
+        return False
 
     def download_book(self, book_uuid: str, output_path: Path) -> bool:
         """Download the processed EPUB3 artifact."""
