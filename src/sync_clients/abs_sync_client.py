@@ -50,7 +50,7 @@ class ABSSyncClient(SyncClient):
             abs_ts = response.get('currentTime') if response is not None else None
 
         if abs_ts is None:
-            logger.info("ABS timestamp is None, probably not started the book yet.")
+            logger.info("🔍 ABS timestamp is None, probably not started the book yet")
             abs_ts = 0.0
 
         # Convert timestamp to percentage
@@ -133,11 +133,11 @@ class ABSSyncClient(SyncClient):
         if hasattr(book, 'transcript_file') and book.transcript_file:
             path = Path(book.transcript_file)
             if not path.exists() and self.alignment_service:
-                logger.warning(f"[{book.abs_id}] Legacy transcript file missing: {path}. Attempting DB fallback.")
+                logger.warning(f"⚠️ '{book.abs_id}' Legacy transcript file missing: '{path}' — Attempting DB fallback")
                 # Try DB lookup
                 char_offset = self.alignment_service.get_char_for_time(book.abs_id, abs_ts)
                 if char_offset is not None:
-                     logger.info(f"[{book.abs_id}] ✅ Found in DB despite missing file. Self-healing state.")
+                     logger.info(f"✅ '{book.abs_id}' Found in DB despite missing file — Self-healing state")
                      # We can't easily save the book here without circular dependency or passing DB service
                      # But we can at least return valid text!
                      book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
@@ -165,7 +165,7 @@ class ABSSyncClient(SyncClient):
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         book_title = book.abs_title or 'Unknown Book'
         if request.locator_result.percentage == 0.0:
-            logger.info(f"[{book_title}] Locator percentage is 0.0% - setting ABS progress to start of book.")
+            logger.info(f"🔄 '{book_title}' Locator percentage is 0.0% — Setting ABS progress to start of book")
             result, final_ts = self._update_abs_progress_with_offset(book.abs_id, 0.0)
             updated_state = {
                 'ts': final_ts,
@@ -187,7 +187,7 @@ class ABSSyncClient(SyncClient):
                     char_offset_hint=char_index
                 )
             else:
-                logger.debug(f"[{book_title}] Alignment lookup skipped: No character index provided in request.")
+                logger.debug(f"🔍 '{book_title}' Alignment lookup skipped: No character index provided in request")
                 
         elif book.transcript_file and book.transcript_file != "DB_MANAGED":
             # Legacy Path: Use JSON File
@@ -201,7 +201,7 @@ class ABSSyncClient(SyncClient):
             response = self.abs_client.get_progress(book.abs_id)
             abs_ts = response.get('currentTime') if response is not None else None
             if abs_ts is not None and ts_for_text < abs_ts:
-                logger.info(f"[{book_title}] Not updating ABS progress - target timestamp {ts_for_text:.2f}s is before current ABS position {abs_ts:.2f}s.")
+                logger.info(f"🔄 '{book_title}' Not updating ABS progress — target timestamp {ts_for_text:.2f}s is before current ABS position {abs_ts:.2f}s")
                 return SyncResult(abs_ts, True, {
                     'ts': abs_ts,
                     'pct': self._abs_to_percentage(abs_ts, book) or 0
@@ -215,7 +215,7 @@ class ABSSyncClient(SyncClient):
                 'pct': pct or 0
             }
             return SyncResult(final_ts, result.get("success", False), updated_state)
-        logger.warning(f"[{book_title}] Not updating ABS progress - could not find timestamp for provided text.")
+        logger.warning(f"⚠️ '{book_title}' Not updating ABS progress — could not find timestamp for provided text")
         return SyncResult(None, False)
 
     def _update_abs_progress_with_offset(self, abs_id, ts, prev_abs_ts: float = 0):

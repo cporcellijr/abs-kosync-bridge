@@ -58,7 +58,7 @@ def kosync_auth_required(f):
         if user and expected_user and user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
             return f(*args, **kwargs)
 
-        logger.warning(f"KOSync Integrated Server: Unauthorized access attempt from {request.remote_addr} (user: {user})")
+        logger.warning(f"⚠️ KOSync Integrated Server: Unauthorized access attempt from '{request.remote_addr}' (user: '{user}'")
         return jsonify({"error": "Unauthorized"}), 401
     return decorated_function
 
@@ -83,11 +83,11 @@ def kosync_users_auth():
     expected_password = os.environ.get("KOSYNC_KEY")
 
     if not user or not key:
-        logger.warning(f"KOSync Auth: Missing credentials from {request.remote_addr}")
+        logger.warning(f"⚠️ KOSync Auth: Missing credentials from '{request.remote_addr}'")
         return jsonify({"message": "Invalid credentials"}), 401
 
     if not expected_user or not expected_password:
-        logger.error("KOSync Auth: Server credentials not configured")
+        logger.error("❌ KOSync Auth: Server credentials not configured")
         return jsonify({"message": "Server not configured"}), 500
 
     expected_hash = hash_kosync_key(expected_password)
@@ -96,7 +96,7 @@ def kosync_users_auth():
         logger.debug(f"KOSync Auth: User '{user}' authenticated successfully")
         return jsonify({"username": user}), 200
 
-    logger.warning(f"KOSync Auth: Failed auth attempt for user '{user}' from {request.remote_addr}")
+    logger.warning(f"⚠️ KOSync Auth: Failed auth attempt for user '{user}' from '{request.remote_addr}'")
     return jsonify({"message": "Unauthorized"}), 401
 
 
@@ -262,7 +262,7 @@ def kosync_put_progress():
                         epub_filename = _try_find_epub_by_hash(doc_hash_val)
 
                         if not epub_filename:
-                            logger.debug(f"⚠️ Could not auto-match EPUB for KOSync document {doc_hash_val[:8]}...")
+                            logger.debug(f"Could not auto-match EPUB for KOSync document '{doc_hash_val[:8]}'")
                             return
                         
                         title = Path(epub_filename).stem
@@ -423,7 +423,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                 logger.info(f"📚 Matched EPUB via DB: {doc.filename}")
                 return doc.filename
             except FileNotFoundError:
-                logger.debug(f"⚠️ DB suggested '{doc.filename}' but file is missing. Re-scanning...")
+                logger.debug(f"🔍 DB suggested '{doc.filename}' but file is missing — Re-scanning")
         
         # [NEW] Check if valid linked book exists with original filename
         if doc and doc.linked_abs_id:
@@ -474,7 +474,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                         return epub_path.name
                 except Exception as e:
                     logger.debug(f"Error checking file {epub_path.name}: {e}")
-            logger.info(f"❌ Filesystem search finished. Checked {count} files. No match.")
+            logger.info(f"🔍 Filesystem search finished. Checked {count} files. No match found")
 
         # Fallback to Booklore
         if _container.booklore_client().is_configured():
@@ -545,7 +545,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
                     except Exception as e:
                         logger.warning(f"Failed to check Booklore book {book.title}: {e}")
 
-                logger.info(f"❌ Booklore search finished. Checked {len(books)} books. No match.")
+                logger.info(f"🔍 Booklore search finished. Checked {len(books)} books. No match found")
 
             except Exception as e:
                 logger.debug(f"Error querying Booklore for EPUB matching: {e}")
@@ -553,7 +553,7 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error in EPUB auto-discovery: {e}")
 
-    logger.info("❌ Auto-discovery finished. No match found.")
+    logger.info("🔍 Auto-discovery finished. No match found")
     return None
 
 

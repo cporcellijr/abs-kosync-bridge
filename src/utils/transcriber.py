@@ -112,7 +112,7 @@ class AudioTranscriber:
         
         overlap_ratio = overlap_count / len(smil_segments)
         if overlap_ratio > 0.15: # 15% threshold
-            logger.warning(f"⚠️ SMIL contains explicit overlaps ({overlap_ratio:.1%}). Might be invalid.")
+            logger.warning(f"⚠️ SMIL contains explicit overlaps ({overlap_ratio:.1%}) — Might be invalid")
             # Don't fail just on overlap if text match is perfect (e.g. concurrent audio layers in SMIL)
             # But usually high overlap means bad SMIL.
         
@@ -178,7 +178,7 @@ class AudioTranscriber:
                     
                     # Reject if coverage is less than 85%
                     if coverage < 0.85:
-                        logger.warning(f"⛔ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s. Falling back to transcriber.")
+                        logger.warning(f"⛔ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s. Falling back to transcriber")
                         return None
 
             # [NEW] Validate transcript against BOOK TEXT
@@ -187,15 +187,15 @@ class AudioTranscriber:
                 is_valid, score = self.validate_smil(transcript, full_book_text)
                 
                 if not is_valid:
-                    logger.warning(f"⚠️ SMIL validation failed: Match score {score:.1%} too low.")
+                    logger.warning(f"⚠️ SMIL validation failed: Match score {score:.1%} too low")
                     logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
                     return None
                 else:
                     logger.info(f"✅ SMIL Validated (Match: {score:.1%})")
             else:
-                logger.warning("⚠️ Skipping detailed SMIL validation (no ebook text provided).")
+                logger.warning("⚠️ Skipping detailed SMIL validation (no ebook text provided)")
 
-            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments.")
+            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments")
             return transcript # Return raw data!
         except Exception as e:
             logger.error(f"Failed to extract SMIL transcript: {e}")
@@ -291,7 +291,7 @@ class AudioTranscriber:
         if duration <= target_max_duration_sec:
             return [file_path]
 
-        logger.info(f"   ⚠️ File {file_path.name} is {duration/60:.1f}m. Splitting...")
+        logger.warning(f"⚠️ File '{file_path.name}' is {duration/60:.1f}m — Splitting")
         num_parts = math.ceil(duration / target_max_duration_sec)
         segment_duration = duration / num_parts
         new_files = []
@@ -411,7 +411,7 @@ class AudioTranscriber:
                     downloaded_files = list(existing_files)
                 else:
                     if existing_files:
-                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh.")
+                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh")
                         shutil.rmtree(book_cache_dir)
                     
                     # Original logic: Wipe and Start Fresh

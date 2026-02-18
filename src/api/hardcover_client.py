@@ -624,12 +624,12 @@ class HardcoverClient:
             if not started_at_val and should_start:
                 started_at_val = today
                 logger.info(
-                    f"Hardcover: Setting started_at to {today} (Progress: {current_percentage:.1%})"
+                    f"🔄 Hardcover: Setting started_at to '{today}' (Progress: {current_percentage:.1%})"
                 )
 
             if is_finished and not finished_at_val:
                 finished_at_val = today
-                logger.info(f"Hardcover: Setting finished_at to {today}")
+                logger.info(f"🔄 Hardcover: Setting finished_at to '{today}'")
 
             # Use progress_seconds for audiobooks, progress_pages for page-based editions
             if audio_seconds and audio_seconds > 0:

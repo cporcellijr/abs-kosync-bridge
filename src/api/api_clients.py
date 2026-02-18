@@ -49,13 +49,13 @@ class ABSClient:
                 return True
             else:
                 # Keep failure visible as warning
-                logger.warning(f"❌ Audiobookshelf Connection Failed: {r.status_code} - {sanitize_log_data(r.text)}")
+                logger.error(f"❌ Audiobookshelf Connection Failed: {r.status_code} - {sanitize_log_data(r.text)}")
                 return False
         except requests.exceptions.ConnectionError:
-            logger.warning(f"❌ Could not connect to Audiobookshelf at {self.base_url}. Check URL and Docker Network.")
+            logger.error(f"❌ Could not connect to Audiobookshelf at {self.base_url} — Check URL and Docker Network")
             return False
         except Exception as e:
-            logger.warning(f"❌ Audiobookshelf Error: {e}")
+            logger.error(f"❌ Audiobookshelf Error: {e}")
             return False
 
     def get_all_audiobooks(self):
@@ -71,7 +71,7 @@ class ABSClient:
                 all_audiobooks.extend(r_items)
             return all_audiobooks
         except Exception as e:
-            logger.error(f"Exception fetching audiobooks: {e}")
+            logger.error(f"❌ Exception fetching audiobooks: {e}")
             return []
 
     def get_audiobooks_for_lib(self, lib: str):
@@ -81,7 +81,7 @@ class ABSClient:
         r_items = self.session.get(items_url, params=params, timeout=self.timeout)
         if r_items.status_code == 200:
             return r_items.json().get('results', [])
-        logger.warning("⚠️ ABS - Failed to fetch audiobooks for library " + lib)
+        logger.warning(f"⚠️ ABS - Failed to fetch audiobooks for library '{lib}'")
         return []
 
     def get_audio_files(self, item_id):
@@ -106,7 +106,7 @@ class ABSClient:
                 return files
             return []
         except Exception as e:
-            logger.error(f"Error getting audio files: {e}")
+            logger.error(f"❌ Error getting audio files: {e}")
             return []
 
     def get_ebook_files(self, item_id):
@@ -133,7 +133,7 @@ class ABSClient:
                 return ebook_files
             return []
         except Exception as e:
-            logger.error(f"Error getting ebook files: {e}")
+            logger.error(f"❌ Error getting ebook files: {e}")
             return []
 
     def search_ebooks(self, query):
@@ -144,7 +144,7 @@ class ABSClient:
             # Get all libraries first
             r_libs = self.session.get(f"{self.base_url}/api/libraries", timeout=self.timeout)
             if r_libs.status_code != 200:
-                logger.warning(f"ABS Search: Failed to get libraries (status {r_libs.status_code})")
+                logger.warning(f"⚠️ ABS Search: Failed to get libraries (status {r_libs.status_code})")
                 return []
             
             libraries = r_libs.json().get('libraries', [])
@@ -194,11 +194,11 @@ class ABSClient:
                     else:
                         logger.debug(f"   No items found in library '{lib_name}'")
                 else:
-                    logger.warning(f"   Search failed for library '{lib_name}' (status {r.status_code})")
+                    logger.warning(f"⚠️    Search failed for library '{lib_name}' (status {r.status_code})")
                     
             return results
         except Exception as e:
-            logger.error(f"Error searching ABS ebooks: {e}")
+            logger.error(f"❌ Error searching ABS ebooks: {e}")
             return []
 
     def download_file(self, stream_url, output_path):
@@ -251,7 +251,7 @@ class ABSClient:
         """
         # Validate required parameters
         if location is None:
-            logger.error("Ebook location is required for progress updates")
+            logger.error("❌ Ebook location is required for progress updates")
             return False
 
         # Ensure we use a float for the progress
@@ -268,10 +268,10 @@ class ABSClient:
                 logger.debug(f"ABS ebook progress updated: {item_id} -> {progress} at location: {location[:50]}...")
                 return True
             else:
-                logger.error(f"ABS ebook update failed: {r.status_code} - {r.text}")
+                logger.error(f"❌ ABS ebook update failed: {r.status_code} - {r.text}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to update ABS ebook progress: {e}")
+            logger.error(f"❌ Failed to update ABS ebook progress: {e}")
             return False
 
     def update_progress(self, abs_id, timestamp, time_listened):
@@ -297,7 +297,7 @@ class ABSClient:
     def update_progress_using_payload(self, abs_id, payload: dict):
         session_id = self.create_session(abs_id)
         if not session_id:
-            logger.error(f"Failed to create ABS session for item {abs_id}")
+            logger.error(f"❌ Failed to create ABS session for item '{abs_id}'")
             return {"success": False, "code": None, "reason": f"Failed to create ABS session for item {abs_id}"}
 
         try:
@@ -308,13 +308,13 @@ class ABSClient:
                 self.close_session(session_id)
                 return {"success": True, "code": r.status_code, "response": r.text}
             elif r.status_code == 404:
-                logger.warning(f"ABS session not found (404): {session_id}")
+                logger.warning(f"⚠️ ABS session not found (404): '{session_id}'")
                 return {"success": False, "code": 404, "response": r.text}
             else:
-                logger.error(f"ABS session sync failed: {r.status_code} - {r.text}")
+                logger.error(f"❌ ABS session sync failed: {r.status_code} - {r.text}")
                 return {"success": False, "code": r.status_code, "response": r.text}
         except Exception as e:
-            logger.error(f"Failed to sync ABS session progress: {e}")
+            logger.error(f"❌ Failed to sync ABS session progress: {e}")
             return {"success": False, "code": None, "reason": str(e)}
 
     def get_all_progress_raw(self):
@@ -331,7 +331,7 @@ class ABSClient:
                 return mapped_items
             elif r.status_code == 404:
                 # Fallback to /api/me
-                logger.debug("⚠️ /api/me/progress not found (404), falling back to /api/me")
+                logger.warning("⚠️ /api/me/progress not found (404), falling back to /api/me")
                 url_fallback = f"{self.base_url}/api/me"
                 r2 = self.session.get(url_fallback, timeout=self.timeout)
                 if r2.status_code == 200:
@@ -350,10 +350,10 @@ class ABSClient:
                 
             return {}
         except Exception as e:
-            logger.error(f"Error fetching all ABS progress: {e}")
+            logger.error(f"❌ Error fetching all ABS progress: {e}")
             return {}
         except Exception as e:
-            logger.error(f"Error fetching all ABS progress: {e}")
+            logger.error(f"❌ Error fetching all ABS progress: {e}")
             return {}
 
     def get_in_progress(self, min_progress=0.01):
@@ -394,7 +394,7 @@ class ABSClient:
                     })
             return active_items
         except Exception as e:
-            logger.error(f"Error fetching ABS in-progress: {e}")
+            logger.error(f"❌ Error fetching ABS in-progress: {e}")
             return []
 
     def create_session(self, abs_id):
@@ -422,9 +422,9 @@ class ABSClient:
                 logger.debug(f"Created new ABS session for item {abs_id}, id: {id}")
                 return id
             else:
-                logger.error(f"Failed to create ABS session: {r.status_code} - {r.text}")
+                logger.error(f"❌ Failed to create ABS session: {r.status_code} - {r.text}")
         except Exception as e:
-            logger.error(f"Exception creating ABS session: {e}")
+            logger.error(f"❌ Exception creating ABS session: {e}")
         return None
 
     def close_session(self, session_id):
@@ -474,7 +474,7 @@ class ABSClient:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error adding item to ABS collection: {e}")
+            logger.error(f"❌ Error adding item to ABS collection: {e}")
             return False
 
     def remove_from_collection(self, item_id, collection_name="abs-kosync"):
@@ -484,14 +484,14 @@ class ABSClient:
             collections_url = f"{self.base_url}/api/collections"
             r = self.session.get(collections_url)
             if r.status_code != 200:
-                logger.warning(f"Failed to fetch collections to remove item {item_id}")
+                logger.warning(f"⚠️ Failed to fetch collections to remove item '{item_id}'")
                 return False
 
             collections = r.json().get('collections', [])
             target_collection = next((c for c in collections if c.get('name') == collection_name), None)
 
             if not target_collection:
-                logger.warning(f"Collection '{collection_name}' not found, cannot remove item {item_id}")
+                logger.warning(f"⚠️ Collection '{collection_name}' not found, cannot remove item '{item_id}'")
                 return False
 
             # Remove from collection
@@ -499,14 +499,14 @@ class ABSClient:
             r_remove = self.session.delete(remove_url)
             
             if r_remove.status_code in [200, 201, 204]:
-                logger.info(f"🗑️ Removed item {item_id} from ABS Collection: {collection_name}")
+                logger.info(f"🗑️ Removed item '{item_id}' from ABS Collection: '{collection_name}'")
                 return True
             else:
-                logger.warning(f"Failed to remove item {item_id} from collection {collection_name}: {r_remove.status_code} - {r_remove.text}")
+                logger.warning(f"⚠️ Failed to remove item '{item_id}' from collection '{collection_name}': {r_remove.status_code} - {r_remove.text}")
                 return False
 
         except Exception as e:
-            logger.error(f"Error removing item from ABS collection: {e}")
+            logger.error(f"❌ Error removing item from ABS collection: {e}")
             return False
 
 class KoSyncClient:
@@ -565,14 +565,14 @@ class KoSyncClient:
             r = self.session.get(url_sync, headers=headers, timeout=5)
             if r.status_code == 200:
                 return True
-            logger.warning(f"❌ KoSync connection failed (Response: {r.status_code})")
+            logger.error(f"❌ KoSync connection failed (Response: {r.status_code})")
             return False
         except Exception as e:
             if is_local:
                 # Expected race condition during startup
                 logger.debug(f"ℹ️  KoSync (Internal): Server check skipped during startup (will be ready shortly)")
                 return True
-            logger.warning(f"❌ KoSync Error: {e}")
+            logger.error(f"❌ KoSync Error: {e}")
             return False
 
     def get_progress(self, doc_id):
@@ -591,7 +591,7 @@ class KoSyncClient:
                 xpath = data.get('progress')
                 return pct, xpath
         except Exception as e:
-            logger.error(f"Error fetching KoSync progress for doc {doc_id}: {e}")
+            logger.error(f"❌ Error fetching KoSync progress for doc '{doc_id}': {e}")
             pass
         return None, None
 
@@ -622,9 +622,9 @@ class KoSyncClient:
                 logger.debug(f"   📡 KoSync Updated: {percentage:.1%} with progress '{progress_val}' for doc {doc_id}")
                 return True
             else:
-                logger.error(f"Failed to update KoSync: {r.status_code} - {r.text}")
+                logger.error(f"❌ Failed to update KoSync: {r.status_code} - {r.text}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to update KoSync: {e}")
+            logger.error(f"❌ Failed to update KoSync: {e}")
             return False
 # [END FILE]

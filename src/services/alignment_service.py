@@ -264,7 +264,7 @@ class AlignmentService:
         # Threshold: First anchor is > 1000 chars in AND > 30 seconds in
         if valid_anchors and valid_anchors[0]['char'] > 1000 and valid_anchors[0]['ts'] > 30.0:
             first = valid_anchors[0]
-            logger.info(f"   ⚠️ Late start detected (Char: {first['char']}, TS: {first['ts']:.1f}s). Attempting backfill...")
+            logger.info(f"   🔄 Late start detected (Char: {first['char']}, TS: {first['ts']:.1f}s) — Attempting backfill")
 
             # Slice the data: Everything BEFORE the first anchor
             # We use the indices we stored during tokenization

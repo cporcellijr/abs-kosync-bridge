@@ -57,7 +57,7 @@ class HardcoverSyncClient(SyncClient):
 
         pages = match.get('pages')
         if not pages or pages <= 0:
-            logger.info(f"[{book_title}] could not find valid page count using {strategy_name} match")
+            logger.info(f"🔍 '{book_title}' could not find valid page count using '{strategy_name}' match")
             return None, match  # Return None for valid match, but keep rejected match
 
         return match, None  # Return valid match, no rejected match
@@ -278,7 +278,7 @@ class HardcoverSyncClient(SyncClient):
                 logger.info(f"Hardcover: Found audiobook edition ({audio_seconds}s) for {sanitize_log_data(book.abs_title)}")
                 return self._update_audiobook_progress(book, hardcover_details, ub, percentage, audio_seconds)
             else:
-                logger.info(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} still has 0 pages after refresh.")
+                logger.warning(f"⚠️ Hardcover Sync Skipped: {sanitize_log_data(book.abs_title)} still has 0 pages after refresh")
                 hardcover_details.hardcover_pages = -1
                 self.database_service.save_hardcover_details(hardcover_details)
                 return SyncResult(None, False)

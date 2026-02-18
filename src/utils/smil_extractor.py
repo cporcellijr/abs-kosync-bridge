@@ -283,7 +283,7 @@ class SmilExtractor:
                         'text': text_content
                     })
                 else:
-                    logger.debug(f"       ⚠️ Text content empty for {text_src} (decoded)")
+                    logger.debug(f"       🔍 Text content empty for '{text_src}' (decoded)")
 
         except Exception as e:
             logger.warning(f"Error processing SMIL {smil_path}: {e}")
@@ -544,7 +544,7 @@ class SmilExtractor:
                         seen_smil.add(smil_id)
         
         if not smil_files and smil_items:
-            logger.info("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
+            logger.warning("⚠️ Spine media-overlay lookup failed, falling back to natural sort")
             all_smil = [self._resolve_path(opf_dir, href) for href in smil_items.values()]
             smil_files = sorted(all_smil, key=self._natural_sort_key)
         

@@ -64,7 +64,7 @@ class BookloreClient:
                                 self.db.save_booklore_book(b_model)
                                 count += 1
                             except Exception as e:
-                                logger.warning(f"Failed to migrate book {filename}: {e}")
+                                logger.warning(f"⚠️ Failed to migrate book {filename}: {e}")
                         
                         logger.info(f"✅ Booklore: Migrated {count} books to database.")
                         
@@ -73,9 +73,9 @@ class BookloreClient:
                         self.legacy_cache_file.rename(self.legacy_cache_file.with_suffix('.json.bak'))
                         logger.info("📦 Booklore: Legacy cache file renamed to .bak")
                     except Exception as e:
-                        logger.warning(f"Could not rename legacy cache file: {e}")
+                        logger.warning(f"⚠️ Could not rename legacy cache file: {e}")
             except Exception as e:
-                logger.error(f"Booklore migration failed: {e}")
+                logger.error(f"❌ Booklore migration failed: {e}")
 
         # 2. Load from DB into memory
         if self.db:
@@ -106,7 +106,7 @@ class BookloreClient:
                 self._cache_timestamp = 0
                 logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from database")
             except Exception as e:
-                logger.error(f"Failed to load Booklore cache from DB: {e}")
+                logger.error(f"❌ Failed to load Booklore cache from DB: {e}")
                 self._book_cache = {}
 
     def _save_cache(self):
@@ -135,9 +135,9 @@ class BookloreClient:
                 self._token_timestamp = time.time()
                 return self._token
             else:
-                logger.error(f"Booklore login failed: {response.status_code} - {response.text}")
+                logger.error(f"❌ Booklore login failed: {response.status_code} - {response.text}")
         except Exception as e:
-            logger.error(f"Booklore login error: {e}")
+            logger.error(f"❌ Booklore login error: {e}")
         return None
 
     def _make_request(self, method, endpoint, json_data=None):
@@ -163,7 +163,7 @@ class BookloreClient:
                     response = self.session.post(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
-            logger.error(f"Booklore API request failed: {e}")
+            logger.error(f"❌ Booklore API request failed: {e}")
             return None
 
     def is_configured(self):
@@ -176,7 +176,7 @@ class BookloreClient:
     def check_connection(self):
         # Ensure Booklore is configured first
         if not all([self.base_url, self.username, self.password]):
-            logger.info("⚠️ Booklore not configured (skipping)")
+            logger.warning("⚠️ Booklore not configured (skipping)")
             return False
 
         token = self._get_fresh_token()
@@ -197,7 +197,7 @@ class BookloreClient:
             return True
 
         # If we were configured but couldn't get a token, warn
-        logger.warning("❌ Booklore connection failed: could not obtain auth token")
+        logger.error("❌ Booklore connection failed: could not obtain auth token")
         return False
 
     def get_libraries(self):
@@ -233,7 +233,7 @@ class BookloreClient:
                         }
                 return list(unique_libs.values())
         except Exception as e:
-            logger.error(f"Booklore: Failed to discover libraries via book scan: {e}")
+            logger.error(f"❌ Booklore: Failed to discover libraries via book scan: {e}")
             
         return []
 
@@ -276,7 +276,7 @@ class BookloreClient:
             response = self._make_request("GET", endpoint)
             
             if not response or response.status_code != 200:
-                logger.error(f"Booklore: Failed to fetch page {page}")
+                logger.error(f"❌ Booklore: Failed to fetch page {page}")
                 return False
 
             data = response.json()
@@ -402,7 +402,7 @@ class BookloreClient:
                         # Use the CACHE KEY (fname) which corresponds to the database `filename` column (lowercase)
                         self.db.delete_booklore_book(fname)
                     except Exception as e:
-                        logger.error(f"Failed to prune stale book {fname}: {e}")
+                        logger.error(f"❌ Failed to prune stale book {fname}: {e}")
 
             if stale_count > 0:
                 logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
@@ -503,7 +503,7 @@ class BookloreClient:
                 )
                 self.db.save_booklore_book(b_model)
             except Exception as e:
-                logger.error(f"Failed to persist book {filename} to DB: {e}")
+                logger.error(f"❌ Failed to persist book {filename} to DB: {e}")
 
         return None
 
@@ -633,12 +633,12 @@ class BookloreClient:
                 response = self.session.get(file_url, headers=headers, timeout=60)
 
             if response.status_code != 200:
-                logger.error(f"Failed to download book: {response.status_code}")
+                logger.error(f"❌ Failed to download book: {response.status_code}")
                 return None
 
             return response.content
         except Exception as e:
-            logger.error(f"Download error: {e}")
+            logger.error(f"❌ Download error: {e}")
             return None
 
     def get_progress(self, ebook_filename):
@@ -684,7 +684,7 @@ class BookloreClient:
         elif book_type == 'CBX':
             payload = {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}}
         else:
-            logger.warning(f"Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
+            logger.warning(f"⚠️ Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
             return False
 
         response = self._make_request("POST", "/api/v1/books/progress", payload)
@@ -698,7 +698,7 @@ class BookloreClient:
             return True
         else:
             status = response.status_code if response else "No response"
-            logger.error(f"Booklore update failed: {status}")
+            logger.error(f"❌ Booklore update failed: {status}")
             return False
 
     def get_recent_activity(self, min_progress=0.01):
@@ -730,13 +730,13 @@ class BookloreClient:
             # Find the book
             book = self.find_book_by_filename(ebook_filename)
             if not book:
-                logger.warning(f"Booklore: Book not found for shelf assignment: {sanitize_log_data(ebook_filename)}")
+                logger.warning(f"⚠️ Booklore: Book not found for shelf assignment: {sanitize_log_data(ebook_filename)}")
                 return False
 
             # Get or create shelf
             shelves_response = self._make_request("GET", "/api/v1/shelves")
             if not shelves_response or shelves_response.status_code != 200:
-                logger.error("Failed to get Booklore shelves")
+                logger.error("❌ Failed to get Booklore shelves")
                 return False
 
             shelves = shelves_response.json()
@@ -750,7 +750,7 @@ class BookloreClient:
                     "iconType": "PRIME_NG"
                 })
                 if not create_response or create_response.status_code != 201:
-                    logger.error(f"Failed to create Booklore shelf: {shelf_name}")
+                    logger.error(f"❌ Failed to create Booklore shelf: {shelf_name}")
                     return False
                 target_shelf = create_response.json()
 
@@ -765,11 +765,11 @@ class BookloreClient:
                 logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
                 return True
             else:
-                logger.error(f"Failed to assign book to shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
+                logger.error(f"❌ Failed to assign book to shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
                 return False
 
         except Exception as e:
-            logger.error(f"Error adding book to Booklore shelf: {e}")
+            logger.error(f"❌ Error adding book to Booklore shelf: {e}")
             return False
 
     def remove_from_shelf(self, ebook_filename, shelf_name=None):
@@ -781,20 +781,20 @@ class BookloreClient:
             # Find the book
             book = self.find_book_by_filename(ebook_filename)
             if not book:
-                logger.warning(f"Booklore: Book not found for shelf removal: {sanitize_log_data(ebook_filename)}")
+                logger.warning(f"⚠️ Booklore: Book not found for shelf removal: {sanitize_log_data(ebook_filename)}")
                 return False
 
             # Get shelf
             shelves_response = self._make_request("GET", "/api/v1/shelves")
             if not shelves_response or shelves_response.status_code != 200:
-                logger.error("Failed to get Booklore shelves")
+                logger.error("❌ Failed to get Booklore shelves")
                 return False
 
             shelves = shelves_response.json()
             target_shelf = next((s for s in shelves if s.get('name') == shelf_name), None)
 
             if not target_shelf:
-                logger.warning(f"Shelf '{shelf_name}' not found")
+                logger.warning(f"⚠️ Shelf '{shelf_name}' not found")
                 return False
 
             # Remove from shelf
@@ -808,9 +808,9 @@ class BookloreClient:
                 logger.info(f"🗑️ Removed '{sanitize_log_data(ebook_filename)}' from Booklore Shelf: {shelf_name}")
                 return True
             else:
-                logger.error(f"Failed to remove book from shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
+                logger.error(f"❌ Failed to remove book from shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
                 return False
 
         except Exception as e:
-            logger.error(f"Error removing book from Booklore shelf: {e}")
+            logger.error(f"❌ Error removing book from Booklore shelf: {e}")
             return False

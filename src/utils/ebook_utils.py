@@ -60,7 +60,7 @@ class EbookParser:
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
         self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
 
-        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
+        logger.info(f"✅ EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
     def resolve_book_path(self, filename):
         try:
@@ -100,7 +100,7 @@ class EbookParser:
                     md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing hash for {filepath}: {e}")
+            logger.error(f"❌ Error computing hash for {filepath}: {e}")
             return None
 
     def _compute_koreader_hash_from_bytes(self, content):
@@ -625,12 +625,12 @@ class EbookParser:
                             break
 
             if target_element is None:
-                logger.warning(f"No text elements found in spine {target_item['spine_index']}")
+                logger.warning(f"⚠️ No text elements found in spine {target_item['spine_index']}")
                 return None
 
             # Safety Check: Prevent Out-Of-Bounds offsets due to parser drift
             if target_text_len > 0 and target_offset > target_text_len + 1:
-                logger.warning(f"KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for {target_element.tag}. Rejecting to prevent crash.")
+                logger.warning(f"⚠️ KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for '{target_element.tag}' — Rejecting to prevent crash")
                 return None
 
             # Build xpath for the target element
@@ -757,7 +757,7 @@ class EbookParser:
                 except Exception: pass
 
             if not elements:
-                logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
+                logger.warning(f"⚠️ Could not resolve XPath in {filename}: {clean_xpath}")
                 return None
 
             target_node = elements[0]
@@ -801,7 +801,7 @@ class EbookParser:
             else:
                 # Fallback: If exact match fails (rare), try the old calculation method
                 # (This preserves old behavior if the new matching fails)
-                logger.debug("⚠️ Exact text match failed, falling back to LXML offset calculation")
+                logger.debug("Exact text match failed, falling back to LXML offset calculation")
                 # Falling back to strict calculation (Logic from original implementation)
                 
                 preceding_len = 0
