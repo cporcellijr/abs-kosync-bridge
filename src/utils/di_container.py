@@ -138,6 +138,14 @@ class Container(containers.DeclarativeContainer):
         StorytellerAPIClient
     )
 
+    # Transcriber
+    transcriber = providers.Singleton(
+        AudioTranscriber,
+        data_dir,
+        smil_extractor,
+        polisher  # [UPDATED] Injected dependency
+    )
+
     forge_service = providers.Singleton(
         ForgeService,
         database_service=database_service,
@@ -148,14 +156,6 @@ class Container(containers.DeclarativeContainer):
         ebook_parser=ebook_parser,
         transcriber=transcriber,
         alignment_service=alignment_service
-    )
-
-    # Transcriber
-    transcriber = providers.Singleton(
-        AudioTranscriber,
-        data_dir,
-        smil_extractor,
-        polisher  # [UPDATED] Injected dependency
     )
 
     # Sync clients
