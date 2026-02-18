@@ -125,15 +125,18 @@ class ForgeService:
             safe_author = self.safe_folder_name(author) if author else "Unknown"
             safe_title = self.safe_folder_name(title) if title else "Unknown"
             
-            # Fallback to env or default since config_service not injected
-            st_lib_path = os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library")
-                
-            final_course_dir = Path(st_lib_path) / safe_title
+            st_lib_path = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
+            dest_base = Path(os.environ.get("PROCESSING_DIR", "/processing"))
+
+            final_course_dir = st_lib_path / safe_title
+            hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
+            processing_dir = dest_base / f"forge_staging_{safe_title}"
+
             if final_course_dir.exists():
-                logger.warning(f"Target directory {final_course_dir} already exists. Using it (no atomic stage).")
+                logger.warning(f"Target directory {final_course_dir} already exists. Using it directly.")
                 course_dir = final_course_dir
             else:
-                course_dir = Path(st_lib_path) / f".staging_{safe_title}"
+                course_dir = processing_dir
                 course_dir.mkdir(parents=True, exist_ok=True)
                 
             audio_dest = course_dir 
@@ -219,19 +222,29 @@ class ForgeService:
                 except: pass
                 return
 
-            # ATOMIC RENAME
+            # TWO-STEP ATOMIC TRANSFER
             if course_dir != final_course_dir:
                 try:
-                    logger.info(f"⚡ Forge: Atomically moving staging to {final_course_dir}")
+                    logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
+                    if hidden_staging_dir.exists():
+                        shutil.rmtree(hidden_staging_dir)
                     if final_course_dir.exists():
-                         shutil.rmtree(final_course_dir) 
-                    course_dir.rename(final_course_dir)
-                    course_dir = final_course_dir 
+                        shutil.rmtree(final_course_dir)
+
+                    # Step 1: Cross-device move to hidden folder inside Storyteller library
+                    shutil.move(str(course_dir), str(hidden_staging_dir))
+
+                    # Step 2: Instant atomic rename to reveal to Storyteller scanner
+                    logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
+                    hidden_staging_dir.rename(final_course_dir)
+                    course_dir = final_course_dir
                 except Exception as e:
-                    logger.error(f"⚡ Forge: Atomic move failed: {e}")
+                    logger.error(f"⚡ Forge: Atomic transfer failed: {e}")
                     try: shutil.rmtree(course_dir)
                     except: pass
-                    return
+                    try: shutil.rmtree(hidden_staging_dir)
+                    except: pass
+                    raise Exception(f"Atomic move failed: {e}")
 
             logger.info(f"⚡ Forge: Files staged. Waiting for Storyteller to detect '{title}'...")
 
@@ -245,9 +258,13 @@ class ForgeService:
                     results = st_client.search_books(title)
                     for b in results:
                         if b.get('title') == title:
-                            found_uuid = b.get('uuid')
+                            found_uuid = b.get('uuid') or b.get('id')
                             break
-                    if found_uuid: break
+
+                    if found_uuid:
+                        logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
+                        time.sleep(60)
+                        break
                 except Exception as e:
                     logger.debug(f"Forge: Storyteller search error: {e}")
                     pass
@@ -351,14 +368,18 @@ class ForgeService:
             # --- STAGING & TRIGGER ---
             safe_author = self.safe_folder_name(author) if author else "Unknown"
             safe_title = self.safe_folder_name(title) if title else "Unknown"
-            st_lib_path = os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library")
-            
-            # Use Atomic Staging
-            final_course_dir = Path(st_lib_path) / safe_title
+            st_lib_path = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
+            dest_base = Path(os.environ.get("PROCESSING_DIR", "/processing"))
+
+            final_course_dir = st_lib_path / safe_title
+            hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
+            processing_dir = dest_base / f"forge_staging_{safe_title}"
+
             if final_course_dir.exists():
+                logger.warning(f"Target directory {final_course_dir} already exists. Using it directly.")
                 course_dir = final_course_dir
             else:
-                course_dir = Path(st_lib_path) / f".staging_{safe_title}"
+                course_dir = processing_dir
                 course_dir.mkdir(parents=True, exist_ok=True)
             
             # Copy Audio
@@ -386,13 +407,28 @@ class ForgeService:
             if not epub_dest.exists():
                 raise Exception("Failed to acquire text source")
 
-            # Atomic Rename
+            # TWO-STEP ATOMIC TRANSFER
             if course_dir != final_course_dir:
                 try:
-                    if final_course_dir.exists(): shutil.rmtree(final_course_dir)
-                    course_dir.rename(final_course_dir)
+                    logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
+                    if hidden_staging_dir.exists():
+                        shutil.rmtree(hidden_staging_dir)
+                    if final_course_dir.exists():
+                        shutil.rmtree(final_course_dir)
+
+                    # Step 1: Cross-device move to hidden folder inside Storyteller library
+                    shutil.move(str(course_dir), str(hidden_staging_dir))
+
+                    # Step 2: Instant atomic rename to reveal to Storyteller scanner
+                    logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
+                    hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
                 except Exception as e:
+                    logger.error(f"⚡ Forge: Atomic transfer failed: {e}")
+                    try: shutil.rmtree(course_dir)
+                    except: pass
+                    try: shutil.rmtree(hidden_staging_dir)
+                    except: pass
                     raise Exception(f"Atomic move failed: {e}")
 
             logger.info("⚡ Auto-Forge: Files staged. Waiting for Storyteller detection...")
@@ -406,9 +442,13 @@ class ForgeService:
                     results = st_client.search_books(title)
                     for b in results:
                         if b.get('title') == title:
-                            found_uuid = b.get('uuid')
+                            found_uuid = b.get('uuid') or b.get('id')
                             break
-                    if found_uuid: break
+
+                    if found_uuid:
+                        logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
+                        time.sleep(60)
+                        break
                 except: pass
             
             if found_uuid:
