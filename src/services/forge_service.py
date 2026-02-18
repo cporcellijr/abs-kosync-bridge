@@ -12,13 +12,15 @@ from src.utils.ebook_utils import sanitize_storyteller_artifacts
 logger = logging.getLogger(__name__)
 
 class ForgeService:
-    def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser):
+    def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service):
         self.database_service = database_service
         self.abs_client = abs_client
         self.booklore_client = booklore_client
         self.storyteller_client = storyteller_client
         self.library_service = library_service
         self.ebook_parser = ebook_parser
+        self.transcriber = transcriber
+        self.alignment_service = alignment_service
         self.active_tasks = set()
         self.lock = threading.Lock()
         
@@ -500,6 +502,21 @@ class ForgeService:
             else:
                  new_hash = self.ebook_parser.get_kosync_id(target_path)
                  logger.info(f"⚡ Auto-Forge: Generated New Hash (Artifact): {new_hash}")
+
+            # --- EXTRACT & ALIGN ---
+            logger.info("⚡ Auto-Forge: Extracting SMIL transcript and generating alignment map...")
+            item_details = self.abs_client.get_item_details(abs_id)
+            chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+            book_text, _ = self.ebook_parser.extract_text_and_map(target_path)
+            raw_transcript = self.transcriber.transcribe_from_smil(
+                abs_id, target_path, chapters, full_book_text=book_text
+            )
+            if not raw_transcript:
+                raise Exception("Auto-Forge: SMIL extraction returned no transcript. Cannot build alignment map.")
+            success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
+            if not success:
+                raise Exception("Auto-Forge: align_and_store failed to generate a valid alignment map.")
+            logger.info(f"✅ Auto-Forge: Alignment map stored for {abs_id}.")
 
             # --- UPDATE DATABASE ---
             # NOTE: DB service calls need connection. Assuming database_service handles its own session.

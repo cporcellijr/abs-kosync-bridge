@@ -145,7 +145,9 @@ class Container(containers.DeclarativeContainer):
         booklore_client=booklore_client,
         storyteller_client=storyteller_client,
         library_service=library_service,
-        ebook_parser=ebook_parser
+        ebook_parser=ebook_parser,
+        transcriber=transcriber,
+        alignment_service=alignment_service
     )
 
     # Transcriber
