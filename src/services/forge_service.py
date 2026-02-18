@@ -253,24 +253,29 @@ class ForgeService:
             # Trigger Storyteller Processing via API
             st_client = self.storyteller_client
             found_uuid = None
-            
-            for _ in range(240): 
+            epub_filename = f"{safe_title}.epub"
+
+            for _ in range(240):
                 time.sleep(5)
                 try:
-                    results = st_client.search_books(title)
-                    for b in results:
-                        if b.get('title') == title:
-                            found_uuid = b.get('uuid') or b.get('id')
-                            break
+                    # Primary: match by staged file path (deterministic)
+                    found_uuid = st_client.find_book_by_staged_path(safe_title, epub_filename)
+
+                    # Fallback: title search
+                    if not found_uuid:
+                        results = st_client.search_books(title)
+                        for b in results:
+                            if b.get('title') == title:
+                                found_uuid = b.get('uuid') or b.get('id')
+                                break
 
                     if found_uuid:
                         logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
                         time.sleep(60)
                         break
                 except Exception as e:
-                    logger.debug(f"Forge: Storyteller search error: {e}")
-                    pass
-            
+                    logger.debug(f"Forge: Storyteller detection error (retrying): {e}")
+
             if found_uuid:
                 logger.info(f"⚡ Forge: Book detected ({found_uuid}). Triggering processing...")
                 try:
@@ -459,21 +464,29 @@ class ForgeService:
             # Trigger Storyteller
             st_client = self.storyteller_client
             found_uuid = None
-            for _ in range(60): # Wait up to 5 mins for initial detection
+            epub_filename = f"{safe_title}.epub"
+
+            for _ in range(240): # Wait up to 20 mins for initial detection
                 time.sleep(5)
                 try:
-                    results = st_client.search_books(title)
-                    for b in results:
-                        if b.get('title') == title:
-                            found_uuid = b.get('uuid') or b.get('id')
-                            break
+                    # Primary: match by staged file path (deterministic)
+                    found_uuid = st_client.find_book_by_staged_path(safe_title, epub_filename)
+
+                    # Fallback: title search
+                    if not found_uuid:
+                        results = st_client.search_books(title)
+                        for b in results:
+                            if b.get('title') == title:
+                                found_uuid = b.get('uuid') or b.get('id')
+                                break
 
                     if found_uuid:
                         logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
                         time.sleep(60)
                         break
-                except: pass
-            
+                except Exception as e:
+                    logger.debug(f"Forge: Storyteller detection error (retrying): {e}")
+
             if found_uuid:
                 logger.info(f"⚡ Auto-Forge: Triggering processing for {found_uuid}")
                 st_client.trigger_processing(found_uuid)
