@@ -1131,7 +1131,8 @@ def _forge_background_task(abs_id, text_item, title, author):
             logger.warning(f"Target directory {final_course_dir} already exists. Using it (no atomic stage).")
             course_dir = final_course_dir
         else:
-            course_dir = Path(st_lib_path) / f".staging_{safe_title}"
+            # [ISOLATION] Use DEST_BASE for staging to avoid Storyteller scanning partial files
+            course_dir = DEST_BASE / f"forge_staging_{safe_title}"
             course_dir.mkdir(parents=True, exist_ok=True)
             
         audio_dest = course_dir # Audio files go directly in root
@@ -1226,7 +1227,10 @@ def _forge_background_task(abs_id, text_item, title, author):
                 logger.info(f"⚡ Forge: Atomically moving staging to {final_course_dir}")
                 if final_course_dir.exists():
                      shutil.rmtree(final_course_dir) # Should not happen if we checked earlier, but safety
-                course_dir.rename(final_course_dir)
+                
+                # [FIX] Use shutil.move for cross-device compatibility (processing -> storyteller volumes)
+                shutil.move(str(course_dir), str(final_course_dir))
+                
                 course_dir = final_course_dir # Update variable for downstream logging/logic
             except Exception as e:
                 logger.error(f"⚡ Forge: Atomic move failed: {e}")
@@ -1245,11 +1249,14 @@ def _forge_background_task(abs_id, text_item, title, author):
             try:
                 results = st_client.search_books(title)
                 for b in results:
-                    # simplistic match, or we could match path if available
                     if b.get('title') == title:
-                        found_uuid = b.get('uuid')
+                        found_uuid = b.get('uuid') or b.get('id')
                         break
-                if found_uuid: break
+                
+                if found_uuid:
+                    logger.info(f"⚡ Forge: Book detected in Storyteller ({found_uuid}). Waiting 30s for internal EPUB linking...")
+                    time.sleep(30)
+                    break
             except Exception as e:
                 logger.debug(f"Forge: Storyteller search error: {e}")
                 pass
