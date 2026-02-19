@@ -19,9 +19,11 @@ class ABSClient:
     def base_url(self):
         """Dynamic base_url from environment (no caching)."""
         url = os.environ.get("ABS_SERVER", "").rstrip('/')
-        # Validate URL scheme to help catch configuration errors
-        if url and not url.startswith(('http://', 'https://')):
-            logger.warning(f"⚠️ ABS_SERVER missing http:// or https:// scheme: {url}")
+        
+        # Ensure scheme is present (case-insensitive check)
+        if url and not url.lower().startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            
         return url
 
     @property
@@ -551,7 +553,13 @@ class KoSyncClient:
 
     @property
     def base_url(self):
-        return os.environ.get("KOSYNC_SERVER", "").rstrip('/')
+        url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
+        
+        # Ensure scheme is present (case-insensitive check)
+        if url and not url.lower().startswith(('http://', 'https://')):
+            url = f"http://{url}"
+            
+        return url
 
     @property
     def user(self):
