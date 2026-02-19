@@ -430,15 +430,15 @@ class EbookResult:
 
     @property
     def display_name(self):
-        """Format: 'Author - Title: Subtitle' for sources with metadata, filename for filesystem."""
+        """Format: 'Title: Subtitle - Author' for sources with metadata, title for filesystem."""
         if self.has_metadata and self.title:
             full_title = self.title
             if self.subtitle:
                 full_title = f"{self.title}: {self.subtitle}"
             if self.authors:
-                return f"{self.authors} - {full_title}"
+                return f"{full_title} - {self.authors}"
             return full_title
-        return self.name
+        return self.title
 
     @property
     def stem(self):
@@ -1342,6 +1342,7 @@ def batch_match():
             session.setdefault('queue', [])
             abs_id = request.form.get('audiobook_id')
             ebook_filename = request.form.get('ebook_filename', '')
+            ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
             storyteller_uuid = request.form.get('storyteller_uuid', '')
             audiobooks = container.abs_client().get_all_audiobooks()
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
@@ -1351,6 +1352,7 @@ def batch_match():
                     session['queue'].append({"abs_id": abs_id,
                                              "abs_title": manager.get_abs_title(selected_ab),
                                              "ebook_filename": ebook_filename,
+                                             "ebook_display_name": ebook_display_name,
                                              "storyteller_uuid": storyteller_uuid,
                                              "duration": manager.get_duration(selected_ab),
                                              "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"})
