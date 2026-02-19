@@ -21,7 +21,6 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 from src.utils.config_loader import ConfigLoader
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
-from src.utils.logging_utils import sanitize_log_data
 from src.api.kosync_server import kosync_sync_bp, kosync_admin_bp, init_kosync_server
 from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 
@@ -73,7 +72,7 @@ def setup_dependencies(app, test_container=None):
     global LINKER_BOOKS_DIR, DEST_BASE, STORYTELLER_INGEST, ABS_AUDIO_ROOT
     global STORYTELLER_LIBRARY_DIR, EBOOK_IMPORT_DIR
     global ABS_API_URL, ABS_API_TOKEN, ABS_LIBRARY_ID
-    global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL, SHELFMARK_URL
+    global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL
     global SYNC_PERIOD_MINS, SYNC_DELTA_ABS_SECONDS, SYNC_DELTA_KOSYNC_PERCENT, FUZZY_MATCH_THRESHOLD
 
     LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
@@ -102,7 +101,6 @@ def setup_dependencies(app, test_container=None):
     ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
     BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
     MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", "3600"))
-    SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
 
     logger.info(f"🔄 Globals reloaded from settings (ABS_SERVER={ABS_API_URL})")
 
@@ -165,7 +163,7 @@ ABS_COLLECTION_NAME = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReade
 BOOKLORE_SHELF_NAME = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
 
 
-SHELFMARK_URL = os.environ.get("SHELFMARK_URL", "")
+
 
 # Storyteller Forge
 STORYTELLER_LIBRARY_DIR = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
@@ -610,6 +608,16 @@ def settings():
 
             clean_value = value.strip()
 
+            # Sanitize URLs
+            url_keys = [
+                'SHELFMARK_URL', 'ABS_SERVER', 'BOOKLORE_SERVER', 
+                'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER'
+            ]
+            if key in url_keys and clean_value:
+                lower_val = clean_value.lower()
+                if not (lower_val.startswith("http://") or lower_val.startswith("https://")):
+                    clean_value = f"http://{clean_value}"
+
             if clean_value:
                 database_service.set_setting(key, clean_value)
                 os.environ[key] = clean_value # Immediate update for current process
@@ -894,6 +902,11 @@ def shelfmark():
     url = os.environ.get("SHELFMARK_URL")
     if not url:
         return redirect(url_for('index'))
+    
+    # Case-insensitive sanitization for the iframe source
+    if not url.lower().startswith(('http://', 'https://')):
+        url = f"http://{url}"
+        
     return render_template('shelfmark.html', shelfmark_url=url)
 
 

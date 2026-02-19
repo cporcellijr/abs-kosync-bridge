@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 class BookloreClient:
     def __init__(self, database_service=None):
-        self.base_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
+        raw_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
+        if raw_url and not raw_url.lower().startswith(('http://', 'https://')):
+            raw_url = f"http://{raw_url}"
+        self.base_url = raw_url
         self.username = os.environ.get("BOOKLORE_USER")
         self.password = os.environ.get("BOOKLORE_PASSWORD")
         self.db = database_service
