@@ -28,6 +28,11 @@ class HardcoverClient:
         self.token = os.environ.get("HARDCOVER_TOKEN")
         self.user_id = None
 
+        if self.token:
+            self.token = self.token.strip()
+            if self.token.lower().startswith("bearer "):
+                self.token = self.token[7:].strip()
+
         if not self.token:
             logger.info("HARDCOVER_TOKEN not set")
             return
