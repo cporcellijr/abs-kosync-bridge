@@ -551,7 +551,14 @@ class KoSyncClient:
 
     @property
     def base_url(self):
-        return os.environ.get("KOSYNC_SERVER", "").rstrip('/')
+        url = os.environ.get("KOSYNC_SERVER", "").rstrip('/')
+        
+        # Ensure scheme is present (case-insensitive check)
+        if url and not url.lower().startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ KOSYNC_SERVER missing scheme, auto-correcting: {url}")
+            url = f"http://{url}"
+            
+        return url
 
     @property
     def user(self):

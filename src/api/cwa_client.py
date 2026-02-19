@@ -13,6 +13,11 @@ class CWAClient:
         raw_url = os.environ.get("CWA_SERVER", "").rstrip('/')
         if raw_url.endswith('/opds'):
             raw_url = raw_url[:-5]
+        
+        # Ensure scheme is present (case-insensitive check)
+        if raw_url and not raw_url.lower().startswith(('http://', 'https://')):
+            raw_url = f"http://{raw_url}"
+            
         self.base_url = raw_url
         
         # Sanitize credentials (strip whitespace)
