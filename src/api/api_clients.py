@@ -11,13 +11,32 @@ logger = logging.getLogger(__name__)
 
 class ABSClient:
     def __init__(self):
-        # Kept your variable names (ABS_SERVER / ABS_KEY)
-        self.base_url = os.environ.get("ABS_SERVER", "").rstrip('/')
-        self.token = os.environ.get("ABS_KEY")
-        self.headers = {"Authorization": f"Bearer {self.token}"}
+        # Configuration is now dynamic via properties (no caching)
         self.session = requests.Session()
-        self.session.headers.update(self.headers)
         self.timeout = 30
+
+    @property
+    def base_url(self):
+        """Dynamic base_url from environment (no caching)."""
+        url = os.environ.get("ABS_SERVER", "").rstrip('/')
+        # Validate URL scheme to help catch configuration errors
+        if url and not url.startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ ABS_SERVER missing http:// or https:// scheme: {url}")
+        return url
+
+    @property
+    def token(self):
+        """Dynamic token from environment (no caching)."""
+        return os.environ.get("ABS_KEY")
+
+    @property
+    def headers(self):
+        """Dynamic headers with current token."""
+        return {"Authorization": f"Bearer {self.token}"}
+
+    def _update_session_headers(self):
+        """Update session headers with current token (called before requests)."""
+        self.session.headers.update(self.headers)
 
     def is_configured(self):
         """Check if ABS is configured with URL and token."""
@@ -29,6 +48,7 @@ class ABSClient:
             logger.warning("⚠️ Audiobookshelf not configured (skipping)")
             return False
 
+        self._update_session_headers()
         url = f"{self.base_url}/api/me"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -60,6 +80,7 @@ class ABSClient:
 
     def get_all_audiobooks(self):
         if not self.is_configured(): return []
+        self._update_session_headers()
         lib_url = f"{self.base_url}/api/libraries"
         try:
             r = self.session.get(lib_url, timeout=self.timeout)
@@ -76,6 +97,7 @@ class ABSClient:
 
     def get_audiobooks_for_lib(self, lib: str):
         if not self.is_configured(): return []
+        self._update_session_headers()
         items_url = f"{self.base_url}/api/libraries/{lib}/items"
         params = {"mediaType": "audiobook"}
         r_items = self.session.get(items_url, params=params, timeout=self.timeout)
@@ -86,6 +108,7 @@ class ABSClient:
 
     def get_audio_files(self, item_id):
         if not self.is_configured(): return []
+        self._update_session_headers()
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -112,6 +135,7 @@ class ABSClient:
     def get_ebook_files(self, item_id):
         """Get ebook files for an item (from libraryFiles)."""
         if not self.is_configured(): return []
+        self._update_session_headers()
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -139,6 +163,7 @@ class ABSClient:
     def search_ebooks(self, query):
         """Search for ebooks across all book libraries."""
         if not self.is_configured(): return []
+        self._update_session_headers()
         results = []
         try:
             # Get all libraries first
@@ -203,6 +228,7 @@ class ABSClient:
 
     def download_file(self, stream_url, output_path):
         """Download file from stream_url to output_path."""
+        self._update_session_headers()
         try:
             logger.info(f"⬇️ ABS: Downloading file from {stream_url}...")
             with self.session.get(stream_url, stream=True, timeout=120) as r:
@@ -221,6 +247,7 @@ class ABSClient:
 
     def get_item_details(self, item_id):
         if not self.is_configured(): return None
+        self._update_session_headers()
         url = f"{self.base_url}/api/items/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -231,6 +258,7 @@ class ABSClient:
 
     def get_progress(self, item_id):
         if not self.is_configured(): return None
+        self._update_session_headers()
         url = f"{self.base_url}/api/me/progress/{item_id}"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -254,6 +282,7 @@ class ABSClient:
             logger.error("❌ Ebook location is required for progress updates")
             return False
 
+        self._update_session_headers()
         # Ensure we use a float for the progress
         progress = float(progress)
         url = f"{self.base_url}/api/me/progress/{item_id}"
@@ -300,6 +329,7 @@ class ABSClient:
             logger.error(f"❌ Failed to create ABS session for item '{abs_id}'")
             return {"success": False, "code": None, "reason": f"Failed to create ABS session for item {abs_id}"}
 
+        self._update_session_headers()
         try:
             url = f"{self.base_url}/api/session/{session_id}/sync"
             r = self.session.post(url, json=payload, timeout=self.timeout)
@@ -319,6 +349,7 @@ class ABSClient:
 
     def get_all_progress_raw(self):
         """Fetch all user progress in one API call."""
+        self._update_session_headers()
         # Try specific progress endpoint first
         url = f"{self.base_url}/api/me/progress"
         try:
@@ -357,6 +388,7 @@ class ABSClient:
 
     def get_in_progress(self, min_progress=0.01):
         """Fetch in-progress items, optimized to avoid redundant detail fetches if possible."""
+        self._update_session_headers()
         url = f"{self.base_url}/api/me/progress"
         try:
             r = self.session.get(url, timeout=self.timeout)
@@ -398,6 +430,7 @@ class ABSClient:
 
     def create_session(self, abs_id):
         """Create a new ABS session for the given abs_id (item id). Returns session_id or None."""
+        self._update_session_headers()
         play_url = f"{self.base_url}/api/items/{abs_id}/play"
         play_payload = {
             "deviceInfo": {
@@ -427,6 +460,7 @@ class ABSClient:
         return None
 
     def close_session(self, session_id):
+        self._update_session_headers()
         try:
             close_url = f"{self.base_url}/api/session/{session_id}/close"
             self.session.post(close_url, timeout=5)
@@ -437,7 +471,8 @@ class ABSClient:
         """Add an audiobook to a collection, creating the collection if it doesn't exist."""
         if not collection_name:
              collection_name = os.environ.get("ABS_COLLECTION_NAME", "abs-kosync")
-             
+
+        self._update_session_headers()
         try:
             collections_url = f"{self.base_url}/api/collections"
             r = self.session.get(collections_url)
@@ -478,6 +513,7 @@ class ABSClient:
 
     def remove_from_collection(self, item_id, collection_name="abs-kosync"):
         """Remove an audiobook from a collection."""
+        self._update_session_headers()
         try:
             # Get collection by name
             collections_url = f"{self.base_url}/api/collections"
