@@ -330,11 +330,6 @@
             font-weight: 600;
             color: #ffffff;
             line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
             word-break: break-word;
         }
 
@@ -342,11 +337,6 @@
             font-size: 12px;
             color: rgba(255, 255, 255, 0.5);
             line-height: 1.2;
-            display: -webkit-box;
-            -webkit-line-clamp: 1;
-            line-clamp: 1;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
         }
 
         /* Ghost card (None/Skip) as resource-card */
@@ -391,11 +381,6 @@
             font-weight: 600;
             color: #ffffff;
             line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
         }
 
         input[type="radio"] {
@@ -752,16 +737,18 @@
                                 <div class="resource-title">None / Skip</div>
                             </label>
 
-                            {% for book in storyteller_books %}
+                            {% for st in storyteller_books %}
                             <label
                                 class="audiobook-option st-option resource-card {% if single_st_match %}selected{% endif %}"
                                 onclick="selectItem(this, 'storyteller_uuid')">
-                                <input type="radio" name="storyteller_uuid" value="{{ book.uuid }}" {% if
+                                <input type="radio" name="storyteller_uuid" value="{{ st.uuid }}" {% if
                                     single_st_match %}checked{% endif %}>
                                 <div class="resource-icon">⚡</div>
-                                <div class="resource-title">{{ book.title }}</div>
-                                {% if book.authors %}
-                                <div class="resource-subtitle">{{ book.authors|join(', ') }}</div>
+                                <div class="resource-title" title="{{ st.title }}{% if st.subtitle %}: {{ st.subtitle }}{% endif %}">
+                                    {{ st.title }}{% if st.subtitle %}: {{ st.subtitle }}{% endif %}
+                                </div>
+                                {% if st.authors %}
+                                <div class="resource-subtitle">{{ st.authors|join(', ') }}</div>
                                 {% endif %}
                             </label>
                             {% endfor %}
@@ -792,7 +779,9 @@
                                 <input type="radio" name="ebook_filename" value="{{ eb.name }}" {% if single_eb_match
                                     %}checked{% endif %}>
                                 <div class="resource-icon">📖</div>
-                                <div class="resource-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
+                                <div class="resource-title" title="{{ eb.display_name }}">
+                                    {{ eb.title }}{% if eb.subtitle %}: {{ eb.subtitle }}{% endif %}
+                                </div>
                                 {% if eb.authors %}
                                 <div class="resource-subtitle">{{ eb.authors }}</div>
                                 {% endif %}

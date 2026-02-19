@@ -330,8 +330,7 @@ class ABSClient:
                 # logger.debug(f"📊 ABS Bulk Progress (Direct): {len(mapped_items)} items")
                 return mapped_items
             elif r.status_code == 404:
-                # Fallback to /api/me
-                logger.warning("⚠️ /api/me/progress not found (404), falling back to /api/me")
+                # Fallback to /api/me (normal for older ABS versions)
                 url_fallback = f"{self.base_url}/api/me"
                 r2 = self.session.get(url_fallback, timeout=self.timeout)
                 if r2.status_code == 200:

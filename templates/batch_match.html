@@ -316,11 +316,6 @@
             font-weight: 600;
             color: #ffffff;
             line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
         }
 
         /* Resource Grid (square cards for Storyteller + Ebook) */
@@ -406,11 +401,6 @@
             font-weight: 600;
             color: #ffffff;
             line-height: 1.3;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
             word-break: break-word;
         }
 
@@ -418,11 +408,6 @@
             font-size: 12px;
             color: rgba(255, 255, 255, 0.5);
             line-height: 1.2;
-            display: -webkit-box;
-            -webkit-line-clamp: 1;
-            line-clamp: 1;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
         }
 
         /* Ebook Select (kept for fallback but hidden when cards shown) */
@@ -736,6 +721,7 @@
                     <input type="hidden" name="search" value="{{ search }}">
                     <input type="hidden" name="audiobook_id" id="selected_audiobook_id">
                     <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
+                    <input type="hidden" name="ebook_display_name" id="selected_ebook_display_name" value="">
                     <input type="hidden" name="storyteller_uuid" id="selected_storyteller_uuid" value="">
 
                     {% set single_ab_match = audiobooks|length == 1 %}
@@ -771,7 +757,9 @@
                         <div class="resource-card st-card {% if single_st_match %}selected{% endif %}"
                             data-value="{{ st.uuid }}" onclick="selectStoryteller(this, '{{ st.uuid }}')">
                             <div class="resource-icon">⚡</div>
-                            <div class="resource-title">{{ st.title }}</div>
+                            <div class="resource-title" title="{{ st.title }}{% if st.subtitle %}: {{ st.subtitle }}{% endif %}">
+                                {{ st.title }}{% if st.subtitle %}: {{ st.subtitle }}{% endif %}
+                            </div>
                             {% if st.authors %}
                             <div class="resource-subtitle">{{ st.authors|join(', ') }}</div>
                             {% endif %}
@@ -789,9 +777,13 @@
                     <div class="resource-grid" id="ebook-card-grid">
                         {% for eb in ebooks %}
                         <div class="resource-card eb-card {% if single_eb_match %}selected{% endif %}"
-                            data-value="{{ eb.name }}" onclick="selectEbookCard(this, '{{ eb.name }}')">
+                            data-value="{{ eb.name }}"
+                            data-display-name="{{ eb.display_name | replace("'", "\\'") }}"
+                            onclick="selectEbookCard(this, '{{ eb.name }}', '{{ eb.display_name | replace("'", "\\'") }}')">
                             <div class="resource-icon">📖</div>
-                            <div class="resource-title" title="{{ eb.display_name }}">{{ eb.display_name }}</div>
+                            <div class="resource-title" title="{{ eb.display_name }}">
+                                {{ eb.title }}{% if eb.subtitle %}: {{ eb.subtitle }}{% endif %}
+                            </div>
                             {% if eb.authors %}
                             <div class="resource-subtitle">{{ eb.authors }}</div>
                             {% endif %}
@@ -824,11 +816,13 @@
                     <div class="queue-item-info">
                         <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
                         {% if item.storyteller_uuid %}
-                        <p class="queue-item-ebook"><span style="color: #a78bfa; font-size: 11px;">⚡
-                                Storyteller</span>{% if item.ebook_filename %} + {{ item.ebook_filename }}{% endif %}
+                        <p class="queue-item-ebook">
+                            <span style="color: #a78bfa; font-size: 11px;">⚡ Storyteller</span>{% if item.ebook_display_name %} + {{ item.ebook_display_name }}{% endif %}
                         </p>
                         {% else %}
-                        <p class="queue-item-ebook" title="{{ item.ebook_filename }}">{{ item.ebook_filename }}</p>
+                        <p class="queue-item-ebook" title="{{ item.ebook_filename }}">
+                            📖 {{ item.ebook_display_name or item.ebook_filename }}
+                        </p>
                         {% endif %}
                     </div>
                     <form method="POST" action="/batch-match" class="d-inline">
@@ -881,6 +875,7 @@
             if (preSelectedEb) {
                 selectedEbookFilename = preSelectedEb.dataset.value;
                 document.getElementById('selected_ebook_filename').value = selectedEbookFilename;
+                document.getElementById('selected_ebook_display_name').value = preSelectedEb.dataset.displayName || selectedEbookFilename;
             }
             const preSelectedSt = document.querySelector('.st-card.selected');
             if (preSelectedSt) {
@@ -900,13 +895,14 @@
             updateAddButton();
         }
 
-        function selectEbookCard(element, filename) {
+        function selectEbookCard(element, filename, display_name) {
             document.querySelectorAll('.eb-card').forEach(el => {
                 el.classList.remove('selected');
             });
             element.classList.add('selected');
             selectedEbookFilename = filename;
             document.getElementById('selected_ebook_filename').value = filename;
+            document.getElementById('selected_ebook_display_name').value = display_name || filename;
             updateAddButton();
         }
 
