@@ -19,12 +19,9 @@ class ABSClient:
     def base_url(self):
         """Dynamic base_url from environment (no caching)."""
         url = os.environ.get("ABS_SERVER", "").rstrip('/')
-        
-        # Ensure scheme is present (case-insensitive check)
-        if url and not url.lower().startswith(('http://', 'https://')):
-            logger.warning(f"⚠️ ABS_SERVER missing scheme, auto-correcting: {url}")
-            url = f"http://{url}"
-            
+        # Validate URL scheme to help catch configuration errors
+        if url and not url.startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ ABS_SERVER missing http:// or https:// scheme: {url}")
         return url
 
     @property
