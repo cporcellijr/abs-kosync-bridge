@@ -678,6 +678,21 @@ def index():
     # Load books from database service
     books = database_service.get_all_books()
 
+    # Fetch ABS metadata once for the whole dashboard (single API call, not per-book)
+    abs_metadata_by_id = {}
+    try:
+        all_abs_books = container.abs_client().get_all_audiobooks()
+        for ab in all_abs_books:
+            ab_id = ab.get('id')
+            if ab_id:
+                metadata = ab.get('media', {}).get('metadata', {})
+                abs_metadata_by_id[ab_id] = {
+                    'subtitle': metadata.get('subtitle') or '',
+                    'author': metadata.get('authorName') or '',
+                }
+    except Exception as e:
+        logger.warning(f"Could not fetch ABS metadata for dashboard enrichment: {e}")
+
     # Fetch all states at once to avoid N+1 queries with NullPool
     all_states = database_service.get_all_states()
     states_by_book = {}
@@ -723,10 +738,17 @@ def index():
         # Convert states to a dict by client name for easy access
         state_by_client = {state.client_name: state for state in states}
 
+        # Pull enriched ABS metadata from the pre-fetched lookup (no additional API calls)
+        _abs_meta = abs_metadata_by_id.get(book.abs_id, {})
+        abs_subtitle = _abs_meta.get('subtitle', '')
+        abs_author = _abs_meta.get('author', '')
+
         # Create mapping dict for template compatibility
         mapping = {
             'abs_id': book.abs_id,
             'abs_title': book.abs_title,
+            'abs_subtitle': abs_subtitle,
+            'abs_author': abs_author,
             'ebook_filename': book.ebook_filename,
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,

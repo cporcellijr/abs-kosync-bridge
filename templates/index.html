@@ -45,7 +45,9 @@
         {# Info section - always visible #}
         <div class="book-info">
             <div class="book-header">
-                <div class="book-title">{{ mapping.abs_title }}</div>
+                <div class="book-title">
+                    {{ mapping.abs_title }}{% if mapping.abs_subtitle %}: {{ mapping.abs_subtitle }}{% endif %}
+                </div>
                 <div class="status-badge status-{{ mapping.status }}">
                     {% if mapping.status == 'processing' and mapping.job_progress is defined %}
                     {{ mapping.job_progress }}%
@@ -55,7 +57,7 @@
                 </div>
             </div>
 
-            <div class="book-filename">{{ mapping.ebook_filename }}</div>
+            <div class="book-author">{{ mapping.abs_author or mapping.ebook_filename }}</div>
 
             {# Unified progress bar #}
             <div class="unified-progress">
@@ -503,17 +505,12 @@
                 font-weight: 700;
                 color: #ffffff;
                 line-height: 1.3;
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                line-clamp: 2;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
                 word-break: break-word;
             }
 
-            .book-filename {
-                font-size: 10px;
-                color: rgba(255, 255, 255, 0.4);
+            .book-author {
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.55);
                 margin-bottom: 8px;
                 white-space: nowrap;
                 overflow: hidden;
