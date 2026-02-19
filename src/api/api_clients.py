@@ -22,6 +22,7 @@ class ABSClient:
         
         # Ensure scheme is present (case-insensitive check)
         if url and not url.lower().startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ ABS_SERVER missing scheme, auto-correcting: {url}")
             url = f"http://{url}"
             
         return url
@@ -557,6 +558,7 @@ class KoSyncClient:
         
         # Ensure scheme is present (case-insensitive check)
         if url and not url.lower().startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ KOSYNC_SERVER missing scheme, auto-correcting: {url}")
             url = f"http://{url}"
             
         return url
