@@ -517,9 +517,12 @@ class EbookParser:
                         if spine_item_len > 0:
                             chapter_progress = local_index / spine_item_len
 
+                        perfect_ko = self.get_perfect_ko_xpath(filename, match_index)
+
                         return LocatorResult(
                             percentage=percentage,
                             xpath=final_xpath,
+                            perfect_ko_xpath=perfect_ko,
                             match_index=match_index,
                             cfi=cfi,
                             href=item['href'],
