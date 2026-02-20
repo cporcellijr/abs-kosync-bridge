@@ -34,6 +34,7 @@
 ## 📝 Branch Notes (`fix/perfect-ko-xpath`)
 
 - **Enhanced KOReader Syncing**: The `LocatorResult` model and `find_text_location` have been updated to include and supply a `perfect_ko_xpath` calculation to ensure more accurate synchronization targeting.
+- **Booklore Shelf Removal Fix**: The `delete_mapping` function in `web_server.py` now uses the original ebook filename when removing a book from the Booklore shelf, avoiding issues with temporary Storyteller artifact names.
 
 ## 🚀 Quick Start
 

@@ -1580,7 +1580,8 @@ def delete_mapping(abs_id):
         if book.ebook_filename and container.booklore_client().is_configured():
             shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
             try:
-                container.booklore_client().remove_from_shelf(book.ebook_filename, shelf_name)
+                shelf_filename = book.original_ebook_filename or book.ebook_filename
+                container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
                 # Same here regarding logging.
             except Exception as e:
                 logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
