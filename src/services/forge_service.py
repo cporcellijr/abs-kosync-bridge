@@ -565,6 +565,22 @@ class ForgeService:
             else:
                 logger.error(f"❌ Auto-Forge: Book {abs_id} not found in DB to update!")
 
+            # --- ADD TO COLLECTIONS/SHELVES ---
+            try:
+                abs_collection_name = os.environ.get("ABS_COLLECTION_NAME", "Synced with KOReader")
+                self.abs_client.add_to_collection(abs_id, abs_collection_name)
+
+                if self.booklore_client:
+                    shelf_filename = original_filename if original_filename else target_filename
+                    booklore_shelf_name = os.environ.get("BOOKLORE_SHELF_NAME", "Kobo")
+                    self.booklore_client.add_to_shelf(shelf_filename, booklore_shelf_name)
+
+                if self.storyteller_client:
+                    self.storyteller_client.add_to_collection(target_filename)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")
+
             # --- CLEANUP ---
             AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
             for f in course_dir.iterdir():
