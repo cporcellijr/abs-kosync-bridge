@@ -613,7 +613,58 @@ class EbookParser:
             if not target_tag or target_tag.name == '[document]':
                 return None
 
-            # Build KOReader-compatible strictly positional XPath
+            # =================================================================
+            # HYBRID ANCHOR MAPPING: BS4 -> LXML
+            # 1. We have the exact mathematical text offset via BS4.
+            # 2. We use the raw text as a unique "anchor" to find the exact
+            #    same node in LXML's strictly structured tree.
+            # 3. This guarantees perfect KOReader XPaths with zero parser drift.
+            # =================================================================
+            search_text = target_string.strip()
+            occurrence_index = 0
+            
+            # Count which occurrence of this exact text this is in the BS4 document
+            for string in elements:
+                if string is target_string:
+                    break
+                if string.strip() == search_text:
+                    occurrence_index += 1
+                    
+            tree = html.fromstring(target_item['content'])
+            current_occurrence = 0
+            
+            for el in tree.iter():
+                if el.text and el.text.strip() == search_text:
+                    if current_occurrence == occurrence_index:
+                        xpath = self._build_xpath(el)
+                        # Regular element text is just /text()
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+                    current_occurrence += 1
+                    
+                if el.tail and el.tail.strip() == search_text:
+                    if current_occurrence == occurrence_index:
+                        parent = el.getparent()
+                        node_to_build = parent if parent is not None else el
+                        xpath_base = self._build_xpath(node_to_build)
+                        
+                        # Calculate which text node of the parent this is
+                        # XPath text() nodes are 1-based indices of text children
+                        text_node_index = 0
+                        if node_to_build.text: text_node_index += 1
+                        
+                        for child in node_to_build:
+                            if child == el:
+                                if child.tail: text_node_index += 1
+                                break
+                            if child.tail: text_node_index += 1
+                                
+                        suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath_base}{suffix}.{target_offset}"
+                    current_occurrence += 1
+
+            logger.warning(f"⚠️ Hybrid Anchor mapping failed for '{search_text}'. Falling back to BS4 structural path.")
+
+            # Build KOReader-compatible strictly positional XPath using BS4 (Fallback)
             path_segments = []
             curr = target_tag
 
@@ -637,8 +688,6 @@ class EbookParser:
                 path_segments.append('body')
 
             xpath = "/".join(reversed(path_segments))
-            
-            # KOReader xpath format: /body/DocFragment[1]/body/p[1] (Yes, it literally includes body twice)
             return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
 
         except Exception as e:
