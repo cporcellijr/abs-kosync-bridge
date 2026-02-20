@@ -1076,6 +1076,25 @@ class SyncManager:
             title_snip = sanitize_log_data(book.abs_title or 'Unknown')
 
             try:
+                # -----------------------------------------------------------------
+                # SPARSE MAP DETECTOR (Self-Healing)
+                # If a book was aligned under the old N=12 logic, it might have
+                # sparse anchors. This forces them back to the background queue
+                # to get a dense Pass 3/4 map without blocking the UI cycle.
+                # -----------------------------------------------------------------
+                if self.alignment_service and getattr(book, 'transcript_file', None) == 'DB_MANAGED':
+                    alignment = self.alignment_service._get_alignment(abs_id)
+                    if alignment and len(alignment) > 2:
+                        last_ts = float(alignment[-1].get('ts', 0))
+                        anchor_count = len(alignment)
+                        avg_gap = last_ts / anchor_count if anchor_count > 0 else 0
+                        
+                        if avg_gap > 45.0:
+                            logger.info(f"   🩹 Self-Healing: Sparse alignment map detected (avg gap {avg_gap:.1f}s). Queuing for dense re-processing.")
+                            book.status = 'pending'
+                            self.database_service.save_book(book)
+                            continue
+
                 # Get previous state for this book from database
                 previous_states = self.database_service.get_states_for_book(abs_id)
 
