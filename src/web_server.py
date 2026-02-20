@@ -1331,7 +1331,8 @@ def match():
             shelf_filename = original_ebook_filename or ebook_filename
             container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
-            container.storyteller_client().add_to_collection(ebook_filename)
+            st_filename = original_ebook_filename or ebook_filename
+            container.storyteller_client().add_to_collection(st_filename)
 
         # Auto-dismiss any pending suggestion for this book
         # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
@@ -1492,7 +1493,8 @@ def batch_match():
                     shelf_filename = original_ebook_filename or ebook_filename
                     container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
                 if container.storyteller_client().is_configured():
-                    container.storyteller_client().add_to_collection(ebook_filename)
+                    st_filename = original_ebook_filename or ebook_filename
+                    container.storyteller_client().add_to_collection(st_filename)
 
                 # Auto-dismiss any pending suggestion
                 database_service.dismiss_suggestion(item['abs_id'])
