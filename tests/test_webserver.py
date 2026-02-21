@@ -439,7 +439,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
             self.mock_abs_client.add_to_collection.assert_called_once_with('test-audiobook-123', 'Synced with KOReader')
             self.mock_booklore_client.add_to_shelf.assert_called_once_with('test-book.epub', 'Kobo')
-            self.mock_storyteller_client.add_to_collection.assert_called_once_with('test-book.epub')
+            self.mock_storyteller_client.add_to_collection.assert_not_called()
 
             print("[OK] Match endpoint test passed with clean DI")
 
