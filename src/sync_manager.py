@@ -1101,6 +1101,13 @@ class SyncManager:
                                 book.status = 'pending'
                                 self.database_service.save_book(book)
                                 continue
+                    else:
+                        # Alignment map is completely missing
+                        if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only':
+                            logger.info(f"   🩹 Self-Healing: Missing alignment map detected for '{title_snip}'. Queuing for deep anchoring.")
+                            book.status = 'pending'
+                            self.database_service.save_book(book)
+                            continue
 
                 # Get previous state for this book from database
                 previous_states = self.database_service.get_states_for_book(abs_id)
