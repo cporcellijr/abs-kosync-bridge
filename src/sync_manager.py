@@ -1241,14 +1241,6 @@ class SyncManager:
                 # At this point we have a significant change to act on
                 logger.info(f"🔄 '{abs_id}' '{title_snip}' Change detected")
 
-                # [NEW] Missing Map Check (Deep Anchoring)
-                # Only heal if progress is actively happening to avoid unnecessary processing
-                if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only':
-                    if self.alignment_service and not self.alignment_service._get_alignment(abs_id):
-                        logger.info(f"   🩹 Self-Healing: Missing deep anchoring map detected after progress on '{title_snip}'. Queuing for processing.")
-                        book.status = 'pending'
-                        self.database_service.save_book(book)
-                        continue
 
                 # Status block - show only changed lines
                 status_lines = []

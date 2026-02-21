@@ -290,55 +290,7 @@ class AlignmentService:
                     # Prepend to main list
                     valid_anchors = valid_early + valid_anchors
 
-        # 5. PASS 3: GAP FILLING (N=6)
-        # Search the gaps between monotonic anchors where the time span > 15 seconds
-        gap_anchors_pass3 = []
-        if len(valid_anchors) > 1:
-            for i in range(len(valid_anchors) - 1):
-                a1 = valid_anchors[i]
-                a2 = valid_anchors[i+1]
-                if a2['ts'] - a1['ts'] > 15.0:
-                    t_slice = transcript_words[a1['t_idx']:a2['t_idx']]
-                    b_slice = book_words[a1['b_idx']:a2['b_idx']]
-                    if t_slice and b_slice:
-                        new_anchors = _find_anchors(t_slice, b_slice, n_size=6)
-                        gap_anchors_pass3.extend(new_anchors)
-        
-        if gap_anchors_pass3:
-            logger.info(f"   ➕ Pass 3 Gap Filling: Found {len(gap_anchors_pass3)} new anchors.")
-            valid_anchors.extend(gap_anchors_pass3)
-            # Re-sort and forcefully guarantee absolute monotonicity again
-            valid_anchors.sort(key=lambda x: x['char'])
-            temp_valid = [valid_anchors[0]]
-            for a in valid_anchors[1:]:
-                if a['ts'] > temp_valid[-1]['ts']:
-                    temp_valid.append(a)
-            valid_anchors = temp_valid
 
-        # 6. PASS 4: MICRO-GAP FILLING (N=4)
-        # One last tight squeeze on any remaining > 5.0 second gaps
-        gap_anchors_pass4 = []
-        if len(valid_anchors) > 1:
-            for i in range(len(valid_anchors) - 1):
-                a1 = valid_anchors[i]
-                a2 = valid_anchors[i+1]
-                if a2['ts'] - a1['ts'] > 5.0:
-                    t_slice = transcript_words[a1['t_idx']:a2['t_idx']]
-                    b_slice = book_words[a1['b_idx']:a2['b_idx']]
-                    if t_slice and b_slice:
-                         new_anchors = _find_anchors(t_slice, b_slice, n_size=4)
-                         gap_anchors_pass4.extend(new_anchors)
-                         
-        if gap_anchors_pass4:
-            logger.info(f"   ➕ Pass 4 Micro-Gap Filling: Found {len(gap_anchors_pass4)} new anchors.")
-            valid_anchors.extend(gap_anchors_pass4)
-            # Final sort and strict monotonic filter
-            valid_anchors.sort(key=lambda x: x['char'])
-            temp_valid = [valid_anchors[0]]
-            for a in valid_anchors[1:]:
-                if a['ts'] > temp_valid[-1]['ts']:
-                    temp_valid.append(a)
-            valid_anchors = temp_valid
 
         # 5. Build Final Map
         final_map = []
