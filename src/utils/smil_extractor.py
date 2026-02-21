@@ -106,17 +106,12 @@ class SmilExtractor:
                             if idx < 3 or idx == len(smil_files) - 1:
                                 if segments:
                                     logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
-                elif timestamp_mode == 'relative':
-                    # Relative timestamps - need to calculate offsets
-                    # Only use 1:1 Chapter Mapping if counts are roughly equal
-                    # Otherwise assume SMILs are 'Parts' and stack them
-                    count_diff = abs(len(smil_files) - len(abs_chapters)) if abs_chapters else 999
-
-                    if abs_chapters and count_diff <= 2:
-                        logger.info(f"   Using 1:1 Chapter Mapping (Files: {len(smil_files)}, Chapters: {len(abs_chapters)})")
+                    # Relative timestamps - calculate offsets
+                    if abs_chapters:
+                        logger.info(f"   Using Smart Duration Mapping (Files: {len(smil_files)}, Chapters: {len(abs_chapters)})")
                         transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
                     else:
-                        logger.info(f"   Using Sequential Stacking (Files: {len(smil_files)} != Chapters: {len(abs_chapters) if abs_chapters else 0})")
+                        logger.info(f"   Using Sequential Stacking (No ABS chapters provided)")
                         transcript = self._process_relative_sequential(zf, smil_files, audio_offset)
                 else:
                     # Auto/Smart mode
@@ -294,10 +289,9 @@ class SmilExtractor:
 
     def _process_relative_with_chapters(self, zf: zipfile.ZipFile, smil_files: List[str], 
                                          abs_chapters: List[Dict]) -> List[Dict]:
-        """Process SMIL files with relative timestamps, using ABS chapter starts as offsets."""
+        """Process SMIL files with relative timestamps using Smart Duration Mapping."""
         transcript = []
         
-        # Simple sequential matching: assign SMIL files to ABS chapters in order
         # Skip obvious front matter
         content_smil_files = []
         for path in smil_files:
@@ -306,19 +300,54 @@ class SmilExtractor:
                 content_smil_files.append(path)
         
         if len(content_smil_files) == 0:
-            logger.warning(f"   ⚠️ ALL SMIL files filtered as front matter! Sample names: {[Path(p).stem for p in smil_files[:5]]}")
+            logger.warning(f"   ⚠️ ALL SMIL files filtered as front matter!")
+            return []
+
+        last_matched_abs_idx = -1
+        current_sequential_offset = 0.0
         
         for idx, smil_path in enumerate(content_smil_files):
-            # Use corresponding ABS chapter offset if available
-            if idx < len(abs_chapters):
-                offset = float(abs_chapters[idx].get('start', 0))
-            else:
-                # If more SMIL than chapters, use last chapter end as base
-                if transcript:
-                    offset = max(s['end'] for s in transcript)
-                else:
-                    offset = 0
+            # 1. Get SMIL duration
+            start_raw, end_raw, _ = self._get_raw_info(zf, smil_path)
+            smil_duration = end_raw - start_raw
             
+            best_match_idx = -1
+            best_offset = current_sequential_offset
+            smallest_diff = float('inf')
+            
+            # 2. Search forward in ABS chapters for a duration match
+            # Look ahead up to 6 chapters to account for skipped intro/prologue tracks
+            search_start = max(0, last_matched_abs_idx)
+            search_end = min(len(abs_chapters), search_start + 6)
+            
+            for abs_idx in range(search_start, search_end):
+                ch = abs_chapters[abs_idx]
+                ch_start = float(ch.get('start', 0))
+                ch_end = float(ch.get('end', 0))
+                ch_duration = ch_end - ch_start
+                
+                diff = abs(ch_duration - smil_duration)
+                
+                # If duration matches within 15 seconds, it's a solid hit
+                if diff < 15.0 and diff < smallest_diff:
+                    smallest_diff = diff
+                    best_match_idx = abs_idx
+                    best_offset = ch_start
+
+            # 3. Apply the offset
+            if best_match_idx != -1:
+                if last_matched_abs_idx != -1 and best_match_idx > last_matched_abs_idx + 1:
+                    logger.info(f"   ⏭️ Skipped {best_match_idx - last_matched_abs_idx - 1} ABS tracks to find match.")
+                
+                logger.debug(f"   🔗 Matched SMIL {Path(smil_path).name} ({smil_duration:.1f}s) to ABS Ch {best_match_idx} ({abs_chapters[best_match_idx].get('start', 0):.1f}s) - diff: {smallest_diff:.1f}s")
+                last_matched_abs_idx = best_match_idx
+                offset = best_offset
+                current_sequential_offset = float(abs_chapters[best_match_idx].get('end', 0))
+            else:
+                logger.warning(f"   ⚠️ No duration match for {Path(smil_path).name} ({smil_duration:.1f}s). Falling back to sequential offset {current_sequential_offset:.1f}s")
+                offset = current_sequential_offset
+                current_sequential_offset += smil_duration
+
             segments = self._process_smil_with_offset(zf, smil_path, offset)
             transcript.extend(segments)
             
