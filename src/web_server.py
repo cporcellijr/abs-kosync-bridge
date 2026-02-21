@@ -1331,7 +1331,11 @@ def match():
             shelf_filename = original_ebook_filename or ebook_filename
             container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
         if container.storyteller_client().is_configured():
-            container.storyteller_client().add_to_collection(ebook_filename)
+            if book.storyteller_uuid:
+                container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
+            else:
+                fallback_name = original_ebook_filename or ebook_filename
+                container.storyteller_client().add_to_collection(fallback_name)
 
         # Auto-dismiss any pending suggestion for this book
         # Need to dismiss by BOTH abs_id (audiobook-triggered) and kosync_doc_id (ebook-triggered)
@@ -1492,7 +1496,11 @@ def batch_match():
                     shelf_filename = original_ebook_filename or ebook_filename
                     container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
                 if container.storyteller_client().is_configured():
-                    container.storyteller_client().add_to_collection(ebook_filename)
+                    if book.storyteller_uuid:
+                        container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
+                    else:
+                        fallback_name = original_ebook_filename or ebook_filename
+                        container.storyteller_client().add_to_collection(fallback_name)
 
                 # Auto-dismiss any pending suggestion
                 database_service.dismiss_suggestion(item['abs_id'])
@@ -1580,7 +1588,8 @@ def delete_mapping(abs_id):
         if book.ebook_filename and container.booklore_client().is_configured():
             shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
             try:
-                container.booklore_client().remove_from_shelf(book.ebook_filename, shelf_name)
+                shelf_filename = book.original_ebook_filename or book.ebook_filename
+                container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
                 # Same here regarding logging.
             except Exception as e:
                 logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
@@ -1744,9 +1753,7 @@ def api_storyteller_link(abs_id):
         target_path = epub_cache / f"storyteller_{storyteller_uuid}.epub"
         
         if container.storyteller_client().download_book(storyteller_uuid, target_path):
-            # [FIX] Sanitize Storyteller artifacts to remove <span> tags that break alignment
-            from src.utils.ebook_utils import sanitize_storyteller_artifacts
-            sanitize_storyteller_artifacts(target_path)
+
 
             # Preserve OLD filename as original if not already set
             if not book.original_ebook_filename:

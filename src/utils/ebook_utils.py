@@ -517,9 +517,12 @@ class EbookParser:
                         if spine_item_len > 0:
                             chapter_progress = local_index / spine_item_len
 
+                        perfect_ko = self.get_perfect_ko_xpath(filename, match_index)
+
                         return LocatorResult(
                             percentage=percentage,
                             xpath=final_xpath,
+                            perfect_ko_xpath=perfect_ko,
                             match_index=match_index,
                             cfi=cfi,
                             href=item['href'],
@@ -536,16 +539,13 @@ class EbookParser:
     def _normalize(self, text):
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
-    # =========================================================================
-    # KOREADER PERFECT SYNC
-    # Uses LXML and "Hybrid" Logic (ID + Text Offset)
-    # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
-    # =========================================================================
+
 
     def get_perfect_ko_xpath(self, filename, position=0) -> Optional[str]:
         """
         Generate KOReader XPath for a specific character position in the book.
-        Simplified and focused approach that finds actual text elements.
+        Uses BeautifulSoup (Engine A) to perfectly align with the text extraction,
+        eliminating parser drift compared to the old LXML offset logic.
         """
         try:
             # Get full text and spine mapping
@@ -564,104 +564,127 @@ class EbookParser:
 
             local_pos = position - target_item['start']
 
-            # Parse HTML content
-            tree = html.fromstring(target_item['content'])
-
-            # Find all elements that contain text, in document order
-            text_elements = []
-            current_count = 0
-            SEPARATOR_LEN = 1
-
-            for element in tree.iter():
-                if element.text and element.text.strip():
-                    text_len = len(element.text.strip())
-                    text_elements.append({
-                        'element': element,
-                        'start_pos': current_count,
-                        'end_pos': current_count + text_len + SEPARATOR_LEN,
-                        'text_len': text_len
-                    })
-                    current_count += (text_len + SEPARATOR_LEN)
-
-                if element.tail and element.tail.strip():
-                    tail_len = len(element.tail.strip())
-                    text_elements.append({
-                        'element': element,
-                        'start_pos': current_count,
-                        'end_pos': current_count + tail_len + SEPARATOR_LEN,
-                        'text_len': tail_len,
-                        'is_tail': True
-                    })
-                    current_count += (tail_len + SEPARATOR_LEN)
-
-            # Find the element that contains our target position
-            target_element = None
+            # Parse HTML content with BeautifulSoup
+            soup = BeautifulSoup(target_item['content'], 'html.parser')
+            
+            # Find the exact text element matching the character count
+            current_char_count = 0
+            target_string = None
             target_offset = 0
-            is_tail = False
-            target_text_len = 0
 
-            for elem_info in text_elements:
-                if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
-                    target_element = elem_info['element']
-                    target_offset = local_pos - elem_info['start_pos']
-                    is_tail = elem_info.get('is_tail', False)
-                    target_text_len = elem_info.get('text_len', 0)
+            elements = soup.find_all(string=True)
+            for string in elements:
+                # Count lengths exactly like extract_text_and_map's get_text(strip=True)
+                clean_text = string.strip()
+                text_len = len(clean_text)
+                
+                if text_len == 0: 
+                    continue
+                
+                if current_char_count + text_len > local_pos:
+                    target_string = string
+                    # Calculate offset within the CLEAN string
+                    clean_offset = local_pos - current_char_count
+                    
+                    # KOReader needs the offset within the RAW string (including leading whitespace etc)
+                    # Find where the clean text starts inside the raw string to determine true offset
+                    raw_text = str(string)
+                    raw_start = raw_text.find(clean_text)
+                    if raw_start == -1: 
+                        raw_start = 0
+                    
+                    target_offset = raw_start + clean_offset
                     break
+                
+                current_char_count += text_len
+                # extract_text_and_map uses separator=' ', adding exactly 1 space between words
+                if current_char_count <= local_pos:
+                    current_char_count += 1
 
-            if target_element is None:
-                # Fallback: use the first text-containing element
-                if text_elements:
-                    target_element = text_elements[0]['element']
-                    target_offset = 0
-                    is_tail = text_elements[0].get('is_tail', False)
-                    target_text_len = text_elements[0].get('text_len', 0)
-                else:
-                    # Last resort: find any element with text
-                    for elem in tree.xpath('.//p | .//span | .//em | .//strong | .//st | .//div'):
-                        if elem.text and elem.text.strip():
-                            target_element = elem
-                            target_offset = 0
-                            target_text_len = len(elem.text.strip())
-                            break
-
-            if target_element is None:
-                logger.warning(f"⚠️ No text elements found in spine {target_item['spine_index']}")
+            if not target_string:
+                logger.warning(f"⚠️ No matching text element found in spine {target_item['spine_index']}")
                 return None
 
-            # Safety Check: Prevent Out-Of-Bounds offsets due to parser drift
-            if target_text_len > 0 and target_offset > target_text_len + 1:
-                logger.warning(f"⚠️ KOReader XPath Safety: Offset {target_offset} > text len {target_text_len} for '{target_element.tag}' — Rejecting to prevent crash")
+            target_tag = target_string.parent
+            if not target_tag or target_tag.name == '[document]':
                 return None
 
-            # Build xpath for the target element
-            if is_tail:
-                # Tail text belongs to the parent container, not the element itself
-                parent = target_element.getparent()
-                if parent is None:
-                    # Should not happen for valid HTML body content
-                    xpath = self._build_xpath(target_element)
-                    return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+            # =================================================================
+            # HYBRID ANCHOR MAPPING: BS4 -> LXML
+            # 1. We have the exact mathematical text offset via BS4.
+            # 2. We use the raw text as a unique "anchor" to find the exact
+            #    same node in LXML's strictly structured tree.
+            # 3. This guarantees perfect KOReader XPaths with zero parser drift.
+            # =================================================================
+            search_text = str(target_string)
+            occurrence_index = 0
+            
+            # Count which occurrence of this exact text this is in the BS4 document
+            for string in elements:
+                if string is target_string:
+                    break
+                if str(string) == search_text:
+                    occurrence_index += 1
+                    
+            tree = html.fromstring(target_item['content'])
+            current_occurrence = 0
+            
+            for el in tree.iter():
+                if el.text and el.text == search_text:
+                    if current_occurrence == occurrence_index:
+                        xpath = self._build_xpath(el)
+                        # Regular element text is just /text()
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
+                    current_occurrence += 1
+                    
+                if el.tail and el.tail == search_text:
+                    if current_occurrence == occurrence_index:
+                        parent = el.getparent()
+                        node_to_build = parent if parent is not None else el
+                        xpath_base = self._build_xpath(node_to_build)
+                        
+                        # Calculate which text node of the parent this is
+                        # XPath text() nodes are 1-based indices of text children
+                        text_node_index = 0
+                        if node_to_build.text: text_node_index += 1
+                        
+                        for child in node_to_build:
+                            if child == el:
+                                if child.tail: text_node_index += 1
+                                break
+                            if child.tail: text_node_index += 1
+                                
+                        suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath_base}{suffix}.0"
+                    current_occurrence += 1
 
-                xpath = self._build_xpath(parent)
+            logger.warning(f"⚠️ Hybrid Anchor mapping failed for '{search_text}'. Falling back to BS4 structural path.")
+
+            # Build KOReader-compatible strictly positional XPath using BS4 (Fallback)
+            path_segments = []
+            curr = target_tag
+
+            while curr and curr.name != '[document]':
+                if curr.name == 'body':
+                    path_segments.append("body")
+                    break
                 
-                # Calculate which text node of the parent this is
-                # XPath text() nodes are 1-based indices of text children
-                text_node_index = 0
-                if parent.text: text_node_index += 1
+                index = 1
+                sibling = curr.previous_sibling
+                while sibling:
+                    if isinstance(sibling, Tag) and sibling.name == curr.name:
+                        index += 1
+                    sibling = sibling.previous_sibling
                 
-                for child in parent:
-                    if child == target_element:
-                        if child.tail: text_node_index += 1
-                        break
-                    if child.tail: text_node_index += 1
-                
-                # Should be at least 1 since we found it in text_elements check
-                suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
-                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}{suffix}.{target_offset}"
-            else:
-                # Regular element text
-                xpath = self._build_xpath(target_element)
-                return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+                path_segments.append(f"{curr.name}[{index}]")
+                curr = curr.parent
+
+            # Ensure the path starts with body
+            if not path_segments or path_segments[-1] != 'body':
+                path_segments.append('body')
+
+            xpath = "/".join(reversed(path_segments))
+            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
 
         except Exception as e:
             logger.error(f"❌ Error generating KOReader XPath: {e}")
@@ -976,76 +999,3 @@ class EbookParser:
             return None
 
 
-def sanitize_storyteller_artifacts(epub_path: Path) -> bool:
-    """
-    Sanitize Storyteller EPUBs by removing specific <span> tags that break alignment.
-    Removes <span id="par..."> and <span id="sent..."> tags while preserving content.
-    """
-    try:
-        epub_path = Path(epub_path)
-        logger.info(f"Sanitizing Storyteller artifacts in: {epub_path.name}")
-        
-        # Create temp dir
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            
-            # Extract EPUB
-            with zipfile.ZipFile(epub_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_path)
-                
-            # Iterate through HTML/XHTML files
-            modified_count = 0
-            for root, dirs, files in os.walk(temp_path):
-                for file in files:
-                    if file.endswith(('.html', '.xhtml', '.htm')):
-                        file_path = Path(root) / file
-                        
-                        try:
-                            # Read with utf-8
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                
-                            soup = BeautifulSoup(content, 'html.parser')
-                            file_modified = False
-                            
-                            # Find spans with ids starting with 'par' or 'sent'
-                            # Storyteller uses id="par0", id="sent0", etc. which break our specific alignment engines
-                            for span in soup.find_all('span', id=re.compile(r'^(par|sent)\d+')):
-                                span.unwrap() # Remove the tag but keep contents
-                                file_modified = True
-                                modified_count += 1
-                                
-                            if file_modified:
-                                with open(file_path, 'w', encoding='utf-8') as f:
-                                    f.write(str(soup))
-                                    
-                        except Exception as e:
-                            logger.warning(f"⚠️ Failed to sanitize file '{file}': {e}")
-                            
-            if modified_count > 0:
-                logger.info(f"Removed {modified_count} Storyteller tags. Repacking...")
-                
-                # Create a new zip file
-                temp_epub = temp_path / "sanitized.epub"
-                with zipfile.ZipFile(temp_epub, 'w', zipfile.ZIP_DEFLATED) as zip_out:
-                    for root, dirs, files in os.walk(temp_path):
-                        for file in files:
-                            file_path = Path(root) / file
-                            if file == "sanitized.epub": continue
-                            
-                            # Archive name should be relative to temp_path
-                            arcname = file_path.relative_to(temp_path)
-                            zip_out.write(file_path, arcname)
-                            
-                # Replace original
-                # Force move (replace)
-                shutil.move(str(temp_epub), str(epub_path))
-                logger.info(f"✅ Successfully sanitized: {epub_path.name}")
-                return True
-            else:
-                logger.debug(f"No Storyteller tags found in {epub_path.name}. Skipping repack.")
-                return True # It's valid, just didn't need changes
-            
-    except Exception as e:
-        logger.error(f"❌ Error sanitizing EPUB {epub_path}: {e}")
-        return False

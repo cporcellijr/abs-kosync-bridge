@@ -23,7 +23,8 @@ class DatabaseService:
     """
 
     def __init__(self, db_path: str):
-        self.db_path = Path(db_path)
+        import os
+        self.db_path = Path(os.path.abspath(db_path))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_manager = DatabaseManager(str(self.db_path))
 

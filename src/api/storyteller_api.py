@@ -300,6 +300,37 @@ class StorytellerAPIClient:
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
+        
+    def add_to_collection_by_uuid(self, book_uuid: str, collection_name: str = None) -> bool:
+        if not collection_name:
+            collection_name = os.environ.get("STORYTELLER_COLLECTION_NAME", "Synced with KOReader")
+
+        # 1. Get Collections
+        r = self._make_request("GET", "/api/v2/collections")
+        if not r or r.status_code != 200: return False
+        collections = r.json()
+        target_col = next((c for c in collections if c.get('name') == collection_name), None)
+
+        # 2. Create if missing
+        if not target_col:
+            r_create = self._make_request("POST", "/api/v2/collections", {"name": collection_name})
+            if r_create and r_create.status_code in [200, 201]:
+                target_col = r_create.json()
+            else: return False
+
+        col_uuid = target_col.get('uuid') or target_col.get('id')
+
+        # 3. Add book (Batch Endpoint from route(2).ts)
+        endpoint = "/api/v2/collections/books"
+        payload = {"collections": [col_uuid], "books": [book_uuid]}
+        r_add = self._make_request("POST", endpoint, payload)
+        if r_add and r_add.status_code in [200, 204]:
+             logger.info(f"🏷️ Added '{book_uuid[:8]}' to Storyteller Collection: '{collection_name}'")
+             return True
+        # Backup strategy (singular)
+        fallback = f"/api/v2/collections/{col_uuid}/books"
+        r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
+        return bool(r_back and r_back.status_code in [200, 204])
     def search_books(self, query: str) -> list:
         """Search for books in Storyteller."""
         response = self._make_request("GET", "/api/v2/books", None)

@@ -320,10 +320,12 @@ class DatabaseManager:
     """
 
     def __init__(self, db_path: str):
-        self.db_path = db_path
+        import os
+        self.db_path = os.path.abspath(db_path)
         # Increase timeout to reduce lock errors, enable WAL mode for concurrency, allow multi-thread access
+        # Using 4 slashes guarantees an absolute path in SQLAlchemy
         self.engine = create_engine(
-            f'sqlite:///{db_path}', 
+            f'sqlite:///{self.db_path}', 
             echo=False, 
             connect_args={'timeout': 30, 'check_same_thread': False}
         )

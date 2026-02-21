@@ -31,7 +31,7 @@
 > [!TIP]
 > **Upgrading?** Review `docs/getting-started.md` to potentially simplify your `docker-compose.yml` volumes. The new Forge tool and CWA integration reduce the need for multiple volume mappings.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```yaml
 services:
