@@ -1077,10 +1077,7 @@ class SyncManager:
 
             try:
                 # -----------------------------------------------------------------
-                # SPARSE MAP DETECTOR (Self-Healing)
-                # If a book was aligned under the old N=12 logic, it might have
-                # sparse anchors. This forces them back to the background queue
-                # to get a dense Pass 3/4 map without blocking the UI cycle.
+                # MIGRATION UPGRADE
                 # -----------------------------------------------------------------
                 if self.alignment_service:
                     alignment = self.alignment_service._get_alignment(abs_id)
@@ -1090,24 +1087,6 @@ class SyncManager:
                             logger.info(f"   🔄 Upgrading '{title_snip}' to DB_MANAGED unified architecture")
                             book.transcript_file = 'DB_MANAGED'
                             self.database_service.save_book(book)
-
-                        if len(alignment) > 2:
-                            last_ts = float(alignment[-1].get('ts', 0))
-                            anchor_count = len(alignment)
-                            avg_gap = last_ts / anchor_count if anchor_count > 0 else 0
-                            
-                            if avg_gap > 45.0:
-                                logger.info(f"   🩹 Self-Healing: Sparse alignment map detected (avg gap {avg_gap:.1f}s). Queuing for dense re-processing.")
-                                book.status = 'pending'
-                                self.database_service.save_book(book)
-                                continue
-                    else:
-                        # Alignment map is completely missing
-                        if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only':
-                            logger.info(f"   🩹 Self-Healing: Missing alignment map detected for '{title_snip}'. Queuing for deep anchoring.")
-                            book.status = 'pending'
-                            self.database_service.save_book(book)
-                            continue
 
                 # Get previous state for this book from database
                 previous_states = self.database_service.get_states_for_book(abs_id)
@@ -1261,6 +1240,15 @@ class SyncManager:
 
                 # At this point we have a significant change to act on
                 logger.info(f"🔄 '{abs_id}' '{title_snip}' Change detected")
+
+                # [NEW] Missing Map Check (Deep Anchoring)
+                # Only heal if progress is actively happening to avoid unnecessary processing
+                if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only':
+                    if self.alignment_service and not self.alignment_service._get_alignment(abs_id):
+                        logger.info(f"   🩹 Self-Healing: Missing deep anchoring map detected after progress on '{title_snip}'. Queuing for processing.")
+                        book.status = 'pending'
+                        self.database_service.save_book(book)
+                        continue
 
                 # Status block - show only changed lines
                 status_lines = []
