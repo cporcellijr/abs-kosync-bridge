@@ -1753,9 +1753,7 @@ def api_storyteller_link(abs_id):
         target_path = epub_cache / f"storyteller_{storyteller_uuid}.epub"
         
         if container.storyteller_client().download_book(storyteller_uuid, target_path):
-            # [FIX] Sanitize Storyteller artifacts to remove <span> tags that break alignment
-            from src.utils.ebook_utils import sanitize_storyteller_artifacts
-            sanitize_storyteller_artifacts(target_path)
+
 
             # Preserve OLD filename as original if not already set
             if not book.original_ebook_filename:

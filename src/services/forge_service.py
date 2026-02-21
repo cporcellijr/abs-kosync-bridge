@@ -7,7 +7,6 @@ import html
 from pathlib import Path
 from urllib.parse import urljoin
 import requests
-from src.utils.ebook_utils import sanitize_storyteller_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -525,9 +524,7 @@ class ForgeService:
             if not st_client.download_book(found_uuid, target_path):
                 raise Exception("Failed to download Storyteller artifact")
 
-            # --- SANITIZE ---
-            sanitize_storyteller_artifacts(target_path)
-            
+
             # --- RECALCULATE HASH ---
             # [FIX] Prioritize original_hash if valid (Tri-Link Principle)
             if original_hash:

@@ -539,11 +539,7 @@ class EbookParser:
     def _normalize(self, text):
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
-    # =========================================================================
-    # KOREADER PERFECT SYNC
-    # Uses LXML and "Hybrid" Logic (ID + Text Offset)
-    # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
-    # =========================================================================
+
 
     def get_perfect_ko_xpath(self, filename, position=0) -> Optional[str]:
         """
@@ -620,28 +616,28 @@ class EbookParser:
             #    same node in LXML's strictly structured tree.
             # 3. This guarantees perfect KOReader XPaths with zero parser drift.
             # =================================================================
-            search_text = target_string.strip()
+            search_text = str(target_string)
             occurrence_index = 0
             
             # Count which occurrence of this exact text this is in the BS4 document
             for string in elements:
                 if string is target_string:
                     break
-                if string.strip() == search_text:
+                if str(string) == search_text:
                     occurrence_index += 1
                     
             tree = html.fromstring(target_item['content'])
             current_occurrence = 0
             
             for el in tree.iter():
-                if el.text and el.text.strip() == search_text:
+                if el.text and el.text == search_text:
                     if current_occurrence == occurrence_index:
                         xpath = self._build_xpath(el)
                         # Regular element text is just /text()
-                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
                     current_occurrence += 1
                     
-                if el.tail and el.tail.strip() == search_text:
+                if el.tail and el.tail == search_text:
                     if current_occurrence == occurrence_index:
                         parent = el.getparent()
                         node_to_build = parent if parent is not None else el
@@ -659,7 +655,7 @@ class EbookParser:
                             if child.tail: text_node_index += 1
                                 
                         suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
-                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath_base}{suffix}.{target_offset}"
+                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath_base}{suffix}.0"
                     current_occurrence += 1
 
             logger.warning(f"⚠️ Hybrid Anchor mapping failed for '{search_text}'. Falling back to BS4 structural path.")
@@ -688,7 +684,7 @@ class EbookParser:
                 path_segments.append('body')
 
             xpath = "/".join(reversed(path_segments))
-            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
 
         except Exception as e:
             logger.error(f"❌ Error generating KOReader XPath: {e}")
@@ -1003,76 +999,3 @@ class EbookParser:
             return None
 
 
-def sanitize_storyteller_artifacts(epub_path: Path) -> bool:
-    """
-    Sanitize Storyteller EPUBs by removing specific <span> tags that break alignment.
-    Removes <span id="par..."> and <span id="sent..."> tags while preserving content.
-    """
-    try:
-        epub_path = Path(epub_path)
-        logger.info(f"Sanitizing Storyteller artifacts in: {epub_path.name}")
-        
-        # Create temp dir
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            
-            # Extract EPUB
-            with zipfile.ZipFile(epub_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_path)
-                
-            # Iterate through HTML/XHTML files
-            modified_count = 0
-            for root, dirs, files in os.walk(temp_path):
-                for file in files:
-                    if file.endswith(('.html', '.xhtml', '.htm')):
-                        file_path = Path(root) / file
-                        
-                        try:
-                            # Read with utf-8
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                                
-                            soup = BeautifulSoup(content, 'html.parser')
-                            file_modified = False
-                            
-                            # Find spans with ids starting with 'par' or 'sent'
-                            # Storyteller uses id="par0", id="sent0", etc. which break our specific alignment engines
-                            for span in soup.find_all('span', id=re.compile(r'^(par|sent)\d+')):
-                                span.unwrap() # Remove the tag but keep contents
-                                file_modified = True
-                                modified_count += 1
-                                
-                            if file_modified:
-                                with open(file_path, 'w', encoding='utf-8') as f:
-                                    f.write(str(soup))
-                                    
-                        except Exception as e:
-                            logger.warning(f"⚠️ Failed to sanitize file '{file}': {e}")
-                            
-            if modified_count > 0:
-                logger.info(f"Removed {modified_count} Storyteller tags. Repacking...")
-                
-                # Create a new zip file
-                temp_epub = temp_path / "sanitized.epub"
-                with zipfile.ZipFile(temp_epub, 'w', zipfile.ZIP_DEFLATED) as zip_out:
-                    for root, dirs, files in os.walk(temp_path):
-                        for file in files:
-                            file_path = Path(root) / file
-                            if file == "sanitized.epub": continue
-                            
-                            # Archive name should be relative to temp_path
-                            arcname = file_path.relative_to(temp_path)
-                            zip_out.write(file_path, arcname)
-                            
-                # Replace original
-                # Force move (replace)
-                shutil.move(str(temp_epub), str(epub_path))
-                logger.info(f"✅ Successfully sanitized: {epub_path.name}")
-                return True
-            else:
-                logger.debug(f"No Storyteller tags found in {epub_path.name}. Skipping repack.")
-                return True # It's valid, just didn't need changes
-            
-    except Exception as e:
-        logger.error(f"❌ Error sanitizing EPUB {epub_path}: {e}")
-        return False
