@@ -4,33 +4,47 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
-## [6.3.0] - 2026-02-18
+## [6.3.0] - 2026-02-23
 
-### 🚀 Features
+### � Critical Update Requirements
+
+- **Storyteller API v2 Requirement:** The bridge has fully transitioned to the Storyteller REST API v2 endpoints (`/api/v2/`). **You MUST update your Storyteller container to the latest version to use Bridge v6.3.0.** Legacy Storyteller versions are no longer supported and will result in 404 connection errors.
+- **Docker Compose Volume Mounts for "Forge":** The new Auto-Forge pipeline requires proper volume mapping for directory transfers. Ensure your `docker-compose.yml` includes mappings for `STORYTELLER_LIBRARY_DIR`, `BOOKS_DIR`, and any relevant processing directories for the Forge tab to function without "Directory not found" errors.
+- **Database Migration:** This update includes a major database schema upgrade (Alembic) to support the Tri-Link architecture. **Highly Recommended: Backup your `database.db` and legacy JSON files before pulling this update.** If you encounter a boot-loop due to a locked database, simply deleting the DB and letting it rebuild is the fastest fix, as the bridge can auto-match most entries automatically.
+- **KOSync "Stuck" Progress on Old Links:** Books matched under older versions of the bridge might lack the `original_ebook_filename` required by the new Tri-Link architecture. If an older book stops syncing progress to KOReader after this update, simply delete the mapping from the dashboard and re-match it to rebuild the link correctly.
+
+### �🚀 New Features & Integrations
 
 - **Tri-Link Architecture**: Maintain a three-way link between ABS audiobook, KOReader ebook, and Storyteller entries.
 - **Auto-Forge Pipeline**: Automated downloading, staging, and hand-off to Storyteller for processing.
 - **Hardcover.app Audiobook Support**: Link specific editions and sync listening progress (in seconds).
-- **Booklore & CWA (OPDS) Integration**: Fetch ebooks from Booklore and OPDS sources.
+- **Booklore & CWA (OPDS) Integration**: Fetch ebooks from Booklore and OPDS sources, including backward-compatible fallbacks for Booklore v2.
 - **Split-Port Security Mode**: Run sync and admin UI on separate ports.
 - **New Transcription Providers**: Support for Whisper.cpp Server, Deepgram API, and CUDA GPU acceleration.
-- **Progress Suggestions**: Smart auto-discovery and suggestions for potential matches.
+- **Advanced Anchor Mapping**: Implemented BS4-to-LXML Hybrid Anchor Mapping and SMIL Extractor Smart Duration Mapping for perfect KOReader xpath generation.
+
+### ✨ Enhancements
+
 - **UI Redesign**: Horizontal dashboard cards, overhauled match pages, and responsive settings UI.
-
-### 🐛 Fixes
-
-- Fixed KOReader sync crashes (XPath double `body` tag issue).
-- Fixed KOSync hash overwrites by Storyteller artifacts.
-- Fixed race conditions in Storyteller ingestion.
-- Fixed special characters in filenames breaking glob searches.
-- Fixed KOSync client headers, legacy exception types, and sync position payloads.
-
-### 🧹 Maintenance
-
+- **Progress Suggestions**: Smart auto-discovery and suggestions for potential matches.
+- **Dynamic Configuration**: ABSClient web UI settings now take effect dynamically without requiring a restart.
+- **Optimized Workflows**: Restored automatic addition of collections and shelves post Auto-Forge processing.
 - **Logging Standardization**: Consistent emoji prefixes and log levels across the entire codebase.
+
+### 🐛 Bug Fixes
+
+- **KOReader Sync**: Fixed KOReader sync crashes caused by an XPath double `body` tag issue.
+- **KOSync Sync Integrity**: Prevented destructive progress pushes, preserved manual hash overrides, and fixed KOSync hash overwrites by Storyteller artifacts.
+- **Storyteller Stability**: Fixed race conditions in Storyteller ingestion and removed conflicting Storyteller fallback collection logic.
+- **System Stability**: Fixed special characters in filenames breaking glob searches, corrected Booklore shelf assignment issues during batch matching, and resolved legacy KOSync client headers, legacy exception types, and sync position payloads.
+- **Database Persistence & Migrations**: Forced absolute paths for SQLite connections to prevent ephemeral Docker data loss, auto-upgraded legacy DB-migrated books, and prevented legacy DB crashes on startup via Alembic stamping.
+- **XPath Hardening**: Defaulted Crengine-safe XPath suffixes, and hardened generation against fragile inline tags to prevent parsing drift.
+
+### ⚠️ Breaking Changes & Deprecations
+
 - **Unified DB Architecture**: Transitioned to SQLAlchemy for alignments, transcripts, and settings.
 - **Alembic Migrations**: Improved migration tracking and safety checks.
-- **Storyteller API**: Removed direct DB access in favor of strictly API-based communication.
+- **Storyteller API**: Removed direct DB access in favor of strictly API-based communication; legacy Storyteller DB fallback has been deprecated.
 
 ---
 
