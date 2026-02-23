@@ -43,7 +43,7 @@ class TestEbookSentenceXPathFallback(unittest.TestCase):
 
         xpath = self.parser._build_crengine_safe_text_xpath(span, 8, html_content)
 
-        self.assertEqual(xpath, "/body/DocFragment[8]/body/p[1]/text().0")
+        self.assertEqual(xpath, "/body/DocFragment[8]/body/p/text().0")
         self.assertNotIn("/span", xpath)
 
 

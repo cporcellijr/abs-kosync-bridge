@@ -6,10 +6,14 @@ Unit test for the ABS leading scenario using unittest.TestCase.
 import unittest
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 # Add the project root to the path to resolve module imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tests.base_sync_test import BaseSyncCycleTestCase
+from src.sync_clients.kosync_sync_client import KoSyncSyncClient
+from src.sync_clients.sync_client_interface import LocatorResult
 
 class TestABSLeadsSync(BaseSyncCycleTestCase):
     """Test case for ABS leading sync_cycle scenario."""
@@ -73,6 +77,28 @@ class TestABSLeadsSync(BaseSyncCycleTestCase):
 
     def test_abs_leads(self):
         super().run_test(10, 40)
+
+    def test_malformed_xpath_skips_kosync_update(self):
+        kosync_api = Mock()
+        ebook_parser = Mock()
+        ebook_parser.get_sentence_level_ko_xpath.return_value = None
+        client = KoSyncSyncClient(kosync_api, ebook_parser)
+
+        book = SimpleNamespace(
+            kosync_doc_id='test-kosync-doc',
+            ebook_filename='test-book.epub',
+            abs_title='Test Audiobook',
+        )
+        request = SimpleNamespace(
+            locator_result=LocatorResult(percentage=0.4, xpath="/html/body/div[1]/p[5]")
+        )
+
+        result = client.update_progress(book, request)
+
+        self.assertFalse(result.success)
+        self.assertTrue(result.updated_state.get('skipped'))
+        self.assertIsNone(result.updated_state.get('xpath'))
+        kosync_api.update_progress.assert_not_called()
 
 
 if __name__ == '__main__':

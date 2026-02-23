@@ -2105,10 +2105,15 @@ def create_app(test_container=None):
     app.context_processor(inject_global_vars)
     app.jinja_env.globals['safe_folder_name'] = safe_folder_name
 
+    def _legacy_book_linker_redirect(dummy=None):
+        return redirect(url_for('forge'), code=301)
+
     # Register all routes here
     app.add_url_rule('/', 'index', index)
     app.add_url_rule('/shelfmark', 'shelfmark', shelfmark)
     app.add_url_rule('/forge', 'forge', forge)
+    app.add_url_rule('/book-linker', 'book_linker_legacy', _legacy_book_linker_redirect)
+    app.add_url_rule('/book-linker/<path:dummy>', 'book_linker_legacy_path', _legacy_book_linker_redirect)
     app.add_url_rule('/match', 'match', match, methods=['GET', 'POST'])
     app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
     app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])

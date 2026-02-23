@@ -152,8 +152,13 @@ class ConfigLoader:
                 # Apply validation or type conversion if needed (mostly string for env vars)
                 val_str = str(value) if value is not None else ""
                 
-                # Update environment variable
-                os.environ[key] = val_str
+                # Preserve existing non-empty env vars when DB value is blank.
+                if val_str != "":
+                    os.environ[key] = val_str
+                else:
+                    existing_env = os.environ.get(key, "")
+                    if not existing_env:
+                        os.environ[key] = ""
                 
                 # Mask secrets in logs
                 log_val = "******" if any(s in key for s in ['KEY', 'PASSWORD', 'TOKEN']) else val_str
