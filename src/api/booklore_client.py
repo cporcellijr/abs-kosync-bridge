@@ -361,7 +361,7 @@ class BookloreClient:
                     # Problem 2: Cache Key 'fname' is lowercase, but real filename is in book_info['fileName'].
                     
                     live_book = live_map[str(bid)]
-                    raw_live_filename = live_book.get('fileName', '')
+                    raw_live_filename = live_book.get('primaryFile', {}).get('fileName', live_book.get('fileName', ''))
                     # Clean filename to ensure we don't treat whitespace/control chars as valid names
                     live_filename = str(raw_live_filename).strip() if raw_live_filename else ''
                     
@@ -451,7 +451,10 @@ class BookloreClient:
             if lid is not None and str(lid) != str(self.target_library_id):
                 return None
 
-        filename = detail.get('fileName', '')
+        primary_file = detail.get('primaryFile', {})
+        filename = primary_file.get('fileName', detail.get('fileName', ''))
+        filepath = primary_file.get('filePath', detail.get('filePath', ''))
+        book_type = primary_file.get('bookType', detail.get('bookType', ''))
         if not filename:
             return
 
@@ -473,11 +476,11 @@ class BookloreClient:
         book_info = {
             'id': detail.get('id'),
             'fileName': filename,
-            'filePath': detail.get('filePath'),
+            'filePath': filepath,
             'title': title,
             'subtitle': subtitle,
             'authors': author_str,
-            'bookType': detail.get('bookType'),
+            'bookType': book_type,
             'epubProgress': detail.get('epubProgress'),
             'pdfProgress': detail.get('pdfProgress'),
             'cbxProgress': detail.get('cbxProgress'),
@@ -651,7 +654,7 @@ class BookloreClient:
         response = self._make_request("GET", f"/api/v1/books/{book['id']}")
         if response and response.status_code == 200:
             data = response.json()
-            book_type = data.get('bookType', '').upper()
+            book_type = data.get('primaryFile', {}).get('bookType', data.get('bookType', '')).upper()
             if book_type == 'EPUB':
                 progress = data.get('epubProgress') or {}
                 pct = progress.get('percentage', 0)
