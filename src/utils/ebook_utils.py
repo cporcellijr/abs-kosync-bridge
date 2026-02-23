@@ -418,7 +418,14 @@ class EbookParser:
             path_segments.append(f"{curr.name}[{index}]")
             curr = curr.parent
 
+        if not path_segments:
+            return "/body/p[1]", target_tag, False
+
         xpath = "//" + "/".join(reversed(path_segments)) if found_anchor else "/" + "/".join(reversed(path_segments))
+        xpath = xpath.rstrip("/")
+        if xpath in ("", "/", "//", "/body", "//body"):
+            xpath = "/body/p[1]"
+            found_anchor = False
         return xpath, target_tag, found_anchor
 
     def find_text_location(self, filename, search_phrase, hint_percentage=None) -> Optional[LocatorResult]:
@@ -541,6 +548,67 @@ class EbookParser:
 
 
 
+    def _build_sentence_level_chapter_fallback_xpath(self, html_content, spine_index) -> str:
+        """
+        Build a safe sentence-level XPath anchored to the first readable text node
+        in the chapter. This intentionally targets node starts (.0) instead of
+        character-level offsets.
+        """
+        default_xpath = f"/body/DocFragment[{spine_index}]/body/p[1]/text().0"
+        try:
+            tree = html.fromstring(html_content)
+        except Exception:
+            return default_xpath
+
+        sentence_tags = (
+            "p", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+            "blockquote", "figcaption", "dd", "dt", "td", "th"
+        )
+
+        def first_non_empty_direct_text_suffix(element):
+            try:
+                direct_text_nodes = element.xpath("text()")
+            except Exception:
+                return None
+            for i, node in enumerate(direct_text_nodes, start=1):
+                if str(node).strip():
+                    return "/text()" if i == 1 else f"/text()[{i}]"
+            return None
+
+        for tag in sentence_tags:
+            for element in tree.iter(tag):
+                suffix = first_non_empty_direct_text_suffix(element)
+                if suffix:
+                    xpath_base = self._build_xpath(element)
+                    return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
+        for element in tree.iter():
+            suffix = first_non_empty_direct_text_suffix(element)
+            if suffix:
+                xpath_base = self._build_xpath(element)
+                return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
+        return default_xpath
+
+    def get_sentence_level_ko_xpath(self, filename, percentage) -> Optional[str]:
+        """
+        Resolve a sentence-level KOReader XPath from percentage.
+        Returns node-start offset (.0), not word-level offsets.
+        """
+        try:
+            book_path = self.resolve_book_path(filename)
+            full_text, _ = self.extract_text_and_map(book_path)
+            if not full_text:
+                return None
+
+            pct = float(percentage if percentage is not None else 0.0)
+            pct = max(0.0, min(1.0, pct))
+            position = int((len(full_text) - 1) * pct) if len(full_text) > 1 else 0
+            return self.get_perfect_ko_xpath(filename, position)
+        except Exception as e:
+            logger.error(f"Error generating sentence-level KOReader XPath: {e}")
+            return None
+
     def get_perfect_ko_xpath(self, filename, position=0) -> Optional[str]:
         """
         Generate KOReader XPath for a specific character position in the book.
@@ -571,6 +639,8 @@ class EbookParser:
             current_char_count = 0
             target_string = None
             target_offset = 0
+            first_non_empty_string = None
+            last_non_empty_string = None
 
             elements = soup.find_all(string=True)
             for string in elements:
@@ -580,6 +650,10 @@ class EbookParser:
                 
                 if text_len == 0: 
                     continue
+
+                if first_non_empty_string is None:
+                    first_non_empty_string = string
+                last_non_empty_string = string
                 
                 if current_char_count + text_len > local_pos:
                     target_string = string
@@ -601,13 +675,23 @@ class EbookParser:
                 if current_char_count <= local_pos:
                     current_char_count += 1
 
+            if target_string is None:
+                target_string = last_non_empty_string or first_non_empty_string
+                target_offset = 0
+
             if not target_string:
                 logger.warning(f"⚠️ No matching text element found in spine {target_item['spine_index']}")
-                return None
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
 
             target_tag = target_string.parent
             if not target_tag or target_tag.name == '[document]':
-                return None
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
 
             # =================================================================
             # HYBRID ANCHOR MAPPING: BS4 -> LXML
@@ -684,6 +768,11 @@ class EbookParser:
                 path_segments.append('body')
 
             xpath = "/".join(reversed(path_segments))
+            if xpath == "body":
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
             return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
 
         except Exception as e:
