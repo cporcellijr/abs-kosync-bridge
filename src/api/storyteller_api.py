@@ -425,32 +425,6 @@ class StorytellerAPIClient:
         except Exception as e:
             logger.warning(f"⚠️ API download raised exception: {e}")
 
-    def trigger_processing(self, book_uuid: str) -> bool:
-        """Trigger the Storyteller processing for a book."""
-        try:
-            response = self._make_request("POST", f"/api/v2/books/{book_uuid}/process", {})
-            if response and response.status_code in [200, 201, 202, 204]:
-                logger.info(f"✅ Triggered Storyteller processing for '{book_uuid}'")
-                return True
-            else:
-                logger.warning(f"⚠️ Failed to trigger processing: {response.status_code if response else 'No Resp'}")
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error triggering processing: {e}")
-            return False
-
-            return False
-
-    def get_book_details(self, book_uuid: str) -> Optional[Dict]:
-        """Fetch full book details from Storyteller API."""
-        try:
-            response = self._make_request("GET", f"/api/v2/books/{book_uuid}")
-            if response and response.status_code == 200:
-                return response.json()
-        except Exception as e:
-            logger.error(f"❌ Error fetching book details: {e}")
-        return None
-
         # Fallback: Local File Copy
         try:
             # 1. Get Book Details for Filepath
@@ -497,6 +471,30 @@ class StorytellerAPIClient:
         except Exception as e:
             logger.error(f"❌ Failed to download Storyteller book '{book_uuid}' (API & Fallback): {e}")
             raise e
+
+    def trigger_processing(self, book_uuid: str) -> bool:
+        """Trigger the Storyteller processing for a book."""
+        try:
+            response = self._make_request("POST", f"/api/v2/books/{book_uuid}/process", {})
+            if response and response.status_code in [200, 201, 202, 204]:
+                logger.info(f"✅ Triggered Storyteller processing for '{book_uuid}'")
+                return True
+            else:
+                logger.warning(f"⚠️ Failed to trigger processing: {response.status_code if response else 'No Resp'}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error triggering processing: {e}")
+            return False
+
+    def get_book_details(self, book_uuid: str) -> Optional[Dict]:
+        """Fetch full book details from Storyteller API."""
+        try:
+            response = self._make_request("GET", f"/api/v2/books/{book_uuid}")
+            if response and response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"❌ Error fetching book details: {e}")
+        return None
 
     def get_progress(self, ebook_filename: str) -> Tuple[Optional[float], Optional[int]]:
         """Legacy compatibility wrapper."""
