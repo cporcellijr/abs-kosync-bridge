@@ -11,6 +11,11 @@ from src.sync_clients.sync_client_interface import SyncClient, SyncResult, Updat
 logger = logging.getLogger(__name__)
 
 class KoSyncSyncClient(SyncClient):
+    _FRAGILE_INLINE_SEGMENT_RE = re.compile(
+        r"/(?:span|em|strong|b|i|u|small|sub|sup|font|mark|abbr|cite|code|q|time|s|del|ins)(?:\[\d+\])?(?=/|$)",
+        re.IGNORECASE,
+    )
+
     def __init__(self, kosync_client: KoSyncClient, ebook_parser: EbookParser):
         super().__init__(ebook_parser)
         self.kosync_client = kosync_client
@@ -84,6 +89,8 @@ class KoSyncSyncClient(SyncClient):
         clean_xpath = re.sub(r"/{2,}", "/", clean_xpath).rstrip("/")
 
         if not re.match(r"^/body/DocFragment\[\d+\](/.+)?$", clean_xpath):
+            return None
+        if self._FRAGILE_INLINE_SEGMENT_RE.search(clean_xpath):
             return None
 
         if re.search(r"/text\(\)(\[\d+\])?\.\d+$", clean_xpath):

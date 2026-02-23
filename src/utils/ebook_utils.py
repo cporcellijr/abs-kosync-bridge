@@ -50,6 +50,16 @@ class LRUCache:
 
 
 class EbookParser:
+    CRENGINE_FRAGILE_INLINE_TAGS = {
+        "span", "em", "strong", "b", "i", "u", "a", "font", "small", "big", "sub", "sup"
+    }
+    CRENGINE_STRUCTURAL_TAGS = {
+        "p", "div", "section", "article", "blockquote",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "header", "footer", "aside",
+        "td", "th", "dt", "dd", "figcaption", "pre"
+    }
+
     def __init__(self, books_dir, epub_cache_dir=None):
         self.books_dir = Path(books_dir)
         self.epub_cache_dir = Path(epub_cache_dir) if epub_cache_dir else Path("/data/epub_cache")
@@ -548,6 +558,63 @@ class EbookParser:
 
 
 
+    def _local_tag_name(self, node) -> str:
+        tag = getattr(node, "tag", None)
+        if not isinstance(tag, str):
+            tag = getattr(node, "name", None)
+        if not isinstance(tag, str):
+            return ""
+        if "}" in tag:
+            tag = tag.split("}", 1)[1]
+        return tag.lower()
+
+    def _get_parent_node(self, node):
+        if node is None:
+            return None
+        getparent = getattr(node, "getparent", None)
+        if callable(getparent):
+            return getparent()
+        return getattr(node, "parent", None)
+
+    def _nearest_crengine_anchor(self, node):
+        current = node
+        while current is not None:
+            tag_name = self._local_tag_name(current)
+            if tag_name == "body":
+                return current
+            if tag_name in self.CRENGINE_STRUCTURAL_TAGS:
+                return current
+            if tag_name in ("html", "document", "[document]"):
+                break
+            current = self._get_parent_node(current)
+        return node
+
+    def _first_non_empty_direct_text_suffix(self, element) -> Optional[str]:
+        if element is None:
+            return None
+        try:
+            direct_text_nodes = element.xpath("text()")
+            for i, node in enumerate(direct_text_nodes, start=1):
+                if str(node).strip():
+                    return "/text()" if i == 1 else f"/text()[{i}]"
+        except Exception:
+            pass
+
+        if isinstance(element, Tag):
+            text_nodes = [child for child in element.children if isinstance(child, str)]
+            for i, node in enumerate(text_nodes, start=1):
+                if str(node).strip():
+                    return "/text()" if i == 1 else f"/text()[{i}]"
+        return None
+
+    def _build_crengine_safe_text_xpath(self, element, spine_index, html_content) -> str:
+        anchor = self._nearest_crengine_anchor(element)
+        suffix = self._first_non_empty_direct_text_suffix(anchor)
+        if not suffix:
+            return self._build_sentence_level_chapter_fallback_xpath(html_content, spine_index)
+        xpath_base = self._build_xpath(anchor)
+        return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
     def _build_sentence_level_chapter_fallback_xpath(self, html_content, spine_index) -> str:
         """
         Build a safe sentence-level XPath anchored to the first readable text node
@@ -562,28 +629,21 @@ class EbookParser:
 
         sentence_tags = (
             "p", "li", "h1", "h2", "h3", "h4", "h5", "h6",
-            "blockquote", "figcaption", "dd", "dt", "td", "th"
+            "blockquote", "figcaption", "dd", "dt", "td", "th",
+            "div", "section", "article", "pre"
         )
-
-        def first_non_empty_direct_text_suffix(element):
-            try:
-                direct_text_nodes = element.xpath("text()")
-            except Exception:
-                return None
-            for i, node in enumerate(direct_text_nodes, start=1):
-                if str(node).strip():
-                    return "/text()" if i == 1 else f"/text()[{i}]"
-            return None
 
         for tag in sentence_tags:
             for element in tree.iter(tag):
-                suffix = first_non_empty_direct_text_suffix(element)
+                suffix = self._first_non_empty_direct_text_suffix(element)
                 if suffix:
                     xpath_base = self._build_xpath(element)
                     return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
 
         for element in tree.iter():
-            suffix = first_non_empty_direct_text_suffix(element)
+            if self._local_tag_name(element) not in self.CRENGINE_STRUCTURAL_TAGS:
+                continue
+            suffix = self._first_non_empty_direct_text_suffix(element)
             if suffix:
                 xpath_base = self._build_xpath(element)
                 return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
@@ -716,30 +776,22 @@ class EbookParser:
             for el in tree.iter():
                 if el.text and el.text == search_text:
                     if current_occurrence == occurrence_index:
-                        xpath = self._build_xpath(el)
-                        # Regular element text is just /text()
-                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
+                        return self._build_crengine_safe_text_xpath(
+                            el,
+                            target_item['spine_index'],
+                            target_item['content']
+                        )
                     current_occurrence += 1
                     
                 if el.tail and el.tail == search_text:
                     if current_occurrence == occurrence_index:
                         parent = el.getparent()
                         node_to_build = parent if parent is not None else el
-                        xpath_base = self._build_xpath(node_to_build)
-                        
-                        # Calculate which text node of the parent this is
-                        # XPath text() nodes are 1-based indices of text children
-                        text_node_index = 0
-                        if node_to_build.text: text_node_index += 1
-                        
-                        for child in node_to_build:
-                            if child == el:
-                                if child.tail: text_node_index += 1
-                                break
-                            if child.tail: text_node_index += 1
-                                
-                        suffix = f"/text()[{text_node_index}]" if text_node_index > 0 else "/text()"
-                        return f"/body/DocFragment[{target_item['spine_index']}]/{xpath_base}{suffix}.0"
+                        return self._build_crengine_safe_text_xpath(
+                            node_to_build,
+                            target_item['spine_index'],
+                            target_item['content']
+                        )
                     current_occurrence += 1
 
             logger.warning(f"⚠️ Hybrid Anchor mapping failed for '{search_text}'. Falling back to BS4 structural path.")
@@ -752,6 +804,10 @@ class EbookParser:
                 if curr.name == 'body':
                     path_segments.append("body")
                     break
+                
+                if curr.name in self.CRENGINE_FRAGILE_INLINE_TAGS:
+                    curr = curr.parent
+                    continue
                 
                 index = 1
                 sibling = curr.previous_sibling
@@ -789,17 +845,23 @@ class EbookParser:
         current = element
 
         while current is not None and current.tag not in ['html', 'document']:
+            tag_name = self._local_tag_name(current)
+
+            if tag_name in self.CRENGINE_FRAGILE_INLINE_TAGS:
+                current = current.getparent()
+                continue
+            
             # Get siblings of same tag to determine index
             parent = current.getparent()
             if parent is not None:
-                siblings = [s for s in parent if s.tag == current.tag]
+                siblings = [s for s in parent if self._local_tag_name(s) == tag_name]
                 if len(siblings) > 1:
                     index = siblings.index(current) + 1
-                    parts.insert(0, f"{current.tag}[{index}]")
+                    parts.insert(0, f"{tag_name}[{index}]")
                 else:
-                    parts.insert(0, current.tag)
+                    parts.insert(0, tag_name)
             else:
-                parts.insert(0, current.tag)
+                parts.insert(0, tag_name)
             current = parent
 
         # Clean up the path

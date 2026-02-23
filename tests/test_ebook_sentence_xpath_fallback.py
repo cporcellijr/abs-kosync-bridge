@@ -1,4 +1,5 @@
 import unittest
+from lxml import html
 
 from src.utils.ebook_utils import EbookParser
 
@@ -24,6 +25,26 @@ class TestEbookSentenceXPathFallback(unittest.TestCase):
         xpath, _, _ = self.parser._generate_xpath_bs4(html_content, 0)
         self.assertEqual(xpath, "/body/p[1]")
         self.assertFalse(xpath.endswith("/"))
+
+    def test_crengine_safe_xpath_collapses_inline_target_to_structural_anchor(self):
+        html_content = "<html><body><p>Lead <span>inline target</span></p></body></html>"
+        tree = html.fromstring(html_content)
+        span = tree.xpath("//span")[0]
+
+        xpath = self.parser._build_crengine_safe_text_xpath(span, 3, html_content)
+
+        self.assertEqual(xpath, "/body/DocFragment[3]/body/p/text().0")
+        self.assertNotIn("/span", xpath)
+
+    def test_crengine_safe_xpath_falls_back_when_anchor_has_no_direct_text(self):
+        html_content = "<html><body><p><span>inline only</span></p></body></html>"
+        tree = html.fromstring(html_content)
+        span = tree.xpath("//span")[0]
+
+        xpath = self.parser._build_crengine_safe_text_xpath(span, 8, html_content)
+
+        self.assertEqual(xpath, "/body/DocFragment[8]/body/p[1]/text().0")
+        self.assertNotIn("/span", xpath)
 
 
 if __name__ == "__main__":

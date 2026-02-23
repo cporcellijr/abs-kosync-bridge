@@ -26,6 +26,10 @@ class TestKoSyncXPathSafety(unittest.TestCase):
         self.assertEqual(self.client._sanitize_kosync_xpath("", 0.0), "")
         self.assertIsNone(self.client._sanitize_kosync_xpath("", 0.2))
 
+    def test_sanitize_rejects_fragile_inline_xpath_segments(self):
+        inline_xpath = "/body/DocFragment[24]/body/p[15]/span[2]/text().0"
+        self.assertIsNone(self.client._sanitize_kosync_xpath(inline_xpath, 0.5))
+
     def test_update_progress_skips_malformed_xpath_when_unrecoverable(self):
         self.ebook_parser.get_sentence_level_ko_xpath.return_value = None
         book = SimpleNamespace(kosync_doc_id="doc-1", ebook_filename="book.epub", abs_title="Book")
@@ -52,6 +56,26 @@ class TestKoSyncXPathSafety(unittest.TestCase):
             "doc-2",
             0.73,
             "/body/DocFragment[4]/body/p[1]/text().0",
+        )
+
+    def test_update_progress_replaces_fragile_inline_xpath(self):
+        self.ebook_parser.get_sentence_level_ko_xpath.return_value = "/body/DocFragment[24]/body/p[15]/text().0"
+        self.kosync_api.update_progress.return_value = True
+        book = SimpleNamespace(kosync_doc_id="doc-4", ebook_filename="book.epub", abs_title="Book")
+        locator = LocatorResult(
+            percentage=0.61,
+            xpath="/body/DocFragment[24]/body/p[15]/span[2]/text().0",
+        )
+        request = UpdateProgressRequest(locator_result=locator)
+
+        result = self.client.update_progress(book, request)
+
+        self.assertTrue(result.success)
+        self.ebook_parser.get_sentence_level_ko_xpath.assert_called_once_with("book.epub", 0.61)
+        self.kosync_api.update_progress.assert_called_once_with(
+            "doc-4",
+            0.61,
+            "/body/DocFragment[24]/body/p[15]/text().0",
         )
 
     def test_update_progress_clear_flow_forces_empty_xpath(self):
