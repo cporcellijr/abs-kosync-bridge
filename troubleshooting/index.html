@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -589,6 +589,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#kosync-port-not-working" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KOSync Port Not Working
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whispercpp-model-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WhisperCpp Model Ignored
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#syncing-backwards" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -722,6 +744,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#kosync-port-not-working" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KOSync Port Not Working
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whispercpp-model-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WhisperCpp Model Ignored
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#syncing-backwards" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -791,9 +835,24 @@
 <li><strong>Model Size</strong>: Try setting <code>WHISPER_MODEL=tiny</code> in the Settings page.</li>
 <li><strong>Hardware</strong>: Transcription is CPU-intensive. If possible, enable <a href="#gpu-acceleration-optional">GPU Acceleration</a>.</li>
 </ul>
+<h3 id="kosync-port-not-working">KOSync Port Not Working</h3>
+<ul>
+<li><strong>Issue</strong>: You set <code>KOSYNC_PORT</code> but cannot connect on that port.</li>
+<li><strong>Solution</strong>: Ensure you have mapped the port in your <code>docker-compose.yml</code>.</li>
+<li>Example: <code>ports: - "5758:5758"</code> if <code>KOSYNC_PORT=5758</code>.</li>
+</ul>
+<h3 id="whispercpp-model-ignored">WhisperCpp Model Ignored</h3>
+<ul>
+<li><strong>Issue</strong>: WhisperCpp seems to use 'large-v3' even if I select 'small' in the UI.</li>
+<li><strong>Solution</strong>: Previous versions had a bug where the model parameter wasn't sent. This is fixed in the latest release.</li>
+<li>Ensure <code>WHISPER_MODEL</code> is set in your environment variables (e.g., <code>WHISPER_MODEL=small</code>).</li>
+<li>Check the logs to see the request URL and data being sent.</li>
+</ul>
 <h3 id="syncing-backwards">Syncing backwards?</h3>
-<p>The system includes anti-regression logic, but if you switch devices rapidly, issues can occur.
-- <strong>Solution</strong>: Go to the Dashboard and click <strong>"Reset Progress"</strong> for the affected book. This clears the stored sync state without affecting your external accounts.</p>
+<p>The system includes anti-regression logic, but if you switch devices rapidly, issues can occur.</p>
+<ul>
+<li><strong>Solution</strong>: Go to the Dashboard and click <strong>"Reset Progress"</strong> for the affected book. This clears the stored sync state without affecting your external accounts.</li>
+</ul>
 <hr />
 <h2 id="logs">Logs</h2>
 <p>Documentation and live logs are available directly in the Web UI.

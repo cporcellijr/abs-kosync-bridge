@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -576,6 +576,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Step 3: Create docker-compose.yml">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security-note-split-port-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Note: Split-Port Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -856,6 +873,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Step 3: Create docker-compose.yml">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security-note-split-port-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Note: Split-Port Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -934,18 +968,24 @@
 <li>Copy the token.</li>
 </ol>
 <h3 id="optional-find-your-abs-library-id">(Optional) Find Your ABS Library ID</h3>
-<p>If you want to limit the sync mapping search to a specific library (recommended for performance):
-1. In ABS, go to your audiobook library.
-2. Look at the URL: <code>https://your-server.com/library/LIBRARY_ID_HERE</code>
-3. Copy that ID.</p>
+<p>If you want to limit the sync mapping search to a specific library (recommended for performance):</p>
+<ol>
+<li>In ABS, go to your audiobook library.</li>
+<li>Look at the URL: <code>https://your-server.com/library/LIBRARY_ID_HERE</code></li>
+<li>Copy that ID.</li>
+</ol>
 <h3 id="optional-kosync-credentials">(Optional) KOSync Credentials</h3>
-<p>If using KOReader sync:
-- Your Calibre/KOSync username and password.
-- KOSync server URL (usually <code>https://your-calibre.com/api/koreader</code>).</p>
+<p>If using KOReader sync:</p>
+<ul>
+<li>Your Calibre/KOSync username and password.</li>
+<li>KOSync server URL (usually <code>https://your-calibre.com/api/koreader</code>).</li>
+</ul>
 <h3 id="optional-booklore-credentials">(Optional) Booklore Credentials</h3>
-<p>If using Booklore:
-- Your Booklore server URL.
-- Username and password.</p>
+<p>If using Booklore:</p>
+<ul>
+<li>Your Booklore server URL.</li>
+<li>Username and password.</li>
+</ul>
 <hr />
 <h2 id="step-2-prepare-your-work-directory">Step 2: Prepare Your Work Directory</h2>
 <p>Create a directory for the application on your server:</p>
@@ -962,7 +1002,8 @@ mkdir<span class="w"> </span>data
 <span class="w">    </span><span class="nt">container_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">abs_kosync</span>
 <span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
 <span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8080:5757&quot;</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8080:5757&quot;</span><span class="w"> </span><span class="c1"># Admin Panel (Keep Private)</span>
+<span class="w">      </span><span class="c1"># - &quot;5758:5758&quot; # Sync Protocol (Safe to Expose)</span>
 <span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TZ=America/New_York</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">LOG_LEVEL=INFO</span>
@@ -974,12 +1015,16 @@ mkdir<span class="w"> </span>data
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./data:/data</span><span class="w">                    </span><span class="c1"># App data</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/path/to/ebooks:/books</span><span class="w">          </span><span class="c1"># Your EPUB library</span>
 
-<span class="w">      </span><span class="c1"># === OPTIONAL: Book Linker ===</span>
-<span class="w">      </span><span class="c1"># - /path/to/downloads/ebooks:/linker_books</span>
-<span class="w">      </span><span class="c1"># - /path/to/downloads/audio:/audiobooks</span>
-<span class="w">      </span><span class="c1"># - ./processing:/processing</span>
-<span class="w">      </span><span class="c1"># - /path/to/storyteller:/storyteller/library</span>
+<span class="w">      </span><span class="c1"># === OPTIONAL: Forge ===</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/path/to/storyteller/library:/storyteller_library</span>
 </code></pre></div>
+<h3 id="security-note-split-port-mode">Security Note: Split-Port Mode</h3>
+<p>By default, the container listens on port <strong>8080</strong> (mapped to 5757 int). This port exposes <strong>everything</strong>: the Admin Dashboard, Settings, and API.</p>
+<p>If you want to expose the KOSync endpoint to the internet (for syncing on the go) but keep the Dashboard private, you can use <strong>Split-Port Mode</strong>:</p>
+<ol>
+<li>Set <code>KOSYNC_PORT=5758</code> (or any other port) in your environment variables.</li>
+<li>Map that port in <code>docker-compose.yml</code> (as shown in the commented example).</li>
+</ol>
 <div class="admonition tip">
 <p class="admonition-title">Optional Integrations</p>
 <p>You can configure KOSync, Storyteller, and other integrations via enviroment variables during bootstrap, but it is easier to do it later in the Web UI!</p>
@@ -1003,8 +1048,10 @@ mkdir<span class="w"> </span>data
 <h2 id="step-6-create-your-first-mapping">Step 6: Create Your First Mapping</h2>
 <ol>
 <li>Go to the <strong>Match</strong> page (or click "Single Match" on the dashboard).</li>
-<li>Search for an audiobook in your ABS library.</li>
-<li>Select the corresponding ebook file from the list.</li>
+<li><strong>Search</strong> for an audiobook (e.g., "The Martian").</li>
+<li><strong>Select</strong> the audiobook from the first column.</li>
+<li>(Optional) Select a <strong>Storyteller</strong> artifact if one was found. If not, choose "None".</li>
+<li><strong>Select</strong> the standard EPUB file from the third column.</li>
 <li>Click <strong>Create Mapping</strong>.</li>
 </ol>
 <p>That's it! The system will now automatically sync progress between your audiobook and ebook every 5 minutes (default).</p>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -529,6 +529,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -545,6 +563,75 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#630-2026-02-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [6.3.0] - 2026-02-18
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[6.3.0] - 2026-02-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚀 Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐛 Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧹 Maintenance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -570,6 +657,64 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#630-2026-02-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [6.3.0] - 2026-02-18
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[6.3.0] - 2026-02-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🚀 Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🐛 Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        🧹 Maintenance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -589,7 +734,36 @@
 
 
 <h1 id="changelog">Changelog</h1>
-<p>For the most up-to-date changes, features, and bug fixes, please refer to the <strong><a href="https://github.com/cporcellijr/abs-kosync-bridge/releases">GitHub Releases</a></strong> page.</p>
+<p>For the full history of changes, please refer to the <strong><a href="https://github.com/cporcellijr/abs-kosync-bridge/releases">GitHub Releases</a></strong> page.</p>
+<hr />
+<h2 id="630-2026-02-18">[6.3.0] - 2026-02-18</h2>
+<h3 id="features">🚀 Features</h3>
+<ul>
+<li><strong>Tri-Link Architecture</strong>: Maintain a three-way link between ABS audiobook, KOReader ebook, and Storyteller entries.</li>
+<li><strong>Auto-Forge Pipeline</strong>: Automated downloading, staging, and hand-off to Storyteller for processing. Triggered from the Matcher — automatically creates the sync mapping after Storyteller finishes.</li>
+<li><strong>Hardcover.app Audiobook Support</strong>: Link specific editions and sync listening progress (in seconds).</li>
+<li><strong>Booklore &amp; CWA (OPDS) Integration</strong>: Fetch ebooks from Booklore and OPDS sources.</li>
+<li><strong>Split-Port Security Mode</strong>: Run sync and admin UI on separate ports.</li>
+<li><strong>New Transcription Providers</strong>: Support for Whisper.cpp Server, Deepgram API, and CUDA GPU acceleration.</li>
+<li><strong>Progress Suggestions</strong>: Smart auto-discovery and suggestions for potential matches.</li>
+<li><strong>Telegram Notifications</strong>: Send log alerts to a Telegram chat at a configurable severity level.</li>
+<li><strong>UI Redesign</strong>: Horizontal dashboard cards, overhauled match pages, and responsive settings UI.</li>
+</ul>
+<h3 id="fixes">🐛 Fixes</h3>
+<ul>
+<li>Fixed KOReader sync crashes (XPath double <code>body</code> tag issue).</li>
+<li>Fixed KOSync hash overwrites by Storyteller artifacts.</li>
+<li>Fixed race conditions in Storyteller ingestion.</li>
+<li>Fixed special characters in filenames breaking glob searches.</li>
+<li>Fixed KOSync client headers, legacy exception types, and sync position payloads.</li>
+</ul>
+<h3 id="maintenance">🧹 Maintenance</h3>
+<ul>
+<li><strong>Logging Standardization</strong>: Consistent emoji prefixes and log levels across the entire codebase.</li>
+<li><strong>Unified DB Architecture</strong>: Transitioned to SQLAlchemy for alignments, transcripts, and settings.</li>
+<li><strong>Alembic Migrations</strong>: Improved migration tracking and safety checks.</li>
+<li><strong>Storyteller API</strong>: Removed direct DB access in favor of strictly API-based communication.</li>
+</ul>
 
 
 

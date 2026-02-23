@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -533,17 +533,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#how-it-works_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        🛠️ How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -802,17 +791,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#how-it-works_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        🛠️ How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -834,6 +812,7 @@
 
 
 <h1 id="abs-kosync-enhanced">ABS-KoSync Enhanced</h1>
+<!-- markdownlint-disable MD033 -->
 <div align="center">
 
 **The ultimate bridge for cross-platform reading and listening synchronization.**
@@ -842,6 +821,7 @@
 [View on GitHub](https://github.com/cporcellijr/abs-kosync-bridge){ .md-button }
 
 </div>
+<!-- markdownlint-enable MD033 -->
 
 <hr />
 <h2 id="what-is-it">📖 What is it?</h2>
@@ -870,7 +850,7 @@
 <tr>
 <td style="text-align: left;"><strong>Storyteller</strong></td>
 <td style="text-align: left;">Enhanced Reader</td>
-<td style="text-align: left;">Full Read/Write Sync (REST API &amp; SQLite)</td>
+<td style="text-align: left;">Full Read/Write Sync (REST API)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Booklore</strong></td>
@@ -888,7 +868,10 @@
 <h2 id="features">✨ Features</h2>
 <h3 id="core-sync-engine">🚀 Core Sync Engine</h3>
 <ul>
-<li><strong>AI-Powered Alignment</strong>: Uses Whisper AI transcription to accurately map audio timestamps to ebook text.</li>
+<li><strong>Robust Synchronization</strong>: Syncs progress bi-directionally between Audiobookshelf and KOReader.</li>
+<li><strong>Split-Port Security</strong>: Optionally run the sync service on a separate port from the admin dashboard for safe internet exposure.</li>
+<li><strong>Forge</strong>: Active tooling to prepare and trigger "Read-Along" books for Storyteller.</li>
+<li><strong>Multi-Device Support</strong>: Handles multiple KOReader devices seamlessly.</li>
 <li><strong>Multi-Platform Support</strong>: Synchronize progress across five different ecosystems simultaneously.</li>
 <li><strong>Smart Conflict Resolution</strong>: "Furthest progress wins" logic with built-in anti-regression protection.</li>
 <li><strong>Rich Positioning</strong>: Support for XPath, CSS selectors, and EPUB CFI for pixel-perfect positioning.</li>
@@ -899,7 +882,7 @@
 <li><strong>Real-Time Dashboard</strong>: Monitor progress and sync status across all your books.</li>
 <li><strong>Advanced Matcher</strong>: Manual mapping for complex titles or different editions.</li>
 <li><strong>Batch Processing</strong>: Queue and process multiple books for synchronization in bulk.</li>
-<li><strong>Book Linker</strong>: Automated workflow for Storyteller readaloud generation.</li>
+<li><strong>Forge</strong>: Automated workflow for Storyteller readaloud generation.</li>
 <li><strong>Dynamic Settings</strong>: Configure your entire system from the Web UI with instant hot-reloading.</li>
 </ul>
 <h3 id="automation-reliability">🤖 Automation &amp; Reliability</h3>
@@ -910,7 +893,6 @@
 </ul>
 <hr />
 <h2 id="how-it-works">🛠️ How It Works</h2>
-<h2 id="how-it-works_1">🛠️ How It Works</h2>
 <p>The sync engine operates on a sophisticated event-driven architecture (V2):</p>
 <ol>
 <li><strong>Triggers</strong>: Changes are detected via <strong>Instant Pushes</strong> (Internal KOSync) or <strong>Periodic Polling</strong> (ABS/Booklore).</li>
