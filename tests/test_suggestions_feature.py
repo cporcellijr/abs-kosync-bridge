@@ -44,6 +44,7 @@ class MockContainer:
     def sync_clients(self): return self.mock_sync_clients
     def data_dir(self): return Path(tempfile.gettempdir()) / 'test_data'
     def books_dir(self): return Path(tempfile.gettempdir()) / 'test_books'
+    def epub_cache_dir(self): return Path(tempfile.gettempdir()) / 'test_epub_cache'
 
 class TestSuggestionsFeature(unittest.TestCase):
     def setUp(self):
@@ -138,6 +139,7 @@ class TestSuggestionsFeature(unittest.TestCase):
             self.mock_container.mock_sync_clients.items.return_value = {}.items()
             
             # Perform Match
+            self.mock_container.mock_database_service.get_book.return_value = None
             self.client.post('/match', data={
                 'audiobook_id': 'abc-123',
                 'ebook_filename': 'test.epub'

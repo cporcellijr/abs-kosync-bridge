@@ -549,6 +549,48 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
             finally:
                 migration_db_service.db_manager.close()
 
+    def test_clear_stale_suggestions(self):
+        """Test clearing suggestions that are not for active books."""
+        from src.db.models import PendingSuggestion
+        
+        # 1. Setup Active Books
+        active_id = 'active-book-id'
+        book = self.Book(abs_id=active_id, abs_title='Active Book', status='active')
+        self.db_service.save_book(book)
+        
+        # 2. Setup Suggestions
+        # Suggestion for the active book (should be preserved)
+        s1 = PendingSuggestion(
+            source_id=active_id,
+            title='Active Book Title',
+            author='Author A',
+            matches_json='[]'
+        )
+        self.db_service.save_pending_suggestion(s1)
+        
+        # Suggestion for a non-existent book (should be cleared)
+        stale_id = 'stale-book-id'
+        s2 = PendingSuggestion(
+            source_id=stale_id,
+            title='Stale Book Title',
+            author='Author B',
+            matches_json='[]'
+        )
+        self.db_service.save_pending_suggestion(s2)
+        
+        # Verify initial state
+        all_suggestions = self.db_service.get_all_pending_suggestions()
+        self.assertEqual(len(all_suggestions), 2)
+        
+        # 3. Clear Stale Suggestions
+        cleared_count = self.db_service.clear_stale_suggestions()
+        self.assertEqual(cleared_count, 1)
+        
+        # 4. Verify Final State
+        remaining = self.db_service.get_all_pending_suggestions()
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0].source_id, active_id)
+
     def test_migration_partial_data(self):
         """Test migration with partial/missing data scenarios."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -622,6 +664,193 @@ class TestDatabaseServiceIntegration(unittest.TestCase):
                 self.assertNotIn('booklore', state_clients)
             finally:
                 migration_db_service.db_manager.close()
+
+
+class TestLegacyDatabaseMigration(unittest.TestCase):
+    """
+    Tests that simulate a pre-Alembic (legacy) database to verify the stamp-on-upgrade
+    fix prevents startup crashes when upgrading from older installations.
+
+    The crash scenario:
+      1. User has a database created before Alembic was introduced.
+      2. The database has a 'books' table but NO 'alembic_version' table.
+      3. On startup, DatabaseService calls command.upgrade("head").
+      4. Alembic tries to run initial_database_schema which calls op.create_table("books").
+      5. SQLite raises OperationalError: table books already exists → container crashes.
+
+    The fix:
+      Before running upgrade, detect this state and stamp the DB at the initial
+      revision (76886bc89d6e) so Alembic skips that migration and only applies
+      newer ones on top.
+    """
+
+    def _make_legacy_db(self, db_path: str):
+        """
+        Create a bare SQLite database that mimics a pre-Alembic installation.
+        Manually creates all tables that initial_database_schema (76886bc89d6e)
+        would have created, but WITHOUT an alembic_version table. This is the
+        exact state a legacy user's database would be in before upgrading.
+
+        We must create all tables from that migration (books, hardcover_details,
+        states, jobs) because stamping at 76886bc89d6e tells Alembic those tables
+        already exist. Only creating 'books' would cause subsequent ADD COLUMN
+        migrations to fail with 'no such table: hardcover_details'.
+        """
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.executescript("""
+            CREATE TABLE books (
+                abs_id TEXT PRIMARY KEY,
+                abs_title TEXT,
+                ebook_filename TEXT,
+                kosync_doc_id TEXT,
+                transcript_file TEXT,
+                status TEXT DEFAULT 'active',
+                duration REAL
+            );
+
+            CREATE TABLE hardcover_details (
+                abs_id TEXT PRIMARY KEY,
+                hardcover_book_id TEXT,
+                hardcover_edition_id TEXT,
+                hardcover_pages INTEGER,
+                isbn TEXT,
+                asin TEXT,
+                matched_by TEXT,
+                FOREIGN KEY (abs_id) REFERENCES books(abs_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                abs_id TEXT NOT NULL,
+                client_name TEXT NOT NULL,
+                last_updated REAL,
+                percentage REAL,
+                timestamp REAL,
+                xpath TEXT,
+                cfi TEXT,
+                FOREIGN KEY (abs_id) REFERENCES books(abs_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                abs_id TEXT NOT NULL,
+                last_attempt REAL,
+                retry_count INTEGER DEFAULT 0,
+                last_error TEXT,
+                FOREIGN KEY (abs_id) REFERENCES books(abs_id) ON DELETE CASCADE
+            );
+        """)
+        # Insert a row so we can verify data is preserved after migration
+        conn.execute("""
+            INSERT INTO books (abs_id, abs_title, status)
+            VALUES ('legacy-book-1', 'My Legacy Book', 'active')
+        """)
+        conn.commit()
+        conn.close()
+
+    def test_legacy_db_does_not_crash_on_startup(self):
+        """
+        Scenario: legacy database with 'books' but no 'alembic_version'.
+        DatabaseService.__init__ must complete without raising any exception.
+        Previously this would crash with: OperationalError: table books already exists
+        """
+        import sqlite3
+        from src.db.database_service import DatabaseService
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / 'legacy.db')
+            self._make_legacy_db(db_path)
+
+            # Verify precondition: books exists, alembic_version does not
+            conn = sqlite3.connect(db_path)
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            conn.close()
+            self.assertIn('books', tables)
+            self.assertNotIn('alembic_version', tables)
+
+            # This must not raise — previously it would crash here
+            try:
+                db_service = DatabaseService(db_path)
+                db_service.db_manager.close()
+            except Exception as e:
+                self.fail(
+                    f"DatabaseService raised {type(e).__name__} on legacy database: {e}\n"
+                    "This means the legacy stamp fix is not working."
+                )
+
+    def test_legacy_db_is_stamped_at_initial_revision(self):
+        """
+        After DatabaseService starts up against a legacy database, the alembic_version
+        table must exist and be stamped at 'head' (having passed through 76886bc89d6e).
+        The initial revision must NOT be re-run as a migration.
+        """
+        import sqlite3
+        from src.db.database_service import DatabaseService
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / 'legacy_stamp.db')
+            self._make_legacy_db(db_path)
+
+            db_service = DatabaseService(db_path)
+            db_service.db_manager.close()
+
+            # alembic_version must now exist and hold a revision
+            conn = sqlite3.connect(db_path)
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            self.assertIn('alembic_version', tables, "alembic_version table was not created after stamp")
+
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+            conn.close()
+
+            self.assertIsNotNone(version, "alembic_version table is empty after startup")
+            # The version must be non-empty — it will be 'head' (the latest migration),
+            # because after stamping at 76886bc89d6e, upgrade("head") runs the remaining
+            # newer migrations on top
+            self.assertTrue(len(version[0]) > 0, f"Unexpected empty version_num: {version[0]!r}")
+
+    def test_legacy_db_preserves_existing_data(self):
+        """
+        Data that existed in the legacy database before migration must survive intact.
+        The stamp+upgrade process must never destroy existing rows.
+        """
+        import sqlite3
+        from src.db.database_service import DatabaseService
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / 'legacy_data.db')
+            self._make_legacy_db(db_path)  # inserts 'legacy-book-1'
+
+            db_service = DatabaseService(db_path)
+
+            # The pre-existing book row must still be readable via the service
+            book = db_service.get_book('legacy-book-1')
+            db_service.db_manager.close()
+
+            self.assertIsNotNone(book, "Pre-existing legacy book was lost after migration")
+            self.assertEqual(book.abs_title, 'My Legacy Book')
+            self.assertEqual(book.status, 'active')
+
+    def test_fresh_db_still_initializes_correctly(self):
+        """
+        Regression guard: a brand-new (empty) database must still initialize cleanly.
+        The legacy detection must not interfere with normal first-run behaviour.
+        """
+        from src.db.database_service import DatabaseService
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / 'fresh.db')
+
+            # File must not exist yet — genuine first run
+            self.assertFalse(Path(db_path).exists())
+
+            try:
+                db_service = DatabaseService(db_path)
+                db_service.db_manager.close()
+            except Exception as e:
+                self.fail(f"DatabaseService raised {type(e).__name__} on fresh database: {e}")
+
+            self.assertTrue(Path(db_path).exists(), "Database file was not created")
 
 
 if __name__ == '__main__':

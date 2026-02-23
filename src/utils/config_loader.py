@@ -21,7 +21,10 @@ ALL_SETTINGS = [
     'STORYTELLER_ENABLED', 'STORYTELLER_API_URL', 'STORYTELLER_USER', 'STORYTELLER_PASSWORD',
     
     # Booklore
-    'BOOKLORE_ENABLED', 'BOOKLORE_SERVER', 'BOOKLORE_USER', 'BOOKLORE_PASSWORD', 'BOOKLORE_SHELF_NAME',
+    'BOOKLORE_ENABLED', 'BOOKLORE_SERVER', 'BOOKLORE_USER', 'BOOKLORE_PASSWORD', 'BOOKLORE_SHELF_NAME', 'BOOKLORE_LIBRARY_ID',
+
+    # CWA (Calibre-Web Automated)
+    'CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD',
     
     # Hardcover
     'HARDCOVER_ENABLED', 'HARDCOVER_TOKEN',
@@ -39,9 +42,10 @@ ALL_SETTINGS = [
     'FUZZY_MATCH_THRESHOLD', 'SUGGESTIONS_ENABLED',
     
     # System
-    'TZ', 'LOG_LEVEL', 'DATA_DIR', 'BOOKS_DIR', 'LINKER_BOOKS_DIR', 'PROCESSING_DIR', 
-    'STORYTELLER_INGEST_DIR', 'AUDIOBOOKS_DIR', 'EBOOK_CACHE_SIZE',
-    'JOB_MAX_RETRIES', 'JOB_RETRY_DELAY_MINS', 'MONITOR_INTERVAL', 'WHISPER_MODEL',
+    'TZ', 'LOG_LEVEL', 'DATA_DIR', 'BOOKS_DIR', 
+    'AUDIOBOOKS_DIR', 'STORYTELLER_LIBRARY_DIR',
+    'EBOOK_CACHE_SIZE',
+    'JOB_MAX_RETRIES', 'JOB_RETRY_DELAY_MINS', 'WHISPER_MODEL',
     'WHISPER_DEVICE', 'WHISPER_COMPUTE_TYPE',
     'TRANSCRIPTION_PROVIDER', 'DEEPGRAM_API_KEY', 'DEEPGRAM_MODEL', 'WHISPER_CPP_URL'
 ]
@@ -69,11 +73,8 @@ DEFAULT_CONFIG = {
     'DEEPGRAM_MODEL': 'nova-2',
     'JOB_MAX_RETRIES': '5',
     'JOB_RETRY_DELAY_MINS': '15',
-    'MONITOR_INTERVAL': '3600',
-    'LINKER_BOOKS_DIR': '/linker_books',
-    'PROCESSING_DIR': '/processing',
-    'STORYTELLER_INGEST_DIR': '/linker_books',
     'AUDIOBOOKS_DIR': '/audiobooks',
+    'STORYTELLER_LIBRARY_DIR': '/storyteller_library',
     'ABS_PROGRESS_OFFSET_SECONDS': '0',
     'EBOOK_CACHE_SIZE': '3',
     'KOSYNC_HASH_METHOD': 'content',
@@ -82,6 +83,11 @@ DEFAULT_CONFIG = {
     'KOSYNC_ENABLED': 'false',
     'STORYTELLER_ENABLED': 'false',
     'BOOKLORE_ENABLED': 'false',
+    'BOOKLORE_LIBRARY_ID': '',
+    'CWA_ENABLED': 'false',
+    'CWA_SERVER': '',
+    'CWA_USERNAME': '',
+    'CWA_PASSWORD': '',
     'HARDCOVER_ENABLED': 'false',
     'TELEGRAM_ENABLED': 'false',
     'SUGGESTIONS_ENABLED': 'false',
@@ -128,7 +134,7 @@ class ConfigLoader:
             logger.info(f"✅ Bootstrapped {count} settings to database")
 
         except Exception as e:
-            logger.error(f"⚠️  Error bootstrapping config: {e}")
+            logger.error(f"❌ Error bootstrapping config: {e}")
 
     @staticmethod
     def load_settings(db_service: DatabaseService):
@@ -146,8 +152,13 @@ class ConfigLoader:
                 # Apply validation or type conversion if needed (mostly string for env vars)
                 val_str = str(value) if value is not None else ""
                 
-                # Update environment variable
-                os.environ[key] = val_str
+                # Preserve existing non-empty env vars when DB value is blank.
+                if val_str != "":
+                    os.environ[key] = val_str
+                else:
+                    existing_env = os.environ.get(key, "")
+                    if not existing_env:
+                        os.environ[key] = ""
                 
                 # Mask secrets in logs
                 log_val = "******" if any(s in key for s in ['KEY', 'PASSWORD', 'TOKEN']) else val_str
@@ -157,5 +168,5 @@ class ConfigLoader:
             logger.info(f"⚙️  Loaded {count} settings from database")
             
         except Exception as e:
-            logger.error(f"⚠️  Error loading settings from database: {e}")
+            logger.error(f"❌ Error loading settings from database: {e}")
             # Do not re-raise, fall back to existing env vars

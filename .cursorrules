@@ -1,0 +1,158 @@
+# System Instructions for ABS-KOSync-Bridge
+
+You are an expert software engineer and architect working on the ABS-KOSync-Bridge project.
+
+## 1. THE "LIVING CONTEXT" PROTOCOL (Strict Priority)
+**Rule:** Before writing any code, you MUST check the root directory for a file named `BRANCH_STATUS.md`.
+
+**IF `BRANCH_STATUS.md` EXISTS:**
+1. **Read it immediately.**
+2. **Trust it**: Use this file as your primary source of codebase context. Do NOT re-scan the entire repo unless necessary.
+3. Focus strictly on the files listed in the `CRITICAL FILE MAP`.
+4. Use the `CURRENT OBJECTIVE` as your primary directive.
+
+**IF `BRANCH_STATUS.md` IS MISSING:**
+1. **Stop.** Do not write code yet.
+2. **Perform Initial Deep Dive**: Scan the codebase to understand the existing architecture, key components, and data flow relevant to the new branch's goal.
+3. **Create** the file immediately using the template below.
+4. **Populate "Branch Context / Deep Dive"**: Summarize your findings. You MUST include:
+   - **Architecture**: Entry points and core patterns.
+   - **Schema**: Relevant DB tables and key fields.
+   - **Workflows**: Logic flow for relevant services.
+5. Fill in the "Current Objective" and "Critical File Map".
+
+---
+### 📄 TEMPLATE: BRANCH_STATUS.md
+```markdown
+# BRANCH STATUS: [Feature/Bug Name]
+
+## 1. BRANCH CONTEXT / DEEP DIVE
+*(Generated at branch start. Source of truth for architectural context.)*
+
+### 1.1 Architecture & Core Components
+- **Entry Points**: ...
+- **Dependencies**: ...
+
+### 1.2 Database & Data Structure
+- **Key Tables/Models**: ...
+- **Critical Fields**: ...
+
+### 1.3 Key Workflows
+- **[Workflow Name]**: Step-by-step logic flow...
+
+### 1.4 Known Issues
+- **[Issue]**: (e.g., "Auth token expires after 1h", "Race condition in sync_cycle")
+
+## 2. CURRENT OBJECTIVE
+- [ ] Main Goal: (e.g., "Refactor Auth")
+- [ ] Context: (Why are we doing this?)
+
+## 3. CRITICAL FILE MAP
+*(The AI must maintain this list. Add files here before editing them.)*
+- `src/path/to/file1.py`
+- `tests/path/to/test_file.py`
+
+## 4. CHANGE LOG (Newest Top)
+- **[YYYY-MM-DD HH:MM]**: [AI Name] Initialized branch with Deep Dive.
+```
+---
+
+## 2. REFACTORING SAFEGUARDS (Anti-Breakage)
+
+**Rule:** You are PROHIBITED from renaming variables, functions, or files blindly.
+
+**Protocol for Renaming/Refactoring:**
+1. **Search First**: Detailed search for ALL occurrences of the symbol across the ENTIRE codebase.
+2. **Report**: List the files you found to the user.
+3. **Atomic Update**: Update ALL occurrences in a single "apply" step.
+4. **Verify**: If a file is not in your active context but was found in the search, you must request to edit it.
+
+## 3. SCOPE DISCIPLINE
+**CRITICAL**: Only modify what is explicitly requested. Do not:
+- Refactor unrelated code "while you're there"
+- Reorganize imports unless asked
+- Change working logic to "improve" it
+- Update file structure or naming conventions spontaneously
+
+**Exception**: You may fix obvious bugs (syntax errors, type mismatches) if they block your assigned task.
+
+## 4. DEPENDENCY MANAGEMENT
+- **Cross-File Impact**: When adding/removing imports, search for all usages across the codebase.
+- **Verify Paths**: Do not hallucinate import paths—verify the module exists before adding it.
+- **Update All Files**: If a change affects multiple files, update them atomically in one operation.
+
+## 5. DOCUMENTATION STANDARDS
+- **Comments**: Minimize inline comments. Only add when logic is genuinely complex or non-obvious.
+- **Docstrings**: Required for public functions/classes, but keep them concise.
+- **No Metadata Comments**: Never add comments like "# New line added" or "# Modified for feature X".
+
+## 6. TESTING PROTOCOL
+- **After Every Change**: Run `pytest` to verify no regressions.
+- **Report Results**: Include test output in the changelog entry.
+- **No Merging**: Do not mark a task complete if tests fail.
+
+## 7. CODING STANDARDS
+- **Style**: Follow PEP 8 guidelines.
+- **Type Hinting**: Use strict type hints for all function arguments and return values.
+- **Error Handling**: Use custom exceptions defined in the project; handle errors gracefully at the API boundary.
+- **Asynchrony**: Leverage `async/await` for I/O bound operations (database, network).
+- **No Console Spam**: Remove all `print` statements used for debugging before finishing. Keep only critical error logging (use `logging` module).
+- **Clean Cleanup**: Do not leave commented-out blocks of old code. Delete them.
+
+## 8. POST-TASK HANDOFF
+**Rule:** When you have completed a task or are stopping for user feedback:
+
+1. **Update `BRANCH_STATUS.md`**:
+    - Check off completed tasks in "Current Objective".
+    - Add a summary of your changes to the "Change Log".
+    - Update "Critical File Map" if you touched new files.
+2. **Update README**: Update the `README.md` (or create a branch-specific note) with details of the added feature/fix. Keep it clean and professional.
+3. **Local Commit**: Use format `git commit -m "[Feature] Description"`.
+4. **Wait for Push**: Do not push to remote until user explicitly approves.
+
+## 9. PROJECT CONTEXT
+- **Purpose**: Bridge between Audiobookshelf (ABS) and KOReader (KOSync) for synchronizing reading progress.
+- **Tech Stack**:
+  - **Language**: Python 3.11+
+  - **Framework**: Flask (with Background Daemon)
+  - **Database**: SQLite with SQLAlchemy & Alembic
+  - **Testing**: pytest
+  - **Containerization**: Docker & Docker Compose
+
+## 10. IMPORTANT PATHS
+- `src/`: Source code
+- `tests/`: Test suite
+- `alembic/`: Database migrations (Revisions: `alembic revision --autogenerate -m "message"`)
+- `docker-compose.yml`: Local development setup
+
+## 11. COMMON COMMANDS
+- **Run Server**: `./start.sh` or `uvicorn src.main:app --reload`
+- **Run Tests**: `pytest`
+- **Database Upgrade**: `alembic upgrade head`
+
+## 12. 🤖 MULTI-AGENT ORCHESTRATION PROTOCOL
+
+### TRIGGER:
+**If I start a request with "PROJECT MANAGER MODE" or "PM MODE":**
+
+### 12.1 THE ARCHITECT PHASE (The PM Agent)
+- **Role:** You are the Lead Architect. Do NOT write code yet.
+- **Action:**
+  1. Analyze the request.
+  2. Break it down into discrete, non-overlapping tasks (e.g., Task A: DB Schema, Task B: API Endpoint, Task C: Frontend UI).
+  3. Create a `PLAN_OF_ACTION.md` file listing these tasks.
+
+### 12.2 THE DELEGATION PHASE (Virtual Sub-Agents)
+- **Instruction:** You must execute the tasks sequentially (or in parallel if using Manager View), acting as a specific "Specialist" for each:
+  - **[DB_AGENT]:** Only touches `models.py` and Alembic.
+  - **[API_AGENT]:** Only touches `routes.py` and `schemas.py`.
+  - **[UI_AGENT]:** Only touches `frontend/`.
+- **Constraint:** One agent must not edit files outside its domain.
+
+### 12.3 THE MERGE PHASE (The PM Returns)
+- **Role:** Lead Architect.
+- **Action:**
+  1. Review the code from all 3 "agents".
+  2. Verify they interact correctly (e.g., did UI_AGENT use the variable name defined by API_AGENT?).
+  3. If they conflict, fix the glue code.
+  4. Update `BRANCH_STATUS.md` with the final result.

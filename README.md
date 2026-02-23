@@ -25,9 +25,13 @@
 - **Five-Way Sync**: Syncs Audiobookshelf, KOReader, Storyteller, Booklore, and Hardcover.
 - **AI-Powered**: Uses Whisper for precise audio-to-text alignment.
 - **Web UI**: Full management dashboard for tracking syncs and matching books.
+- **Split-Port Security**: Expose only the sync API to the internet while keeping the dashboard on your LAN.
 - **Self-Hosted**: Runs entirely in Docker on your own server.
 
-## 🚀 Quick Start
+> [!TIP]
+> **Upgrading?** Review `docs/getting-started.md` to potentially simplify your `docker-compose.yml` volumes. The new Forge tool and CWA integration reduce the need for multiple volume mappings.
+
+## Quick Start
 
 ```yaml
 services:
@@ -35,12 +39,15 @@ services:
     image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
     ports:
       - "8080:5757"
+      # - "5758:5758"  # Optional: Expose separate sync-only port (requires KOSYNC_PORT=5758)
     environment:
       - TZ=America/New_York
+      # - KOSYNC_PORT=5758  # Optional: Enable split-port mode for security
       # NOTE: All configuration is managed in the Web UI.
     volumes:
       - ./data:/data
       - /books:/books
+      # - /path/to/storyteller/library:/storyteller_library # Optional: For Forge
 ```
 
 For full installation instructions, checking logs, and advanced configuration, please visit the **[Documentation Site](https://cporcellijr.github.io/abs-kosync-bridge/)**.

@@ -30,8 +30,9 @@ class ABSEbookSyncClient(SyncClient):
         return {'ebook'}
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
-        abs_id = book.abs_id
-        response = self.abs_client.get_progress(abs_id)
+        # [FIX] Prefer specific ebook item ID if it exists (Tri-Link), otherwise fallback to primary ID (Standard)
+        target_id = book.abs_ebook_item_id if book.abs_ebook_item_id else book.abs_id
+        response = self.abs_client.get_progress(target_id)
         if response is None:
             return None
         abs_pct, abs_cfi = response.get('ebookProgress'), response.get('ebookLocation') if response is not None else None
@@ -73,13 +74,13 @@ class ABSEbookSyncClient(SyncClient):
             self.abs_client.update_ebook_progress(book.abs_id, 0, "")
             return SyncResult(0, True, {'pct': 0, 'cfi': ""})
         if locator.cfi is None:
-            logger.error("⚠️ Cannot update ABS eBook progress - cfi is not set")
+            logger.warning("⚠️ Cannot update ABS eBook progress - cfi is not set")
             return SyncResult(0, False)
 
         pct = locator.percentage
-        abs_id = book.abs_id
+        target_id = book.abs_ebook_item_id if book.abs_ebook_item_id else book.abs_id
         cfi = locator.cfi
-        success = self.abs_client.update_ebook_progress(abs_id, pct, cfi)
+        success = self.abs_client.update_ebook_progress(target_id, pct, cfi)
         updated_state = {
             'pct': pct,
             'cfi': cfi

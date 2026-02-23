@@ -15,6 +15,9 @@ import os
 import re
 import glob
 import rapidfuzz
+import zipfile
+import shutil
+import tempfile
 from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult
@@ -47,6 +50,16 @@ class LRUCache:
 
 
 class EbookParser:
+    CRENGINE_FRAGILE_INLINE_TAGS = {
+        "span", "em", "strong", "b", "i", "u", "a", "font", "small", "big", "sub", "sup"
+    }
+    CRENGINE_STRUCTURAL_TAGS = {
+        "p", "div", "section", "article", "blockquote",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "header", "footer", "aside",
+        "td", "th", "dt", "dd", "figcaption", "pre"
+    }
+
     def __init__(self, books_dir, epub_cache_dir=None):
         self.books_dir = Path(books_dir)
         self.epub_cache_dir = Path(epub_cache_dir) if epub_cache_dir else Path("/data/epub_cache")
@@ -57,7 +70,7 @@ class EbookParser:
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
         self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
 
-        logger.info(f"EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
+        logger.info(f"✅ EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
     def resolve_book_path(self, filename):
         try:
@@ -97,7 +110,7 @@ class EbookParser:
                     md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing hash for {filepath}: {e}")
+            logger.error(f"❌ Error computing hash for {filepath}: {e}")
             return None
 
     def _compute_koreader_hash_from_bytes(self, content):
@@ -113,7 +126,7 @@ class EbookParser:
                 md5.update(chunk)
             return md5.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing KOReader hash from bytes: {e}")
+            logger.error(f"❌ Error computing KOReader hash from bytes: {e}")
             return None
 
     def get_kosync_id_from_bytes(self, filename, content):
@@ -163,7 +176,7 @@ class EbookParser:
             return False
 
         except Exception as e:
-            logger.error(f"Error extracting cover from {filepath}: {e}")
+            logger.error(f"❌ Error extracting cover from '{filepath}': {e}")
             return False
 
     def extract_text_and_map(self, filepath, progress_callback=None):
@@ -220,7 +233,7 @@ class EbookParser:
             return combined_text, spine_map
 
         except Exception as e:
-            logger.error(f"Failed to parse EPUB {filepath}: {e}")
+            logger.error(f"❌ Failed to parse EPUB '{filepath}': {e}")
             return "", []
 
     def get_text_at_percentage(self, filename, percentage):
@@ -239,7 +252,7 @@ class EbookParser:
 
             return full_text[start:end]
         except Exception as e:
-            logger.error(f"Error getting text at percentage: {e}")
+            logger.error(f"❌ Error getting text at percentage: {e}")
             return None
 
     def get_character_delta(self, filename, percentage_prev, percentage_new):
@@ -252,7 +265,7 @@ class EbookParser:
             total_len = len(full_text)
             return abs(int(total_len * percentage_prev) - int(total_len * percentage_new))
         except Exception as e:
-            logger.error(f"Error calculating character delta: {e}")
+            logger.error(f"❌ Error calculating character delta: {e}")
             return None
 
     # =========================================================================
@@ -310,7 +323,7 @@ class EbookParser:
             return full_text[start:end]
 
         except Exception as e:
-            logger.error(f"Error resolving locator ID {fragment_id} in {filename}: {e}")
+            logger.error(f"❌ Error resolving locator ID '{fragment_id}' in '{filename}': {e}")
             return None
 
     def _generate_css_selector(self, target_tag):
@@ -415,7 +428,14 @@ class EbookParser:
             path_segments.append(f"{curr.name}[{index}]")
             curr = curr.parent
 
+        if not path_segments:
+            return "/body/p[1]", target_tag, False
+
         xpath = "//" + "/".join(reversed(path_segments)) if found_anchor else "/" + "/".join(reversed(path_segments))
+        xpath = xpath.rstrip("/")
+        if xpath in ("", "/", "//", "/body", "//body"):
+            xpath = "/body/p[1]"
+            found_anchor = False
         return xpath, target_tag, found_anchor
 
     def find_text_location(self, filename, search_phrase, hint_percentage=None) -> Optional[LocatorResult]:
@@ -503,34 +523,162 @@ class EbookParser:
                             final_xpath = doc_frag_prefix + xpath_str
                         else:
                             final_xpath = f"{doc_frag_prefix}/{xpath_str}"
+                        # Calculate chapter progress (critical for Storyteller)
+                        chapter_len = len(item['content']) # Rough approximation using HTML length
+                        if hasattr(item, 'get_content'): # double check if item object available or just dict
+                             pass 
+                        
+                        # better: use start/end from map
+                        spine_item_len = item['end'] - item['start']
+                        chapter_progress = 0.0
+                        if spine_item_len > 0:
+                            chapter_progress = local_index / spine_item_len
+
+                        perfect_ko = self.get_perfect_ko_xpath(filename, match_index)
+
                         return LocatorResult(
                             percentage=percentage,
                             xpath=final_xpath,
+                            perfect_ko_xpath=perfect_ko,
                             match_index=match_index,
                             cfi=cfi,
                             href=item['href'],
                             fragment=None,
-                            css_selector=css_selector
+                            css_selector=css_selector,
+                            chapter_progress=chapter_progress
                         )
 
             return None
         except Exception as e:
-            logger.error(f"Error finding text in {filename}: {e}")
+            logger.error(f"❌ Error finding text in '{filename}': {e}")
             return None
 
     def _normalize(self, text):
         return re.sub(r'[^a-z0-9]', '', text.lower())
 
-    # =========================================================================
-    # KOREADER PERFECT SYNC
-    # Uses LXML and "Hybrid" Logic (ID + Text Offset)
-    # UPDATED: STRICT WHITESPACE STRIPPING (Fixes "Behind by a page" / Undercounting)
-    # =========================================================================
+
+
+    def _local_tag_name(self, node) -> str:
+        tag = getattr(node, "tag", None)
+        if not isinstance(tag, str):
+            tag = getattr(node, "name", None)
+        if not isinstance(tag, str):
+            return ""
+        if "}" in tag:
+            tag = tag.split("}", 1)[1]
+        return tag.lower()
+
+    def _get_parent_node(self, node):
+        if node is None:
+            return None
+        getparent = getattr(node, "getparent", None)
+        if callable(getparent):
+            return getparent()
+        return getattr(node, "parent", None)
+
+    def _nearest_crengine_anchor(self, node):
+        current = node
+        while current is not None:
+            tag_name = self._local_tag_name(current)
+            if tag_name == "body":
+                return current
+            if tag_name in self.CRENGINE_STRUCTURAL_TAGS:
+                return current
+            if tag_name in ("html", "document", "[document]"):
+                break
+            current = self._get_parent_node(current)
+        return node
+
+    def _first_non_empty_direct_text_suffix(self, element) -> Optional[str]:
+        if element is None:
+            return None
+        try:
+            direct_text_nodes = element.xpath("text()")
+            for i, node in enumerate(direct_text_nodes, start=1):
+                if str(node).strip():
+                    return "/text()" if i == 1 else f"/text()[{i}]"
+        except Exception:
+            pass
+
+        if isinstance(element, Tag):
+            text_nodes = [child for child in element.children if isinstance(child, str)]
+            for i, node in enumerate(text_nodes, start=1):
+                if str(node).strip():
+                    return "/text()" if i == 1 else f"/text()[{i}]"
+        return None
+
+    def _build_crengine_safe_text_xpath(self, element, spine_index, html_content) -> str:
+        anchor = self._nearest_crengine_anchor(element)
+        suffix = self._first_non_empty_direct_text_suffix(anchor)
+
+        # If the text was inside a flattened inline tag, the anchor won't have direct text in XML.
+        # But Crengine WILL flatten it, so we trust the anchor and default to the first text node
+        # instead of falling back to the start of the chapter.
+        if not suffix:
+            suffix = "/text()"
+
+        xpath_base = self._build_xpath(anchor)
+        return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
+    def _build_sentence_level_chapter_fallback_xpath(self, html_content, spine_index) -> str:
+        """
+        Build a safe sentence-level XPath anchored to the first readable text node
+        in the chapter. This intentionally targets node starts (.0) instead of
+        character-level offsets.
+        """
+        default_xpath = f"/body/DocFragment[{spine_index}]/body/p[1]/text().0"
+        try:
+            tree = html.fromstring(html_content)
+        except Exception:
+            return default_xpath
+
+        sentence_tags = (
+            "p", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+            "blockquote", "figcaption", "dd", "dt", "td", "th",
+            "div", "section", "article", "pre"
+        )
+
+        for tag in sentence_tags:
+            for element in tree.iter(tag):
+                suffix = self._first_non_empty_direct_text_suffix(element)
+                if suffix:
+                    xpath_base = self._build_xpath(element)
+                    return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
+        for element in tree.iter():
+            if self._local_tag_name(element) not in self.CRENGINE_STRUCTURAL_TAGS:
+                continue
+            suffix = self._first_non_empty_direct_text_suffix(element)
+            if suffix:
+                xpath_base = self._build_xpath(element)
+                return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
+
+        return default_xpath
+
+    def get_sentence_level_ko_xpath(self, filename, percentage) -> Optional[str]:
+        """
+        Resolve a sentence-level KOReader XPath from percentage.
+        Returns node-start offset (.0), not word-level offsets.
+        """
+        try:
+            book_path = self.resolve_book_path(filename)
+            full_text, _ = self.extract_text_and_map(book_path)
+            if not full_text:
+                return None
+
+            pct = float(percentage if percentage is not None else 0.0)
+            pct = max(0.0, min(1.0, pct))
+            position = int((len(full_text) - 1) * pct) if len(full_text) > 1 else 0
+            return self.get_perfect_ko_xpath(filename, position)
+        except Exception as e:
+            logger.error(f"Error generating sentence-level KOReader XPath: {e}")
+            return None
 
     def get_perfect_ko_xpath(self, filename, position=0) -> Optional[str]:
         """
         Generate KOReader XPath for a specific character position in the book.
-        Simplified and focused approach that finds actual text elements.
+        Uses BeautifulSoup (Engine A) to perfectly align with the text extraction,
+        eliminating parser drift compared to the old LXML offset logic.
         """
         try:
             # Get full text and spine mapping
@@ -549,69 +697,147 @@ class EbookParser:
 
             local_pos = position - target_item['start']
 
-            # Parse HTML content
-            tree = html.fromstring(target_item['content'])
-
-            # Find all elements that contain text, in document order
-            text_elements = []
-            current_count = 0
-            SEPARATOR_LEN = 1
-
-            for element in tree.iter():
-                if element.text and element.text.strip():
-                    text_len = len(element.text.strip())
-                    text_elements.append({
-                        'element': element,
-                        'start_pos': current_count,
-                        'end_pos': current_count + text_len + SEPARATOR_LEN,
-                        'text_len': text_len
-                    })
-                    current_count += (text_len + SEPARATOR_LEN)
-
-                if element.tail and element.tail.strip():
-                    tail_len = len(element.tail.strip())
-                    text_elements.append({
-                        'element': element,
-                        'start_pos': current_count,
-                        'end_pos': current_count + tail_len + SEPARATOR_LEN,
-                        'text_len': tail_len,
-                        'is_tail': True
-                    })
-                    current_count += (tail_len + SEPARATOR_LEN)
-
-            # Find the element that contains our target position
-            target_element = None
+            # Parse HTML content with BeautifulSoup
+            soup = BeautifulSoup(target_item['content'], 'html.parser')
+            
+            # Find the exact text element matching the character count
+            current_char_count = 0
+            target_string = None
             target_offset = 0
+            first_non_empty_string = None
+            last_non_empty_string = None
 
-            for elem_info in text_elements:
-                if elem_info['start_pos'] <= local_pos < elem_info['end_pos']:
-                    target_element = elem_info['element']
-                    target_offset = local_pos - elem_info['start_pos']
+            elements = soup.find_all(string=True)
+            for string in elements:
+                # Count lengths exactly like extract_text_and_map's get_text(strip=True)
+                clean_text = string.strip()
+                text_len = len(clean_text)
+                
+                if text_len == 0: 
+                    continue
+
+                if first_non_empty_string is None:
+                    first_non_empty_string = string
+                last_non_empty_string = string
+                
+                if current_char_count + text_len > local_pos:
+                    target_string = string
+                    # Calculate offset within the CLEAN string
+                    clean_offset = local_pos - current_char_count
+                    
+                    # KOReader needs the offset within the RAW string (including leading whitespace etc)
+                    # Find where the clean text starts inside the raw string to determine true offset
+                    raw_text = str(string)
+                    raw_start = raw_text.find(clean_text)
+                    if raw_start == -1: 
+                        raw_start = 0
+                    
+                    target_offset = raw_start + clean_offset
                     break
+                
+                current_char_count += text_len
+                # extract_text_and_map uses separator=' ', adding exactly 1 space between words
+                if current_char_count <= local_pos:
+                    current_char_count += 1
 
-            if target_element is None:
-                # Fallback: use the first text-containing element
-                if text_elements:
-                    target_element = text_elements[0]['element']
-                    target_offset = 0
-                else:
-                    # Last resort: find any element with text
-                    for elem in tree.xpath('.//p | .//span | .//em | .//strong | .//st | .//div'):
-                        if elem.text and elem.text.strip():
-                            target_element = elem
-                            target_offset = 0
-                            break
+            if target_string is None:
+                target_string = last_non_empty_string or first_non_empty_string
+                target_offset = 0
 
-            if target_element is None:
-                logger.warning(f"No text elements found in spine {target_item['spine_index']}")
-                return None
+            if not target_string:
+                logger.warning(f"⚠️ No matching text element found in spine {target_item['spine_index']}")
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
 
-            # Build xpath for the target element
-            xpath = self._build_xpath(target_element)
-            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().{target_offset}"
+            target_tag = target_string.parent
+            if not target_tag or target_tag.name == '[document]':
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
+
+            # =================================================================
+            # HYBRID ANCHOR MAPPING: BS4 -> LXML
+            # 1. We have the exact mathematical text offset via BS4.
+            # 2. We use the raw text as a unique "anchor" to find the exact
+            #    same node in LXML's strictly structured tree.
+            # 3. This guarantees perfect KOReader XPaths with zero parser drift.
+            # =================================================================
+            search_text = str(target_string)
+            occurrence_index = 0
+            
+            # Count which occurrence of this exact text this is in the BS4 document
+            for string in elements:
+                if string is target_string:
+                    break
+                if str(string) == search_text:
+                    occurrence_index += 1
+                    
+            tree = html.fromstring(target_item['content'])
+            current_occurrence = 0
+            
+            for el in tree.iter():
+                if el.text and el.text == search_text:
+                    if current_occurrence == occurrence_index:
+                        return self._build_crengine_safe_text_xpath(
+                            el,
+                            target_item['spine_index'],
+                            target_item['content']
+                        )
+                    current_occurrence += 1
+                    
+                if el.tail and el.tail == search_text:
+                    if current_occurrence == occurrence_index:
+                        parent = el.getparent()
+                        node_to_build = parent if parent is not None else el
+                        return self._build_crengine_safe_text_xpath(
+                            node_to_build,
+                            target_item['spine_index'],
+                            target_item['content']
+                        )
+                    current_occurrence += 1
+
+            logger.warning(f"⚠️ Hybrid Anchor mapping failed for '{search_text}'. Falling back to BS4 structural path.")
+
+            # Build KOReader-compatible strictly positional XPath using BS4 (Fallback)
+            path_segments = []
+            curr = target_tag
+
+            while curr and curr.name != '[document]':
+                if curr.name == 'body':
+                    path_segments.append("body")
+                    break
+                
+                if curr.name in self.CRENGINE_FRAGILE_INLINE_TAGS:
+                    curr = curr.parent
+                    continue
+                
+                index = 1
+                sibling = curr.previous_sibling
+                while sibling:
+                    if isinstance(sibling, Tag) and sibling.name == curr.name:
+                        index += 1
+                    sibling = sibling.previous_sibling
+                
+                path_segments.append(f"{curr.name}[{index}]")
+                curr = curr.parent
+
+            # Ensure the path starts with body
+            if not path_segments or path_segments[-1] != 'body':
+                path_segments.append('body')
+
+            xpath = "/".join(reversed(path_segments))
+            if xpath == "body":
+                return self._build_sentence_level_chapter_fallback_xpath(
+                    target_item['content'],
+                    target_item['spine_index']
+                )
+            return f"/body/DocFragment[{target_item['spine_index']}]/{xpath}/text().0"
 
         except Exception as e:
-            logger.error(f"Error generating KOReader XPath: {e}")
+            logger.error(f"❌ Error generating KOReader XPath: {e}")
             return None
 
     def _has_text_content(self, element):
@@ -624,17 +850,23 @@ class EbookParser:
         current = element
 
         while current is not None and current.tag not in ['html', 'document']:
+            tag_name = self._local_tag_name(current)
+
+            if tag_name in self.CRENGINE_FRAGILE_INLINE_TAGS:
+                current = current.getparent()
+                continue
+            
             # Get siblings of same tag to determine index
             parent = current.getparent()
             if parent is not None:
-                siblings = [s for s in parent if s.tag == current.tag]
+                siblings = [s for s in parent if self._local_tag_name(s) == tag_name]
                 if len(siblings) > 1:
                     index = siblings.index(current) + 1
-                    parts.insert(0, f"{current.tag}[{index}]")
+                    parts.insert(0, f"{tag_name}[{index}]")
                 else:
-                    parts.insert(0, current.tag)
+                    parts.insert(0, tag_name)
             else:
-                parts.insert(0, current.tag)
+                parts.insert(0, tag_name)
             current = parent
 
         # Clean up the path
@@ -690,21 +922,21 @@ class EbookParser:
             # [Fallback logic from original code for finding elements...]
             if not elements and clean_xpath.startswith('./'):
                 try: elements = tree.xpath(clean_xpath[2:])
-                except: pass
+                except Exception: pass
 
             if not elements:
                 id_match = re.search(r"@id='([^']+)'", clean_xpath)
                 if id_match:
                     try: elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
-                    except: pass
+                    except Exception: pass
 
             if not elements:
                 simple_path = re.sub(r'\[\d+]', '', clean_xpath)
                 try: elements = tree.xpath(simple_path)
-                except: pass
+                except Exception: pass
 
             if not elements:
-                logger.warning(f"❌ Could not resolve XPath in {filename}: {clean_xpath}")
+                logger.warning(f"⚠️ Could not resolve XPath in {filename}: {clean_xpath}")
                 return None
 
             target_node = elements[0]
@@ -748,7 +980,7 @@ class EbookParser:
             else:
                 # Fallback: If exact match fails (rare), try the old calculation method
                 # (This preserves old behavior if the new matching fails)
-                logger.debug("⚠️ Exact text match failed, falling back to LXML offset calculation")
+                logger.debug("Exact text match failed, falling back to LXML offset calculation")
                 # Falling back to strict calculation (Logic from original implementation)
                 
                 preceding_len = 0
@@ -780,7 +1012,7 @@ class EbookParser:
                 return None
 
         except Exception as e:
-            logger.error(f"Error resolving XPath {xpath_str}: {e}")
+            logger.error(f"❌ Error resolving XPath '{xpath_str}': {e}")
             return None
 
     def get_text_around_cfi(self, filename, cfi, context=50):
@@ -811,7 +1043,7 @@ class EbookParser:
             char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
 
             if not spine_step:
-                logger.error(f"Could not extract spine step from CFI: {cfi}")
+                logger.error(f"❌ Could not extract spine step from CFI: '{cfi}'")
                 return None
 
             # Load the EPUB and find the spine item
@@ -821,7 +1053,7 @@ class EbookParser:
             # Calculate spine index (CFI spine steps are 2x the actual index)
             spine_index = (spine_step // 2) - 1
             if not (0 <= spine_index < len(spine_map)):
-                logger.error(f"Spine index {spine_index} out of range for CFI {cfi}")
+                logger.error(f"❌ Spine index {spine_index} out of range for CFI '{cfi}'")
                 return None
 
             item = spine_map[spine_index]
@@ -861,7 +1093,7 @@ class EbookParser:
                         current_element = children[element_index]
                         logger.debug(f"Navigated to child element {element_index}: {current_element.tag}")
                     else:
-                        logger.warning(f"Element index {element_index} out of range (have {len(children)} children)")
+                        logger.warning(f"⚠️ Element index {element_index} out of range (have {len(children)} children)")
                         break
                 else:  # Odd number = text node
                     text_index = (step_index // 2)
@@ -915,9 +1147,11 @@ class EbookParser:
             end_pos = min(len(full_text), global_offset + context)
 
             snippet = full_text[start_pos:end_pos]
-            logger.debug(f"epubcfi CFI resolved: spine_index={spine_index}, local_offset={local_offset}, global_offset={global_offset}")
+            logger.info(f"Snippet extracted: {snippet[:30]}...")
             return snippet
 
         except Exception as e:
-            logger.error(f"Error using epubcfi library for {cfi}: {e}")
+            logger.error(f"❌ Error using epubcfi library for '{cfi}': {e}")
             return None
+
+

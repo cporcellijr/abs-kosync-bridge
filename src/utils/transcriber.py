@@ -12,6 +12,7 @@ UPDATED VERSION with:
 """
 
 import json
+import requests
 import logging
 import os
 import shutil
@@ -19,26 +20,21 @@ import subprocess
 import gc
 from pathlib import Path
 from typing import Optional
-
-from faster_whisper import WhisperModel
-import requests
 import math
-from collections import OrderedDict
 import re
+from collections import OrderedDict
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
 from src.utils.transcription_providers import get_transcription_provider
+from src.utils.polisher import Polisher
 # We keep the import for type hinting, but we don't instantiate it directly anymore
-from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 
 class AudioTranscriber:
-    # [UPDATED] Accepted smil_extractor as an argument
-    def __init__(self, data_dir, smil_extractor):
+    # [UPDATED] Accepted smil_extractor and polisher as arguments
+    def __init__(self, data_dir, smil_extractor, polisher: Polisher):
         self.data_dir = data_dir
-        self.transcripts_dir = data_dir / "transcripts"
-        self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         self.cache_root = data_dir / "audio_cache"
         self.cache_root.mkdir(parents=True, exist_ok=True)
 
@@ -54,8 +50,9 @@ class AudioTranscriber:
         # Unified threshold logic
         self.match_threshold = int(os.environ.get("TRANSCRIPT_MATCH_THRESHOLD", os.environ.get("FUZZY_MATCH_THRESHOLD", 80)))
 
-        # [UPDATED] Use the injected instance
+        # [UPDATED] Use the injected instances
         self.smil_extractor = smil_extractor
+        self.polisher = polisher
 
     def _get_whisper_config(self) -> tuple[str, str]:
         """
@@ -93,32 +90,73 @@ class AudioTranscriber:
         logger.info(f"⚙️ Whisper config: device={device}, compute_type={compute_type}, model={self.model_size}")
         return device, compute_type
 
-    def validate_transcript(self, segments: list, max_overlap_ratio: float = 0.05) -> tuple[bool, float]:
+    def validate_smil(self, smil_segments: list, ebook_text: str) -> tuple[bool, float]:
         """
-        Validate transcript for overlapping timestamps.
+        Robustly validate SMIL alignment using text similarity.
+        
+        1. Overlap Check: Basic sanity check.
+        2. Content Match: Normalize both texts and calculate similarity ratio.
+           This allows SMIL to be slightly off but still accepted if it largely matches.
         
         Returns:
-            (is_valid, overlap_ratio)
+            (is_valid, score) - score is overlap_ratio (if failed overlap) or match_percentage (if passed overlap)
         """
-        if not segments or len(segments) < 2:
-            return True, 0.0
-        
+        if not smil_segments or len(smil_segments) < 2:
+             return True, 1.0
+
+        # 1. Overlap Check (Basic) - Allow up to 15% overlap noise
         overlap_count = 0
-        for i in range(1, len(segments)):
-            if segments[i]['start'] < segments[i-1]['end']:
+        for i in range(1, len(smil_segments)):
+            if smil_segments[i]['start'] < smil_segments[i-1]['end']:
                 overlap_count += 1
         
-        overlap_ratio = overlap_count / len(segments)
-        is_valid = overlap_ratio <= max_overlap_ratio
+        overlap_ratio = overlap_count / len(smil_segments)
+        if overlap_ratio > 0.15: # 15% threshold
+            logger.warning(f"⚠️ SMIL contains explicit overlaps ({overlap_ratio:.1%}) — Might be invalid")
+            # Don't fail just on overlap if text match is perfect (e.g. concurrent audio layers in SMIL)
+            # But usually high overlap means bad SMIL.
         
-        return is_valid, overlap_ratio
+        # 2. Content Validation (The "Swift Rejects" Fix)
+        # We need to see if the SMIL text actually plausibly exists in the ebook text.
+        # This prevents accepting "Page 1", "Page 2" type SMILs that don't match audio content.
+        
+        # Construct full SMIL text
+        smil_text_raw = " ".join([s['text'] for s in smil_segments])
+        smil_norm = self.polisher.normalize(smil_text_raw)
+        
+        # Normalize a chunk of ebook text (first 50k chars to save time, or fully if small)
+        # Ideally, we used the full extracted text passed in.
+        ebook_norm = self.polisher.normalize(ebook_text[:max(len(ebook_text), len(smil_text_raw)*2)])
+        
+        if not smil_norm:
+            return False, 0.0
+            
+        # Using simple token overlap ratio for speed
+        # Levenshtein on huge strings is slow.
+        smil_tokens = set(smil_norm.split())
+        ebook_tokens = set(ebook_norm.split())
+        
+        common = smil_tokens.intersection(ebook_tokens)
+        if not smil_tokens: return False, 0.0
+        
+        match_ratio = len(common) / len(smil_tokens)
+        
+        # Acceptance Criteria: 
+        # Must have significant text overlap (proving it aligns to THIS book)
+        # Threshold is configurable via SMIL_VALIDATION_THRESHOLD (default 60%)
+        smil_threshold = float(os.getenv("SMIL_VALIDATION_THRESHOLD", "60")) / 100.0
+        logger.info(f"   📊 SMIL Validation: Overlap={overlap_ratio:.1%}, Token Match={match_ratio:.1%} (threshold={smil_threshold:.0%})")
+        if match_ratio < smil_threshold:
+             return False, match_ratio
 
-    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list, progress_callback=None) -> Optional[Path]:
+        return True, match_ratio
+
+    def transcribe_from_smil(self, abs_id: str, epub_path: Path, abs_chapters: list, full_book_text: str = None, progress_callback=None) -> Optional[list]:
         """
         Attempts to extract a transcript directly from the EPUB's SMIL overlay data.
+        Returns RAW SEGMENTS (list of dicts) if successful, None otherwise.
         """
         if progress_callback: progress_callback(0.0)
-        output_file = self.transcripts_dir / f"{abs_id}.json"
 
         if not self.smil_extractor.has_media_overlays(str(epub_path)):
             return None
@@ -130,33 +168,37 @@ class AudioTranscriber:
             if not transcript:
                 return None
 
-            # [NEW] Validate transcript before saving
-            is_valid, overlap_ratio = self.validate_transcript(transcript)
-            
-            if not is_valid:
-                logger.warning(f"⚠️ SMIL extraction failed validation: {overlap_ratio:.1%} overlap (threshold: 5%)")
-                logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
+            # [FAILSAFE] Check Duration / Coverage
+            # If the SMIL transcript is significantly shorter than the audiobook, reject it.
+            if abs_chapters and len(abs_chapters) > 0:
+                expected_duration = float(abs_chapters[-1].get('end', 0))
+                if expected_duration > 0:
+                    transcript_duration = transcript[-1]['end']
+                    coverage = transcript_duration / expected_duration
+                    
+                    # Reject if coverage is less than 85%
+                    if coverage < 0.85:
+                        logger.warning(f"⚠️ SMIL REJECTED: Coverage too low ({coverage:.1%}). Expected {expected_duration:.0f}s, got {transcript_duration:.0f}s — Falling back to transcriber")
+                        return None
+
+            # [NEW] Validate transcript against BOOK TEXT
+            # We require full_book_text for this validation.
+            if full_book_text:
+                is_valid, score = self.validate_smil(transcript, full_book_text)
                 
-                return None
+                if not is_valid:
+                    logger.warning(f"⚠️ SMIL validation failed: Match score {score:.1%} too low")
+                    logger.info(f"🔄 Falling back to Whisper transcription for {abs_id}")
+                    return None
+                else:
+                    logger.info(f"✅ SMIL Validated (Match: {score:.1%})")
+            else:
+                logger.warning("⚠️ Skipping detailed SMIL validation (no ebook text provided)")
 
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(transcript, f, ensure_ascii=False)
-
-            # [NEW] Generate alignment map for SMIL path
-            try:
-                # Need to read epub text
-                from src.utils.ebook_utils import EbookParser
-                # We might not have ebook_parser here, but we can extract it if needed
-                # Actually, SyncManager already has it. But for now, let's keep it simple.
-                # If we want alignment on SMIL, we need the full book text.
-                pass
-            except:
-                pass
-
-            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments saved.")
-            return output_file
+            logger.info(f"✅ SMIL Extraction complete: {len(transcript)} segments")
+            return transcript # Return raw data!
         except Exception as e:
-            logger.error(f"Failed to extract SMIL transcript: {e}")
+            logger.error(f"❌ Failed to extract SMIL transcript: {e}")
             return None
 
     def _get_cached_transcript(self, path):
@@ -175,7 +217,7 @@ class AudioTranscriber:
                 self._transcript_cache.popitem(last=False)
             return data
         except Exception as e:
-            logger.error(f"Error loading transcript {path}: {e}")
+            logger.error(f"❌ Error loading transcript '{path}': {e}")
             return None
 
     def _clean_text(self, text):
@@ -194,7 +236,7 @@ class AudioTranscriber:
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             return float(result.stdout.strip())
         except (ValueError, subprocess.CalledProcessError) as e:
-            logger.error(f"Could not determine duration for {file_path}: {e}")
+            logger.error(f"❌ Could not determine duration for '{file_path}': {e}")
             return 0.0
 
     def normalize_audio_to_wav(self, input_path: Path) -> Optional[Path]:
@@ -240,7 +282,7 @@ class AudioTranscriber:
             return output_path
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg conversion failed for {input_path}: {e.stderr}")
+            logger.error(f"❌ FFmpeg conversion failed for '{input_path}': {e.stderr}")
             return None
 
     def split_audio_file(self, file_path, target_max_duration_sec=2700):
@@ -249,7 +291,7 @@ class AudioTranscriber:
         if duration <= target_max_duration_sec:
             return [file_path]
 
-        logger.info(f"   ⚠️ File {file_path.name} is {duration/60:.1f}m. Splitting...")
+        logger.warning(f"⚠️ File '{file_path.name}' is {duration/60:.1f}m — Splitting")
         num_parts = math.ceil(duration / target_max_duration_sec)
         segment_duration = duration / num_parts
         new_files = []
@@ -277,58 +319,48 @@ class AudioTranscriber:
                 new_files.append(new_path)
                 logger.info(f"      Created chunk {i+1}/{num_parts}: {new_filename}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"      Failed to create chunk {i+1}: {e}")
+                logger.error(f"❌ Failed to create chunk {i+1}: {e}")
 
         # Remove original file after splitting
         if new_files:
             try:
                 file_path.unlink()
-            except:
-                pass
+            except OSError as e:
+                logger.debug(f"Failed to remove original file after splitting: {e}")
 
         return new_files if new_files else [file_path]
 
     @time_execution
-    def process_audio(self, abs_id, audio_urls, full_book_text=None, progress_callback=None):
-        output_file = self.transcripts_dir / f"{abs_id}.json"
+    def process_audio(self, abs_id, audio_urls, full_book_text=None, progress_callback=None) -> Optional[list]:
+        """
+        Main transcription pipeline.
+        Returns: List of segment dicts [{'start': 0.0, 'end': 1.0, 'text': 'foo'}, ...]
+        """
+        # Note: We no longer check for 'output_file.exists()' here as the primary cache check.
+        # The Orchestrator (SyncManager) should check the DB (AlignmentService) before calling this.
+        # However, we CAN check our local cache to resume/skip work if we crashed mid-transcription.
         
-        # [NEW] Path for the alignment map
-        alignment_file = self.transcripts_dir / f"{abs_id}_alignment.json"
-
-        # Check if we can skip the heavy lifting
-        if output_file.exists():
-            # If we have the transcript AND the map (or no text to map against), we are truly done.
-            if not full_book_text or alignment_file.exists():
-                logger.info(f"Transcript and alignment already exist for {abs_id}")
-                return output_file
-            
-            # If we are here, we have the transcript but MISS the map.
-            # We can skip downloading/transcribing and jump straight to alignment!
-            logger.info(f"⚡ Transcript exists for {abs_id}, but alignment map is missing. Running alignment phase only.")
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    full_transcript = json.load(f)
-                
-                # Run Phase 3 (Alignment) immediately
-                alignment_map = self.align_transcript_to_text(full_transcript, full_book_text)
-                if alignment_map:
-                    with open(alignment_file, 'w', encoding='utf-8') as f:
-                        json.dump(alignment_map, f, ensure_ascii=False)
-                    logger.info(f"✅ Alignment complete: Saved {len(alignment_map)} sync points.")
-                
-                return output_file
-            except Exception as e:
-                logger.error(f"⚠️ Alignment update failed: {e}")
-                # If alignment fails, we still return the output_file so basic sync works
-                return output_file
+        # Check LRU Cache (in-memory) (Optional, mostly for dev speed)
+        # if abs_id in self._transcript_cache: ...
 
         book_cache_dir = self.cache_root / str(abs_id)
-        if book_cache_dir.exists():
-            # If we aren't resuming, clean up
-            pass
+        # Clean up if not resuming? For now, we assume if we are called, we need to run.
         book_cache_dir.mkdir(parents=True, exist_ok=True)
 
         progress_file = book_cache_dir / "_progress.json"
+        
+        # If we have a fully completed progress file, we can just return the result!
+        if progress_file.exists():
+             try:
+                with open(progress_file, 'r') as f:
+                    progress = json.load(f)
+                # If it looks like a complete run?
+                if progress.get('chunks_completed', 0) > 0 and progress.get('done', False):
+                    logger.info(f"⚡ Resuming from completed local cache for {abs_id}")
+                    return progress.get('transcript', [])
+             except (json.JSONDecodeError, OSError) as e:
+                 logger.debug(f"Failed to read progress cache file: {e}")
+
         MAX_DURATION_SECONDS = 45 * 60
 
         downloaded_files = []
@@ -338,7 +370,7 @@ class AudioTranscriber:
         resuming = False
 
         try:
-            # Check for resumption
+            # Check for partial resumption
             if progress_file.exists():
                 try:
                     with open(progress_file, 'r') as f:
@@ -379,7 +411,7 @@ class AudioTranscriber:
                     downloaded_files = list(existing_files)
                 else:
                     if existing_files:
-                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh.")
+                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh")
                         shutil.rmtree(book_cache_dir)
                     
                     # Original logic: Wipe and Start Fresh
@@ -458,7 +490,8 @@ class AudioTranscriber:
                     json.dump({
                         'chunks_completed': chunks_completed,
                         'cumulative_duration': cumulative_duration,
-                        'transcript': full_transcript
+                        'transcript': full_transcript,
+                        'done': (chunks_completed == total_chunks)
                     }, f)
 
                 if progress_callback:
@@ -467,33 +500,14 @@ class AudioTranscriber:
 
                 gc.collect()
 
-            # Save final transcript
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(full_transcript, f, ensure_ascii=False)
-
-            # [NEW] Phase 3: Alignment (If book text provided)
-            if full_book_text:
-                try:
-                    alignment_map = self.align_transcript_to_text(full_transcript, full_book_text)
-                    if alignment_map:
-                        with open(alignment_file, 'w', encoding='utf-8') as f:
-                            json.dump(alignment_map, f, ensure_ascii=False)
-                        logger.info(f"✅ Alignment complete: Saved {len(alignment_map)} sync points.")
-                except Exception as e:
-                    logger.error(f"⚠️ Alignment failed: {e}")
-
-            logger.info(f"✅ Transcription complete: {len(full_transcript)} segments, {cumulative_duration/60:.1f} minutes")
-
             # Clean up cache only on success
             if book_cache_dir.exists():
                 shutil.rmtree(book_cache_dir)
 
-            return output_file
+            return full_transcript
 
         except Exception as e:
             logger.error(f"❌ Transcription failed: {e}")
-            if output_file.exists():
-                os.remove(output_file)
             # Don't delete cache dir - allows resume on retry
             raise e
 
@@ -606,7 +620,7 @@ class AudioTranscriber:
             return self._clean_text(raw_text)
 
         except Exception as e:
-            logger.error(f"Error reading transcript {transcript_path}: {e}")
+            logger.error(f"❌ Error reading transcript '{transcript_path}': {e}")
         return None
 
     def get_previous_segment_text(self, transcript_path, timestamp):
@@ -641,7 +655,7 @@ class AudioTranscriber:
             return None
 
         except Exception as e:
-            logger.error(f"Error getting previous segment {transcript_path}: {e}")
+            logger.error(f"❌ Error getting previous segment '{transcript_path}': {e}")
             return None
 
     @time_execution
@@ -773,50 +787,12 @@ class AudioTranscriber:
         title_prefix = f"[{sanitize_log_data(book_title)}] " if book_title else ""
 
         try:
-            # 0. Try Alignment Map First (Precise Path)
-            abs_id = Path(transcript_path).stem
-            map_file = self.transcripts_dir / f"{abs_id}_alignment.json"
+            # NOTE: Alignment map lookups are now handled by AlignmentService (database-backed).
+            # The synchronization layer (ABSSyncClient) should use alignment_service.find_time_for_position()
+            # for precise char_offset to timestamp conversion.
+            # This method now only handles fallback fuzzy text matching for legacy paths.
             
-            if map_file.exists() and char_offset is not None:
-                try:
-                    with open(map_file, 'r') as f:
-                        points = json.load(f)
-                    
-                    if points:
-                        # Find the two points surrounding char_offset
-                        # points: [{"char": 0, "ts": 0.0}, ...]
-                        left = 0
-                        right = len(points) - 1
-                        
-                        # Binary search for the neighborhood
-                        while left <= right:
-                            mid = (left + right) // 2
-                            if points[mid]['char'] <= char_offset:
-                                left = mid + 1
-                            else:
-                                right = mid - 1
-                        
-                        # Neighborhood is at index 'right' and 'right + 1'
-                        if right >= 0:
-                            p1 = points[right]
-                            if right + 1 < len(points):
-                                p2 = points[right + 1]
-                                # Linear interpolation
-                                char_delta = p2['char'] - p1['char']
-                                time_delta = p2['ts'] - p1['ts']
-                                
-                                ratio = (char_offset - p1['char']) / char_delta if char_delta > 0 else 0
-                                precise_ts = p1['ts'] + (ratio * time_delta)
-                                
-                                logger.debug(f"{title_prefix}🎯 PRECISE MATCH (Map) at {precise_ts:.2f}s (Char: {char_offset})")
-                                return precise_ts
-                            else:
-                                logger.debug(f"{title_prefix}🎯 PRECISE MATCH (Map End) at {p1['ts']:.2f}s")
-                                return p1['ts']
-                except Exception as e:
-                    logger.warning(f"{title_prefix}Alignment map lookup failed: {e}")
-
-            # Fallback to Windowed Fuzzy Match (Existing Logic)
+            # Fuzzy text matching (fallback when alignment map not available)
             data = self._get_cached_transcript(transcript_path)
             if not data:
                 return None
@@ -871,10 +847,10 @@ class AudioTranscriber:
                 logger.info(f"✅ {title_prefix}Match found at {best_match['start']:.1f}s | Confidence: {best_score}% - '{sanitize_log_data(clean_search)}'")
                 return best_match['start']
             else:
-                logger.warning(f"{title_prefix}No good match found (best: {best_score}% < {self.match_threshold}%)")
+                logger.warning(f"⚠️ {title_prefix}No good match found (best: {best_score}% < {self.match_threshold}%)")
                 return None
 
         except Exception as e:
-            logger.error(f"{title_prefix}Error searching transcript {transcript_path}: {e}")
+            logger.error(f"❌ {title_prefix}Error searching transcript '{transcript_path}': {e}")
         return None
 # [END FILE]

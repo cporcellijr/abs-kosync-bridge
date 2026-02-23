@@ -22,6 +22,7 @@ class TestStorytellerLeadsSync(BaseSyncCycleTestCase):
             'abs_title': 'Storyteller Leader Test Book',
             'kosync_doc_id': 'test-kosync-doc-storyteller',
             'ebook_filename': 'test-book.epub',
+            'storyteller_uuid': 'test-storyteller-uuid', # [NEW]
             'transcript_file': str(Path(self.temp_dir) / 'test_transcript.json'),
             'status': 'active'
         }

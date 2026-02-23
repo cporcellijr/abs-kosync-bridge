@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
-from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, Base
+from .models import DatabaseManager, Book, State, Job, HardcoverDetails, Setting, KosyncDocument, PendingSuggestion, BookloreBook, Base
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,8 @@ class DatabaseService:
     """
 
     def __init__(self, db_path: str):
-        self.db_path = Path(db_path)
+        import os
+        self.db_path = Path(os.path.abspath(db_path))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_manager = DatabaseManager(str(self.db_path))
 
@@ -35,39 +36,75 @@ class DatabaseService:
 
     def _run_alembic_migrations(self):
         """Run Alembic migrations to ensure database schema is up to date."""
+        import sys
+        import traceback
+        from alembic.config import Config
+        from alembic import command
+        from sqlalchemy import inspect, text
+        import io
+
+        # In Docker, we expect alembic.ini at /app/alembic.ini
+        # Calculate project root relative to this file: src/db/database_service.py -> ../../ -> project_root
+        project_root = Path(__file__).parent.parent.parent
+        alembic_cfg_path = project_root / "alembic.ini"
+
+        if not alembic_cfg_path.exists():
+            logger.critical(f"❌ alembic.ini not found at '{alembic_cfg_path}' — Cannot run migrations — Exiting")
+            sys.exit(1)
+
+        alembic_cfg = Config(str(alembic_cfg_path))
+        alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+        # Log the current revision before upgrading so failures are diagnosable
+        with self.db_manager.engine.connect() as conn:
+            inspector = inspect(self.db_manager.engine)
+            if 'alembic_version' in inspector.get_table_names():
+                try:
+                    result = conn.execute(text("SELECT version_num FROM alembic_version"))
+                    current_rev = result.scalar()
+                    logger.info(f"🔍 Current database revision before migration: '{current_rev}'")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not read alembic version: {e}")
+            else:
+                table_names = inspector.get_table_names()
+                if 'books' in table_names:
+                    logger.warning("⚠️ Legacy database detected: 'books' table exists but no 'alembic_version' table found")
+                    logger.info("🔧 Stamping legacy database with initial revision '76886bc89d6e' to prevent duplicate table creation")
+                    command.stamp(alembic_cfg, "76886bc89d6e")
+                    logger.info("✅ Legacy database stamped successfully — subsequent migrations will run from this baseline")
+                else:
+                    logger.info("🔍 alembic_version table not found — database is new or unversioned")
+
+        # Suppress massive stdout noise from Alembic, but keep errors
+        alembic_cfg.attributes['output_buffer'] = io.StringIO()
+
+        # Suppress Alembic info logging noise, but keep WARNING/ERROR
+        alembic_logger = logging.getLogger('alembic')
+        original_level = alembic_logger.level
+        alembic_logger.setLevel(logging.WARNING)
+
+        logger.info("🔄 Running Alembic migrations to head")
+        
         try:
-            from alembic.config import Config
-            from alembic import command
-            import io
-
-            project_root = Path(__file__).parent.parent.parent
-            alembic_cfg_path = project_root / "alembic.ini"
-            
-            if not alembic_cfg_path.exists():
-                logger.warning("alembic.ini not found, skipping migrations")
-                return
-
-            alembic_cfg = Config(str(alembic_cfg_path))
-            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
-            
-            # Suppress stdout
-            alembic_cfg.attributes['output_buffer'] = io.StringIO()
-            
-            # Suppress Alembic logging noise
-            alembic_logger = logging.getLogger('alembic')
-            original_level = alembic_logger.level
-            alembic_logger.setLevel(logging.WARNING)
-            
-            try:
-                command.upgrade(alembic_cfg, "head")
-                logger.debug("Database migrations completed successfully")
-            finally:
-                alembic_logger.setLevel(original_level)
-            
+            command.upgrade(alembic_cfg, "head")
+            logger.info("✅ Database migrations completed successfully")
         except Exception as e:
-            logger.error(f"Alembic migration failed: {e}")
-            import traceback
-            logger.debug(f"Migration error details: {traceback.format_exc()}")
+            logger.error(f"❌ FATAL: Alembic migration failed: {e}")
+            logger.error(f"❌ Migration error details: {traceback.format_exc()}")
+            # Re-raise to prevent startup with invalid schema
+            raise
+        finally:
+            alembic_logger.setLevel(original_level)
+
+        # Post-migration verification: Check for critical columns
+        # This confirms that our migrations actually ran and took effect
+        with self.db_manager.engine.connect() as conn:
+            inspector = inspect(self.db_manager.engine)
+            columns = [c['name'] for c in inspector.get_columns('books')]
+            if 'original_ebook_filename' not in columns:
+                logger.warning("⚠️ WARNING: 'original_ebook_filename' column missing in 'books' table after migration! Schema may be out of sync")
+            else:
+                logger.debug("🔍 Schema verification passed: 'original_ebook_filename' exists")
 
     @contextmanager
     def get_session(self):
@@ -78,7 +115,7 @@ class DatabaseService:
             session.commit()
         except Exception as e:
             session.rollback()
-            logger.error(f"Database error: {e}")
+            logger.error(f"❌ Database error: {e}")
             raise
         finally:
             session.close()
@@ -166,8 +203,8 @@ class DatabaseService:
 
             if existing:
                 # Update existing book
-                for attr in ['abs_title', 'ebook_filename', 'kosync_doc_id',
-                           'transcript_file', 'status', 'duration']:
+                for attr in ['abs_title', 'ebook_filename', 'original_ebook_filename', 'kosync_doc_id',
+                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
@@ -181,6 +218,31 @@ class DatabaseService:
                 session.refresh(book)
                 session.expunge(book)
                 return book
+
+    def migrate_book_data(self, old_abs_id: str, new_abs_id: str):
+        """
+        Migrate all associated data (States, Jobs, Links) from one book ID to another.
+        Used when merging an existing ebook-only entry into a new audiobook entry.
+        """
+        with self.get_session() as session:
+            try:
+                # Migrate Foreign Keys
+                # synchronize_session=False is required for updates on collections
+                session.query(State).filter(State.abs_id == old_abs_id).update({State.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(Job).filter(Job.abs_id == old_abs_id).update({Job.abs_id: new_abs_id}, synchronize_session=False)
+                session.query(KosyncDocument).filter(KosyncDocument.linked_abs_id == old_abs_id).update({KosyncDocument.linked_abs_id: new_abs_id}, synchronize_session=False)
+                
+                # Cleanup non-migratable data (Alignment/Hardcover)
+                from .models import BookAlignment # Import here to avoid circulars if any, though likely safe at top
+                try:
+                    session.query(BookAlignment).filter(BookAlignment.abs_id == old_abs_id).delete(synchronize_session=False)
+                    session.query(HardcoverDetails).filter(HardcoverDetails.abs_id == old_abs_id).delete(synchronize_session=False)
+                except Exception: pass
+                
+                logger.info(f"✅ Migrated data from '{old_abs_id}' to '{new_abs_id}'")
+            except Exception as e:
+                logger.error(f"❌ Failed to migrate book data: {e}")
+                raise
 
     def delete_book(self, abs_id: str) -> bool:
         """Delete a book and all its related data."""
@@ -336,7 +398,7 @@ class DatabaseService:
             if existing:
                 # Update existing details
                 for attr in ['hardcover_book_id', 'hardcover_slug', 'hardcover_edition_id', 'hardcover_pages',
-                           'isbn', 'asin', 'matched_by']:
+                           'hardcover_audio_seconds', 'isbn', 'asin', 'matched_by']:
                     if hasattr(details, attr):
                         setattr(existing, attr, getattr(details, attr))
                 session.flush()
@@ -422,7 +484,7 @@ class DatabaseService:
         with self.get_session() as session:
             doc.last_updated = datetime.utcnow()
             merged = session.merge(doc)
-            session.commit()
+            session.flush()
             session.refresh(merged)
             session.expunge(merged)
             return merged
@@ -466,7 +528,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = abs_id
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -479,7 +540,6 @@ class DatabaseService:
             if doc:
                 doc.linked_abs_id = None
                 doc.last_updated = datetime.utcnow()
-                session.commit()
                 return True
             return False
 
@@ -491,7 +551,6 @@ class DatabaseService:
             ).first()
             if doc:
                 session.delete(doc)
-                session.commit()
                 return True
             return False
 
@@ -500,6 +559,26 @@ class DatabaseService:
         with self.get_session() as session:
             doc = session.query(KosyncDocument).filter(
                 KosyncDocument.linked_abs_id == abs_id
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+    def get_kosync_doc_by_filename(self, filename: str) -> Optional[KosyncDocument]:
+        """Find a KOSync document by its associated filename."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.filename == filename
+            ).first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
+    def get_kosync_doc_by_booklore_id(self, booklore_id: str) -> Optional[KosyncDocument]:
+        """Find a KOSync document by its Booklore ID."""
+        with self.get_session() as session:
+            doc = session.query(KosyncDocument).filter(
+                KosyncDocument.booklore_id == str(booklore_id)
             ).first()
             if doc:
                 session.expunge(doc)
@@ -547,6 +626,16 @@ class DatabaseService:
                 session.expunge(suggestion)
                 return suggestion
 
+    def is_hash_linked_to_device(self, doc_hash: str) -> bool:
+        """Check if a document hash is actively linked to a device document."""
+        if not doc_hash:
+            return False
+            
+        with self.get_session() as session:
+            return session.query(KosyncDocument).filter(
+                KosyncDocument.document_hash == doc_hash
+            ).count() > 0
+
     def get_all_pending_suggestions(self) -> List[PendingSuggestion]:
         """Get all pending suggestions."""
         with self.get_session() as session:
@@ -580,6 +669,88 @@ class DatabaseService:
                 return True
             return False
 
+    def clear_stale_suggestions(self) -> int:
+        """
+        Delete suggestions that are not for active books in our bridge.
+        A suggestion is 'stale' if its source_id (ABS ID) is not in our books table.
+        """
+        with self.get_session() as session:
+            # Subquery to get all IDs in books table
+            # We preserve ANY suggestion that corresponds to a book we tracking,
+            # regardless of its status. This ensures that if the user matched it
+            # or it's pending transcription, we don't wipe it accidentally.
+            # But junk suggestions for books they haven't touched are wiped.
+            from sqlalchemy import select
+            
+            # Using raw delete with subquery for efficiency
+            # We delete suggestions where source_id is not in the books table
+            from sqlalchemy import not_
+            
+            # Find all suggestions not in the books table
+            stale_query = session.query(PendingSuggestion).filter(
+                not_(PendingSuggestion.source_id.in_(
+                    session.query(Book.abs_id)
+                ))
+            )
+            
+            count = stale_query.count()
+            stale_query.delete(synchronize_session=False)
+            
+            return count
+
+    # BookloreBook operations
+    def get_booklore_book(self, filename: str) -> Optional[BookloreBook]:
+        """Get a cached Booklore book by filename."""
+        with self.get_session() as session:
+            book = session.query(BookloreBook).filter(BookloreBook.filename == filename).first()
+            if book:
+                session.expunge(book)
+            return book
+
+    def get_all_booklore_books(self) -> List[BookloreBook]:
+        """Get all cached Booklore books."""
+        with self.get_session() as session:
+            books = session.query(BookloreBook).all()
+            for book in books:
+                session.expunge(book)
+            return books
+
+    def save_booklore_book(self, booklore_book: BookloreBook) -> BookloreBook:
+        """Save or update a Booklore book."""
+        with self.get_session() as session:
+            existing = session.query(BookloreBook).filter(
+                BookloreBook.filename == booklore_book.filename
+            ).first()
+
+            if existing:
+                for attr in ['title', 'authors', 'raw_metadata']:
+                    if hasattr(booklore_book, attr):
+                        setattr(existing, attr, getattr(booklore_book, attr))
+                session.flush()
+                session.refresh(existing)
+                session.expunge(existing)
+                return existing
+            else:
+                session.add(booklore_book)
+                session.flush()
+                session.refresh(booklore_book)
+                session.expunge(booklore_book)
+                return booklore_book
+
+    def delete_booklore_book(self, filename: str) -> bool:
+        """Delete a Booklore book from the cache table."""
+        try:
+            from src.db.models import BookloreBook
+            # Use safe session context manager
+            with self.get_session() as session:
+                # STRICT DELETION: Use exact filename as passed by client
+                # This ensures we delete "mybook.epub" but not "MyBook.epub" if both exist
+                session.query(BookloreBook).filter(BookloreBook.filename == filename).delete(synchronize_session=False)
+                return True
+        except Exception as e:
+            logger.error(f"❌ Failed to delete Booklore book '{filename}': {e}")
+            return False
+
 
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
@@ -591,7 +762,7 @@ class DatabaseMigrator:
 
     def migrate(self):
         """Perform migration from JSON to SQLAlchemy database."""
-        logger.info("Starting migration from JSON to SQLAlchemy database...")
+        logger.info("🔄 Starting migration from JSON to SQLAlchemy database")
 
         # Migrate mappings/books
         if self.json_db_path.exists():
@@ -601,10 +772,10 @@ class DatabaseMigrator:
 
                 if 'mappings' in mapping_data:
                     self._migrate_books(mapping_data['mappings'])
-                    logger.info(f"Migrated {len(mapping_data['mappings'])} book mappings")
+                    logger.info(f"✅ Migrated {len(mapping_data['mappings'])} book mappings")
 
             except Exception as e:
-                logger.error(f"Failed to migrate mapping data: {e}")
+                logger.error(f"❌ Failed to migrate mapping data: {e}")
 
         # Migrate state
         if self.json_state_path.exists():
@@ -613,12 +784,12 @@ class DatabaseMigrator:
                     state_data = json.load(f)
 
                 self._migrate_states(state_data)
-                logger.info(f"Migrated state for {len(state_data)} books")
+                logger.info(f"✅ Migrated state for {len(state_data)} books")
 
             except Exception as e:
-                logger.error(f"Failed to migrate state data: {e}")
+                logger.error(f"❌ Failed to migrate state data: {e}")
 
-        logger.info("Migration completed")
+        logger.info("✅ Migration completed")
 
     def _migrate_books(self, mappings_list: List[dict]):
         """Migrate book mappings to Book models."""

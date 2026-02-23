@@ -33,14 +33,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN mkdir -p /app/src /app/templates /app/static /data/audio_cache /data/logs /data/transcripts
 
 # 4. Copy Application Code
-copy src/ /app/src/
+COPY src/ /app/src/
 COPY templates/ /app/templates/
 COPY static/ /app/static/
 COPY alembic/ /app/alembic/
 COPY alembic.ini /app/alembic.ini
 
 COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
 EXPOSE 5757
 

@@ -110,10 +110,10 @@ class JsonDB:
                     return default
                 return json.loads(content)
         except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error in {self.filepath}: {e}")
+            logger.error(f"❌ JSON decode error in '{self.filepath}': {e}")
             return default
         except Exception as e:
-            logger.error(f"Failed to load {self.filepath}: {e}")
+            logger.error(f"❌ Failed to load '{self.filepath}': {e}")
             return default
     
     def save(self, data):
@@ -128,7 +128,7 @@ class JsonDB:
                 os.fsync(f.fileno())
             return True
         except Exception as e:
-            logger.error(f"Failed to save {self.filepath}: {e}")
+            logger.error(f"❌ Failed to save '{self.filepath}': {e}")
             return False
     
     def update(self, update_func, default=None):
@@ -172,5 +172,5 @@ class JsonDB:
                         pass
             return True
         except Exception as e:
-            logger.error(f"Failed to update {self.filepath}: {e}")
+            logger.error(f"❌ Failed to update '{self.filepath}': {e}")
             return False
