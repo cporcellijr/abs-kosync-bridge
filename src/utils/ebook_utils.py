@@ -610,8 +610,13 @@ class EbookParser:
     def _build_crengine_safe_text_xpath(self, element, spine_index, html_content) -> str:
         anchor = self._nearest_crengine_anchor(element)
         suffix = self._first_non_empty_direct_text_suffix(anchor)
+
+        # If the text was inside a flattened inline tag, the anchor won't have direct text in XML.
+        # But Crengine WILL flatten it, so we trust the anchor and default to the first text node
+        # instead of falling back to the start of the chapter.
         if not suffix:
-            return self._build_sentence_level_chapter_fallback_xpath(html_content, spine_index)
+            suffix = "/text()"
+
         xpath_base = self._build_xpath(anchor)
         return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
 
