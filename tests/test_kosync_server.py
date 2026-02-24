@@ -373,8 +373,8 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertAlmostEqual(data['percentage'], 0.75)
 
 
-    def test_get_progress_sibling_hash_resolution(self):
-        """Test that GET resolves an unknown hash via sibling KosyncDocuments linked to the same book."""
+    def test_get_progress_unknown_hash_creates_stub(self):
+        """Test that GET for a completely unknown hash returns 502 and creates a stub for background discovery."""
         from src import web_server
 
         # Create a book with a known kosync_doc_id

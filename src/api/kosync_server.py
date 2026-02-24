@@ -160,7 +160,7 @@ def kosync_get_progress(doc_id):
         return _respond_from_book_states(doc_id, book)
 
     # Step 3: Sibling hash resolution — find the book via other linked hashes
-    resolved_book = _resolve_book_by_sibling_hash(doc_id)
+    resolved_book = _resolve_book_by_sibling_hash(doc_id, existing_doc=kosync_doc)
     if resolved_book:
         _register_hash_for_book(doc_id, resolved_book)
         return _respond_from_book_states(doc_id, resolved_book)
@@ -609,13 +609,13 @@ def _respond_from_book_states(doc_id, book):
     }), 200
 
 
-def _resolve_book_by_sibling_hash(doc_id: str):
+def _resolve_book_by_sibling_hash(doc_id: str, existing_doc=None):
     """
     Try to resolve an unknown hash to a known book using DB-only lookups.
     Checks if any other KosyncDocument with the same filename is already linked.
     """
     # Check if this hash has a filename cached (from a prior scan/PUT)
-    doc = _database_service.get_kosync_document(doc_id)
+    doc = existing_doc or _database_service.get_kosync_document(doc_id)
     if doc and doc.filename:
         # Find a sibling document with the same filename that's linked to a book
         sibling = _database_service.get_kosync_doc_by_filename(doc.filename)
@@ -646,7 +646,6 @@ def _register_hash_for_book(doc_id: str, book):
     else:
         doc = KD(document_hash=doc_id, linked_abs_id=book.abs_id)
         _database_service.save_kosync_document(doc)
-        _database_service.link_kosync_document(doc_id, book.abs_id)
         logger.info(f"🔗 KOSync: Created and linked new document {doc_id[:8]}... to '{book.abs_title}'")
 
 
@@ -673,14 +672,6 @@ def _run_get_auto_discovery(doc_id: str):
             _database_service.link_kosync_document(doc_id, book.abs_id)
             logger.info(f"✅ KOSync: GET-discovery linked {doc_id[:8]}... to '{book.abs_title}'")
             return
-
-        # Also check by original_ebook_filename via all books
-        all_books = _database_service.get_all_books()
-        for b in all_books:
-            if b.ebook_filename == epub_filename or (b.original_ebook_filename and b.original_ebook_filename == epub_filename):
-                _database_service.link_kosync_document(doc_id, b.abs_id)
-                logger.info(f"✅ KOSync: GET-discovery linked {doc_id[:8]}... to '{b.abs_title}'")
-                return
 
         logger.info(f"🔍 KOSync: GET-discovery found epub '{epub_filename}' but no matching book")
     except Exception as e:
