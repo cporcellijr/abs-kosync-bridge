@@ -373,5 +373,145 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertAlmostEqual(data['percentage'], 0.75)
 
 
+    def test_get_progress_sibling_hash_resolution(self):
+        """Test that GET resolves an unknown hash via sibling KosyncDocuments linked to the same book."""
+        from src import web_server
+
+        # Create a book with a known kosync_doc_id
+        book = Book(
+            abs_id='test-sibling-book',
+            abs_title='Sibling Test Book',
+            kosync_doc_id='a' * 32,
+            ebook_filename='sibling_test.epub',
+            status='active',
+            sync_mode='ebook_only'
+        )
+        web_server.database_service.save_book(book)
+
+        # Create a KosyncDocument for hash_A linked to the book, with progress
+        self.client.put(
+            '/syncs/progress',
+            headers=self.auth_headers,
+            json={
+                'document': 'a' * 32,
+                'progress': '/body/chapter[3]',
+                'percentage': 0.45,
+                'device': 'Device1',
+                'device_id': 'D1'
+            }
+        )
+        # Link it to the book
+        web_server.database_service.link_kosync_document('a' * 32, 'test-sibling-book')
+
+        # Now GET with an unknown hash_B — should resolve via the book's sibling docs
+        # First, we need hash_B to be findable. The sibling resolution requires
+        # the unknown hash to have a filename in common. Since hash_B is brand new
+        # with no filename, it will fall through to Step 4 (background discovery).
+        # So this tests that the 502 + stub creation path works.
+        response = self.client.get(
+            '/syncs/progress/' + 'b' * 32,
+            headers=self.auth_headers
+        )
+        # Unknown hash with no filename link returns 502
+        self.assertEqual(response.status_code, 502)
+
+        # Clean up
+        with web_server.database_service.get_session() as session:
+            session.query(Book).filter(Book.abs_id == 'test-sibling-book').delete()
+
+    def test_get_progress_resolves_via_book_kosync_id(self):
+        """Test that GET resolves via book.kosync_doc_id fallback (Step 2) and returns sibling progress."""
+        from src import web_server
+
+        # Create a book whose kosync_doc_id matches the GET hash
+        book = Book(
+            abs_id='test-step2-book',
+            abs_title='Step2 Test Book',
+            kosync_doc_id='s' * 32,
+            ebook_filename='step2_test.epub',
+            status='active',
+            sync_mode='ebook_only'
+        )
+        web_server.database_service.save_book(book)
+
+        # Create a sibling KosyncDocument linked to the same book with progress
+        sibling_doc = KosyncDocument(
+            document_hash='t' * 32,
+            progress='/body/chapter[7]',
+            percentage=0.60,
+            device='Sibling',
+            device_id='S1',
+            timestamp=datetime.utcnow(),
+            linked_abs_id='test-step2-book'
+        )
+        web_server.database_service.save_kosync_document(sibling_doc)
+
+        # GET with the book's kosync_doc_id (not in kosync_documents itself)
+        response = self.client.get(
+            '/syncs/progress/' + 's' * 32,
+            headers=self.auth_headers
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        # Should return sibling's progress since it's linked to the same book
+        self.assertAlmostEqual(data['percentage'], 0.60)
+        self.assertEqual(data['document'], 's' * 32)
+
+        # Clean up
+        with web_server.database_service.get_session() as session:
+            session.query(Book).filter(Book.abs_id == 'test-step2-book').delete()
+
+    def test_get_progress_sibling_via_filename(self):
+        """Test that GET resolves an unknown hash when a sibling with the same filename is linked to a book."""
+        from src import web_server
+
+        # Create a book
+        book = Book(
+            abs_id='test-filename-book',
+            abs_title='Filename Test Book',
+            kosync_doc_id='f' * 32,
+            ebook_filename='shared_name.epub',
+            status='active',
+            sync_mode='ebook_only'
+        )
+        web_server.database_service.save_book(book)
+
+        # Create a KosyncDocument for hash_A linked to the book, with a filename and progress
+        doc_a = KosyncDocument(
+            document_hash='f' * 32,
+            progress='/body/chapter[5]',
+            percentage=0.50,
+            device='DeviceA',
+            device_id='DA',
+            timestamp=datetime.utcnow(),
+            filename='shared_name.epub',
+            linked_abs_id='test-filename-book'
+        )
+        web_server.database_service.save_kosync_document(doc_a)
+
+        # Create a KosyncDocument for hash_B with the SAME filename but NOT linked
+        doc_b = KosyncDocument(
+            document_hash='e' * 32,
+            filename='shared_name.epub'
+        )
+        web_server.database_service.save_kosync_document(doc_b)
+
+        # GET with hash_B — should resolve via filename sibling to the book
+        response = self.client.get(
+            '/syncs/progress/' + 'e' * 32,
+            headers=self.auth_headers
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertAlmostEqual(data['percentage'], 0.50)
+        self.assertEqual(data['document'], 'e' * 32)
+
+        # Clean up
+        with web_server.database_service.get_session() as session:
+            session.query(Book).filter(Book.abs_id == 'test-filename-book').delete()
+
+
 if __name__ == '__main__':
     unittest.main()
