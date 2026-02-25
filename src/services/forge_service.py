@@ -79,19 +79,19 @@ class ForgeService:
                     if matches:
                         src_path = matches[0]
 
-                    if src_path and src_path.exists():
-                        shutil.copy2(str(src_path), dest_folder / src_path.name)
+                if src_path and src_path.exists():
+                    shutil.copy2(str(src_path), dest_folder / src_path.name)
+                    copied += 1
+                else:
+                    # 4. API Download Fallback
+                    logger.info(f"⚡ Local file not found, downloading via API: '{filename}'")
+                    stream_url = f"{self.ABS_API_URL.rstrip('/')}/api/items/{abs_id}/file/{f.get('ino')}?token={self.ABS_API_TOKEN}"
+                    dest_path = dest_folder / filename
+                    # Use the ABS Client
+                    if self.abs_client.download_file(stream_url, dest_path):
                         copied += 1
                     else:
-                        # 4. API Download Fallback
-                        logger.info(f"⚡ Local file not found, downloading via API: '{filename}'")
-                        stream_url = f"{self.ABS_API_URL.rstrip('/')}/api/items/{abs_id}/file/{f.get('ino')}?token={self.ABS_API_TOKEN}"
-                        dest_path = dest_folder / filename
-                        # Use the ABS Client
-                        if self.abs_client.download_file(stream_url, dest_path):
-                            copied += 1
-                        else:
-                            logger.error(f"❌ Could not find or download audio file: '{filename}'")
+                        logger.error(f"❌ Could not find or download audio file: '{filename}'")
             
             if copied == len(audio_files):
                 return True
