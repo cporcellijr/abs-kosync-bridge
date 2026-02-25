@@ -2243,6 +2243,23 @@ if __name__ == '__main__':
     threading.Thread(target=get_update_status, daemon=True).start()
     logger.info("🚀 Sync daemon thread started")
 
+    # Start ABS Socket.IO listener for real-time sync
+    abs_socket_enabled = os.environ.get('ABS_SOCKET_ENABLED', 'true').lower() != 'false'
+    if abs_socket_enabled and container.abs_client().is_configured():
+        from src.services.abs_socket_listener import ABSSocketListener
+        abs_listener = ABSSocketListener(
+            abs_server_url=os.environ.get('ABS_SERVER', ''),
+            abs_api_token=os.environ.get('ABS_KEY', ''),
+            database_service=database_service,
+            sync_manager=manager
+        )
+        abs_socket_thread = threading.Thread(target=abs_listener.start, daemon=True)
+        abs_socket_thread.start()
+        logger.info("🔌 ABS Socket.IO listener started (real-time sync enabled)")
+    else:
+        if not abs_socket_enabled:
+            logger.info("ℹ️ ABS Socket.IO listener disabled (ABS_SOCKET_ENABLED=false)")
+
 
 
     # Check ebook source configuration

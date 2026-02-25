@@ -398,6 +398,17 @@ def kosync_put_progress():
         # This ensures proper delta detection between cycles.
         logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
 
+        # Trigger instant sync when KOReader pushes progress
+        # Skip if the update came from the sync bot itself (prevents sync→PUT→sync loop)
+        is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
+        if linked_book.status == 'active' and _manager and not is_internal:
+            threading.Thread(
+                target=_manager.sync_cycle,
+                kwargs={'target_abs_id': linked_book.abs_id},
+                daemon=True
+            ).start()
+            logger.info(f"⚡ KOSync PUT: Triggering instant sync for '{linked_book.abs_title}'")
+
     response_timestamp = now.isoformat() + "Z"
     if device and device.lower() == "booknexus":
         # BookNexus expects an integer timestamp (Unix epoch)

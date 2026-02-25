@@ -15,5 +15,6 @@ lxml
 dependency-injector
 sqlalchemy
 alembic
+python-socketio[client]
 mkdocs-material
 
