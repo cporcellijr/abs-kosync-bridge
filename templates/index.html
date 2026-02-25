@@ -2091,6 +2091,20 @@
             </div>
         </div>
         <script src="/static/js/storyteller-modal.js"></script>
+        <div style="position: fixed; bottom: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);">
+            <span style="font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 600; letter-spacing: 0.5px; font-family: monospace;">
+                v{{ app_version }}
+            </span>
+            {% if update_available %}
+            <a href="https://github.com/cporcellijr/abs-kosync-bridge/releases/latest"
+               target="_blank"
+               style="font-size: 11px; color: #667eea; text-decoration: none; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 4px; padding: 3px 8px; white-space: nowrap; transition: all 0.2s; font-weight: 600;"
+               onmouseover="this.style.background='rgba(102,126,234,0.25)'"
+               onmouseout="this.style.background='rgba(102,126,234,0.15)'">
+                ↑ v{{ latest_version }} Available
+            </a>
+            {% endif %}
+        </div>
 </body>
 
 </html>

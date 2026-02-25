@@ -23,6 +23,7 @@ from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.api.kosync_server import kosync_sync_bp, kosync_admin_bp, init_kosync_server
 from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
+from src.version import APP_VERSION, get_update_status
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -894,7 +895,18 @@ def index():
     else:
         overall_progress = 0
 
-    return render_template('index.html', mappings=mappings, integrations=integrations, progress=overall_progress, suggestions=suggestions)
+    latest_version, update_available = get_update_status()
+
+    return render_template(
+        'index.html',
+        mappings=mappings,
+        integrations=integrations,
+        progress=overall_progress,
+        suggestions=suggestions,
+        app_version=APP_VERSION,
+        update_available=update_available,
+        latest_version=latest_version
+    )
 
 
 def shelfmark():
@@ -2176,6 +2188,7 @@ if __name__ == '__main__':
     # Start sync daemon in background thread
     sync_daemon_thread = threading.Thread(target=sync_daemon, daemon=True)
     sync_daemon_thread.start()
+    threading.Thread(target=get_update_status, daemon=True).start()
     logger.info("🚀 Sync daemon thread started")
 
 
