@@ -683,7 +683,6 @@ def _run_get_auto_discovery(doc_id: str):
 # ---------------- KOSync Document Management API ----------------
 
 @kosync_admin_bp.route('/api/kosync-documents', methods=['GET'])
-@kosync_auth_required
 def api_get_kosync_documents():
     """Get all KOSync documents with their link status."""
     docs = _database_service.get_all_kosync_documents()
@@ -715,7 +714,6 @@ def api_get_kosync_documents():
 
 
 @kosync_admin_bp.route('/api/kosync-documents/<doc_hash>/link', methods=['POST'])
-@kosync_auth_required
 def api_link_kosync_document(doc_hash):
     """Link a KOSync document to an ABS book."""
     data = request.json
@@ -755,7 +753,6 @@ def api_link_kosync_document(doc_hash):
 
 
 @kosync_admin_bp.route('/api/kosync-documents/<doc_hash>/unlink', methods=['POST'])
-@kosync_auth_required
 def api_unlink_kosync_document(doc_hash):
     """Remove the ABS book link from a KOSync document."""
     success = _database_service.unlink_kosync_document(doc_hash)
@@ -767,7 +764,6 @@ def api_unlink_kosync_document(doc_hash):
 
 
 @kosync_admin_bp.route('/api/kosync-documents/<doc_hash>', methods=['DELETE'])
-@kosync_auth_required
 def api_delete_kosync_document(doc_hash):
     """Delete a KOSync document."""
     success = _database_service.delete_kosync_document(doc_hash)
