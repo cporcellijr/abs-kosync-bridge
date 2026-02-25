@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import glob
+import threading
 import rapidfuzz
 import zipfile
 import shutil
@@ -31,22 +32,26 @@ class LRUCache:
     def __init__(self, capacity: int = 3):
         self.cache = OrderedDict()
         self.capacity = capacity
+        self._lock = threading.Lock()
 
     def get(self, key):
-        if key not in self.cache:
-            return None
-        self.cache.move_to_end(key)
-        return self.cache[key]
+        with self._lock:
+            if key not in self.cache:
+                return None
+            self.cache.move_to_end(key)
+            return self.cache[key]
 
     def put(self, key, value):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = value
-        while len(self.cache) > self.capacity:
-            self.cache.popitem(last=False)
+        with self._lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            self.cache[key] = value
+            while len(self.cache) > self.capacity:
+                self.cache.popitem(last=False)
 
     def clear(self):
-        self.cache.clear()
+        with self._lock:
+            self.cache.clear()
 
 
 class EbookParser:

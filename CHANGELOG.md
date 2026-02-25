@@ -20,6 +20,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 - **Booklore Double Search**: Fixed a redundant double-search issue in Booklore book lookups, improving match performance.
 - **Database Schema**: Consolidated schema repair into a single clean Alembic migration, reducing startup migration time and preventing edge-case schema conflicts.
 - **Mark Complete Crash**: Fixed a `TypeError` in the `mark_complete` endpoint caused by invalid `LocatorResult` keyword arguments.
+- **LRUCache Thread Safety**: Added `threading.Lock` to the `LRUCache` class in `ebook_utils.py`. The cache is accessed concurrently by the sync daemon, forge background jobs, and web server requests, but `OrderedDict.move_to_end()` and `popitem()` are not thread-safe for concurrent mutation.
 
 ---
 
