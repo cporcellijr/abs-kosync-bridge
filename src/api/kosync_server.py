@@ -141,8 +141,16 @@ def kosync_get_progress(doc_id):
     # Step 1: Direct hash lookup
     kosync_doc = _database_service.get_kosync_document(doc_id)
     if kosync_doc:
+        # If linked to a book, always check siblings for freshest progress.
+        # This prevents "shadow" docs (created by sync-bot PUTs) from returning
+        # stale data when the real device hash has advanced further.
+        if kosync_doc.linked_abs_id:
+            book = _database_service.get_book(kosync_doc.linked_abs_id)
+            if book:
+                return _respond_from_book_states(doc_id, book)
+
         has_progress = kosync_doc.percentage and float(kosync_doc.percentage) > 0
-        if has_progress or kosync_doc.linked_abs_id:
+        if has_progress:
             return jsonify({
                 "device": kosync_doc.device or "",
                 "device_id": kosync_doc.device_id or "",
