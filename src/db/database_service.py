@@ -204,7 +204,8 @@ class DatabaseService:
             if existing:
                 # Update existing book
                 for attr in ['abs_title', 'ebook_filename', 'original_ebook_filename', 'kosync_doc_id',
-                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid']:
+                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid',
+                           'abs_ebook_item_id']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
@@ -934,6 +935,5 @@ class DatabaseMigrator:
             return True
 
         return False
-
 
 
