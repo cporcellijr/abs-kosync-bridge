@@ -32,14 +32,31 @@ Links your ebook status across platforms.
 
 - **Mechanism**: Direct percentage/text position sync.
 - **Triggers**:
-  - **Internal KOSync**: Instant (Push-based).
-  - **ABS/Booklore**: Periodic Polling (every ~5 mins).
+  - **KOReader**: Instant — syncs the moment you close or pause reading.
+  - **Audiobookshelf**: Near-instant (~30s) during audiobook playback.
+  - **Booklore/Others**: Picked up on the regular background sync (every ~5 mins).
 - **Supported Clients**:
   - **KOReader** (via Internal KOSync Server)
   - **Booklore** (Requires `BOOKLORE_ENABLED=true`)
   - **ABS Ebook** (Requires `SYNC_ABS_EBOOK=true`)
 - **Hardcover**: Updates Hardcover.app presence (if configured).
-- **Note**: If you only use Booklore and ABS Web Reader (no KOReader), syncs will occur only during the periodic poll interval.
+
+---
+
+## Real-Time Sync
+
+By default, the bridge checks all your clients for progress changes every 5 minutes. **Real-time sync** makes this happen much faster — within seconds instead of minutes.
+
+### How It Works
+
+There are two ways progress can sync instantly:
+
+1. **Audiobook Playback** — When you listen to an audiobook in Audiobookshelf (web player, mobile app, etc.), the bridge detects the playback activity automatically. Once you stop or pause for about 30 seconds, it syncs your position to all your other platforms right away.
+
+2. **KOReader Reading** — If you use the built-in KoSync server (configured in Settings), KOReader sends your reading position to the bridge the moment you close a book or turn the page. The bridge then pushes that position to all your other clients immediately.
+
+> [!NOTE]
+> The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it. If you update progress in Storyteller or Booklore directly, the background sync will still pick it up on the next cycle.
 
 ---
 
