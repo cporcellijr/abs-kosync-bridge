@@ -9,6 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # 1. Install System Dependencies
 # FFmpeg with full codec support for audio conversion
 RUN apt-get update && \
