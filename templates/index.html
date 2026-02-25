@@ -177,6 +177,8 @@
             <div class="card-footer">
                 <div class="last-sync">Synced {{ mapping.last_sync }}</div>
                 <div class="quick-actions">
+                    <button type="button" class="action-btn" onclick="syncNow('{{ mapping.abs_id }}', this)" title="Sync Now">⚡</button>
+                    <button type="button" class="action-btn" onclick="markComplete('{{ mapping.abs_id }}', '{{ mapping.abs_title | e }}')" title="Mark Complete">✅</button>
                     <form method="POST" action="/clear-progress/{{ mapping.abs_id }}">
                         <button type="submit" class="action-btn warning" aria-label="Clear Progress"
                             onclick="return confirm('Clear all progress for this book?')">🔄</button>
@@ -2105,6 +2107,75 @@
             </a>
             {% endif %}
         </div>
+
+    <script>
+        function syncNow(absId, btn) {
+            btn.disabled = true;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "⏳";
+            
+            fetch('/api/sync-now/' + absId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    btn.innerHTML = "✅";
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }, 2000);
+                } else {
+                    btn.innerHTML = "❌";
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }, 2000);
+                }
+            }).catch(error => {
+                console.error('Error:', error);
+                btn.innerHTML = "❌";
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }, 2000);
+            });
+        }
+
+        function markComplete(absId, title) {
+            if (!confirm('Are you sure you want to mark "' + title + '" as complete? This will set progress to 100% on all synced platforms.')) {
+                return;
+            }
+            
+            const shouldDelete = confirm('Do you also want to delete the mapping and all cached files for this book?');
+            
+            fetch('/api/mark-complete/' + absId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ delete: shouldDelete })
+            }).then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (shouldDelete) {
+                        const cardElement = document.querySelector('.book-card[data-abs-id="' + absId + '"]')
+                        if (cardElement) {
+                            cardElement.remove();
+                        } else {
+                            window.location.reload();
+                        }
+                    } else {
+                        window.location.reload();
+                    }
+                } else {
+                    alert('Error marking book as complete: ' + (data.error || 'Unknown error'));
+                }
+            }).catch(error => {
+                console.error('Error:', error);
+                alert('Connection error while marking book as complete');
+            });
+        }
+    </script>
 </body>
+
 
 </html>

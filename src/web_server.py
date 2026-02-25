@@ -24,6 +24,8 @@ from src.utils.logging_utils import sanitize_log_data
 from src.api.kosync_server import kosync_sync_bp, kosync_admin_bp, init_kosync_server
 from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 from src.version import APP_VERSION, get_update_status
+from src.db.models import State
+from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -1545,21 +1547,37 @@ def batch_match():
                            queue=session.get('queue', []), search=search, get_title=manager.get_abs_title)
 
 
-def delete_mapping(abs_id):
-    # Get book from database service
-    book = database_service.get_book(abs_id)
-    if book:
-        # Clean up transcript file if it exists
-        if book.transcript_file:
-            try:
-                Path(book.transcript_file).unlink()
-            except Exception:
-                pass
+def cleanup_mapping_resources(book):
+    """Delete external artifacts and membership data for a mapped book."""
+    if not book:
+        return
 
-        # Clean up cached ebook if it exists
-        if book.ebook_filename:
-            epub_cache = container.epub_cache_dir()
-            cached_path = epub_cache / book.ebook_filename
+    if book.transcript_file:
+        try:
+            Path(book.transcript_file).unlink()
+        except Exception:
+            pass
+
+    if book.ebook_filename:
+        cache_dirs = []
+        try:
+            cache_dirs.append(container.epub_cache_dir())
+        except Exception:
+            pass
+
+        manager_cache_dir = getattr(manager, 'epub_cache_dir', None)
+        if manager_cache_dir:
+            cache_dirs.append(manager_cache_dir)
+
+        seen_dirs = set()
+        for cache_dir in cache_dirs:
+            cache_dir_path = Path(cache_dir)
+            cache_dir_key = str(cache_dir_path)
+            if cache_dir_key in seen_dirs:
+                continue
+            seen_dirs.add(cache_dir_key)
+
+            cached_path = cache_dir_path / book.ebook_filename
             if cached_path.exists():
                 try:
                     cached_path.unlink()
@@ -1567,38 +1585,28 @@ def delete_mapping(abs_id):
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to delete cached ebook {book.ebook_filename}: {e}")
 
-        # If ebook-only, also delete the raw KOSync document to allow a total fresh re-mapping
-        if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' and book.kosync_doc_id:
-            logger.info(f"🗑️ Deleting KOSync document record for ebook-only mapping: '{book.kosync_doc_id[:8]}'")
-            database_service.delete_kosync_document(book.kosync_doc_id)
+    if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' and book.kosync_doc_id:
+        logger.info(f"🗑️ Deleting KOSync document record for ebook-only mapping: '{book.kosync_doc_id[:8]}'")
+        database_service.delete_kosync_document(book.kosync_doc_id)
 
-        # [NEW] Delete cached ebook file
-        if book.ebook_filename:
-            try:
-                # Use manager's cache dir which is already configured
-                cache_file = manager.epub_cache_dir / book.ebook_filename
-                if cache_file.exists():
-                    cache_file.unlink()
-                    logger.info(f"🗑️ Deleted ebook cache file: {book.ebook_filename}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to delete ebook cache file: {e}")
+    collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
+    try:
+        container.abs_client().remove_from_collection(book.abs_id, collection_name)
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
 
-        # Remove from ABS collection
-        collection_name = os.environ.get('ABS_COLLECTION_NAME', 'Synced with KOReader')
+    if book.ebook_filename and container.booklore_client().is_configured():
+        shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
         try:
-            container.abs_client().remove_from_collection(abs_id, collection_name)
+            shelf_filename = book.original_ebook_filename or book.ebook_filename
+            container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
         except Exception as e:
-            logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
+            logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
 
-        # Remove from Booklore shelf
-        if book.ebook_filename and container.booklore_client().is_configured():
-            shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
-            try:
-                shelf_filename = book.original_ebook_filename or book.ebook_filename
-                container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
-                # Same here regarding logging.
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
+
+def delete_mapping(abs_id):
+    if book:
+        cleanup_mapping_resources(book)
 
     # Delete book and all associated data (states, jobs, hardcover details) via database service
     database_service.delete_book(abs_id)
@@ -1626,6 +1634,61 @@ def clear_progress(abs_id):
 
     return redirect(url_for('index'))
 
+
+
+def sync_now(abs_id):
+    book = database_service.get_book(abs_id)
+    if not book:
+        return jsonify({"success": False, "error": "Book not found"}), 404
+    
+    threading.Thread(target=manager.sync_cycle, kwargs={'target_abs_id': abs_id}, daemon=True).start()
+    return jsonify({"success": True})
+
+def mark_complete(abs_id):
+    book = database_service.get_book(abs_id)
+    if not book:
+        return jsonify({"success": False, "error": "Book not found"}), 404
+        
+    perform_delete = request.json.get('delete', False) if request.json else False
+    
+    locator = LocatorResult(
+        percentage=1.0,
+        hash_id=book.kosync_doc_id,
+        timestamp=int(time.time() * 1000),
+        text="Book finished",
+        perfect_ko=None
+    )
+    
+    update_req = UpdateProgressRequest(
+        abs_id=book.abs_id,
+        kosync_doc_id=book.kosync_doc_id,
+        percentage=1.0,
+        locator=locator,
+        time_listened=book.duration or 0,
+        timestamp=int(time.time() * 1000)
+    )
+    
+    for client_name, client in container.sync_clients().items():
+        if client.is_configured():
+            if client_name.lower() == 'abs':
+                client.mark_finished(abs_id)
+            else:
+                client.update_progress(update_req)
+                
+            state = State(
+                abs_id=abs_id,
+                client_name=client_name.lower(),
+                percentage=1.0,
+                timestamp=int(time.time()),
+                last_updated=int(time.time())
+            )
+            database_service.save_state(state)
+            
+    if perform_delete:
+        cleanup_mapping_resources(book)
+        database_service.delete_book(abs_id)
+        
+    return jsonify({"success": True})
 
 def update_hash(abs_id):
     from flask import flash
@@ -2130,6 +2193,8 @@ def create_app(test_container=None):
     app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
     app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
     app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
+    app.add_url_rule('/api/sync-now/<abs_id>', 'sync_now', sync_now, methods=['POST'])
+    app.add_url_rule('/api/mark-complete/<abs_id>', 'mark_complete', mark_complete, methods=['POST'])
     app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
     app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
     app.add_url_rule('/api/status', 'api_status', api_status)
