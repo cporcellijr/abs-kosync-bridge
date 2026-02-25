@@ -1651,29 +1651,16 @@ def mark_complete(abs_id):
         
     perform_delete = request.json.get('delete', False) if request.json else False
     
-    locator = LocatorResult(
-        percentage=1.0,
-        hash_id=book.kosync_doc_id,
-        timestamp=int(time.time() * 1000),
-        text="Book finished",
-        perfect_ko=None
-    )
-    
-    update_req = UpdateProgressRequest(
-        abs_id=book.abs_id,
-        kosync_doc_id=book.kosync_doc_id,
-        percentage=1.0,
-        locator=locator,
-        time_listened=book.duration or 0,
-        timestamp=int(time.time() * 1000)
-    )
+    locator = LocatorResult(percentage=1.0)
+
+    update_req = UpdateProgressRequest(locator_result=locator, txt="Book finished", previous_location=None)
     
     for client_name, client in container.sync_clients().items():
         if client.is_configured():
             if client_name.lower() == 'abs':
-                client.mark_finished(abs_id)
+                client.abs_client.mark_finished(abs_id)
             else:
-                client.update_progress(update_req)
+                client.update_progress(book, update_req)
                 
             state = State(
                 abs_id=abs_id,

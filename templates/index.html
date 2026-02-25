@@ -2195,9 +2195,17 @@
                 if (!confirm('Are you sure you want to mark "' + title + '" as complete? This will set progress to 100% on all synced platforms.')) {
                     return;
                 }
+                window._mcAbsId = absId;
+                document.getElementById('delete-mapping-modal').style.display = 'flex';
+            }
 
-                const shouldDelete = confirm('Do you also want to delete the mapping and all cached files for this book?');
+            function closeDeleteMappingModal() {
+                document.getElementById('delete-mapping-modal').style.display = 'none';
+                window._mcAbsId = null;
+            }
 
+            function _dmExecuteFetch(absId, shouldDelete) {
+                closeDeleteMappingModal();
                 fetch('/api/mark-complete/' + absId, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2206,7 +2214,7 @@
                     .then(data => {
                         if (data.success) {
                             if (shouldDelete) {
-                                const cardElement = document.querySelector('.book-card[data-abs-id="' + absId + '"]')
+                                const cardElement = document.querySelector('.book-card[data-abs-id="' + absId + '"]');
                                 if (cardElement) {
                                     cardElement.remove();
                                 } else {
@@ -2223,7 +2231,38 @@
                         alert('Connection error while marking book as complete');
                     });
             }
+
+            function _dmYesDelete() { _dmExecuteFetch(window._mcAbsId, true); }
+            function _dmNoKeepMapping() { _dmExecuteFetch(window._mcAbsId, false); }
         </script>
+
+        <!-- Delete Mapping Confirmation Modal -->
+        <div id="delete-mapping-modal" class="hc-modal" style="display:none;">
+            <div class="hc-modal-backdrop" onclick="closeDeleteMappingModal()"></div>
+            <div class="hc-modal-content" style="max-width:420px;">
+                <div class="hc-modal-header">
+                    <h3>Delete Mapping?</h3>
+                    <button class="hc-modal-close" onclick="closeDeleteMappingModal()" aria-label="Close">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round">
+                            <path d="M1 1l12 12M13 1L1 13" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="hc-modal-body">
+                    <p style="color:rgba(255,255,255,0.75); margin:0; line-height:1.6;">
+                        Do you also want to delete the mapping and all cached files for this book?
+                    </p>
+                </div>
+                <div class="hc-modal-footer">
+                    <button class="hc-btn-cancel" onclick="closeDeleteMappingModal()">Cancel</button>
+                    <button class="hc-btn-link" onclick="_dmNoKeepMapping()">No, Keep Mapping</button>
+                    <button onclick="_dmYesDelete()"
+                        style="padding:10px 20px; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; background:linear-gradient(135deg,#e53e3e,#c53030); color:#fff;">Yes,
+                        Delete</button>
+                </div>
+            </div>
+        </div>
 </body>
 
 
