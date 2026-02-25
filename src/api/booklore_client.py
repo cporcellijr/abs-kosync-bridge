@@ -487,9 +487,6 @@ class BookloreClient:
             'koreaderProgress': detail.get('koreaderProgress'),
         }
 
-        self._book_cache[filename] = book_info # Filename case sensitivity might issue used to be filename.lower()
-        # The key in _book_cache seems to be filename (exact) or lower? 
-        # Original code line 300: self._book_cache[filename.lower()] = book_info
         # Let's keep it consistent with what we see in database migration
         
         self._book_cache[filename.lower()] = book_info
