@@ -204,7 +204,8 @@ class DatabaseService:
             if existing:
                 # Update existing book
                 for attr in ['abs_title', 'ebook_filename', 'original_ebook_filename', 'kosync_doc_id',
-                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid']:
+                           'transcript_file', 'status', 'duration', 'sync_mode', 'storyteller_uuid',
+                           'abs_ebook_item_id']:
                     if hasattr(book, attr):
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
@@ -564,6 +565,30 @@ class DatabaseService:
                 session.expunge(doc)
             return doc
 
+    def get_kosync_documents_for_book(self, abs_id: str) -> List[KosyncDocument]:
+        """Get ALL KOSync documents linked to a specific ABS book."""
+        with self.get_session() as session:
+            docs = session.query(KosyncDocument).filter(
+                KosyncDocument.linked_abs_id == abs_id
+            ).all()
+            for doc in docs:
+                session.expunge(doc)
+            return docs
+
+    def get_book_by_ebook_filename(self, filename: str) -> Optional['Book']:
+        """Find a book by its ebook filename (current or original)."""
+        from sqlalchemy import or_
+        with self.get_session() as session:
+            book = session.query(Book).filter(
+                or_(
+                    Book.ebook_filename == filename,
+                    Book.original_ebook_filename == filename
+                )
+            ).first()
+            if book:
+                session.expunge(book)
+            return book
+
     def get_kosync_doc_by_filename(self, filename: str) -> Optional[KosyncDocument]:
         """Find a KOSync document by its associated filename."""
         with self.get_session() as session:
@@ -910,6 +935,5 @@ class DatabaseMigrator:
             return True
 
         return False
-
 
 

@@ -50,7 +50,7 @@ def kosync_auth_required(f):
         expected_password = os.environ.get("KOSYNC_KEY")
 
         if not expected_user or not expected_password:
-            logger.error("❌ KOSync Integrated Server: Credentials not configured in settings")
+            logger.error(f"❌ KOSync Integrated Server: Credentials not configured in settings (request from {request.remote_addr})")
             return jsonify({"error": "Server not configured"}), 500
 
         expected_hash = hash_kosync_key(expected_password)
@@ -58,7 +58,7 @@ def kosync_auth_required(f):
         if user and expected_user and user.lower() == expected_user.lower() and (key == expected_password or key == expected_hash):
             return f(*args, **kwargs)
 
-        logger.warning(f"⚠️ KOSync Integrated Server: Unauthorized access attempt from '{request.remote_addr}' (user: '{user}'")
+        logger.warning(f"⚠️ KOSync Integrated Server: Unauthorized access attempt from '{request.remote_addr}' (user: '{user}')")
         return jsonify({"error": "Unauthorized"}), 401
     return decorated_function
 
@@ -129,42 +129,61 @@ def kosync_get_progress(doc_id):
     """
     Fetch progress for a specific document.
     Returns 502 (not 404) if document not found, per kosync-dotnet spec.
+
+    Lookup order:
+      1. Direct hash match in kosync_documents
+      2. Book lookup by kosync_doc_id
+      3. Sibling hash resolution (same book, different epub hash)
+      4. Background auto-discovery for completely unknown hashes
     """
+    logger.info(f"KOSync: GET progress for doc {doc_id[:8]}... from {request.remote_addr}")
+
+    # Step 1: Direct hash lookup
     kosync_doc = _database_service.get_kosync_document(doc_id)
-
     if kosync_doc:
-        return jsonify({
-            "device": kosync_doc.device or "",
-            "device_id": kosync_doc.device_id or "",
-            "document": kosync_doc.document_hash,
-            "percentage": float(kosync_doc.percentage) if kosync_doc.percentage else 0,
-            "progress": kosync_doc.progress or "",
-            "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else 0
-        }), 200
+        # If linked to a book, always check siblings for freshest progress.
+        # This prevents "shadow" docs (created by sync-bot PUTs) from returning
+        # stale data when the real device hash has advanced further.
+        if kosync_doc.linked_abs_id:
+            book = _database_service.get_book(kosync_doc.linked_abs_id)
+            if book:
+                return _respond_from_book_states(doc_id, book)
 
-    # Fallback: Check mapped book with State data
+        has_progress = kosync_doc.percentage and float(kosync_doc.percentage) > 0
+        if has_progress:
+            return jsonify({
+                "device": kosync_doc.device or "",
+                "device_id": kosync_doc.device_id or "",
+                "document": kosync_doc.document_hash,
+                "percentage": float(kosync_doc.percentage) if kosync_doc.percentage else 0,
+                "progress": kosync_doc.progress or "",
+                "timestamp": int(kosync_doc.timestamp.timestamp()) if kosync_doc.timestamp else 0
+            }), 200
+        # Document exists but has no progress and no linked book — fall through
+        # to try sibling resolution for better data
+
+    # Step 2: Book lookup by kosync_doc_id
     book = _database_service.get_book_by_kosync_id(doc_id)
     if book:
-        states = _database_service.get_states_for_book(book.abs_id)
-        if not states:
-            return jsonify({"message": "Document not found on server"}), 502
+        return _respond_from_book_states(doc_id, book)
 
-        kosync_state = next((s for s in states if s.client_name.lower() == 'kosync'), None)
-        if kosync_state:
-            latest_state = kosync_state
-        else:
-            latest_state = max(states, key=lambda s: s.last_updated if s.last_updated else 0)
+    # Step 3: Sibling hash resolution — find the book via other linked hashes
+    resolved_book = _resolve_book_by_sibling_hash(doc_id, existing_doc=kosync_doc)
+    if resolved_book:
+        _register_hash_for_book(doc_id, resolved_book)
+        return _respond_from_book_states(doc_id, resolved_book)
 
-        return jsonify({
-            "device": "abs-kosync-bridge",
-            "device_id": "abs-kosync-bridge",
-            "document": doc_id,
-            "percentage": float(latest_state.percentage) if latest_state.percentage else 0,
-            "progress": (latest_state.xpath or latest_state.cfi) if hasattr(latest_state, 'xpath') else "",
-            "timestamp": int(latest_state.last_updated) if latest_state.last_updated else 0
-        }), 200
+    # Step 4: Unknown hash — register stub and start background discovery
+    auto_create = os.environ.get('AUTO_CREATE_EBOOK_MAPPING', 'true').lower() == 'true'
+    if auto_create and doc_id not in _active_scans:
+        _active_scans.add(doc_id)
+        from src.db.models import KosyncDocument as KD
+        stub = KD(document_hash=doc_id)
+        _database_service.save_kosync_document(stub)
+        logger.info(f"🔍 KOSync: Created stub for unknown hash {doc_id[:8]}..., starting background discovery")
+        threading.Thread(target=_run_get_auto_discovery, args=(doc_id,), daemon=True).start()
 
-    logger.debug(f"KOSync: Document not found: {doc_id[:8]}...")
+    logger.warning(f"⚠️ KOSync: Document not found: {doc_id[:8]}... (GET from {request.remote_addr})")
     return jsonify({"message": "Document not found on server"}), 502
 
 
@@ -181,11 +200,15 @@ def kosync_put_progress():
 
     data = request.json
     if not data:
+        logger.warning(f"KOSync: PUT progress with no JSON data from {request.remote_addr}")
         return jsonify({"error": "No data"}), 400
 
     doc_hash = data.get('document')
     if not doc_hash:
+        logger.warning(f"KOSync: PUT progress with no document ID from {request.remote_addr}")
         return jsonify({"error": "Missing document ID"}), 400
+
+    logger.info(f"KOSync: PUT progress request for doc {doc_hash[:8]}... from {request.remote_addr} (device: {data.get('device', 'unknown')})")
 
     percentage = data.get('percentage', 0)
     progress = data.get('progress', '')
@@ -555,6 +578,114 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
 
     logger.info("🔍 Auto-discovery finished. No match found")
     return None
+
+
+# ---------------- GET Fallback Helpers ----------------
+
+def _respond_from_book_states(doc_id, book):
+    """Build a GET response from a book's state data. Returns (response, status_code)."""
+    states = _database_service.get_states_for_book(book.abs_id)
+
+    # Also check sibling kosync_documents for device-specific progress
+    sibling_docs = _database_service.get_kosync_documents_for_book(book.abs_id)
+    docs_with_progress = [d for d in sibling_docs if d.percentage and float(d.percentage) > 0]
+    if docs_with_progress:
+        best_doc = max(docs_with_progress, key=lambda d: float(d.percentage))
+        logger.info(f"KOSync: Resolved {doc_id[:8]}... to '{book.abs_title}' via sibling hash {best_doc.document_hash[:8]}... ({float(best_doc.percentage):.2%})")
+        return jsonify({
+            "device": best_doc.device or "abs-kosync-bridge",
+            "device_id": best_doc.device_id or "abs-kosync-bridge",
+            "document": doc_id,
+            "percentage": float(best_doc.percentage),
+            "progress": best_doc.progress or "",
+            "timestamp": int(best_doc.timestamp.timestamp()) if best_doc.timestamp else 0
+        }), 200
+
+    if not states:
+        return jsonify({"message": "Document not found on server"}), 502
+
+    kosync_state = next((s for s in states if s.client_name.lower() == 'kosync'), None)
+    latest_state = kosync_state or max(states, key=lambda s: s.last_updated if s.last_updated else 0)
+
+    return jsonify({
+        "device": "abs-kosync-bridge",
+        "device_id": "abs-kosync-bridge",
+        "document": doc_id,
+        "percentage": float(latest_state.percentage) if latest_state.percentage else 0,
+        "progress": (latest_state.xpath or latest_state.cfi) if hasattr(latest_state, 'xpath') else "",
+        "timestamp": int(latest_state.last_updated) if latest_state.last_updated else 0
+    }), 200
+
+
+def _resolve_book_by_sibling_hash(doc_id: str, existing_doc=None):
+    """
+    Try to resolve an unknown hash to a known book using DB-only lookups.
+    Checks if any other KosyncDocument with the same filename is already linked.
+    """
+    # Check if this hash has a filename cached (from a prior scan/PUT)
+    doc = existing_doc or _database_service.get_kosync_document(doc_id)
+    if doc and doc.filename:
+        # Find a sibling document with the same filename that's linked to a book
+        sibling = _database_service.get_kosync_doc_by_filename(doc.filename)
+        if sibling and sibling.linked_abs_id and sibling.document_hash != doc_id:
+            book = _database_service.get_book(sibling.linked_abs_id)
+            if book:
+                logger.info(f"🔗 KOSync: Resolved {doc_id[:8]}... to '{book.abs_title}' via filename sibling")
+                return book
+
+        # Check if the filename matches a book's ebook_filename directly
+        book = _database_service.get_book_by_ebook_filename(doc.filename)
+        if book:
+            logger.info(f"🔗 KOSync: Resolved {doc_id[:8]}... to '{book.abs_title}' via ebook filename match")
+            return book
+
+    return None
+
+
+def _register_hash_for_book(doc_id: str, book):
+    """Register a new hash and link it to an existing book."""
+    from src.db.models import KosyncDocument as KD
+
+    existing = _database_service.get_kosync_document(doc_id)
+    if existing:
+        if not existing.linked_abs_id:
+            _database_service.link_kosync_document(doc_id, book.abs_id)
+            logger.info(f"🔗 KOSync: Linked existing document {doc_id[:8]}... to '{book.abs_title}'")
+    else:
+        doc = KD(document_hash=doc_id, linked_abs_id=book.abs_id)
+        _database_service.save_kosync_document(doc)
+        logger.info(f"🔗 KOSync: Created and linked new document {doc_id[:8]}... to '{book.abs_title}'")
+
+
+def _run_get_auto_discovery(doc_id: str):
+    """Background auto-discovery triggered by GET for an unknown hash.
+    Finds the matching epub and links the hash to an existing book."""
+    try:
+        logger.info(f"🔍 KOSync: Background discovery (GET) for {doc_id[:8]}...")
+        epub_filename = _try_find_epub_by_hash(doc_id)
+
+        if not epub_filename:
+            logger.info(f"🔍 KOSync: GET-discovery found no epub for {doc_id[:8]}...")
+            return
+
+        # Update stub with filename
+        doc = _database_service.get_kosync_document(doc_id)
+        if doc and not doc.filename:
+            doc.filename = epub_filename
+            _database_service.save_kosync_document(doc)
+
+        # Try to find an existing book that uses this epub
+        book = _database_service.get_book_by_ebook_filename(epub_filename)
+        if book:
+            _database_service.link_kosync_document(doc_id, book.abs_id)
+            logger.info(f"✅ KOSync: GET-discovery linked {doc_id[:8]}... to '{book.abs_title}'")
+            return
+
+        logger.info(f"🔍 KOSync: GET-discovery found epub '{epub_filename}' but no matching book")
+    except Exception as e:
+        logger.error(f"❌ Error in GET auto-discovery: {e}")
+    finally:
+        _active_scans.discard(doc_id)
 
 
 # ---------------- KOSync Document Management API ----------------
