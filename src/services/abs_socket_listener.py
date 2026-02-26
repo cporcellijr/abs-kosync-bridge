@@ -59,7 +59,6 @@ class ABSSocketListener:
         # Track which abs_ids already had a sync fired for the current event
         self._fired: set[str] = set()
         self._lock = threading.Lock()
-        self._auth_retried: bool = False
 
         self._sio = socketio.Client(
             reconnection=True,
@@ -140,13 +139,11 @@ class ABSSocketListener:
 
         @sio.event
         def connect():
-            self._auth_retried = False
-            token = self._socket_token or self._api_token
             logger.info(
                 f"🔌 ABS Socket.IO: Connected — sending auth "
-                f"({self._describe_token(token)})"
+                f"({self._describe_token(self._socket_token)})"
             )
-            sio.emit("auth", token)
+            sio.emit("auth", self._socket_token)
 
         @sio.event
         def disconnect():
@@ -159,26 +156,18 @@ class ABSSocketListener:
                 user = data.get("user", {})
                 if isinstance(user, dict):
                     username = user.get("username", "unknown")
-            self._auth_retried = False  # Reset for future reconnects
             logger.info(f"🔌 ABS Socket.IO: Authenticated as '{username}'")
 
         @sio.on("auth_failed")
         def on_auth_failed(*args):
-            token = self._socket_token or self._api_token
-            logger.warning(
-                f"⚠️ ABS Socket.IO: Authentication failed — "
-                f"token was {self._describe_token(token)}. "
-                f"API key is {self._describe_token(self._api_token)}."
+            logger.error(
+                f"❌ ABS Socket.IO: Authentication failed — token "
+                f"{self._describe_token(self._socket_token)} was rejected. "
+                f"Real-time sync disabled (falling back to standard polling). "
+                f"To fix: log out and back into your ABS web interface to refresh "
+                f"your user token, then restart BookBridge."
             )
-            if not self._auth_retried and self._socket_token and self._socket_token != self._api_token:
-                self._auth_retried = True
-                logger.info("🔌 ABS Socket.IO: Legacy token rejected — retrying auth with API key")
-                sio.emit("auth", self._api_token)
-            else:
-                logger.error(
-                    "❌ ABS Socket.IO: All auth methods exhausted. "
-                    "Check ABS_KEY or try restarting ABS."
-                )
+            sio.disconnect()
 
         @sio.on("connect_error")
         def on_connect_error(data=None):
@@ -285,8 +274,6 @@ class ABSSocketListener:
             self._sio.connect(
                 self._server_url,
                 transports=["websocket"],
-                headers={"Authorization": f"Bearer {self._socket_token}"},
-                auth={"token": self._socket_token},
             )
             self._sio.wait()
         except Exception as e:
