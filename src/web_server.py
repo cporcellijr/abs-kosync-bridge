@@ -1605,6 +1605,7 @@ def cleanup_mapping_resources(book):
 
 
 def delete_mapping(abs_id):
+    book = database_service.get_book(abs_id)
     if book:
         cleanup_mapping_resources(book)
 
