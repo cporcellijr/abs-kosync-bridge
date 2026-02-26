@@ -59,6 +59,7 @@ class ABSSocketListener:
         self._socket_token: str | None = None
         self._db = database_service
         self._sync_manager = sync_manager
+        self._auth_attempts = 0  # Track retries to avoid infinite loops
 
         self._debounce_window = int(
             os.environ.get("ABS_SOCKET_DEBOUNCE_SECONDS", "30")
@@ -167,17 +168,31 @@ class ABSSocketListener:
                 user = data.get("user", {})
                 if isinstance(user, dict):
                     username = user.get("username", "unknown")
+            self._auth_attempts = 0  # Reset for future reconnects
             logger.info(f"🔌 ABS Socket.IO: Authenticated as '{username}'")
 
         @sio.on("auth_failed")
         def on_auth_failed(*args):
+            self._auth_attempts += 1
             token = self._socket_token or self._api_token
             logger.warning(
-                f"⚠️ ABS Socket.IO: Authentication failed — "
-                f"token sent was {self._describe_token(token)}. "
-                f"API key is {self._describe_token(self._api_token)}. "
-                f"Check ABS_KEY or try restarting ABS."
+                f"⚠️ ABS Socket.IO: Auth attempt {self._auth_attempts} failed — "
+                f"token was {self._describe_token(token)}. "
+                f"API key is {self._describe_token(self._api_token)}."
             )
+            # If we used the legacy token and it failed, retry with the API key
+            if self._auth_attempts == 1 and self._socket_token != self._api_token:
+                logger.info(
+                    "🔌 ABS Socket.IO: Legacy token rejected — "
+                    "retrying with API key directly"
+                )
+                self._socket_token = self._api_token
+                sio.emit("auth", self._api_token)
+            else:
+                logger.error(
+                    "❌ ABS Socket.IO: All auth methods exhausted. "
+                    "Check ABS_KEY or try restarting ABS."
+                )
 
         @sio.on("connect_error")
         def on_connect_error(data=None):
