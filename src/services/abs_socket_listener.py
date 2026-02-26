@@ -188,10 +188,6 @@ class ABSSocketListener:
             logger.debug(f"ABS Socket.IO: Progress event for '{library_item_id[:12]}...' — not an active book, ignoring")
             return
 
-        if is_own_write(library_item_id):
-            logger.debug(f"ABS Socket.IO: Ignoring self-triggered event for '{book.abs_title}'")
-            return
-
         with self._lock:
             self._pending[library_item_id] = time.time()
             self._fired.discard(library_item_id)
@@ -231,6 +227,9 @@ class ABSSocketListener:
         for abs_id in to_fire:
             book = self._db.get_book(abs_id)
             title = book.abs_title if book else abs_id[:12]
+            if is_own_write(abs_id):
+                logger.debug(f"ABS Socket.IO: Ignoring self-triggered event for '{title}'")
+                continue
             logger.info(f"⚡ Socket.IO: ABS progress changed for '{title}' — triggering sync")
             threading.Thread(
                 target=self._sync_manager.sync_cycle,
