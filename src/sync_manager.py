@@ -17,6 +17,7 @@ from src.db.models import State, Book, PendingSuggestion
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
+from src.utils.storygraph_push import push_progress
 
 # [NEW] Service Imports
 from src.services.alignment_service import AlignmentService
@@ -1339,6 +1340,15 @@ class SyncManager:
                         self.database_service.save_state(client_state_model)
 
                 logger.info(f"💾 '{abs_id}' '{title_snip}' States saved to database")
+
+                # Push to StoryGraph sidecar (fire-and-forget, never blocks sync)
+                push_progress(
+                    abs_id=book.abs_id,
+                    title=book.abs_title or "",
+                    author=None,  # Not stored on Book model; sidecar searches by title
+                    percentage=leader_state.current.get('pct', 0) or 0,
+                    is_finished=(leader_state.current.get('pct', 0) or 0) >= 0.99,
+                )
 
                 # Debugging crash: Flush logs to ensure we see this before any potential hard crash
                 for handler in logger.handlers:
