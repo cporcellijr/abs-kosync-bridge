@@ -16,6 +16,33 @@ import socketio
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Write-suppression tracker — prevents self-triggered feedback loops.
+# record_abs_write() is called by sync clients after pushing progress to ABS.
+# is_own_write() is checked by the socket listener before recording events.
+# ---------------------------------------------------------------------------
+_recent_writes: dict[str, float] = {}
+_writes_lock = threading.Lock()
+
+
+def record_abs_write(abs_id: str) -> None:
+    """Call after BookBridge successfully pushes progress to ABS."""
+    with _writes_lock:
+        _recent_writes[abs_id] = time.time()
+
+
+def is_own_write(abs_id: str, suppression_window: int = 60) -> bool:
+    """Return True if a recent ABS progress event was caused by our own write."""
+    with _writes_lock:
+        last_write = _recent_writes.get(abs_id)
+        if last_write and time.time() - last_write < suppression_window:
+            return True
+        # Clean up stale entries while holding the lock
+        stale = [k for k, v in _recent_writes.items() if time.time() - v > suppression_window]
+        for k in stale:
+            del _recent_writes[k]
+        return False
+
 
 class ABSSocketListener:
     """Persistent Socket.IO connection to Audiobookshelf for real-time sync."""
@@ -159,6 +186,10 @@ class ABSSocketListener:
         book = self._db.get_book(library_item_id)
         if not book or book.status != "active":
             logger.debug(f"ABS Socket.IO: Progress event for '{library_item_id[:12]}...' — not an active book, ignoring")
+            return
+
+        if is_own_write(library_item_id):
+            logger.debug(f"ABS Socket.IO: Ignoring self-triggered event for '{book.abs_title}'")
             return
 
         with self._lock:
