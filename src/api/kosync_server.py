@@ -29,6 +29,11 @@ _hash_cache = None
 _ebook_dir = None
 _active_scans = set()
 
+# KoSync PUT debounce state
+_kosync_debounce: dict = {}  # {abs_id: {'last_event': float, 'title': str, 'synced': bool}}
+_kosync_debounce_lock = threading.Lock()
+_debounce_thread_started = False
+
 
 def init_kosync_server(database_service, container, manager, ebook_dir=None):
     """Initialize KoSync server with required dependencies."""
@@ -37,6 +42,50 @@ def init_kosync_server(database_service, container, manager, ebook_dir=None):
     _container = container
     _manager = manager
     _ebook_dir = ebook_dir
+
+
+def _record_kosync_event(abs_id: str, title: str) -> None:
+    """Record a KoSync PUT event for debounced sync triggering."""
+    global _debounce_thread_started
+    with _kosync_debounce_lock:
+        _kosync_debounce[abs_id] = {
+            'last_event': time.time(),
+            'title': title,
+            'synced': False,
+        }
+    if not _debounce_thread_started:
+        _debounce_thread_started = True
+        threading.Thread(target=_kosync_debounce_loop, daemon=True).start()
+
+
+def _kosync_debounce_loop() -> None:
+    """Check every 10s for books that stopped receiving KoSync PUTs."""
+    debounce_seconds = int(os.environ.get('ABS_SOCKET_DEBOUNCE_SECONDS', '30'))
+    while True:
+        time.sleep(10)
+        now = time.time()
+        to_sync = []
+
+        with _kosync_debounce_lock:
+            for abs_id, info in _kosync_debounce.items():
+                if not info['synced'] and (now - info['last_event']) > debounce_seconds:
+                    info['synced'] = True
+                    to_sync.append((abs_id, info['title']))
+
+        for abs_id, title in to_sync:
+            if _manager:
+                logger.info(f"⚡ KOSync PUT: Triggering sync for '{title}' (debounced)")
+                threading.Thread(
+                    target=_manager.sync_cycle,
+                    kwargs={'target_abs_id': abs_id},
+                    daemon=True,
+                ).start()
+
+        # Clean up entries older than 5 minutes
+        with _kosync_debounce_lock:
+            stale = [k for k, v in _kosync_debounce.items() if now - v['last_event'] > 300]
+            for k in stale:
+                del _kosync_debounce[k]
 
 
 def kosync_auth_required(f):
@@ -398,16 +447,12 @@ def kosync_put_progress():
         # This ensures proper delta detection between cycles.
         logger.debug(f"KOSync: Updated linked book '{linked_book.abs_title}' to {percentage:.2%}")
 
-        # Trigger instant sync when KOReader pushes progress
+        # Debounce sync trigger — wait until the reader stops turning pages
         # Skip if the update came from the sync bot itself (prevents sync→PUT→sync loop)
         is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
         if linked_book.status == 'active' and _manager and not is_internal:
-            threading.Thread(
-                target=_manager.sync_cycle,
-                kwargs={'target_abs_id': linked_book.abs_id},
-                daemon=True
-            ).start()
-            logger.info(f"⚡ KOSync PUT: Triggering instant sync for '{linked_book.abs_title}'")
+            logger.debug(f"KOSync PUT: Progress event recorded for '{linked_book.abs_title}'")
+            _record_kosync_event(linked_book.abs_id, linked_book.abs_title)
 
     response_timestamp = now.isoformat() + "Z"
     if device and device.lower() == "booknexus":
