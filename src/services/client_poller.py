@@ -14,9 +14,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# {client_name: last_poll_timestamp}
-_last_poll: dict[str, float] = {}
-
 
 class ClientPoller:
     """Background service that polls configured clients at per-client intervals."""
@@ -104,6 +101,7 @@ class ClientPoller:
             logger.debug(f"ClientPoller: could not fetch active books: {e}")
             return
 
+        checked = 0
         for book in active_books:
             try:
                 current_state = sync_client.get_service_state(book, prev_state=None)
@@ -113,10 +111,16 @@ class ClientPoller:
                 current_pct = current_state.current.get('pct')
                 if current_pct is None:
                     continue
+
+                checked += 1
                 cache_key = (client_name, book.abs_id)
                 last_pct = self._last_known.get(cache_key)
 
-                if last_pct is not None and abs(current_pct - last_pct) > 0.001:
+                if last_pct is None:
+                    logger.debug(
+                        f"📡 {client_name} poll: '{book.abs_title}' initial position cached ({current_pct:.1%})"
+                    )
+                elif abs(current_pct - last_pct) > 0.001:
                     # Check write-suppression before acting
                     if is_own_write(client_name, book.abs_id):
                         logger.debug(
@@ -137,3 +141,5 @@ class ClientPoller:
 
             except Exception as e:
                 logger.debug(f"ClientPoller: poll check failed for {client_name}/{getattr(book, 'abs_title', '?')}: {e}")
+
+        logger.debug(f"📡 {client_name} poll: checked {checked}/{len(active_books)} active books")
