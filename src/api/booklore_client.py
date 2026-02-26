@@ -693,11 +693,27 @@ class BookloreClient:
         response = self._make_request("POST", "/api/v1/books/progress", payload)
         if response and response.status_code in [200, 201, 204]:
             logger.info(f"✅ Booklore: {sanitize_log_data(ebook_filename)} → {pct_display:.1f}%")
-            # Refresh cache to reflect recent update so subsequent gets return fresh values
+            # Update cache in-place instead of full library refresh
             try:
-                self._refresh_book_cache()
+                cached = self._book_id_cache.get(book_id)
+                if cached:
+                    if book_type == 'EPUB':
+                        if not cached.get('epubProgress'):
+                            cached['epubProgress'] = {}
+                        cached['epubProgress']['percentage'] = pct_display
+                        if cfi:
+                            cached['epubProgress']['cfi'] = cfi
+                    elif book_type == 'PDF':
+                        if not cached.get('pdfProgress'):
+                            cached['pdfProgress'] = {}
+                        cached['pdfProgress']['percentage'] = pct_display
+                    elif book_type == 'CBX':
+                        if not cached.get('cbxProgress'):
+                            cached['cbxProgress'] = {}
+                        cached['cbxProgress']['percentage'] = pct_display
+                    logger.debug(f"Booklore: Cache updated in-place for book {book_id}")
             except Exception:
-                logger.debug("Booklore: Cache refresh failed after update")
+                logger.debug("Booklore: In-place cache update failed, will refresh on next read")
             return True
         else:
             status = response.status_code if response else "No response"
