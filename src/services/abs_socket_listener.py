@@ -81,6 +81,18 @@ class ABSSocketListener:
     # Token acquisition
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _describe_token(token: str) -> str:
+        """Return a safe diagnostic string for a token (type + masked preview)."""
+        if not token:
+            return "<empty>"
+        kind = "JWT" if token.startswith("eyJ") else "legacy"
+        if len(token) > 12:
+            preview = f"{token[:6]}...{token[-4:]}"
+        else:
+            preview = "***"
+        return f"{kind} len={len(token)} [{preview}]"
+
     def _acquire_socket_token(self) -> str | None:
         """
         Exchange the API Key for a socket-compatible user token.
@@ -91,6 +103,9 @@ class ABSSocketListener:
 
         Returns None if the exchange fails after all retries.
         """
+        logger.debug(
+            f"ABS Socket.IO: API token is {self._describe_token(self._api_token)}"
+        )
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
@@ -102,7 +117,14 @@ class ABSSocketListener:
                 )
                 if resp.status_code == 200:
                     user_data = resp.json()
+                    username = user_data.get("username", "unknown")
+                    abs_type = user_data.get("type", "unknown")
                     legacy_token = user_data.get("token")
+                    logger.debug(
+                        f"ABS Socket.IO: /api/me returned user='{username}' "
+                        f"type='{abs_type}' "
+                        f"token={self._describe_token(legacy_token) if legacy_token else '<missing>'}"
+                    )
                     if legacy_token and legacy_token != self._api_token:
                         logger.info("🔌 ABS Socket.IO: Acquired user token for socket auth")
                         return legacy_token
@@ -128,7 +150,10 @@ class ABSSocketListener:
         @sio.event
         def connect():
             token = self._socket_token or self._api_token
-            logger.info("🔌 ABS Socket.IO: Connected — sending auth")
+            logger.info(
+                f"🔌 ABS Socket.IO: Connected — sending auth "
+                f"({self._describe_token(token)})"
+            )
             sio.emit("auth", token)
 
         @sio.event
@@ -146,9 +171,12 @@ class ABSSocketListener:
 
         @sio.on("auth_failed")
         def on_auth_failed(*args):
+            token = self._socket_token or self._api_token
             logger.warning(
-                "⚠️ ABS Socket.IO: Authentication failed — check ABS_KEY configuration. "
-                "The listener will NOT retry auth until restarted."
+                f"⚠️ ABS Socket.IO: Authentication failed — "
+                f"token sent was {self._describe_token(token)}. "
+                f"API key is {self._describe_token(self._api_token)}. "
+                f"Check ABS_KEY or try restarting ABS."
             )
 
         @sio.on("connect_error")
