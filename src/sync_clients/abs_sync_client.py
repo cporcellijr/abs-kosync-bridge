@@ -239,8 +239,8 @@ class ABSSyncClient(SyncClient):
 
         logger.debug(f"   ⏱️ time_listened: {time_listened:.1f}s (prev: {prev_abs_ts:.1f}s → new: {adjusted_ts:.1f}s)")
         try:
-            from src.services.abs_socket_listener import record_abs_write
-            record_abs_write(abs_id)
+            from src.services.write_tracker import record_write
+            record_write('ABS', abs_id)
         except ImportError:
             pass
         abs_ok = self.abs_client.update_progress(abs_id, adjusted_ts, time_listened)

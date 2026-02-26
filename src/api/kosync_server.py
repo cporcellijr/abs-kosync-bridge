@@ -449,8 +449,10 @@ def kosync_put_progress():
 
         # Debounce sync trigger — wait until the reader stops turning pages
         # Skip if the update came from the sync bot itself (prevents sync→PUT→sync loop)
+        # Skip if instant sync is globally disabled.
         is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
-        if linked_book.status == 'active' and _manager and not is_internal:
+        instant_sync_enabled = os.environ.get('INSTANT_SYNC_ENABLED', 'true').lower() != 'false'
+        if linked_book.status == 'active' and _manager and not is_internal and instant_sync_enabled:
             logger.debug(f"KOSync PUT: Progress event recorded for '{linked_book.abs_title}'")
             _record_kosync_event(linked_book.abs_id, linked_book.abs_title)
 
