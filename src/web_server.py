@@ -589,7 +589,8 @@ def settings():
             'TELEGRAM_ENABLED',
             'SUGGESTIONS_ENABLED',
             'ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID',
-            'REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT'
+            'REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT',
+            'INSTANT_SYNC_ENABLED',
         ]
 
         # Current settings in DB
