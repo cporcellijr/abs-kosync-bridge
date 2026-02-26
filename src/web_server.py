@@ -2244,9 +2244,10 @@ if __name__ == '__main__':
     threading.Thread(target=get_update_status, daemon=True).start()
     logger.info("🚀 Sync daemon thread started")
 
-    # Start ABS Socket.IO listener for real-time sync
+    # Start ABS Socket.IO listener for real-time / instant sync
+    instant_sync_enabled = os.environ.get('INSTANT_SYNC_ENABLED', 'true').lower() != 'false'
     abs_socket_enabled = os.environ.get('ABS_SOCKET_ENABLED', 'true').lower() != 'false'
-    if abs_socket_enabled and container.abs_client().is_configured():
+    if instant_sync_enabled and abs_socket_enabled and container.abs_client().is_configured():
         from src.services.abs_socket_listener import ABSSocketListener
         abs_listener = ABSSocketListener(
             abs_server_url=os.environ.get('ABS_SERVER', ''),
@@ -2256,10 +2257,21 @@ if __name__ == '__main__':
         )
         abs_socket_thread = threading.Thread(target=abs_listener.start, daemon=True)
         abs_socket_thread.start()
-        logger.info("🔌 ABS Socket.IO listener started (real-time sync enabled)")
-    else:
-        if not abs_socket_enabled:
-            logger.info("ℹ️ ABS Socket.IO listener disabled (ABS_SOCKET_ENABLED=false)")
+        logger.info("🔌 ABS Socket.IO listener started (instant sync enabled)")
+    elif not instant_sync_enabled:
+        logger.info("ℹ️ ABS Socket.IO listener disabled (INSTANT_SYNC_ENABLED=false)")
+    elif not abs_socket_enabled:
+        logger.info("ℹ️ ABS Socket.IO listener disabled (ABS_SOCKET_ENABLED=false)")
+
+    # Start per-client poller (always-on; _poll_cycle skips clients in 'global' mode)
+    from src.services.client_poller import ClientPoller
+    client_poller = ClientPoller(
+        database_service=database_service,
+        sync_manager=manager,
+        sync_clients_dict=container.sync_clients(),
+    )
+    poller_thread = threading.Thread(target=client_poller.start, daemon=True)
+    poller_thread.start()
 
 
 

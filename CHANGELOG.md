@@ -4,6 +4,16 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
+## [6.2.3] - 2026-02-26
+
+### ✨ Enhancements
+
+- **Instant Sync Toggle**: Added `INSTANT_SYNC_ENABLED` setting to enable or disable event-driven instant sync globally. When off, the ABS Socket.IO listener and KoSync push trigger are both inactive and the bridge falls back to the standard background poll cycle.
+- **Per-Client Polling**: Storyteller and Booklore can now be configured with their own poll intervals, independent of the global sync cycle. Set either client to `custom` mode in Settings and choose a polling interval (in seconds). The poller checks for position changes on active books only and triggers a targeted sync when a real change is detected.
+- **Shared Write Suppression**: Centralized write-tracking into a single `write_tracker` module. All clients (ABS, KoSync, Storyteller, Booklore) now share the same suppression logic to prevent feedback loops after the bridge pushes a progress update.
+
+---
+
 ## [6.3.2] - 2026-02-25
 
 ### ✨ Enhancements

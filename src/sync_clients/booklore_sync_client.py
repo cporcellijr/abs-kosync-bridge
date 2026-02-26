@@ -61,6 +61,12 @@ class BookloreSyncClient(SyncClient):
         epub = book.original_ebook_filename or book.ebook_filename
         pct = request.locator_result.percentage
         success = self.booklore_client.update_progress(epub, pct, request.locator_result)
+        if success:
+            try:
+                from src.services.write_tracker import record_write
+                record_write('BookLore', book.abs_id)
+            except ImportError:
+                pass
         updated_state = {
             'pct': pct
         }

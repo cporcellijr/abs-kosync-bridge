@@ -894,6 +894,66 @@
                             to regenerate it (which may require re-transcription).
                         </div>
                     </div>
+
+                    <!-- Instant Sync -->
+                    <div class="subsection-header" style="width: 100%; margin-top: 20px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color, #ddd);">
+                        <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600;">Instant Sync</h4>
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="instant_sync_enabled" name="INSTANT_SYNC_ENABLED" {% if
+                            get_bool('INSTANT_SYNC_ENABLED') %}checked{% endif %}>
+                        <label for="instant_sync_enabled">Enable Instant Sync</label>
+                        <div class="help-text" style="display: block; width: 100%; margin-top: 5px;">
+                            Triggers immediate sync when progress changes in ABS (via Socket.IO) or KOReader (via KoSync).
+                            Disable to rely solely on polling.
+                        </div>
+                    </div>
+
+                    <!-- Per-Client Polling -->
+                    <div class="subsection-header" style="width: 100%; margin-top: 20px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color, #ddd);">
+                        <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600;">Per-Client Polling</h4>
+                        <p class="help-text" style="margin: 6px 0 0 0;">
+                            Configure how often each client is checked for progress changes.
+                            <em>Global</em> uses the global sync interval above.
+                            <em>Custom</em> lets you set a faster interval for that client.
+                        </p>
+                    </div>
+
+                    {% if get_bool('STORYTELLER_ENABLED') %}
+                    <div class="form-group" style="align-items: center;">
+                        <label>Storyteller Poll Mode</label>
+                        <select name="STORYTELLER_POLL_MODE" id="storyteller_poll_mode"
+                                onchange="togglePollSeconds('storyteller_poll_seconds_row', this.value)">
+                            <option value="global" {% if get_val('STORYTELLER_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                            <option value="custom" {% if get_val('STORYTELLER_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="storyteller_poll_seconds_row"
+                         {% if get_val('STORYTELLER_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                        <label>Storyteller Poll Interval (seconds)</label>
+                        <input type="number" name="STORYTELLER_POLL_SECONDS" min="10"
+                               value="{{ get_val('STORYTELLER_POLL_SECONDS', '45') }}">
+                        <div class="help-text">Recommended: 30–60s for Storyteller (active reading source).</div>
+                    </div>
+                    {% endif %}
+
+                    {% if get_bool('BOOKLORE_ENABLED') %}
+                    <div class="form-group" style="align-items: center;">
+                        <label>Booklore Poll Mode</label>
+                        <select name="BOOKLORE_POLL_MODE" id="booklore_poll_mode"
+                                onchange="togglePollSeconds('booklore_poll_seconds_row', this.value)">
+                            <option value="global" {% if get_val('BOOKLORE_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                            <option value="custom" {% if get_val('BOOKLORE_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="booklore_poll_seconds_row"
+                         {% if get_val('BOOKLORE_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                        <label>Booklore Poll Interval (seconds)</label>
+                        <input type="number" name="BOOKLORE_POLL_SECONDS" min="10"
+                               value="{{ get_val('BOOKLORE_POLL_SECONDS', '300') }}">
+                        <div class="help-text">Recommended: 300s for Booklore.</div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -1146,6 +1206,18 @@
                 body.classList.add('collapsed');
                 // Optional: Clear inputs when disabling?
                 // For now, we prefer keeping values in UI so user doesn't lose config by accidental toggle
+            }
+        }
+
+        function togglePollSeconds(rowId, mode) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            if (mode === 'custom') {
+                row.style.opacity = '';
+                row.style.pointerEvents = '';
+            } else {
+                row.style.opacity = '0.45';
+                row.style.pointerEvents = 'none';
             }
         }
 

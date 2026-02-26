@@ -113,11 +113,17 @@ class StorytellerSyncClient(SyncClient):
 
         if book.storyteller_uuid:
             success = self.storyteller_client.update_position(book.storyteller_uuid, pct, locator)
+            if success:
+                try:
+                    from src.services.write_tracker import record_write
+                    record_write('Storyteller', book.abs_id)
+                except ImportError:
+                    pass
         else:
             # Strict mode: Do not update if not linked via UUID
             logger.debug(f"Skipping Storyteller update for {book.abs_title}: No linked UUID")
             success = False
-        
+
         return SyncResult(pct, success)
 
     def _resolve_href_from_percentage(self, epub: str, pct: float) -> Optional[str]:

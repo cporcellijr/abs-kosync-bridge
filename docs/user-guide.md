@@ -56,7 +56,17 @@ There are two ways progress can sync instantly:
 2. **KOReader Reading** — If you use the built-in KoSync server (configured in Settings), KOReader sends your reading position to the bridge the moment you close a book or turn the page. The bridge then pushes that position to all your other clients immediately.
 
 > [!NOTE]
-> The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it. If you update progress in Storyteller or Booklore directly, the background sync will still pick it up on the next cycle.
+> The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it.
+
+### Disabling Instant Sync
+
+If you prefer to rely solely on the background poll (e.g., to reduce network activity), you can turn off instant sync entirely from **Settings → Sync Behavior → Instant Sync**. This disables the ABS socket listener and the KoSync push trigger. The global poll cycle continues as normal.
+
+### Per-Client Polling (Storyteller & Booklore)
+
+By default, Storyteller and Booklore are only checked during the global sync cycle. If you make changes directly in one of those apps and want the bridge to notice faster, you can configure a **custom poll interval** for that client under **Settings → Sync Behavior → Per-Client Polling**.
+
+Set the mode to **Custom** and choose how often (in seconds) the bridge should check that client for position changes. Only books with an active mapping are checked, and a full sync is triggered only when a real change is detected — so the overhead is minimal.
 
 ---
 

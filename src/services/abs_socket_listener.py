@@ -14,34 +14,24 @@ import time
 import requests
 import socketio
 
+from src.services.write_tracker import record_write, is_own_write as _tracker_is_own_write
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Write-suppression tracker — prevents self-triggered feedback loops.
-# record_abs_write() is called by sync clients after pushing progress to ABS.
-# is_own_write() is checked by the socket listener before recording events.
+# Write-suppression tracker — delegates to the shared write_tracker module.
+# Backward-compatible wrappers kept so abs_sync_client import still works.
 # ---------------------------------------------------------------------------
-_recent_writes: dict[str, float] = {}
-_writes_lock = threading.Lock()
 
 
 def record_abs_write(abs_id: str) -> None:
     """Call after BookBridge successfully pushes progress to ABS."""
-    with _writes_lock:
-        _recent_writes[abs_id] = time.time()
+    record_write('ABS', abs_id)
 
 
 def is_own_write(abs_id: str, suppression_window: int = 60) -> bool:
     """Return True if a recent ABS progress event was caused by our own write."""
-    with _writes_lock:
-        last_write = _recent_writes.get(abs_id)
-        if last_write and time.time() - last_write < suppression_window:
-            return True
-        # Clean up stale entries while holding the lock
-        stale = [k for k, v in _recent_writes.items() if time.time() - v > suppression_window]
-        for k in stale:
-            del _recent_writes[k]
-        return False
+    return _tracker_is_own_write('ABS', abs_id, suppression_window)
 
 
 class ABSSocketListener:
