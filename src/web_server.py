@@ -2372,6 +2372,7 @@ def _run_storyteller_backfill():
 
     abs_client = container.abs_client() if container else None
     alignment_service = getattr(manager, "alignment_service", None) if manager else None
+    ebook_parser = container.ebook_parser() if container else None
 
     for book in storyteller_books:
         summary["scanned"] += 1
@@ -2391,7 +2392,16 @@ def _run_storyteller_backfill():
             aligned = False
             if alignment_service:
                 storyteller_transcript = StorytellerTranscript(manifest_path)
-                aligned = alignment_service.align_storyteller_and_store(abs_id, storyteller_transcript)
+                book_text = ""
+                if ebook_parser and book.ebook_filename:
+                    try:
+                        epub_path = container.epub_cache_dir() / book.ebook_filename
+                        if epub_path.exists():
+                            book_text, _ = ebook_parser.extract_text_and_map(epub_path)
+                    except Exception as e:
+                        logger.warning(f"Could not extract text for storyteller backfill: {e}")
+                        
+                aligned = alignment_service.align_storyteller_and_store(abs_id, storyteller_transcript, ebook_text=book_text)
                 if aligned:
                     summary["aligned"] += 1
 

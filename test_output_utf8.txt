@@ -1,0 +1,29 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.12, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Server\stacks\abs-kosync-enhanced
+plugins: anyio-4.12.1
+collected 178 items / 1 error
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/test_abs_socket_listener.py ______________
+ImportError while importing test module 'C:\Server\stacks\abs-kosync-enhanced\tests\test_abs_socket_listener.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\cporc\AppData\Local\Programs\Python\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_abs_socket_listener.py:10: in <module>
+    from src.services.abs_socket_listener import ABSSocketListener
+src\services\abs_socket_listener.py:17: in <module>
+    import socketio
+E   ModuleNotFoundError: No module named 'socketio'
+============================== warnings summary ===============================
+src\db\models.py:11
+  C:\Server\stacks\abs-kosync-enhanced\src\db\models.py:11: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_abs_socket_listener.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+========================= 1 warning, 1 error in 0.63s =========================

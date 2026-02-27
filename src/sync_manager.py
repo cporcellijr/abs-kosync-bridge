@@ -867,7 +867,7 @@ class SyncManager:
                     try:
                         storyteller_transcript = StorytellerTranscript(storyteller_manifest)
                         storyteller_aligned = self.alignment_service.align_storyteller_and_store(
-                            abs_id, storyteller_transcript
+                            abs_id, storyteller_transcript, ebook_text=book_text
                         )
                         if storyteller_aligned:
                             transcript_source = "storyteller"

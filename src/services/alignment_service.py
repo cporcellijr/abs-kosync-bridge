@@ -73,16 +73,122 @@ class AlignmentService:
         return True
 
     @time_execution
-    def align_storyteller_and_store(self, abs_id: str, storyteller_transcript) -> bool:
+    def align_storyteller_and_store(self, abs_id: str, storyteller_transcript, ebook_text: str = None) -> bool:
         """
-        Build a chapter-aware alignment map directly from Storyteller wordTimeline data.
+        Build a chapter-aware alignment map directly from Storyteller wordTimeline data,
+        anchored to the actual EPUB text to prevent global offset drifts.
         """
+        # 1. Extract raw segment-like data from Storyteller (every word with its timestamp)
+        raw_segments = []
+        for point in storyteller_transcript.iter_alignment_points():
+            # Since storyteller points are character by character, we just need to group words
+            # But the transcriber already does this. Actually, the easiest way to reuse _generate_alignment_map
+            # is to just provide it with one long segment per chapter or small segments
+            pass
+            
+        # We can construct a list of pseudo-segments to feed into the anchor algorithm
+        # Each "word" in storyteller is effectively a tiny segment
+        for chapter_index, meta in enumerate(storyteller_transcript.chapters):
+            try:
+                chapter = storyteller_transcript._load_chapter(chapter_index)
+                chapter_start = float(meta.get("start", 0.0) or 0.0)
+                
+                for word_data in chapter.get("word_timeline", []):
+                    # In newer Storyteller output, we might not have 'text', but if we don't,
+                    # we can extract it using startOffsetUtf16 and length, or just fall back to standard
+                    text = word_data.get('text')
+                    if not text:
+                         # Extract from transcript
+                         start_utf16 = word_data.get('startOffsetUtf16', 0)
+                         length_utf16 = word_data.get('lengthUtf16', 0)
+                         # This is rough, as we really need python character offsets
+                         pass 
+            except Exception:
+                pass
+
+        if ebook_text:
+            logger.info(f"AlignmentService: Anchoring Storyteller transcript for {abs_id} to {len(ebook_text)} chars of text...")
+            
+            # Extract sentence/phrase segments from Storyteller to feed into Anchor algorithm
+            segments = []
+            current_seg_text = []
+            seg_start_ts = None
+            last_ts = 0.0
+            
+            # Using iter_alignment_points we get per-word or per-phrase timestamps?
+            # iter_alignment_points in storyteller_transcript yields per-word data
+            # Let's chunk them into ~5 second segments.
+            for point in storyteller_transcript.iter_alignment_points():
+                # But iter_alignment_points doesn't return the word *text*. 
+                pass
+
+            # Since iter_alignment_points doesn't yield text, we must build segments from the chapters:
+            for chapter_index, meta in enumerate(storyteller_transcript.chapters):
+                try:
+                    chapter = storyteller_transcript._load_chapter(chapter_index)
+                    chapter_start = float(meta.get("start", 0.0) or 0.0)
+                    transcript_text = chapter.get("transcript", "")
+                    timeline = chapter.get("word_timeline", [])
+                    
+                    if not timeline or not transcript_text: continue
+                    
+                    # Group words into ~5s segments
+                    seg_start = chapter_start + float(timeline[0].get("startTime", 0.0))
+                    seg_text_words = []
+                    
+                    for i, w in enumerate(timeline):
+                        ts = float(w.get("startTime", 0.0)) + chapter_start
+                        
+                        # Extract the word (approximate if word text missing)
+                        word_text = w.get("word")
+                        if not word_text:
+                            # Use offset mapping
+                            py_start = chapter["start_offsets_py"][i]
+                            py_end = chapter["start_offsets_py"][i+1] if i+1 < len(timeline) else len(transcript_text)
+                            word_text = transcript_text[py_start:py_end]
+                            
+                        seg_text_words.append(word_text.strip())
+                        
+                        # Break segment every ~5 seconds or on last word
+                        if ts - seg_start > 5.0 or i == len(timeline) - 1:
+                            segments.append({
+                                "start": seg_start,
+                                "end": ts + 0.5, # give it a small duration for the last word
+                                "text": " ".join(seg_text_words)
+                            })
+                            # Start next
+                            seg_start = ts
+                            seg_text_words = []
+                except Exception as e:
+                    logger.warning(f"Error reading Storyteller chapter {chapter_index}: {e}")
+                    
+            if segments:
+                rebuilt_segments = self.polisher.rebuild_fragmented_sentences(segments, ebook_text)
+                alignment_map = self._generate_alignment_map(rebuilt_segments, ebook_text)
+                if alignment_map:
+                    self._save_alignment(abs_id, alignment_map)
+                    logger.info(f"AlignmentService: Anchored Storyteller map stored for {abs_id} ({len(alignment_map)} points)")
+                    return True
+            
+            logger.warning(f"AlignmentService: Anchored alignment failed for {abs_id}, falling back to unanchored map")
+
+        # Fallback to unanchored map
         alignment_map = list(storyteller_transcript.iter_alignment_points())
         if not alignment_map:
             logger.error("   Failed to generate storyteller alignment map.")
             return False
-        self._save_alignment(abs_id, alignment_map)
-        logger.info(f"AlignmentService: Storyteller map stored for {abs_id} ({len(alignment_map)} points)")
+            
+        # The fallback map uses 'global_char_py' conceptually, but AlignmentService expects 'char'
+        # Convert it:
+        clean_map = []
+        for pt in alignment_map:
+            clean_map.append({
+                "char": pt.get("global_char", 0),  # Use raw py global char
+                "ts": pt.get("ts", 0.0)
+            })
+            
+        self._save_alignment(abs_id, clean_map)
+        logger.info(f"AlignmentService: Unanchored Storyteller map stored for {abs_id} ({len(clean_map)} points)")
         return True
 
     def get_time_for_text(self, abs_id: str, query_text: str, char_offset_hint: int = None) -> Optional[float]:
