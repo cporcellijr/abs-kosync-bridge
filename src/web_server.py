@@ -245,209 +245,9 @@ def inject_global_vars():
     )
 
 # ---------------- BOOK LINKER HELPERS ----------------
-def _normalize_title_key(title: str) -> str:
-    """Normalize title for deterministic directory matching."""
-    lowered = (title or "").lower()
-    collapsed = re.sub(r"[^a-z0-9]+", " ", lowered)
-    return re.sub(r"\s+", " ", collapsed).strip()
+from src.services.alignment_service import ingest_storyteller_transcripts
 
 
-def _storyteller_filename_for_abs_chapter(chapter_index: int, prefix: str = "00000") -> str:
-    """Map ABS chapter index N (0-based) to Storyteller filename N+1 (1-based)."""
-    return f"{prefix}-{chapter_index + 1:05d}.json"
-
-
-def _resolve_storyteller_title_dir(assets_root: Path, abs_title: str) -> Path | None:
-    """
-    Resolve the Storyteller title directory using exact match first,
-    then normalized exact match (must be unique).
-    """
-    assets_dir = assets_root / "assets"
-    if not assets_dir.exists() or not assets_dir.is_dir():
-        return None
-
-    exact_dir = assets_dir / abs_title
-    if exact_dir.exists() and exact_dir.is_dir():
-        return exact_dir
-
-    target_key = _normalize_title_key(abs_title)
-    if not target_key:
-        return None
-
-    candidates = []
-    for child in assets_dir.iterdir():
-        if child.is_dir() and _normalize_title_key(child.name) == target_key:
-            candidates.append(child)
-
-    if len(candidates) == 1:
-        return candidates[0]
-
-    if len(candidates) > 1:
-        logger.warning(
-            f"Storyteller assets match is ambiguous for '{sanitize_log_data(abs_title)}' "
-            f"({len(candidates)} directories)"
-        )
-    return None
-
-
-def _validate_storyteller_chapters(
-    transcriptions_dir: Path, expected_count: int
-) -> tuple[bool, list[str], list[str]]:
-    """
-    Validate Storyteller chapter files by expected naming and exact count.
-    Accept both known prefixes: 00000-XXXXX.json and 00001-XXXXX.json.
-    Returns (is_valid, source_filenames, destination_filenames).
-    """
-    if expected_count <= 0:
-        return False, [], []
-
-    expected_files = [_storyteller_filename_for_abs_chapter(i, "00000") for i in range(expected_count)]
-    present = [
-        p.name
-        for p in transcriptions_dir.glob("*.json")
-        if re.match(r"^0000[01]-\d{5}\.json$", p.name)
-    ]
-    if len(present) != expected_count:
-        return False, [], []
-
-    # Fast path: homogeneous prefixes
-    for prefix in ("00000", "00001"):
-        source_files = [_storyteller_filename_for_abs_chapter(i, prefix) for i in range(expected_count)]
-        if all((transcriptions_dir / name).exists() for name in source_files):
-            if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
-                return True, source_files, expected_files
-            return False, [], []
-
-    # Fallback: allow per-chapter mixed prefix, as long as exactly one file exists per chapter.
-    source_files = []
-    for i in range(expected_count):
-        canonical = _storyteller_filename_for_abs_chapter(i, "00000")
-        alt = _storyteller_filename_for_abs_chapter(i, "00001")
-        has_canonical = (transcriptions_dir / canonical).exists()
-        has_alt = (transcriptions_dir / alt).exists()
-        if has_canonical and not has_alt:
-            source_files.append(canonical)
-        elif has_alt and not has_canonical:
-            source_files.append(alt)
-        else:
-            return False, [], []
-
-    if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
-        return True, source_files, expected_files
-    return False, [], []
-
-
-def _is_storyteller_wordtimeline_chapter(chapter_path: Path) -> bool:
-    try:
-        with open(chapter_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return False
-        return isinstance(data.get("wordTimeline"), list)
-    except Exception:
-        return False
-
-
-def _ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list[dict]) -> str | None:
-    """
-    Copy Storyteller chapter JSON files into bridge-managed data storage and write a manifest.
-    Returns manifest path on success.
-    """
-    assets_dir_raw = os.environ.get("STORYTELLER_ASSETS_DIR", "").strip()
-    if not assets_dir_raw:
-        return None
-
-    chapter_list = chapters if isinstance(chapters, list) else []
-    expected_count = len(chapter_list)
-    if expected_count <= 0:
-        logger.info(f"Storyteller ingest skipped for '{abs_id}': no ABS chapters available")
-        return None
-
-    assets_root = Path(assets_dir_raw)
-    title_dir = _resolve_storyteller_title_dir(assets_root, abs_title or "")
-    if not title_dir:
-        logger.info(f"Storyteller transcripts not found for '{abs_id}' (title='{sanitize_log_data(abs_title)}')")
-        return None
-
-    transcriptions_dir = title_dir / "transcriptions"
-    if not transcriptions_dir.exists() or not transcriptions_dir.is_dir():
-        logger.info(f"Storyteller transcriptions directory missing for '{abs_id}' at '{transcriptions_dir}'")
-        return None
-
-    is_valid, source_files, expected_files = _validate_storyteller_chapters(transcriptions_dir, expected_count)
-    if not is_valid:
-        logger.info(
-            f"Storyteller transcripts rejected for '{abs_id}': expected {expected_count} chapter files at "
-            f"'{transcriptions_dir}'"
-        )
-        return None
-
-    target_dir = DATA_DIR / "transcripts" / "storyteller" / abs_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = target_dir / "manifest.json"
-
-    existing_json_files = [p.name for p in target_dir.glob("*.json") if re.match(r"^00000-\d{5}\.json$", p.name)]
-    existing_valid = (
-        manifest_path.exists()
-        and len(existing_json_files) == expected_count
-        and all((target_dir / name).exists() for name in expected_files)
-    )
-    if existing_valid:
-        logger.info(f"Storyteller ingest reuse for '{abs_id}' from '{target_dir}' ({len(expected_files)} files)")
-    else:
-        copied_count = 0
-        for source_name, target_name in zip(source_files, expected_files):
-            shutil.copy2(transcriptions_dir / source_name, target_dir / target_name)
-            copied_count += 1
-        logger.info(
-            f"Storyteller ingest copied for '{abs_id}': {copied_count} files from "
-            f"'{transcriptions_dir}' to '{target_dir}'"
-        )
-
-    chapter_entries = []
-    for idx, chapter in enumerate(chapter_list):
-        start = float(chapter.get("start", 0.0) or 0.0)
-        end = float(chapter.get("end", 0.0) or 0.0)
-        chapter_file_name = _storyteller_filename_for_abs_chapter(idx)
-        text_len = 0
-        text_len_utf16 = 0
-        chapter_file_path = target_dir / chapter_file_name
-        if chapter_file_path.exists():
-            try:
-                with open(chapter_file_path, "r", encoding="utf-8") as chapter_file:
-                    chapter_data = json.load(chapter_file)
-                chapter_text = chapter_data.get("transcript", "") if isinstance(chapter_data, dict) else ""
-                text_len = len(chapter_text)
-                text_len_utf16 = len(chapter_text.encode("utf-16-le")) // 2
-            except Exception:
-                text_len = 0
-                text_len_utf16 = 0
-        chapter_entries.append({
-            "index": idx,
-            "file": chapter_file_name,
-            "start": start,
-            "end": end,
-            "text_len": text_len,
-            "text_len_utf16": text_len_utf16,
-        })
-
-    duration = 0.0
-    if chapter_entries:
-        duration = float(chapter_entries[-1].get("end", 0.0) or 0.0)
-
-    manifest = {
-        "format": "storyteller_manifest",
-        "version": 1,
-        "abs_id": abs_id,
-        "abs_title": abs_title,
-        "duration": duration,
-        "chapter_count": expected_count,
-        "chapters": chapter_entries
-    }
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False)
-
-    return str(manifest_path)
 
 
 
@@ -1520,7 +1320,7 @@ def match():
 
         # Create Book object and save to database service
         from src.db.models import Book
-        storyteller_manifest = _ingest_storyteller_transcripts(abs_id, abs_title, chapters)
+        storyteller_manifest = ingest_storyteller_transcripts(abs_id, abs_title, chapters)
         transcript_source = "storyteller" if storyteller_manifest else None
         book = Book(
             abs_id=abs_id,
@@ -1697,7 +1497,7 @@ def batch_match():
 
                 item_details = container.abs_client().get_item_details(item['abs_id'])
                 chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
-                storyteller_manifest = _ingest_storyteller_transcripts(
+                storyteller_manifest = ingest_storyteller_transcripts(
                     item['abs_id'],
                     item.get('abs_title', ''),
                     chapters
@@ -2046,7 +1846,7 @@ def api_storyteller_link(abs_id):
             book.storyteller_uuid = storyteller_uuid
             item_details = container.abs_client().get_item_details(abs_id)
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
-            storyteller_manifest = _ingest_storyteller_transcripts(abs_id, book.abs_title or '', chapters)
+            storyteller_manifest = ingest_storyteller_transcripts(abs_id, book.abs_title or '', chapters)
             book.transcript_file = storyteller_manifest
             book.transcript_source = "storyteller" if storyteller_manifest else None
             book.status = 'pending' # Force re-process to align with new EPUB
@@ -2380,7 +2180,7 @@ def _run_storyteller_backfill():
         try:
             item_details = abs_client.get_item_details(abs_id) if abs_client else None
             chapters = item_details.get("media", {}).get("chapters", []) if item_details else []
-            manifest_path = _ingest_storyteller_transcripts(abs_id, book.abs_title or "", chapters)
+            manifest_path = ingest_storyteller_transcripts(abs_id, book.abs_title or "", chapters)
             if not manifest_path:
                 summary["missing"] += 1
                 continue

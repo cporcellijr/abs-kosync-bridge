@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from src.utils.storyteller_transcript import StorytellerTranscript
 from src.utils.transcriber import AudioTranscriber
-from src.web_server import _storyteller_filename_for_abs_chapter, _validate_storyteller_chapters
+from src.services.alignment_service import _storyteller_filename_for_abs_chapter, _validate_storyteller_chapters
 
 
 def _chapter_payload(transcript_text, words):

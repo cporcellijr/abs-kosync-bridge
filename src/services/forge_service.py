@@ -8,6 +8,9 @@ from pathlib import Path
 from urllib.parse import urljoin
 import requests
 
+from src.services.alignment_service import ingest_storyteller_transcripts
+from src.utils.storyteller_transcript import StorytellerTranscript
+
 logger = logging.getLogger(__name__)
 
 class ForgeService:
@@ -510,6 +513,8 @@ class ForgeService:
             if not readaloud_found:
                  raise Exception("Timeout waiting for Storyteller processing")
 
+            readaloud_path = readaloud_files[0] if readaloud_files else None
+
             # Safety Wait
             time.sleep(60)
 
@@ -517,12 +522,19 @@ class ForgeService:
             logger.info("⚡ Auto-Forge: Processing complete. Downloading artifact...")
             epub_cache = self.ebook_parser.epub_cache_dir
             if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
-            
+
             target_filename = f"storyteller_{found_uuid}.epub"
             target_path = epub_cache / target_filename
-            
-            if not st_client.download_book(found_uuid, target_path):
-                raise Exception("Failed to download Storyteller artifact")
+
+            try:
+                if not st_client.download_book(found_uuid, target_path):
+                    raise Exception("API download returned False")
+            except Exception as api_err:
+                if readaloud_path and readaloud_path.exists():
+                    logger.warning(f"⚠️ Auto-Forge: API download failed ({api_err}). Using local file: '{readaloud_path}'")
+                    shutil.copy2(readaloud_path, target_path)
+                else:
+                    raise Exception(f"Failed to download Storyteller artifact and no local fallback available: {api_err}")
 
 
             # --- RECALCULATE HASH ---
@@ -549,6 +561,21 @@ class ForgeService:
                 raise Exception("Auto-Forge: align_and_store failed to generate a valid alignment map.")
             logger.info(f"✅ Auto-Forge: Alignment map stored for '{abs_id}'")
 
+            # --- INGEST STORYTELLER TRANSCRIPT ---
+            storyteller_manifest = ingest_storyteller_transcripts(abs_id, title, chapters)
+            if storyteller_manifest:
+                logger.info(f"✅ Auto-Forge: Storyteller transcript ingested for '{abs_id}'")
+                try:
+                    st_transcript = StorytellerTranscript(storyteller_manifest)
+                    if self.alignment_service.align_storyteller_and_store(abs_id, st_transcript, ebook_text=book_text):
+                        logger.info(f"✅ Auto-Forge: Storyteller-anchored alignment map stored for '{abs_id}'")
+                    else:
+                        logger.warning(f"⚠️ Auto-Forge: Storyteller alignment failed, keeping SMIL alignment for '{abs_id}'")
+                except Exception as st_err:
+                    logger.warning(f"⚠️ Auto-Forge: Storyteller alignment error ({st_err}), keeping SMIL alignment for '{abs_id}'")
+            else:
+                logger.info(f"ℹ️ Auto-Forge: No Storyteller transcript files found for '{abs_id}' (SMIL alignment only)")
+
             # --- UPDATE DATABASE ---
             # NOTE: DB service calls need connection. Assuming database_service handles its own session.
             book = self.database_service.get_book(abs_id)
@@ -557,6 +584,9 @@ class ForgeService:
                 book.storyteller_uuid = found_uuid
                 book.kosync_doc_id = new_hash
                 book.status = 'active'
+                if storyteller_manifest:
+                    book.transcript_file = storyteller_manifest
+                    book.transcript_source = 'storyteller'
                 self.database_service.save_book(book)
                 logger.info(f"✅ Auto-Forge: Book {abs_id} updated successfully!")
             else:
