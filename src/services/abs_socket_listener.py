@@ -138,7 +138,7 @@ class ABSSocketListener:
                     )
                     if legacy_token and legacy_token != self._api_token:
                         logger.info("🔌 ABS Socket.IO: Acquired user token for socket auth")
-                        # Best-effort: try /api/authorize for a potentially fresher token
+                        # Probe /api/authorize for a fresher token; non-fatal if unavailable
                         try:
                             auth_resp = requests.post(
                                 f"{self._server_url}/api/authorize",
@@ -348,7 +348,7 @@ class ABSSocketListener:
             logger.error("❌ ABS Socket.IO: No valid token — listener will not start")
             return
 
-        # Start debounce loop once — it doesn't reference self._sio directly
+        # Debounce loop does not reference self._sio; safe to start once before strategy loop.
         self._sio.start_background_task(self._debounce_loop)
 
         for strategy_idx, token in enumerate(strategies):
@@ -365,9 +365,9 @@ class ABSSocketListener:
                 self._sio.connect(
                     self._server_url,
                     transports=["websocket"],
-                    auth={"token": token},   # Strategy A: handshake-level auth
+                    auth={"token": token},
                 )
-                self._sio.wait()             # blocks until disconnected
+                self._sio.wait()
             except Exception as e:
                 logger.error(f"❌ ABS Socket.IO: Connection error — {e}")
                 break
@@ -382,7 +382,7 @@ class ABSSocketListener:
                         f"⚠️ ABS Socket.IO: Strategy {strategy_idx + 1} failed — "
                         f"trying {remaining} more strategy(s)"
                     )
-                    # Fresh client avoids reconnection=True state races on retry
+                    # Reconstruct client to avoid reconnection state-machine races across auth retries.
                     self._sio = socketio.Client(
                         reconnection=True,
                         logger=False,

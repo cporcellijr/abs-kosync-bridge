@@ -290,7 +290,6 @@ class SyncManager:
         abs_ts = abs_state.current.get('ts', 0)
         normalized['ABS'] = abs_ts
 
-        # Parse once and reuse canonical text length for all ebook clients.
         try:
             book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
             full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
@@ -315,7 +314,7 @@ class SyncManager:
             normalization_source = "percent_fallback"
             
             try:
-                # Prefer locator-derived canonical offsets; only then fall back to percentage.
+                # Resolution order: xpath → cfi → percentage.
                 char_offset = None
                 if client_xpath:
                     char_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, client_xpath)
@@ -1102,8 +1101,7 @@ class SyncManager:
         normalized_positions = self._normalize_for_cross_format_comparison(book, config)
         clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
 
-        # If a locator-derived percentage contradicts raw pct and shows no real movement
-        # from previous state, treat the raw pct delta as stale API noise.
+        # Suppress raw pct delta when locator-derived position shows no movement from previous state.
         for client_name in list(clients_with_delta.keys()):
             state = config[client_name]
             locator_pct = state.current.get("_locator_pct")
@@ -1448,16 +1446,13 @@ class SyncManager:
                         logger.debug(f"'{abs_id}' '{title_snip}' Using storyteller direct timestamp->locator path")
 
                 if not locator:
-                    # Get canonical text from leader
                     txt = leader_client.get_text_from_current_state(book, leader_state)
                     if not txt:
                         logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
                         continue
 
-                    # Get locator (percentage, xpath, etc) from text
                     locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
                     if not locator:
-                        # Try fallback if enabled (e.g. look at previous segment)
                         if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
                             fallback_txt = leader_client.get_fallback_text(book, leader_state)
                             if fallback_txt and fallback_txt != txt:
