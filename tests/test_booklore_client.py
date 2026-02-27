@@ -152,14 +152,70 @@ def test_update_progress_zero_clears_cfi(booklore_client):
         6043: {"epubProgress": {"percentage": 66.3, "cfi": "epubcfi(/6/50!/:0)"}}
     }
 
-    resp = MagicMock()
-    resp.status_code = 200
-    booklore_client._make_request = MagicMock(return_value=resp)
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "primaryFile": {"bookType": "EPUB"},
+        "epubProgress": {"percentage": 0.0, "cfi": ""},
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
 
     ok = booklore_client.update_progress("test-book.epub", 0.0, LocatorResult(percentage=0.0))
 
     assert ok is True
-    _, _, payload = booklore_client._make_request.call_args[0]
+    _, _, payload = booklore_client._make_request.call_args_list[0][0]
     assert payload["epubProgress"]["percentage"] == 0.0
-    assert payload["epubProgress"]["cfi"] == ""
+    assert payload["epubProgress"]["cfi"] is None
     assert booklore_client._book_id_cache[6043]["epubProgress"]["cfi"] == ""
+
+
+def test_update_progress_zero_retries_clear_variants_until_verified(booklore_client):
+    booklore_client.find_book_by_filename = MagicMock(return_value={
+        "id": 6043,
+        "bookType": "EPUB",
+        "fileName": "test-book.epub",
+        "epubProgress": {"percentage": 66.3, "cfi": "epubcfi(/6/50!/:0)"},
+    })
+    booklore_client._book_id_cache = {
+        6043: {"epubProgress": {"percentage": 66.3, "cfi": "epubcfi(/6/50!/:0)"}}
+    }
+
+    post1 = MagicMock()
+    post1.status_code = 200
+    verify1 = MagicMock()
+    verify1.status_code = 200
+    verify1.json.return_value = {
+        "primaryFile": {"bookType": "EPUB"},
+        "epubProgress": {"percentage": 66.3, "cfi": ""},
+    }
+
+    post2 = MagicMock()
+    post2.status_code = 200
+    verify2 = MagicMock()
+    verify2.status_code = 200
+    verify2.json.return_value = {
+        "primaryFile": {"bookType": "EPUB"},
+        "epubProgress": {"percentage": 0.0, "cfi": None},
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post1, verify1, post2, verify2])
+
+    ok = booklore_client.update_progress("test-book.epub", 0.0, LocatorResult(percentage=0.0))
+
+    assert ok is True
+    assert booklore_client._make_request.call_count == 4
+
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    second_post = booklore_client._make_request.call_args_list[2][0]
+
+    assert first_post[0] == "POST"
+    assert first_post[1] == "/api/v1/books/progress"
+    assert first_post[2]["epubProgress"]["cfi"] is None
+
+    assert second_post[0] == "POST"
+    assert second_post[1] == "/api/v1/books/progress"
+    assert "cfi" not in second_post[2]["epubProgress"]

@@ -1048,7 +1048,7 @@
                         <label>Storyteller Backfill</label>
                         <div class="cleanup-group">
                             <button type="button" class="btn btn-primary" onclick="backfillStorytellerTranscripts()">
-                                ðŸ“¥ Backfill Storyteller Transcripts
+                                Backfill Storyteller Transcripts
                             </button>
                             <p class="help-text flex-1 m-0">
                                 Re-scan all Storyteller-linked books, ingest available transcript files, and regenerate
@@ -1327,12 +1327,12 @@
 
                 const data = await response.json();
                 if (!response.ok || data.success === false) {
-                    alert(`âŒ Storyteller backfill failed: ${data.error || 'Unknown error'}`);
+                    alert(`Storyteller backfill failed: ${data.error || 'Unknown error'}`);
                     return;
                 }
 
                 alert(
-                    `âœ… Storyteller backfill complete.\n` +
+                    `Storyteller backfill complete.\n` +
                     `Scanned: ${data.scanned}\n` +
                     `Ingested: ${data.ingested}\n` +
                     `Aligned: ${data.aligned}\n` +
@@ -1342,7 +1342,7 @@
                 );
             } catch (err) {
                 console.error('Error running storyteller backfill:', err);
-                alert('âŒ An error occurred while running storyteller backfill. Check console for details.');
+                alert('An error occurred while running storyteller backfill. Check console for details.');
             }
         }
 
