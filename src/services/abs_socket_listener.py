@@ -267,8 +267,23 @@ class ABSSocketListener:
 
         # Check if this is an active book in our database
         book = self._db.get_book(library_item_id)
-        if not book or book.status != "active":
-            logger.debug(f"ABS Socket.IO: Progress event for '{library_item_id[:12]}...' — not an active book, ignoring")
+        if not book:
+            logger.debug(
+                f"ABS Socket.IO: Progress event for '{library_item_id[:12]}...' "
+                f"— unknown book, queuing suggestion check"
+            )
+            threading.Thread(
+                target=self._sync_manager.queue_suggestion,
+                args=(library_item_id,),
+                daemon=True,
+            ).start()
+            return
+
+        if book.status != "active":
+            logger.debug(
+                f"ABS Socket.IO: Progress event for '{library_item_id[:12]}...' "
+                f"— not an active book, ignoring"
+            )
             return
 
         with self._lock:

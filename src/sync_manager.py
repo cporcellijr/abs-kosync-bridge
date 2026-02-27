@@ -87,6 +87,8 @@ class SyncManager:
         self._sync_lock = threading.Lock()
         self._job_thread = None
         self._last_library_sync = 0
+        self._suggestion_in_flight: set[str] = set()
+        self._suggestion_lock = threading.Lock()
 
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
@@ -497,6 +499,35 @@ class SyncManager:
             return None, None
 
     # Suggestion Logic
+    def queue_suggestion(self, abs_id: str) -> None:
+        """Schedule ebook-discovery for an unmapped ABS book seen via Socket.IO.
+
+        No-ops if suggestions are disabled, the book is already mapped, or a
+        suggestion already exists. Uses an in-flight set to prevent duplicate
+        discovery threads for the same abs_id.
+        """
+        if os.environ.get("SUGGESTIONS_ENABLED", "true").lower() != "true":
+            return
+
+        with self._suggestion_lock:
+            if abs_id in self._suggestion_in_flight:
+                return
+            if self.database_service.suggestion_exists(abs_id):
+                return
+            all_books = self.database_service.get_all_books()
+            if any(b.abs_id == abs_id for b in all_books):
+                return
+            self._suggestion_in_flight.add(abs_id)
+
+        try:
+            logger.info(
+                f"ABS Socket.IO: Queuing suggestion discovery for unknown book '{abs_id[:12]}...'"
+            )
+            self._create_suggestion(abs_id, None)
+        finally:
+            with self._suggestion_lock:
+                self._suggestion_in_flight.discard(abs_id)
+
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
         suggestions_enabled_val = os.environ.get("SUGGESTIONS_ENABLED", "true")

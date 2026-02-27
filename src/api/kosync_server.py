@@ -271,13 +271,15 @@ def kosync_put_progress():
     # Optional "furthest wins" protection
     furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
     force_update = data.get('force', False)
-    
-    # [NEW] Allow rewinds if:
+    is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
+
+    # Allow rewinds if:
     # 1. Force flag is set (e.g. from SyncManager)
     # 2. Update comes from the SAME device (user moved slider back)
+    # 3. Update is internal (sync-bot) — must reach debounce-clear logic below
     same_device = (kosync_doc and kosync_doc.device_id == device_id)
-    
-    if furthest_wins and kosync_doc and kosync_doc.percentage and not force_update and not same_device:
+
+    if furthest_wins and kosync_doc and kosync_doc.percentage and not force_update and not same_device and not is_internal:
         existing_pct = float(kosync_doc.percentage)
         new_pct = float(percentage)
 
@@ -450,7 +452,6 @@ def kosync_put_progress():
         # Debounce sync trigger — wait until the reader stops turning pages
         # Skip if the update came from the sync bot itself (prevents sync→PUT→sync loop)
         # Skip if instant sync is globally disabled.
-        is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
         instant_sync_enabled = os.environ.get('INSTANT_SYNC_ENABLED', 'true').lower() != 'false'
         if is_internal:
             # Internal writes (sync/reset flows) should cancel any pending user debounce

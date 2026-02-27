@@ -55,7 +55,7 @@ def test_storyteller_backfill_handles_missing_transcriptions(tmp_path, monkeypat
 
     abs_client = MagicMock()
     abs_client.get_item_details.return_value = {"media": {"chapters": [{"start": 0.0, "end": 10.0}]}}
-    web_server.container = SimpleNamespace(abs_client=lambda: abs_client)
+    web_server.container = SimpleNamespace(abs_client=lambda: abs_client, ebook_parser=lambda: MagicMock())
     web_server.manager = SimpleNamespace(alignment_service=MagicMock())
 
     summary, status_code = web_server._run_storyteller_backfill()
@@ -89,7 +89,7 @@ def test_storyteller_backfill_ingests_and_flips_source(tmp_path, monkeypatch):
     alignment_service = MagicMock()
     alignment_service.align_storyteller_and_store.return_value = True
 
-    web_server.container = SimpleNamespace(abs_client=lambda: abs_client)
+    web_server.container = SimpleNamespace(abs_client=lambda: abs_client, ebook_parser=lambda: MagicMock())
     web_server.manager = SimpleNamespace(alignment_service=alignment_service)
 
     summary, status_code = web_server._run_storyteller_backfill()
@@ -132,7 +132,7 @@ def test_storyteller_backfill_skips_invalid_chapter_format(tmp_path, monkeypatch
     alignment_service = MagicMock()
     alignment_service.align_storyteller_and_store.return_value = True
 
-    web_server.container = SimpleNamespace(abs_client=lambda: abs_client)
+    web_server.container = SimpleNamespace(abs_client=lambda: abs_client, ebook_parser=lambda: MagicMock())
     web_server.manager = SimpleNamespace(alignment_service=alignment_service)
 
     summary, status_code = web_server._run_storyteller_backfill()
