@@ -984,6 +984,13 @@
                         <div class="help-text">Target directory where Forge writes files for Storyteller to process.
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Storyteller Assets Path (Optional)</label>
+                        <input type="text" name="STORYTELLER_ASSETS_DIR"
+                            value="{{ get_val('STORYTELLER_ASSETS_DIR') }}"
+                            placeholder="Root containing /assets/{title}/transcriptions">
+                        <div class="help-text">Used to ingest Storyteller forced-alignment transcripts when available.</div>
+                    </div>
 
 
                     <div class="form-group">

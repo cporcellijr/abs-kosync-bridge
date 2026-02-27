@@ -15,6 +15,7 @@ from src.api.storyteller_api import StorytellerAPIClient
 from src.db.models import Job
 from src.db.models import State, Book, PendingSuggestion
 from src.sync_clients.sync_client_interface import UpdateProgressRequest, LocatorResult, ServiceState, SyncResult, SyncClient
+from src.utils.storyteller_transcript import StorytellerTranscript
 # Logging utilities (placed at top to ensure availability during sync)
 from src.utils.logging_utils import sanitize_log_data
 
@@ -761,9 +762,9 @@ class SyncManager:
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to eager-lock KOSync ID: {e}")
 
-            # Step 2: Try Fast-Path (SMIL Extraction)
             raw_transcript = None
             transcript_source = None
+            storyteller_aligned = False
 
             # [MOVED UP] Fetch item details to get chapters (for time alignment) and for Ebook Acquisition
             # item_details = self.abs_client.get_item_details(abs_id) # Already fetched above
@@ -773,18 +774,39 @@ class SyncManager:
             # We need this for Validating SMIL OR for Aligning Whisper
             book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
 
+            if getattr(book, 'transcript_source', None) == 'storyteller' and self.alignment_service:
+                manifest_candidates = []
+                if getattr(book, 'transcript_file', None) and book.transcript_file != 'DB_MANAGED':
+                    manifest_candidates.append(Path(book.transcript_file))
+                if self.data_dir:
+                    manifest_candidates.append(Path(self.data_dir) / "transcripts" / "storyteller" / abs_id / "manifest.json")
+
+                storyteller_manifest = next((p for p in manifest_candidates if p.exists()), None)
+                if storyteller_manifest:
+                    try:
+                        storyteller_transcript = StorytellerTranscript(storyteller_manifest)
+                        storyteller_aligned = self.alignment_service.align_storyteller_and_store(
+                            abs_id, storyteller_transcript
+                        )
+                        if storyteller_aligned:
+                            transcript_source = "storyteller"
+                            update_progress(1.0, 2)
+                            logger.info(f"Storyteller alignment map generated for '{sanitize_log_data(abs_title)}'")
+                    except Exception as storyteller_err:
+                        logger.warning(f"Storyteller alignment failed for '{abs_id}': {storyteller_err}")
+
             # Attempt SMIL extraction
-            if hasattr(self.transcriber, 'transcribe_from_smil'):
+            if not storyteller_aligned and hasattr(self.transcriber, 'transcribe_from_smil'):
                   raw_transcript = self.transcriber.transcribe_from_smil(
                       abs_id, epub_path, chapters,
                       full_book_text=book_text,
                        progress_callback=lambda p: update_progress(p, 2)
                   )
                   if raw_transcript:
-                      transcript_source = "SMIL"
+                      transcript_source = "smil"
 
             # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
-            if not raw_transcript:
+            if not storyteller_aligned and not raw_transcript:
                 logger.info("🔄 SMIL extraction skipped/failed, falling back to Whisper transcription")
                 
                 audio_files = self.abs_client.get_audio_files(abs_id)
@@ -794,12 +816,12 @@ class SyncManager:
                     progress_callback=lambda p: update_progress(p, 2)
                 )
                 if raw_transcript:
-                    transcript_source = "WHISPER"
-            else:
+                    transcript_source = "whisper"
+            elif not storyteller_aligned:
                 # If SMIL worked, it's already done with transcribing phase
                 update_progress(1.0, 2)
 
-            if not raw_transcript:
+            if not storyteller_aligned and not raw_transcript:
                 raise Exception("Failed to generate transcript from both SMIL and Whisper.")
 
             # Step 4: Parse EPUB - ebook_parser caches result, so repeating is cheap.
@@ -807,14 +829,18 @@ class SyncManager:
             
             # [NEW] Step 5: Align and Store using AlignmentService
             # This is where we commit the result to the DB
-            logger.info(f"🧠 Aligning transcript ({transcript_source}) using Anchored Alignment...")
+            if not storyteller_aligned:
+                logger.info(f"🧠 Aligning transcript ({transcript_source}) using Anchored Alignment...")
             
             # Update progress to show we are working on alignment (Start of Phase 3 = 90%)
             update_progress(0.1, 3) # 91%
             
-            success = self.alignment_service.align_and_store(
-                abs_id, raw_transcript, book_text, chapters
-            )
+            if storyteller_aligned:
+                success = True
+            else:
+                success = self.alignment_service.align_and_store(
+                    abs_id, raw_transcript, book_text, chapters
+                )
             
             # Alignment done
             update_progress(0.5, 3) # 95%
@@ -832,6 +858,8 @@ class SyncManager:
             # --- Success Update using database service ---
             # Update book with transcript path (Now just a marker or None, as data is in book_alignments)
             book.transcript_file = "DB_MANAGED"
+            if transcript_source:
+                book.transcript_source = transcript_source
             # [FIX] Save the filename so cache cleanup knows this file belongs to a book
             if epub_path:
                 new_filename = epub_path.name
@@ -1083,7 +1111,10 @@ class SyncManager:
                     alignment = self.alignment_service._get_alignment(abs_id)
                     if alignment:
                         # [MIGRATION UPGRADE] If the book has a map but still points to a legacy file, upgrade it
-                        if getattr(book, 'transcript_file', None) != 'DB_MANAGED':
+                        if (
+                            getattr(book, 'transcript_file', None) != 'DB_MANAGED'
+                            and getattr(book, 'transcript_source', None) != 'storyteller'
+                        ):
                             logger.info(f"   🔄 Upgrading '{title_snip}' to DB_MANAGED unified architecture")
                             book.transcript_file = 'DB_MANAGED'
                             self.database_service.save_book(book)

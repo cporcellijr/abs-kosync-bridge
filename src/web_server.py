@@ -4,6 +4,7 @@ import html
 import logging
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -213,6 +214,7 @@ def inject_global_vars():
             'PROCESSING_DIR': '/processing',
             'STORYTELLER_INGEST_DIR': '/linker_books',
             'AUDIOBOOKS_DIR': '/audiobooks',
+            'STORYTELLER_ASSETS_DIR': '',
             'ABS_PROGRESS_OFFSET_SECONDS': '0',
             'EBOOK_CACHE_SIZE': '3',
             'KOSYNC_HASH_METHOD': 'content',
@@ -242,6 +244,178 @@ def inject_global_vars():
     )
 
 # ---------------- BOOK LINKER HELPERS ----------------
+def _normalize_title_key(title: str) -> str:
+    """Normalize title for deterministic directory matching."""
+    lowered = (title or "").lower()
+    collapsed = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return re.sub(r"\s+", " ", collapsed).strip()
+
+
+def _storyteller_filename_for_abs_chapter(chapter_index: int, prefix: str = "00000") -> str:
+    """Map ABS chapter index N (0-based) to Storyteller filename N+1 (1-based)."""
+    return f"{prefix}-{chapter_index + 1:05d}.json"
+
+
+def _resolve_storyteller_title_dir(assets_root: Path, abs_title: str) -> Path | None:
+    """
+    Resolve the Storyteller title directory using exact match first,
+    then normalized exact match (must be unique).
+    """
+    assets_dir = assets_root / "assets"
+    if not assets_dir.exists() or not assets_dir.is_dir():
+        return None
+
+    exact_dir = assets_dir / abs_title
+    if exact_dir.exists() and exact_dir.is_dir():
+        return exact_dir
+
+    target_key = _normalize_title_key(abs_title)
+    if not target_key:
+        return None
+
+    candidates = []
+    for child in assets_dir.iterdir():
+        if child.is_dir() and _normalize_title_key(child.name) == target_key:
+            candidates.append(child)
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if len(candidates) > 1:
+        logger.warning(
+            f"Storyteller assets match is ambiguous for '{sanitize_log_data(abs_title)}' "
+            f"({len(candidates)} directories)"
+        )
+    return None
+
+
+def _validate_storyteller_chapters(
+    transcriptions_dir: Path, expected_count: int
+) -> tuple[bool, list[str], list[str]]:
+    """
+    Validate Storyteller chapter files by expected naming and exact count.
+    Accept both known prefixes: 00000-XXXXX.json and 00001-XXXXX.json.
+    Returns (is_valid, source_filenames, destination_filenames).
+    """
+    if expected_count <= 0:
+        return False, [], []
+
+    expected_files = [_storyteller_filename_for_abs_chapter(i, "00000") for i in range(expected_count)]
+    present = [
+        p.name
+        for p in transcriptions_dir.glob("*.json")
+        if re.match(r"^0000[01]-\d{5}\.json$", p.name)
+    ]
+    if len(present) != expected_count:
+        return False, [], []
+
+    # Fast path: homogeneous prefixes
+    for prefix in ("00000", "00001"):
+        source_files = [_storyteller_filename_for_abs_chapter(i, prefix) for i in range(expected_count)]
+        if all((transcriptions_dir / name).exists() for name in source_files):
+            return True, source_files, expected_files
+
+    # Fallback: allow per-chapter mixed prefix, as long as exactly one file exists per chapter.
+    source_files = []
+    for i in range(expected_count):
+        canonical = _storyteller_filename_for_abs_chapter(i, "00000")
+        alt = _storyteller_filename_for_abs_chapter(i, "00001")
+        has_canonical = (transcriptions_dir / canonical).exists()
+        has_alt = (transcriptions_dir / alt).exists()
+        if has_canonical and not has_alt:
+            source_files.append(canonical)
+        elif has_alt and not has_canonical:
+            source_files.append(alt)
+        else:
+            return False, [], []
+
+    return True, source_files, expected_files
+
+
+def _ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list[dict]) -> str | None:
+    """
+    Copy Storyteller chapter JSON files into bridge-managed data storage and write a manifest.
+    Returns manifest path on success.
+    """
+    assets_dir_raw = os.environ.get("STORYTELLER_ASSETS_DIR", "").strip()
+    if not assets_dir_raw:
+        return None
+
+    chapter_list = chapters if isinstance(chapters, list) else []
+    expected_count = len(chapter_list)
+    if expected_count <= 0:
+        logger.info(f"Storyteller ingest skipped for '{abs_id}': no ABS chapters available")
+        return None
+
+    assets_root = Path(assets_dir_raw)
+    title_dir = _resolve_storyteller_title_dir(assets_root, abs_title or "")
+    if not title_dir:
+        logger.info(f"Storyteller transcripts not found for '{abs_id}' (title='{sanitize_log_data(abs_title)}')")
+        return None
+
+    transcriptions_dir = title_dir / "transcriptions"
+    if not transcriptions_dir.exists() or not transcriptions_dir.is_dir():
+        logger.info(f"Storyteller transcriptions directory missing for '{abs_id}' at '{transcriptions_dir}'")
+        return None
+
+    is_valid, source_files, expected_files = _validate_storyteller_chapters(transcriptions_dir, expected_count)
+    if not is_valid:
+        logger.info(
+            f"Storyteller transcripts rejected for '{abs_id}': expected {expected_count} chapter files at "
+            f"'{transcriptions_dir}'"
+        )
+        return None
+
+    target_dir = DATA_DIR / "transcripts" / "storyteller" / abs_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = target_dir / "manifest.json"
+
+    existing_json_files = [p.name for p in target_dir.glob("*.json") if re.match(r"^00000-\d{5}\.json$", p.name)]
+    existing_valid = (
+        manifest_path.exists()
+        and len(existing_json_files) == expected_count
+        and all((target_dir / name).exists() for name in expected_files)
+    )
+    if existing_valid:
+        logger.info(f"Storyteller ingest reuse for '{abs_id}' from '{target_dir}' ({len(expected_files)} files)")
+    else:
+        copied_count = 0
+        for source_name, target_name in zip(source_files, expected_files):
+            shutil.copy2(transcriptions_dir / source_name, target_dir / target_name)
+            copied_count += 1
+        logger.info(
+            f"Storyteller ingest copied for '{abs_id}': {copied_count} files from "
+            f"'{transcriptions_dir}' to '{target_dir}'"
+        )
+
+    chapter_entries = []
+    for idx, chapter in enumerate(chapter_list):
+        start = float(chapter.get("start", 0.0) or 0.0)
+        end = float(chapter.get("end", 0.0) or 0.0)
+        chapter_entries.append({
+            "index": idx,
+            "file": _storyteller_filename_for_abs_chapter(idx),
+            "start": start,
+            "end": end
+        })
+
+    duration = 0.0
+    if chapter_entries:
+        duration = float(chapter_entries[-1].get("end", 0.0) or 0.0)
+
+    manifest = {
+        "format": "storyteller_manifest",
+        "version": 1,
+        "abs_id": abs_id,
+        "abs_title": abs_title,
+        "duration": duration,
+        "chapter_count": expected_count,
+        "chapters": chapter_entries
+    }
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False)
+
+    return str(manifest_path)
 
 
 
@@ -1132,6 +1306,9 @@ def match():
         audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
+        abs_title = manager.get_abs_title(selected_ab)
+        item_details = container.abs_client().get_item_details(abs_id)
+        chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
 
         # Get booklore_id if available for API-based hash computation
         booklore_id = None
@@ -1194,7 +1371,7 @@ def match():
             # Create dummy book record with status='forging'
             book = Book(
                 abs_id=abs_id,
-                abs_title=manager.get_abs_title(selected_ab),
+                abs_title=abs_title,
                 ebook_filename=original_filename,
                 original_ebook_filename=original_filename,
                 kosync_doc_id=kosync_doc_id or f"forging_{abs_id}", # temporary
@@ -1205,7 +1382,7 @@ def match():
             
             # Start Auto-Forge
             author = get_abs_author(selected_ab)
-            title = manager.get_abs_title(selected_ab)
+            title = abs_title
             
             # Async launch
             container.forge_service().start_auto_forge_match(
@@ -1311,14 +1488,17 @@ def match():
 
         # Create Book object and save to database service
         from src.db.models import Book
+        storyteller_manifest = _ingest_storyteller_transcripts(abs_id, abs_title, chapters)
+        transcript_source = "storyteller" if storyteller_manifest else None
         book = Book(
             abs_id=abs_id,
-            abs_title=manager.get_abs_title(selected_ab),
+            abs_title=abs_title,
             ebook_filename=ebook_filename,
             kosync_doc_id=kosync_doc_id,
-            transcript_file=None,
+            transcript_file=storyteller_manifest,
             status="pending",
             duration=manager.get_duration(selected_ab),
+            transcript_source=transcript_source,
             storyteller_uuid=storyteller_uuid, # Save UUID
             original_ebook_filename=original_ebook_filename,
             abs_ebook_item_id=abs_ebook_item_id # [ID SHADOWING]
@@ -1483,15 +1663,25 @@ def batch_match():
                     logger.info(f"🔄 Preserving existing hash '{current_book_entry.kosync_doc_id}' for '{item['abs_id']}' instead of new hash '{kosync_doc_id}'")
                     kosync_doc_id = current_book_entry.kosync_doc_id
 
+                item_details = container.abs_client().get_item_details(item['abs_id'])
+                chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+                storyteller_manifest = _ingest_storyteller_transcripts(
+                    item['abs_id'],
+                    item.get('abs_title', ''),
+                    chapters
+                )
+                transcript_source = "storyteller" if storyteller_manifest else None
+
                 # Create Book object and save to database service
                 book = Book(
                     abs_id=item['abs_id'],
                     abs_title=item['abs_title'],
                     ebook_filename=ebook_filename,
                     kosync_doc_id=kosync_doc_id,
-                    transcript_file=None,
+                    transcript_file=storyteller_manifest,
                     status="pending",
                     duration=duration,
+                    transcript_source=transcript_source,
                     storyteller_uuid=storyteller_uuid or None,
                     original_ebook_filename=original_ebook_filename
                 )
@@ -1794,6 +1984,8 @@ def api_storyteller_link(abs_id):
     if storyteller_uuid == "none" or not storyteller_uuid:
         logger.info(f"🔄 Unlinking Storyteller for '{book.abs_title}'")
         book.storyteller_uuid = None
+        book.transcript_source = None
+        book.transcript_file = None
         
         # Revert to original filename if it exists
         if book.original_ebook_filename:
@@ -1820,13 +2012,12 @@ def api_storyteller_link(abs_id):
 
             book.ebook_filename = target_path.name
             book.storyteller_uuid = storyteller_uuid
-            # Also clear transcript to force re-alignment if needed? 
-            # Ideally yes, but SyncManager handles DB_MANAGED check.
-            # Maybe set status to pending to trigger re-alignment?
-            # For now, just link. The user might need to re-scan.
-            # Actually, let's set status to 'pending' to force a re-process with the new file!
+            item_details = container.abs_client().get_item_details(abs_id)
+            chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+            storyteller_manifest = _ingest_storyteller_transcripts(abs_id, book.abs_title or '', chapters)
+            book.transcript_file = storyteller_manifest
+            book.transcript_source = "storyteller" if storyteller_manifest else None
             book.status = 'pending' # Force re-process to align with new EPUB
-            # book.transcript_file = None # [OPTIMIZATION] Keep existing transcript to allow cache reuse
             
             database_service.save_book(book)
             

@@ -21,6 +21,12 @@ class AlignmentService:
         self.database_service = database_service
         self.polisher = polisher
 
+    @staticmethod
+    def _point_char(point: Dict) -> int:
+        if 'global_char' in point:
+            return int(point['global_char'])
+        return int(point.get('char', 0))
+
     @time_execution
     def align_and_store(self, abs_id: str, raw_segments: List[Dict], ebook_text: str, spine_chapters: List[Dict] = None):
         """
@@ -66,6 +72,19 @@ class AlignmentService:
         self._save_alignment(abs_id, alignment_map)
         return True
 
+    @time_execution
+    def align_storyteller_and_store(self, abs_id: str, storyteller_transcript) -> bool:
+        """
+        Build a chapter-aware alignment map directly from Storyteller wordTimeline data.
+        """
+        alignment_map = list(storyteller_transcript.iter_alignment_points())
+        if not alignment_map:
+            logger.error("   Failed to generate storyteller alignment map.")
+            return False
+        self._save_alignment(abs_id, alignment_map)
+        logger.info(f"AlignmentService: Storyteller map stored for {abs_id} ({len(alignment_map)} points)")
+        return True
+
     def get_time_for_text(self, abs_id: str, query_text: str, char_offset_hint: int = None) -> Optional[float]:
         """
         Precise time lookup.
@@ -94,16 +113,19 @@ class AlignmentService:
         # Points are [{'char': x, 'ts': y}, ...]
         # Find interval [p1, p2] where p1.char <= target <= p2.char
         
-        if target_offset < map_points[0]['char']:
+        first_char = self._point_char(map_points[0])
+        last_char = self._point_char(map_points[-1])
+
+        if target_offset < first_char:
             return map_points[0]['ts']
-        if target_offset > map_points[-1]['char']:
+        if target_offset > last_char:
             return map_points[-1]['ts']
 
         # Manual binary search to find floor
         floor_idx = 0
         while left <= right:
             mid = (left + right) // 2
-            if map_points[mid]['char'] <= target_offset:
+            if self._point_char(map_points[mid]) <= target_offset:
                 floor_idx = mid
                 left = mid + 1
             else:
@@ -118,12 +140,14 @@ class AlignmentService:
             return p1['ts']
 
         # Linear Interpolation
-        char_span = p2['char'] - p1['char']
+        p1_char = self._point_char(p1)
+        p2_char = self._point_char(p2)
+        char_span = p2_char - p1_char
         time_span = p2['ts'] - p1['ts']
         
         if char_span == 0: return p1['ts']
         
-        ratio = (target_offset - p1['char']) / char_span
+        ratio = (target_offset - p1_char) / char_span
         estimated_time = p1['ts'] + (time_span * ratio)
         
         return float(estimated_time)
@@ -145,9 +169,9 @@ class AlignmentService:
         right = len(map_points) - 1
         
         if target_ts <= map_points[0]['ts']:
-            return int(map_points[0]['char'])
+            return self._point_char(map_points[0])
         if target_ts >= map_points[-1]['ts']:
-            return int(map_points[-1]['char'])
+            return self._point_char(map_points[-1])
             
         floor_idx = 0
         while left <= right:
@@ -162,16 +186,18 @@ class AlignmentService:
         if floor_idx + 1 < len(map_points):
             p2 = map_points[floor_idx + 1]
         else:
-            return int(p1['char'])
+            return self._point_char(p1)
             
         # 3. Interpolate
         time_span = p2['ts'] - p1['ts']
-        char_span = p2['char'] - p1['char']
+        p1_char = self._point_char(p1)
+        p2_char = self._point_char(p2)
+        char_span = p2_char - p1_char
         
-        if time_span == 0: return int(p1['char'])
+        if time_span == 0: return p1_char
         
         ratio = (target_ts - p1['ts']) / time_span
-        estimated_char = p1['char'] + (char_span * ratio)
+        estimated_char = p1_char + (char_span * ratio)
         
         return int(estimated_char)
 
