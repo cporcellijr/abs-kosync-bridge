@@ -28,7 +28,7 @@ class BookloreSyncClient(SyncClient):
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         # FIX: Use original filename if available (Tri-Link), otherwise standard filename
         epub = book.original_ebook_filename or book.ebook_filename
-        bl_pct, _ = self.booklore_client.get_progress(epub)
+        bl_pct, bl_cfi = self.booklore_client.get_progress(epub)
 
         if bl_pct is None:
             logger.warning("⚠️ BookLore percentage is None - returning None for service state")
@@ -40,7 +40,7 @@ class BookloreSyncClient(SyncClient):
         delta = abs(bl_pct - prev_booklore_pct)
 
         return ServiceState(
-            current={"pct": bl_pct},
+            current={"pct": bl_pct, "cfi": bl_cfi},
             previous_pct=prev_booklore_pct,
             delta=delta,
             threshold=self.delta_kosync_thresh,
@@ -51,7 +51,12 @@ class BookloreSyncClient(SyncClient):
 
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         bl_pct = state.current.get('pct')
-        epub = book.ebook_filename
+        bl_cfi = state.current.get('cfi')
+        epub = getattr(book, "ebook_filename", None)
+        if bl_cfi and epub and self.ebook_parser:
+            txt = self.ebook_parser.get_text_around_cfi(epub, bl_cfi)
+            if txt:
+                return txt
         if bl_pct is not None and epub and self.ebook_parser:
             return self.ebook_parser.get_text_at_percentage(epub, bl_pct)
         return None
@@ -64,10 +69,12 @@ class BookloreSyncClient(SyncClient):
         if success:
             try:
                 from src.services.write_tracker import record_write
-                record_write('BookLore', book.abs_id)
+                record_write('BookLore', book.abs_id, pct)
             except ImportError:
                 pass
         updated_state = {
             'pct': pct
         }
+        if request.locator_result and request.locator_result.cfi:
+            updated_state['cfi'] = request.locator_result.cfi
         return SyncResult(pct, success, updated_state)

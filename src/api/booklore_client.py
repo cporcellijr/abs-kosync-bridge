@@ -676,12 +676,19 @@ class BookloreClient:
         book_type = (book.get('bookType') or '').upper()
         pct_display = percentage * 100
         cfi = rich_locator.cfi if rich_locator and rich_locator.cfi else None
+        if book_type == 'EPUB' and percentage <= 0:
+            # Clearing progress must also clear stored CFI or some BookLore setups
+            # can report the old location again on subsequent reads.
+            cfi = ""
 
         if book_type == 'EPUB':
             payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
-            if cfi:
+            if cfi is not None:
                 payload["epubProgress"]["cfi"] = cfi
-                logger.debug(f"Booklore: Setting CFI: {cfi}")
+                if cfi:
+                    logger.debug(f"Booklore: Setting CFI: {cfi}")
+                else:
+                    logger.debug("Booklore: Clearing CFI for 0% reset")
         elif book_type == 'PDF':
             payload = {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}}
         elif book_type == 'CBX':
@@ -701,7 +708,7 @@ class BookloreClient:
                         if not cached.get('epubProgress'):
                             cached['epubProgress'] = {}
                         cached['epubProgress']['percentage'] = pct_display
-                        if cfi:
+                        if cfi is not None:
                             cached['epubProgress']['cfi'] = cfi
                     elif book_type == 'PDF':
                         if not cached.get('pdfProgress'):

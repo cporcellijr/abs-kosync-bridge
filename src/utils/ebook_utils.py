@@ -74,6 +74,7 @@ class EbookParser:
         self.fuzzy_threshold = int(os.getenv("FUZZY_MATCH_THRESHOLD", 80))
         self.hash_method = os.getenv("KOSYNC_HASH_METHOD", "content").lower()
         self.useXpathSegmentFallback = os.getenv("XPATH_FALLBACK_TO_PREVIOUS_SEGMENT", "false").lower() == "true"
+        self.locator_roundtrip_tolerance = int(os.getenv("LOCATOR_ROUNDTRIP_TOLERANCE_CHARS", 2))
 
         logger.info(f"✅ EbookParser initialized (cache={cache_size}, hash={self.hash_method}, xpath_fallback={self.useXpathSegmentFallback})")
 
@@ -225,6 +226,7 @@ class EbookParser:
                     spine_map.append({
                         "start": start,
                         "end": end,
+                        "char_len": length,
                         "spine_index": i + 1,
                         "href": item.get_name(),
                         "content": item.get_content()
@@ -235,11 +237,104 @@ class EbookParser:
 
             combined_text = " ".join(full_text_parts)
             self.cache.put(str_path, {'text': combined_text, 'map': spine_map})
+            self._debug_log_spine_parse(filepath.name, combined_text, spine_map)
             return combined_text, spine_map
 
         except Exception as e:
             logger.error(f"❌ Failed to parse EPUB '{filepath}': {e}")
             return "", []
+
+    def _offset_from_locator(self, locator: LocatorResult, spine_map: list, total_len: int) -> Optional[int]:
+        """Best-effort reverse mapping for debug round-trip checks."""
+        if not locator or not spine_map or total_len <= 0:
+            return None
+
+        if locator.href:
+            target_item = next((item for item in spine_map if item.get('href') == locator.href), None)
+            if not target_item:
+                target_item = next(
+                    (
+                        item for item in spine_map
+                        if item.get('href') and (locator.href in item['href'] or item['href'] in locator.href)
+                    ),
+                    None,
+                )
+            if target_item:
+                if locator.chapter_progress is not None:
+                    chapter_len = max(1, target_item['end'] - target_item['start'])
+                    chapter_progress = max(0.0, min(1.0, float(locator.chapter_progress)))
+                    local_offset = int(chapter_progress * chapter_len)
+                    return min(target_item['start'] + local_offset, target_item['end'] - 1)
+                return target_item['start']
+
+        if locator.match_index is not None:
+            return max(0, min(int(locator.match_index), total_len - 1))
+
+        if locator.percentage is not None:
+            pct = max(0.0, min(1.0, float(locator.percentage)))
+            return int((total_len - 1) * pct) if total_len > 1 else 0
+
+        return None
+
+    def _debug_log_spine_parse(self, filename: str, full_text: str, spine_map: list):
+        """Debug-only telemetry for EPUB spine mapping and locator round-trip consistency."""
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+
+        total_len = len(full_text)
+        char_sum = sum(item.get('char_len', item['end'] - item['start']) for item in spine_map)
+        logger.debug(
+            "EPUB parse debug '%s': included_spine_items=%d, extracted_char_sum=%d, combined_text_len=%d",
+            filename, len(spine_map), char_sum, total_len
+        )
+        for item in spine_map:
+            logger.debug(
+                "EPUB parse debug '%s': spine_index=%d href=%s char_len=%d start=%d end=%d",
+                filename,
+                item['spine_index'],
+                item.get('href'),
+                item.get('char_len', item['end'] - item['start']),
+                item['start'],
+                item['end'],
+            )
+
+        if total_len <= 0 or not spine_map:
+            return
+
+        for pct in (0.1, 0.5, 0.9):
+            target_index = int((total_len - 1) * pct) if total_len > 1 else 0
+            target_item = next((item for item in spine_map if item['start'] <= target_index < item['end']), spine_map[-1])
+            logger.debug(
+                "EPUB parse debug '%s': progress=%.1f selected_spine_index=%d href=%s global_offset=%d",
+                filename,
+                pct,
+                target_item['spine_index'],
+                target_item.get('href'),
+                target_index,
+            )
+
+        sample_progresses = (0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99)
+        for pct in sample_progresses:
+            global_offset = int((total_len - 1) * pct) if total_len > 1 else 0
+            locator = self.get_locator_from_char_offset(filename, global_offset)
+            global_offset_back = self._offset_from_locator(locator, spine_map, total_len) if locator else None
+            if global_offset_back is None:
+                logger.debug(
+                    "EPUB round-trip debug '%s': pct=%.2f offset=%d -> no locator/offset_back",
+                    filename, pct, global_offset
+                )
+                continue
+
+            delta = global_offset_back - global_offset
+            logger.debug(
+                "EPUB round-trip debug '%s': pct=%.2f offset=%d -> offset_back=%d delta=%d",
+                filename, pct, global_offset, global_offset_back, delta
+            )
+            if abs(delta) > self.locator_roundtrip_tolerance:
+                logger.warning(
+                    "EPUB round-trip drift '%s': pct=%.2f delta=%d (tolerance=%d)",
+                    filename, pct, delta, self.locator_roundtrip_tolerance
+                )
 
     def get_text_at_percentage(self, filename, percentage):
         """Get text snippet at a given percentage through the book."""
@@ -388,6 +483,9 @@ class EbookParser:
 
         spine_step = (spine_index + 1) * 2
         element_path = "/".join(reversed(path_segments))
+        if not element_path:
+            # Keep CFI parseable even if target text was attached to the document root.
+            element_path = "4/2/1"
         return f"epubcfi(/6/{spine_step}!/{element_path}:0)"
 
     def _generate_xpath_bs4(self, html_content, local_target_index):
@@ -486,11 +584,15 @@ class EbookParser:
 
             # 2. Normalized match
             if match_index == -1:
-                norm_content = self._normalize(full_text)
+                norm_content, norm_to_raw = self._normalize_with_map(full_text)
                 norm_search = self._normalize(search_phrase)
-                norm_index = norm_content.find(norm_search)
-                if norm_index != -1:
-                    match_index = int((norm_index / len(norm_content)) * total_len)
+                if norm_content and norm_search:
+                    norm_index = norm_content.find(norm_search)
+                    if norm_index != -1:
+                        if norm_index < len(norm_to_raw):
+                            match_index = norm_to_raw[norm_index]
+                        else:
+                            match_index = norm_to_raw[-1]
 
             # 3. Fuzzy match
             if match_index == -1:
@@ -601,8 +703,22 @@ class EbookParser:
             logger.error(f"âŒ Error resolving locator from char offset in '{filename}': {e}")
             return None
 
+    def _normalize_with_map(self, text):
+        """
+        Normalize text and return a map from normalized char index -> raw char index.
+        This prevents using normalized offsets as if they were raw offsets.
+        """
+        normalized_chars = []
+        norm_to_raw = []
+        for raw_idx, ch in enumerate(text):
+            if ch.isalnum():
+                normalized_chars.append(ch.lower())
+                norm_to_raw.append(raw_idx)
+        return "".join(normalized_chars), norm_to_raw
+
     def _normalize(self, text):
-        return re.sub(r'[^a-z0-9]', '', text.lower())
+        normalized, _ = self._normalize_with_map(text)
+        return normalized
 
 
 
@@ -1063,6 +1179,147 @@ class EbookParser:
             logger.error(f"❌ Error resolving XPath '{xpath_str}': {e}")
             return None
 
+    def resolve_xpath_to_index(self, filename, xpath_str) -> Optional[int]:
+        """
+        Resolve KOReader XPath to canonical global character offset.
+        Reuses the same hybrid XPath logic as resolve_xpath().
+        """
+        try:
+            logger.debug(f"Resolving XPath->index (Hybrid): {xpath_str}")
+
+            match = re.search(r'DocFragment\[(\d+)]', xpath_str)
+            if not match:
+                return None
+            spine_index = int(match.group(1))
+
+            book_path = self.resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+
+            target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
+            if not target_item:
+                return None
+
+            relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
+            offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
+            target_offset = int(offset_match.group(1)) if offset_match else 0
+            clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
+
+            if clean_xpath.startswith('/'):
+                clean_xpath = '.' + clean_xpath
+
+            tree = html.fromstring(target_item['content'])
+
+            elements = []
+            try:
+                elements = tree.xpath(clean_xpath)
+            except Exception as e:
+                logger.debug(f"XPath query failed: {e}")
+
+            if not elements and clean_xpath.startswith('./'):
+                try:
+                    elements = tree.xpath(clean_xpath[2:])
+                except Exception:
+                    pass
+
+            if not elements:
+                id_match = re.search(r"@id='([^']+)'", clean_xpath)
+                if id_match:
+                    try:
+                        elements = tree.xpath(f"//*[@id='{id_match.group(1)}']")
+                    except Exception:
+                        pass
+
+            if not elements:
+                simple_path = re.sub(r'\[\d+]', '', clean_xpath)
+                try:
+                    elements = tree.xpath(simple_path)
+                except Exception:
+                    pass
+
+            if not elements:
+                logger.warning(f"Could not resolve XPath in {filename}: {clean_xpath}")
+                return None
+
+            target_node = elements[0]
+
+            node_text = ""
+            if target_node.text:
+                node_text += target_node.text.strip()
+            if target_node.tail:
+                node_text += " " + target_node.tail.strip()
+
+            if len(node_text) < 20:
+                parent = target_node.getparent()
+                if parent is not None:
+                    node_text = parent.text_content().strip()
+
+            clean_anchor = " ".join(node_text.split())
+            if clean_anchor:
+                bs4_chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
+                local_start_index = bs4_chapter_text.find(clean_anchor)
+                if local_start_index != -1:
+                    safe_offset = min(target_offset, len(clean_anchor))
+                    return target_item['start'] + local_start_index + safe_offset
+
+            logger.debug("Exact text match failed, falling back to LXML offset calculation")
+            preceding_len = 0
+            found_target = False
+            separator_len = 1
+
+            for node in tree.iter():
+                if node == target_node:
+                    found_target = True
+                    if node.text and target_offset > 0:
+                        raw_segment = node.text[:min(len(node.text), target_offset)]
+                        preceding_len += len(raw_segment.strip())
+                    elif target_offset > 0:
+                        preceding_len += target_offset
+                    break
+
+                if node.text and node.text.strip():
+                    preceding_len += (len(node.text.strip()) + separator_len)
+                if node.tail and node.tail.strip():
+                    preceding_len += (len(node.tail.strip()) + separator_len)
+
+            if found_target:
+                return target_item['start'] + preceding_len
+            return None
+
+        except Exception as e:
+            logger.error(f"Error resolving XPath->index '{xpath_str}': {e}")
+            return None
+
+    def _parse_cfi_components(self, cfi):
+        """
+        Parse CFI into (spine_step, element_steps, char_offset).
+        Falls back for minimal CFIs like `epubcfi(/6/26!/:0)` that the library rejects.
+        """
+        try:
+            parsed_cfi = epubcfi.parse(cfi)
+            spine_step = None
+            element_steps = []
+            for step in parsed_cfi.steps:
+                if hasattr(step, 'index'):
+                    if step.index == 6:
+                        continue
+                    elif not spine_step and step.index > 6:
+                        spine_step = step.index
+                    elif isinstance(step, epubcfi.cfi.Step):
+                        element_steps.append(step)
+            char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
+            return spine_step, element_steps, char_offset
+        except Exception as parse_err:
+            fallback = re.match(
+                r'^\s*epubcfi\(\s*/6/(\d+)(?:\[[^\]]*\])?!(?:/[^:)]*)?(?::(\d+))?\s*\)\s*$',
+                str(cfi or "")
+            )
+            if not fallback:
+                raise parse_err
+            spine_step = int(fallback.group(1))
+            char_offset = int(fallback.group(2) or 0)
+            logger.debug(f"CFI fallback parser engaged for '{cfi}' (spine_step={spine_step}, offset={char_offset})")
+            return spine_step, [], char_offset
+
     def get_text_around_cfi(self, filename, cfi, context=50):
         """
         Returns a text fragment of length 2*context centered on the position indicated by the CFI.
@@ -1071,24 +1328,7 @@ class EbookParser:
         Example supported CFI: epubcfi(/6/16[chapter_6]!/4/2[book-columns]/2[book-inner]/268/4/2[kobo.134.3]/1:11)
         """
         try:
-            # Parse CFI using the epubcfi library
-            parsed_cfi = epubcfi.parse(cfi)
-
-            # Extract spine information and element steps
-            spine_step = None
-            element_steps = []
-
-            for step in parsed_cfi.steps:
-                if hasattr(step, 'index'):
-                    if step.index == 6:  # Skip spine reference marker
-                        continue
-                    elif not spine_step and step.index > 6:  # First step after /6/ is spine
-                        spine_step = step.index
-                    elif isinstance(step, epubcfi.cfi.Step):
-                        element_steps.append(step)
-                # Skip Redirect objects (!)
-
-            char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
+            spine_step, element_steps, char_offset = self._parse_cfi_components(cfi)
 
             if not spine_step:
                 logger.error(f"❌ Could not extract spine step from CFI: '{cfi}'")
@@ -1099,12 +1339,13 @@ class EbookParser:
             full_text, spine_map = self.extract_text_and_map(book_path)
 
             # Calculate spine index (CFI spine steps are 2x the actual index)
-            spine_index = (spine_step // 2) - 1
-            if not (0 <= spine_index < len(spine_map)):
+            cfi_spine_index = spine_step // 2
+            spine_index = cfi_spine_index
+            item = next((sp for sp in spine_map if sp.get('spine_index') == cfi_spine_index), None)
+            if not item:
                 logger.error(f"❌ Spine index {spine_index} out of range for CFI '{cfi}'")
                 return None
 
-            item = spine_map[spine_index]
 
             # Parse the HTML content with lxml for precise navigation
             tree = html.fromstring(item['content'])
@@ -1202,4 +1443,85 @@ class EbookParser:
             logger.error(f"❌ Error using epubcfi library for '{cfi}': {e}")
             return None
 
+    def resolve_cfi_to_index(self, filename, cfi) -> Optional[int]:
+        """
+        Resolve CFI to canonical global character offset using the same parsing
+        approach as get_text_around_cfi().
+        """
+        try:
+            spine_step, element_steps, char_offset = self._parse_cfi_components(cfi)
+            if not spine_step:
+                logger.error(f"Could not extract spine step from CFI: '{cfi}'")
+                return None
 
+            book_path = self.resolve_book_path(filename)
+            _, spine_map = self.extract_text_and_map(book_path)
+
+            cfi_spine_index = spine_step // 2
+            item = next((sp for sp in spine_map if sp.get('spine_index') == cfi_spine_index), None)
+            if not item:
+                logger.error(f"Spine index {cfi_spine_index} out of range for CFI '{cfi}'")
+                return None
+
+            tree = html.fromstring(item['content'])
+            current_element = tree
+            text_count = 0
+
+            for step in element_steps:
+                if not hasattr(step, 'index'):
+                    continue
+
+                step_index = step.index
+                step_assertion = step.assertion
+
+                if step_assertion:
+                    candidates = current_element.xpath(
+                        f".//*[contains(@id, '{step_assertion}') or contains(@class, '{step_assertion}')]"
+                    )
+                    if candidates:
+                        current_element = candidates[0]
+                        continue
+
+                if step_index % 2 == 0:
+                    element_index = (step_index // 2) - 1
+                    children = [child for child in current_element if hasattr(child, 'tag')]
+                    if 0 <= element_index < len(children):
+                        current_element = children[element_index]
+                    else:
+                        break
+                else:
+                    text_index = (step_index // 2)
+                    text_nodes = []
+                    for child in current_element:
+                        if child.text and child.text.strip():
+                            text_nodes.append(child.text.strip())
+                        if child.tail and child.tail.strip():
+                            text_nodes.append(child.tail.strip())
+
+                    if 0 <= text_index < len(text_nodes):
+                        text_count += sum(len(text) for text in text_nodes[:text_index])
+                    break
+
+            if current_element is not None:
+                soup = BeautifulSoup(item['content'], 'html.parser')
+                chapter_text = soup.get_text(separator=' ', strip=True)
+                element_text = current_element.text_content() if hasattr(current_element, 'text_content') else ""
+
+                if element_text and len(element_text.strip()) > 5:
+                    element_start = chapter_text.find(element_text.strip()[:50])
+                    if element_start != -1:
+                        local_offset = element_start + char_offset
+                    else:
+                        local_offset = text_count + char_offset
+                else:
+                    local_offset = text_count + char_offset
+            else:
+                local_offset = text_count + char_offset
+
+            chapter_text = BeautifulSoup(item['content'], 'html.parser').get_text(separator=' ', strip=True)
+            local_offset = min(max(0, local_offset), len(chapter_text))
+            return item['start'] + local_offset
+
+        except Exception as e:
+            logger.error(f"Error resolving CFI->index '{cfi}': {e}")
+            return None

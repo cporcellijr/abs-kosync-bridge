@@ -6,6 +6,8 @@ events, and triggers instant sync with debounce to avoid hammering downstream
 services during active playback.
 """
 
+import base64
+import json
 import logging
 import os
 import threading
@@ -59,6 +61,8 @@ class ABSSocketListener:
         # Track which abs_ids already had a sync fired for the current event
         self._fired: set[str] = set()
         self._lock = threading.Lock()
+        self._auth_failed_event = threading.Event()
+        self._auth_ok_event = threading.Event()
 
         self._sio = socketio.Client(
             reconnection=True,
@@ -82,6 +86,23 @@ class ABSSocketListener:
         else:
             preview = "***"
         return f"{kind} len={len(token)} [{preview}]"
+
+    @staticmethod
+    def _decode_jwt_payload(token: str) -> dict | None:
+        """Decode JWT payload without verification (for diagnostics only)."""
+        if not token or not token.startswith("eyJ"):
+            return None
+        try:
+            parts = token.split(".")
+            if len(parts) != 3:
+                return None
+            payload_b64 = parts[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            return json.loads(base64.urlsafe_b64decode(payload_b64))
+        except Exception:
+            return None
 
     def _acquire_socket_token(self) -> str | None:
         """
@@ -117,8 +138,39 @@ class ABSSocketListener:
                     )
                     if legacy_token and legacy_token != self._api_token:
                         logger.info("🔌 ABS Socket.IO: Acquired user token for socket auth")
+                        # Best-effort: try /api/authorize for a potentially fresher token
+                        try:
+                            auth_resp = requests.post(
+                                f"{self._server_url}/api/authorize",
+                                headers={"Authorization": f"Bearer {self._api_token}"},
+                                timeout=10,
+                            )
+                            if auth_resp.status_code == 200:
+                                authorized_token = auth_resp.json().get("user", {}).get("token")
+                                if authorized_token and authorized_token != legacy_token:
+                                    logger.debug(
+                                        f"ABS Socket.IO: /api/authorize returned fresher token "
+                                        f"{self._describe_token(authorized_token)}"
+                                    )
+                                    legacy_token = authorized_token
+                        except Exception as _e:
+                            logger.debug(f"ABS Socket.IO: /api/authorize probe failed (non-fatal) — {_e}")
+                        _payload = self._decode_jwt_payload(legacy_token)
+                        if _payload:
+                            logger.debug(
+                                f"ABS Socket.IO: Token payload — type={_payload.get('type', '?')} "
+                                f"userId={str(_payload.get('userId', '?'))[:8]} "
+                                f"iat={_payload.get('iat', '?')} exp={_payload.get('exp', '?')}"
+                            )
                         return legacy_token
                     logger.info("🔌 ABS Socket.IO: Using API token directly (same as user token)")
+                    _payload = self._decode_jwt_payload(self._api_token)
+                    if _payload:
+                        logger.debug(
+                            f"ABS Socket.IO: Token payload — type={_payload.get('type', '?')} "
+                            f"userId={str(_payload.get('userId', '?'))[:8]} "
+                            f"iat={_payload.get('iat', '?')} exp={_payload.get('exp', '?')}"
+                        )
                     return self._api_token
                 else:
                     logger.warning(f"⚠️ ABS Socket.IO: /api/me returned {resp.status_code}")
@@ -129,6 +181,20 @@ class ABSSocketListener:
 
         logger.error("❌ ABS Socket.IO: Could not acquire socket token after retries — listener will not start")
         return None
+
+    def _build_token_strategies(self) -> list[str]:
+        """Return ordered list of tokens to try for socket auth (deduped).
+
+        Strategy 0: user token from /api/me (preferred — type "user" accepted by all ABS versions)
+        Strategy 1: API key directly (fallback if user token is rejected)
+        """
+        primary = self._acquire_socket_token()
+        if not primary:
+            return []
+        strategies: list[str] = [primary]
+        if self._api_token and self._api_token != primary:
+            strategies.append(self._api_token)
+        return strategies
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -157,16 +223,15 @@ class ABSSocketListener:
                 if isinstance(user, dict):
                     username = user.get("username", "unknown")
             logger.info(f"🔌 ABS Socket.IO: Authenticated as '{username}'")
+            self._auth_ok_event.set()
 
         @sio.on("auth_failed")
         def on_auth_failed(*args):
-            logger.error(
-                f"❌ ABS Socket.IO: Authentication failed — token "
-                f"{self._describe_token(self._socket_token)} was rejected. "
-                f"Real-time sync disabled (falling back to standard polling). "
-                f"To fix: log out and back into your ABS web interface to refresh "
-                f"your user token, then restart BookBridge."
+            logger.warning(
+                f"⚠️ ABS Socket.IO: Auth failed — token "
+                f"{self._describe_token(self._socket_token)} was rejected."
             )
+            self._auth_failed_event.set()
             sio.disconnect()
 
         @sio.on("connect_error")
@@ -263,21 +328,60 @@ class ABSSocketListener:
         """Connect and block. Call from a daemon thread."""
         logger.info(f"🔌 ABS Socket.IO: Connecting to {self._server_url}")
 
-        # Acquire a socket-compatible token before connecting
-        self._socket_token = self._acquire_socket_token()
-        if not self._socket_token:
+        strategies = self._build_token_strategies()
+        if not strategies:
             logger.error("❌ ABS Socket.IO: No valid token — listener will not start")
             return
 
-        try:
-            self._sio.start_background_task(self._debounce_loop)
-            self._sio.connect(
-                self._server_url,
-                transports=["websocket"],
+        # Start debounce loop once — it doesn't reference self._sio directly
+        self._sio.start_background_task(self._debounce_loop)
+
+        for strategy_idx, token in enumerate(strategies):
+            self._socket_token = token
+            self._auth_failed_event.clear()
+            self._auth_ok_event.clear()
+
+            logger.info(
+                f"🔌 ABS Socket.IO: Attempting connection "
+                f"(strategy {strategy_idx + 1}/{len(strategies)}, "
+                f"token {self._describe_token(token)})"
             )
-            self._sio.wait()
-        except Exception as e:
-            logger.error(f"❌ ABS Socket.IO: Failed to connect — {e}")
+            try:
+                self._sio.connect(
+                    self._server_url,
+                    transports=["websocket"],
+                    auth={"token": token},   # Strategy A: handshake-level auth
+                )
+                self._sio.wait()             # blocks until disconnected
+            except Exception as e:
+                logger.error(f"❌ ABS Socket.IO: Connection error — {e}")
+                break
+
+            if self._auth_ok_event.is_set():
+                logger.info("ABS Socket.IO: Session ended after successful auth")
+                break
+            elif self._auth_failed_event.is_set():
+                remaining = len(strategies) - strategy_idx - 1
+                if remaining > 0:
+                    logger.warning(
+                        f"⚠️ ABS Socket.IO: Strategy {strategy_idx + 1} failed — "
+                        f"trying {remaining} more strategy(s)"
+                    )
+                    # Fresh client avoids reconnection=True state races on retry
+                    self._sio = socketio.Client(
+                        reconnection=True,
+                        logger=False,
+                        engineio_logger=False,
+                    )
+                    self._register_handlers()
+                    continue
+                else:
+                    logger.error(
+                        "❌ ABS Socket.IO: All auth strategies exhausted — "
+                        "real-time sync disabled (falling back to standard polling). "
+                        "To fix: check your ABS_KEY or restart ABS."
+                    )
+            break
 
     def stop(self) -> None:
         """Disconnect cleanly."""

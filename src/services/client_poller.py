@@ -31,6 +31,10 @@ class ClientPoller:
         self._last_known: dict[tuple, float] = {}  # {(client_name, abs_id): last_pct}
         self._last_poll: dict[str, float] = {}     # {client_name: last_poll_timestamp}
         self._running = False
+        # Allow real user jumps through even inside self-write suppression windows.
+        self._echo_tolerance = float(
+            os.environ.get("CLIENT_POLLER_SELF_WRITE_ECHO_PERCENT", "1.0")
+        ) / 100.0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -89,7 +93,7 @@ class ClientPoller:
 
     def _poll_client(self, client_name: str) -> None:
         """Fetch current position for each active book and trigger sync on change."""
-        from src.services.write_tracker import is_own_write
+        from src.services.write_tracker import get_recent_write, is_own_write
 
         sync_client = self._sync_clients.get(client_name)
         if not sync_client or not sync_client.is_configured():
@@ -123,9 +127,26 @@ class ClientPoller:
                 elif abs(current_pct - last_pct) > 0.001:
                     # Check write-suppression before acting
                     if is_own_write(client_name, book.abs_id):
-                        logger.debug(
-                            f"📡 {client_name} poll: Ignoring self-triggered change for '{book.abs_title}'"
-                        )
+                        recent = get_recent_write(client_name, book.abs_id)
+                        recent_pct = recent.get("pct") if recent else None
+                        if (
+                            recent_pct is not None
+                            and abs(current_pct - recent_pct) > self._echo_tolerance
+                        ):
+                            logger.info(
+                                f"📡 {client_name} poll: '{book.abs_title}' moved "
+                                f"{last_pct:.1%} → {current_pct:.1%} during suppression window; "
+                                f"treating as external jump and triggering sync"
+                            )
+                            threading.Thread(
+                                target=self._sync_manager.sync_cycle,
+                                kwargs={'target_abs_id': book.abs_id},
+                                daemon=True,
+                            ).start()
+                        else:
+                            logger.debug(
+                                f"📡 {client_name} poll: Ignoring self-triggered change for '{book.abs_title}'"
+                            )
                     else:
                         logger.info(
                             f"📡 {client_name} poll: '{book.abs_title}' moved "

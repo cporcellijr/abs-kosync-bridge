@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.api.booklore_client import BookloreClient
 from src.db.models import BookloreBook
+from src.sync_clients.sync_client_interface import LocatorResult
 
 @pytest.fixture
 def mock_db():
@@ -138,3 +139,27 @@ def test_save_to_db_on_fetch(mock_db):
              mock_db.save_booklore_book.assert_called()
              saved_book = mock_db.save_booklore_book.call_args[0][0]
              assert saved_book.filename == "newbook.epub"
+
+
+def test_update_progress_zero_clears_cfi(booklore_client):
+    booklore_client.find_book_by_filename = MagicMock(return_value={
+        "id": 6043,
+        "bookType": "EPUB",
+        "fileName": "test-book.epub",
+        "epubProgress": {"percentage": 66.3, "cfi": "epubcfi(/6/50!/:0)"},
+    })
+    booklore_client._book_id_cache = {
+        6043: {"epubProgress": {"percentage": 66.3, "cfi": "epubcfi(/6/50!/:0)"}}
+    }
+
+    resp = MagicMock()
+    resp.status_code = 200
+    booklore_client._make_request = MagicMock(return_value=resp)
+
+    ok = booklore_client.update_progress("test-book.epub", 0.0, LocatorResult(percentage=0.0))
+
+    assert ok is True
+    _, _, payload = booklore_client._make_request.call_args[0]
+    assert payload["epubProgress"]["percentage"] == 0.0
+    assert payload["epubProgress"]["cfi"] == ""
+    assert booklore_client._book_id_cache[6043]["epubProgress"]["cfi"] == ""

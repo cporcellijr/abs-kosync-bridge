@@ -287,6 +287,18 @@ class SyncManager:
         abs_state = config['ABS']
         abs_ts = abs_state.current.get('ts', 0)
         normalized['ABS'] = abs_ts
+
+        # Parse once and reuse canonical text length for all ebook clients.
+        try:
+            book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+            full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+            total_text_len = len(full_text)
+            if total_text_len <= 0:
+                logger.debug(f"'{book.abs_id}' Empty ebook text during cross-format normalization")
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️ '{book.abs_id}' Failed to load ebook text for normalization: {e}")
+            return None
         
         # For each ebook client, get their text and find equivalent timestamp
         for client_name in ebook_clients:
@@ -296,14 +308,32 @@ class SyncManager:
                 
             client_state = config[client_name]
             client_pct = client_state.current.get('pct', 0)
+            client_xpath = client_state.current.get('xpath')
+            client_cfi = client_state.current.get('cfi')
+            normalization_source = "percent_fallback"
             
             try:
-                # [NEW] Get character offset from the ebook position for precise alignment
-                book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
-                full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
-                total_text_len = len(full_text)
-                
-                char_offset = int(client_pct * total_text_len)
+                # Prefer locator-derived canonical offsets; only then fall back to percentage.
+                char_offset = None
+                if client_xpath:
+                    char_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, client_xpath)
+                    if char_offset is not None:
+                        normalization_source = "xpath"
+
+                if char_offset is None and client_cfi:
+                    char_offset = self.ebook_parser.resolve_cfi_to_index(book.ebook_filename, client_cfi)
+                    if char_offset is not None:
+                        normalization_source = "cfi"
+
+                if char_offset is None:
+                    char_offset = int(client_pct * total_text_len)
+                    normalization_source = "percent_fallback"
+
+                char_offset = max(0, min(char_offset, total_text_len - 1))
+                if normalization_source in ("xpath", "cfi"):
+                    client_state.current["_locator_pct"] = char_offset / float(total_text_len)
+                else:
+                    client_state.current.pop("_locator_pct", None)
                 txt = full_text[max(0, char_offset - 400):min(total_text_len, char_offset + 400)]
                 
                 if not txt:
@@ -322,7 +352,10 @@ class SyncManager:
                 
                 if ts_for_text is not None:
                     normalized[client_name] = ts_for_text
-                    logger.debug(f"'{book.abs_id}' Normalized '{client_name}' {client_pct:.2%} -> {ts_for_text:.1f}s")
+                    logger.debug(
+                        f"'{book.abs_id}' Normalized '{client_name}' {client_pct:.2%} -> {ts_for_text:.1f}s "
+                        f"(source={normalization_source}, char_offset={char_offset})"
+                    )
                 else:
                     logger.debug(f"'{book.abs_id}' Could not find timestamp for '{client_name}' text")
             except Exception as e:
@@ -991,7 +1024,9 @@ class SyncManager:
         - Missing real progress on all books (30s+ changes do count)
         """
         delta_pct = config[client_name].delta
-        
+        return self._is_significant_pct_delta(delta_pct, book)
+
+    def _is_significant_pct_delta(self, delta_pct, book):
         # Quick check: percentage threshold
         MIN_PCT_THRESHOLD = 0.0005  # 0.05%
         if delta_pct > MIN_PCT_THRESHOLD:
@@ -1033,7 +1068,28 @@ class SyncManager:
         # Check which clients have changed (delta > minimum threshold)
         # "Most recent change wins" - if only one client changed, it becomes the leader
         # Use hybrid time/percentage logic to filter out phantom API noise
+        normalized_positions = self._normalize_for_cross_format_comparison(book, config)
         clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
+
+        # If a locator-derived percentage contradicts raw pct and shows no real movement
+        # from previous state, treat the raw pct delta as stale API noise.
+        for client_name in list(clients_with_delta.keys()):
+            state = config[client_name]
+            locator_pct = state.current.get("_locator_pct")
+            raw_pct = vals.get(client_name)
+            if locator_pct is None or raw_pct is None:
+                continue
+            if abs(locator_pct - raw_pct) <= 0.01:
+                continue
+
+            effective_delta = abs(locator_pct - state.previous_pct)
+            if not self._is_significant_pct_delta(effective_delta, book):
+                logger.debug(
+                    f"'{abs_id}' '{title_snip}' Ignoring stale pct delta for '{client_name}' "
+                    f"(raw={raw_pct:.4%}, locator={locator_pct:.4%}, prev={state.previous_pct:.4%})"
+                )
+                vals[client_name] = locator_pct
+                clients_with_delta.pop(client_name, None)
 
         leader = None
         leader_pct = None
@@ -1049,8 +1105,6 @@ class SyncManager:
             candidates = clients_with_delta if clients_with_delta else vals
             
             # For cross-format sync (audiobook vs ebook), use normalized timestamps
-            normalized_positions = self._normalize_for_cross_format_comparison(book, config)
-            
             if normalized_positions and len(normalized_positions) > 1:
                 # Filter normalized positions to only include candidates
                 normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
@@ -1058,6 +1112,14 @@ class SyncManager:
                     leader = max(normalized_candidates, key=normalized_candidates.get)
                     leader_ts = normalized_candidates[leader]
                     leader_pct = vals[leader]
+                    locator_pct = config[leader].current.get("_locator_pct")
+                    if locator_pct is not None and abs(locator_pct - leader_pct) > 0.01:
+                        logger.debug(
+                            f"'{abs_id}' '{title_snip}' Adjusting {leader} pct from {leader_pct:.4%} "
+                            f"to locator-derived {locator_pct:.4%} for sync consistency"
+                        )
+                        leader_pct = locator_pct
+                        config[leader].current['pct'] = leader_pct
                     logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
                 else:
                     # Fallback to percentage-based comparison among candidates
