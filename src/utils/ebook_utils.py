@@ -558,6 +558,49 @@ class EbookParser:
             logger.error(f"❌ Error finding text in '{filename}': {e}")
             return None
 
+    def get_locator_from_char_offset(self, filename, char_offset: int) -> Optional[LocatorResult]:
+        """
+        Resolve a rich locator directly from a global character offset.
+        This bypasses fuzzy text search entirely.
+        """
+        try:
+            book_path = self.resolve_book_path(filename)
+            full_text, spine_map = self.extract_text_and_map(book_path)
+            if not full_text or not spine_map:
+                return None
+
+            total_len = len(full_text)
+            if total_len <= 0:
+                return None
+
+            target_index = max(0, min(int(char_offset), total_len - 1))
+            percentage = target_index / total_len
+
+            target_item = next((item for item in spine_map if item['start'] <= target_index < item['end']), None)
+            if not target_item:
+                target_item = spine_map[-1]
+
+            local_index = max(0, target_index - target_item['start'])
+            perfect_ko = self.get_perfect_ko_xpath(filename, target_index)
+            cfi = self._generate_cfi(target_item['spine_index'] - 1, target_item['content'], local_index)
+            spine_item_len = max(1, target_item['end'] - target_item['start'])
+            chapter_progress = local_index / spine_item_len
+
+            return LocatorResult(
+                percentage=percentage,
+                xpath=perfect_ko,
+                perfect_ko_xpath=perfect_ko,
+                match_index=target_index,
+                cfi=cfi,
+                href=target_item.get('href'),
+                fragment=None,
+                css_selector=None,
+                chapter_progress=chapter_progress,
+            )
+        except Exception as e:
+            logger.error(f"âŒ Error resolving locator from char offset in '{filename}': {e}")
+            return None
+
     def _normalize(self, text):
         return re.sub(r'[^a-z0-9]', '', text.lower())
 

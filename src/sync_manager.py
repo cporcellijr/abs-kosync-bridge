@@ -409,6 +409,60 @@ class SyncManager:
 
         return None
 
+    def _get_storyteller_manifest_path(self, book: Book) -> Path | None:
+        if not book:
+            return None
+        candidates = []
+        transcript_file = getattr(book, "transcript_file", None)
+        if transcript_file and transcript_file != "DB_MANAGED":
+            candidates.append(Path(transcript_file))
+        if self.data_dir:
+            candidates.append(Path(self.data_dir) / "transcripts" / "storyteller" / book.abs_id / "manifest.json")
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_storyteller_locator_from_abs_timestamp(self, book: Book, abs_timestamp: float):
+        """
+        Storyteller-only direct mapping:
+        ABS timestamp -> storyteller chapter/UTF-16 offset -> EPUB locator.
+        """
+        if (
+            not book
+            or getattr(book, "transcript_source", None) != "storyteller"
+            or abs_timestamp is None
+            or not getattr(book, "ebook_filename", None)
+        ):
+            return None, None
+
+        manifest_path = self._get_storyteller_manifest_path(book)
+        if not manifest_path:
+            return None, None
+
+        try:
+            storyteller_transcript = StorytellerTranscript(manifest_path)
+            story_pos = storyteller_transcript.timestamp_to_story_position(float(abs_timestamp))
+            if not story_pos:
+                return None, None
+
+            global_offset_py = int(story_pos["global_offset_py"])
+            locator = self.ebook_parser.get_locator_from_char_offset(book.ebook_filename, global_offset_py)
+            if not locator:
+                return None, None
+
+            context_txt = storyteller_transcript.get_text_at_character_offset(
+                int(story_pos["offset_utf16"]), int(story_pos["chapter"])
+            ) or ""
+            logger.debug(
+                f"'{book.abs_id}' Storyteller direct locator resolved via chapter={story_pos['chapter']} "
+                f"offset_utf16={story_pos['offset_utf16']}"
+            )
+            return locator, context_txt
+        except Exception as e:
+            logger.warning(f"⚠️ '{book.abs_id}' Storyteller direct locator resolution failed: {e}")
+            return None, None
+
     # Suggestion Logic
     def check_for_suggestions(self, abs_progress_map, active_books):
         """Check for unmapped books with progress and create suggestions."""
@@ -775,13 +829,7 @@ class SyncManager:
             book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
 
             if getattr(book, 'transcript_source', None) == 'storyteller' and self.alignment_service:
-                manifest_candidates = []
-                if getattr(book, 'transcript_file', None) and book.transcript_file != 'DB_MANAGED':
-                    manifest_candidates.append(Path(book.transcript_file))
-                if self.data_dir:
-                    manifest_candidates.append(Path(self.data_dir) / "transcripts" / "storyteller" / abs_id / "manifest.json")
-
-                storyteller_manifest = next((p for p in manifest_candidates if p.exists()), None)
+                storyteller_manifest = self._get_storyteller_manifest_path(book)
                 if storyteller_manifest:
                     try:
                         storyteller_transcript = StorytellerTranscript(storyteller_manifest)
@@ -1295,28 +1343,41 @@ class SyncManager:
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]
 
-                # Get canonical text from leader
-                txt = leader_client.get_text_from_current_state(book, leader_state)
-                if not txt:
-                    logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
-                    continue
-
-                # Get locator (percentage, xpath, etc) from text
                 epub = book.ebook_filename
-                locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+                txt = None
+                locator = None
+
+                if leader == 'ABS' and getattr(book, 'transcript_source', None) == 'storyteller':
+                    locator, txt = self._resolve_storyteller_locator_from_abs_timestamp(
+                        book, leader_state.current.get('ts')
+                    )
+                    if locator:
+                        logger.debug(f"'{abs_id}' '{title_snip}' Using storyteller direct timestamp->locator path")
+
                 if not locator:
-                    # Try fallback if enabled (e.g. look at previous segment)
-                    if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
-                        fallback_txt = leader_client.get_fallback_text(book, leader_state)
-                        if fallback_txt and fallback_txt != txt:
-                            logger.info(f"🔄 '{abs_id}' '{title_snip}' Primary text match failed. Trying previous segment fallback...")
-                            locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
-                            if locator:
-                                logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
+                    # Get canonical text from leader
+                    txt = leader_client.get_text_from_current_state(book, leader_state)
+                    if not txt:
+                        logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
+                        continue
+
+                    # Get locator (percentage, xpath, etc) from text
+                    locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+                    if not locator:
+                        # Try fallback if enabled (e.g. look at previous segment)
+                        if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
+                            fallback_txt = leader_client.get_fallback_text(book, leader_state)
+                            if fallback_txt and fallback_txt != txt:
+                                logger.info(f"🔄 '{abs_id}' '{title_snip}' Primary text match failed. Trying previous segment fallback...")
+                                locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
+                                if locator:
+                                    logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
 
                 if not locator:
                     logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not resolve locator from text for leader '{leader}', falling back to percentage of leader")
                     locator = LocatorResult(percentage=leader_pct)
+                if txt is None:
+                    txt = ""
 
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}

@@ -66,6 +66,8 @@ services:
       # REQUIRED
       - ./data:/data
       - /path/to/your/ebooks:/books
+      # OPTIONAL - Storyteller forced-alignment transcript ingestion
+      # - /path/to/storyteller/assets:/storyteller/assets
     
     ports:
       - "8080:5757"
@@ -106,6 +108,12 @@ Press `Ctrl+C` to exit logs.
 Open your browser to: **http://localhost:8080**
 
 You should see the ABS-KoSync dashboard!
+
+If you mounted Storyteller assets:
+
+1. Go to **Settings**.
+2. Set **Storyteller Assets Path** to `/storyteller` (not `/storyteller/assets`).
+3. Save settings.
 
 ---
 
@@ -153,6 +161,7 @@ Look for error messages about API keys or server connections.
 
 Once basic sync is working, you can add:
 - **Storyteller integration** (three-way sync)
+- **Storyteller transcript backfill** (Settings -> Storyteller Backfill)
 - **Book Linker** (automated Storyteller workflows)
 - **Booklore integration** (shelf organization)
 

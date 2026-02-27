@@ -27,6 +27,7 @@ from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 from src.version import APP_VERSION, get_update_status
 from src.db.models import State
 from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
+from src.utils.storyteller_transcript import StorytellerTranscript
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -313,7 +314,9 @@ def _validate_storyteller_chapters(
     for prefix in ("00000", "00001"):
         source_files = [_storyteller_filename_for_abs_chapter(i, prefix) for i in range(expected_count)]
         if all((transcriptions_dir / name).exists() for name in source_files):
-            return True, source_files, expected_files
+            if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+                return True, source_files, expected_files
+            return False, [], []
 
     # Fallback: allow per-chapter mixed prefix, as long as exactly one file exists per chapter.
     source_files = []
@@ -329,7 +332,20 @@ def _validate_storyteller_chapters(
         else:
             return False, [], []
 
-    return True, source_files, expected_files
+    if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+        return True, source_files, expected_files
+    return False, [], []
+
+
+def _is_storyteller_wordtimeline_chapter(chapter_path: Path) -> bool:
+    try:
+        with open(chapter_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        return isinstance(data.get("wordTimeline"), list)
+    except Exception:
+        return False
 
 
 def _ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list[dict]) -> str | None:
@@ -392,11 +408,27 @@ def _ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list[
     for idx, chapter in enumerate(chapter_list):
         start = float(chapter.get("start", 0.0) or 0.0)
         end = float(chapter.get("end", 0.0) or 0.0)
+        chapter_file_name = _storyteller_filename_for_abs_chapter(idx)
+        text_len = 0
+        text_len_utf16 = 0
+        chapter_file_path = target_dir / chapter_file_name
+        if chapter_file_path.exists():
+            try:
+                with open(chapter_file_path, "r", encoding="utf-8") as chapter_file:
+                    chapter_data = json.load(chapter_file)
+                chapter_text = chapter_data.get("transcript", "") if isinstance(chapter_data, dict) else ""
+                text_len = len(chapter_text)
+                text_len_utf16 = len(chapter_text.encode("utf-16-le")) // 2
+            except Exception:
+                text_len = 0
+                text_len_utf16 = 0
         chapter_entries.append({
             "index": idx,
-            "file": _storyteller_filename_for_abs_chapter(idx),
+            "file": chapter_file_name,
             "start": start,
-            "end": end
+            "end": end,
+            "text_len": text_len,
+            "text_len_utf16": text_len_utf16,
         })
 
     duration = 0.0
@@ -2304,6 +2336,92 @@ def clear_stale_suggestions():
     return jsonify({"success": True, "count": count})
 
 
+def _run_storyteller_backfill():
+    """
+    Bulk backfill storyteller transcripts for currently matched storyteller books.
+    """
+    assets_dir_raw = os.environ.get("STORYTELLER_ASSETS_DIR", "").strip()
+    if not assets_dir_raw:
+        return {
+            "success": False,
+            "error": "STORYTELLER_ASSETS_DIR is not configured",
+            "scanned": 0,
+            "ingested": 0,
+            "missing": 0,
+            "failed": 0,
+            "aligned": 0,
+            "duration_seconds": 0.0,
+        }, 400
+
+    started_at = time.time()
+    books = database_service.get_all_books() if database_service else []
+    storyteller_books = [
+        b for b in books
+        if getattr(b, "storyteller_uuid", None) or getattr(b, "transcript_source", None) == "storyteller"
+    ]
+
+    summary = {
+        "success": True,
+        "scanned": 0,
+        "ingested": 0,
+        "missing": 0,
+        "failed": 0,
+        "aligned": 0,
+        "duration_seconds": 0.0,
+    }
+
+    abs_client = container.abs_client() if container else None
+    alignment_service = getattr(manager, "alignment_service", None) if manager else None
+
+    for book in storyteller_books:
+        summary["scanned"] += 1
+        abs_id = book.abs_id
+        try:
+            item_details = abs_client.get_item_details(abs_id) if abs_client else None
+            chapters = item_details.get("media", {}).get("chapters", []) if item_details else []
+            manifest_path = _ingest_storyteller_transcripts(abs_id, book.abs_title or "", chapters)
+            if not manifest_path:
+                summary["missing"] += 1
+                continue
+
+            book.transcript_source = "storyteller"
+            book.transcript_file = manifest_path
+            summary["ingested"] += 1
+
+            aligned = False
+            if alignment_service:
+                storyteller_transcript = StorytellerTranscript(manifest_path)
+                aligned = alignment_service.align_storyteller_and_store(abs_id, storyteller_transcript)
+                if aligned:
+                    summary["aligned"] += 1
+
+            if aligned:
+                book.transcript_file = "DB_MANAGED"
+                if getattr(book, "status", None) in (None, "", "pending", "processing", "failed_retry_later", "failed_permanent", "crashed"):
+                    book.status = "active"
+            else:
+                book.status = "pending"
+
+            database_service.save_book(book)
+        except Exception as e:
+            summary["failed"] += 1
+            logger.warning(f"Storyteller backfill failed for '{abs_id}': {e}")
+
+    summary["duration_seconds"] = round(time.time() - started_at, 3)
+    logger.info(
+        "Storyteller backfill summary: "
+        f"scanned={summary['scanned']} ingested={summary['ingested']} "
+        f"aligned={summary['aligned']} missing={summary['missing']} failed={summary['failed']} "
+        f"duration={summary['duration_seconds']}s"
+    )
+    return summary, 200
+
+
+def api_storyteller_backfill():
+    summary, status_code = _run_storyteller_backfill()
+    return jsonify(summary), status_code
+
+
 def proxy_cover(abs_id):
     """Proxy cover access to allow loading covers from local network ABS instances."""
     try:
@@ -2395,6 +2513,7 @@ def create_app(test_container=None):
     # Storyteller API routes
     app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])
     app.add_url_rule('/api/storyteller/link/<abs_id>', 'api_storyteller_link', api_storyteller_link, methods=['POST'])
+    app.add_url_rule('/api/storyteller/backfill', 'api_storyteller_backfill', api_storyteller_backfill, methods=['POST'])
 
     # Forge routes
     app.add_url_rule('/api/forge/search_audio', 'forge_search_audio', forge_search_audio, methods=['GET'])

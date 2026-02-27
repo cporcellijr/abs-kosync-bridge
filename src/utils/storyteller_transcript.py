@@ -71,15 +71,15 @@ class StorytellerTranscript:
         idx = self._search_floor(chapter["start_times"], local_ts)
         if idx is None:
             return None
-        offset = chapter["start_offsets"][idx]
-        return self._context_from_offset(chapter["transcript"], offset)
+        py_offset = chapter["start_offsets_py"][idx]
+        return self._context_from_offset(chapter["transcript"], py_offset)
 
     def get_text_at_character_offset(self, offset: int, chapter_index: int) -> Optional[str]:
         chapter = self._load_chapter(chapter_index)
-        idx = self._search_floor(chapter["start_offsets"], int(offset))
+        idx = self._search_floor(chapter["start_offsets_utf16"], int(offset))
         if idx is None:
             return None
-        return self._context_from_offset(chapter["transcript"], chapter["start_offsets"][idx])
+        return self._context_from_offset(transcript_text=chapter["transcript"], offset=chapter["start_offsets_py"][idx])
 
     def timestamp_to_char_offset(self, timestamp: float, chapter_index: Optional[int] = None) -> Optional[int]:
         if chapter_index is None:
@@ -91,14 +91,55 @@ class StorytellerTranscript:
         idx = self._search_floor(chapter["start_times"], local_ts)
         if idx is None:
             return None
-        return int(chapter["start_offsets"][idx])
+        return int(chapter["start_offsets_utf16"][idx])
 
     def char_offset_to_timestamp(self, offset: int, chapter_index: int) -> Optional[float]:
         chapter = self._load_chapter(chapter_index)
-        idx = self._search_floor(chapter["start_offsets"], int(offset))
+        idx = self._search_floor(chapter["start_offsets_utf16"], int(offset))
         if idx is None:
             return None
         return float(chapter["start_times"][idx])
+
+    def timestamp_to_chapter_offset_utf16(self, timestamp: float) -> Optional[Tuple[int, int]]:
+        if not self._chapters:
+            return None
+        chapter_index, local_ts = self._resolve_chapter_for_global_timestamp(float(timestamp))
+        local_utf16 = self.timestamp_to_char_offset(local_ts, chapter_index=chapter_index)
+        if local_utf16 is None:
+            return None
+        return chapter_index, int(local_utf16)
+
+    def chapter_utf16_to_python_offset(self, chapter_index: int, offset_utf16: int) -> int:
+        chapter = self._load_chapter(chapter_index)
+        return self._utf16_offset_to_py_index(chapter["transcript"], int(offset_utf16))
+
+    def chapter_utf16_to_global_python_offset(self, chapter_index: int, offset_utf16: int) -> int:
+        return self._global_python_base_for_chapter(chapter_index) + self.chapter_utf16_to_python_offset(
+            chapter_index, offset_utf16
+        )
+
+    def timestamp_to_story_position(self, timestamp: float) -> Optional[Dict]:
+        """
+        Convert a global audiobook timestamp to storyteller chapter-aware position data.
+        """
+        pos = self.timestamp_to_chapter_offset_utf16(timestamp)
+        if not pos:
+            return None
+        chapter_index, offset_utf16 = pos
+        local_ts = self.char_offset_to_timestamp(offset_utf16, chapter_index=chapter_index)
+        offset_py = self.chapter_utf16_to_python_offset(chapter_index, offset_utf16)
+        global_py = self.chapter_utf16_to_global_python_offset(chapter_index, offset_utf16)
+        chapter_start = float(self._chapters[chapter_index].get("start", 0.0) or 0.0)
+        if local_ts is None:
+            local_ts = max(0.0, float(timestamp) - chapter_start)
+        return {
+            "chapter": chapter_index,
+            "offset_utf16": int(offset_utf16),
+            "offset_py": int(offset_py),
+            "global_offset_py": int(global_py),
+            "local_ts": float(local_ts),
+            "ts": float(chapter_start + float(local_ts)),
+        }
 
     def iter_alignment_points(self) -> Iterable[Dict]:
         """
@@ -111,21 +152,26 @@ class StorytellerTranscript:
         - ts: global ABS timestamp
         - global_char: cumulative transcript offset across chapters (adapter for existing lookups)
         """
-        global_char_base = 0
+        global_char_base_py = 0
+        global_char_base_utf16 = 0
         for chapter_index, meta in enumerate(self._chapters):
             chapter = self._load_chapter(chapter_index)
             chapter_start = float(meta.get("start", 0.0) or 0.0)
-            for word in chapter["word_timeline"]:
+            for i, word in enumerate(chapter["word_timeline"]):
                 local_ts = float(word.get("startTime", 0.0) or 0.0)
                 local_char = int(word.get("startOffsetUtf16", 0) or 0)
+                local_char_py = int(chapter["start_offsets_py"][i]) if i < len(chapter["start_offsets_py"]) else 0
                 yield {
                     "chapter": chapter_index,
                     "char": local_char,
+                    "char_py": local_char_py,
                     "local_ts": local_ts,
                     "ts": chapter_start + local_ts,
-                    "global_char": global_char_base + local_char,
+                    "global_char": global_char_base_py + local_char_py,
+                    "global_char_utf16": global_char_base_utf16 + local_char,
                 }
-            global_char_base += len(chapter["transcript"]) + 1
+            global_char_base_py += len(chapter["transcript"]) + 1
+            global_char_base_utf16 += self._utf16_length(chapter["transcript"]) + 1
 
     def _resolve_chapter_for_global_timestamp(self, timestamp: float) -> Tuple[int, float]:
         if not self._chapters:
@@ -167,13 +213,15 @@ class StorytellerTranscript:
         timeline = list(raw.get("wordTimeline") or [])
         timeline.sort(key=lambda x: float(x.get("startTime", 0.0) or 0.0))
         start_times = [float(w.get("startTime", 0.0) or 0.0) for w in timeline]
-        start_offsets = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]
+        start_offsets_utf16 = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]
+        start_offsets_py = self._utf16_offsets_to_py_indices(transcript, start_offsets_utf16)
 
         chapter_data = {
             "transcript": transcript,
             "word_timeline": timeline,
             "start_times": start_times,
-            "start_offsets": start_offsets,
+            "start_offsets_utf16": start_offsets_utf16,
+            "start_offsets_py": start_offsets_py,
         }
 
         self._chapter_cache[chapter_index] = chapter_data
@@ -203,3 +251,55 @@ class StorytellerTranscript:
         if end - start < target_len and start > 0:
             start = max(0, end - target_len)
         return " ".join(transcript_text[start:end].split())
+
+    def _global_python_base_for_chapter(self, chapter_index: int) -> int:
+        base = 0
+        for idx in range(int(chapter_index)):
+            chapter_meta = self._chapters[idx]
+            text_len = chapter_meta.get("text_len")
+            if text_len is None:
+                chapter = self._load_chapter(idx)
+                text_len = len(chapter["transcript"])
+            base += int(text_len) + 1
+        return base
+
+    @staticmethod
+    def _utf16_length(text: str) -> int:
+        if not text:
+            return 0
+        return len(text.encode("utf-16-le")) // 2
+
+    @classmethod
+    def _utf16_offset_to_py_index(cls, text: str, offset_utf16: int) -> int:
+        if not text:
+            return 0
+        target = max(0, min(int(offset_utf16), cls._utf16_length(text)))
+        units = 0
+        for idx, ch in enumerate(text):
+            units += 2 if ord(ch) > 0xFFFF else 1
+            if units >= target:
+                if units > target:
+                    return idx
+                return idx + 1
+        return len(text)
+
+    @classmethod
+    def _utf16_offsets_to_py_indices(cls, text: str, offsets_utf16: List[int]) -> List[int]:
+        if not offsets_utf16:
+            return []
+        result = [0] * len(offsets_utf16)
+        ordered = sorted(enumerate(offsets_utf16), key=lambda x: int(x[1]))
+        units = 0
+        py_idx = 0
+        text_len = len(text)
+        for original_idx, raw_target in ordered:
+            target = max(0, int(raw_target))
+            while py_idx < text_len and units < target:
+                ch = text[py_idx]
+                units += 2 if ord(ch) > 0xFFFF else 1
+                py_idx += 1
+            if units > target and py_idx > 0:
+                result[original_idx] = py_idx - 1
+            else:
+                result[original_idx] = py_idx
+        return result

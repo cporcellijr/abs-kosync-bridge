@@ -1044,6 +1044,19 @@
                         </div>
                     </div>
 
+                    <div class="form-group full-width">
+                        <label>Storyteller Backfill</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-primary" onclick="backfillStorytellerTranscripts()">
+                                ðŸ“¥ Backfill Storyteller Transcripts
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Re-scan all Storyteller-linked books, ingest available transcript files, and regenerate
+                                storyteller-native alignment maps without SMIL or Whisper reprocessing.
+                            </p>
+                        </div>
+                    </div>
+
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 
                     <!-- Transcription Settings -->
@@ -1296,6 +1309,40 @@
             } catch (err) {
                 console.error('Error clearing suggestions:', err);
                 alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
+        }
+
+        async function backfillStorytellerTranscripts() {
+            if (!confirm("Run Storyteller backfill now?\n\nThis will scan all Storyteller-linked books, ingest available transcript files, and regenerate storyteller alignment maps.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/storyteller/backfill', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (!response.ok || data.success === false) {
+                    alert(`âŒ Storyteller backfill failed: ${data.error || 'Unknown error'}`);
+                    return;
+                }
+
+                alert(
+                    `âœ… Storyteller backfill complete.\n` +
+                    `Scanned: ${data.scanned}\n` +
+                    `Ingested: ${data.ingested}\n` +
+                    `Aligned: ${data.aligned}\n` +
+                    `Missing: ${data.missing}\n` +
+                    `Failed: ${data.failed}\n` +
+                    `Duration: ${data.duration_seconds}s`
+                );
+            } catch (err) {
+                console.error('Error running storyteller backfill:', err);
+                alert('âŒ An error occurred while running storyteller backfill. Check console for details.');
             }
         }
 

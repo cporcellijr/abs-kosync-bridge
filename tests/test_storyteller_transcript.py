@@ -75,12 +75,28 @@ def test_storyteller_validation_accepts_00001_prefix(tmp_path):
 
     for idx in range(2):
         filename = f"00001-{idx + 1:05d}.json"
-        (transcriptions_dir / filename).write_text("{}", encoding="utf-8")
+        (transcriptions_dir / filename).write_text(
+            json.dumps({"transcript": "hello", "wordTimeline": []}),
+            encoding="utf-8",
+        )
 
     is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
     assert is_valid is True
     assert source_files == ["00001-00001.json", "00001-00002.json"]
     assert destination_files == ["00000-00001.json", "00000-00002.json"]
+
+
+def test_storyteller_validation_rejects_non_wordtimeline_format(tmp_path):
+    transcriptions_dir = tmp_path / "transcriptions_invalid"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+
+    segment_like = [{"start": 0.0, "end": 1.0, "text": "hello"}]
+    (transcriptions_dir / "00001-00001.json").write_text(json.dumps(segment_like), encoding="utf-8")
+
+    is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 1)
+    assert is_valid is False
+    assert source_files == []
+    assert destination_files == []
 
 
 def test_transcriber_format_dispatch(tmp_path):
@@ -112,3 +128,64 @@ def test_storyteller_transcript_binary_search_methods(tmp_path):
 
     text_at_offset = transcript.get_text_at_character_offset(7, chapter_index=1)
     assert "second chapter" in text_at_offset
+
+
+def test_storyteller_utf16_to_python_offset_conversion(tmp_path):
+    transcript_dir = tmp_path / "storyteller_utf16"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    chapter_name = "00000-00001.json"
+    chapter_payload = {
+        "transcript": "A🙂B",
+        "wordTimeline": [
+            {
+                "type": "word",
+                "text": "A",
+                "startTime": 0.1,
+                "endTime": 0.2,
+                "startOffsetUtf16": 0,
+                "endOffsetUtf16": 1,
+                "timeline": [],
+            },
+            {
+                "type": "word",
+                "text": "🙂",
+                "startTime": 0.3,
+                "endTime": 0.4,
+                "startOffsetUtf16": 1,
+                "endOffsetUtf16": 3,
+                "timeline": [],
+            },
+            {
+                "type": "word",
+                "text": "B",
+                "startTime": 0.5,
+                "endTime": 0.6,
+                "startOffsetUtf16": 3,
+                "endOffsetUtf16": 4,
+                "timeline": [],
+            },
+        ],
+    }
+    (transcript_dir / chapter_name).write_text(json.dumps(chapter_payload), encoding="utf-8")
+
+    manifest = {
+        "format": "storyteller_manifest",
+        "version": 1,
+        "duration": 1.0,
+        "chapters": [
+            {"index": 0, "file": chapter_name, "start": 0.0, "end": 1.0, "text_len": 3, "text_len_utf16": 4},
+        ],
+    }
+    manifest_path = transcript_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    transcript = StorytellerTranscript(manifest_path)
+    assert transcript.chapter_utf16_to_python_offset(0, 1) == 1
+    assert transcript.chapter_utf16_to_python_offset(0, 3) == 2
+
+    story_pos = transcript.timestamp_to_story_position(0.35)
+    assert story_pos is not None
+    assert story_pos["offset_utf16"] == 1
+    assert story_pos["offset_py"] == 1
+    assert story_pos["global_offset_py"] == 1

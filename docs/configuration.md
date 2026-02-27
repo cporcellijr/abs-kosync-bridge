@@ -37,6 +37,11 @@ ports:
 - **Storyteller URL**: URL to your Storyteller instance.
 - **Storyteller Username / Password**: Credentials for your Storyteller admin account.
 - **Sync Mode**: REST API only. The bridge communicates exclusively via the Storyteller API.
+- **Storyteller Assets Path (Optional)**: Root path containing Storyteller `assets/`.
+  - Expected structure: `{assets_root}/assets/{book_title}/transcriptions/`
+  - If your Docker volume is `/path/to/storyteller/assets:/storyteller/assets`, set this value to `/storyteller`.
+  - This setting is optional and can be configured in the Web UI (no compose env var required).
+- **Storyteller Backfill**: Settings includes a maintenance action to scan all Storyteller-linked books, ingest available transcript JSON files, and rebuild alignment maps without re-running SMIL/Whisper.
 
 > [!NOTE]
 > The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.
@@ -80,6 +85,9 @@ ports:
 ### Transcription Settings
 
 Configure the engine used for audio-to-text alignment.
+
+> [!TIP]
+> For books with Storyteller forced-alignment transcript files, that source is prioritized over SMIL and Whisper.
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |

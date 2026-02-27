@@ -89,6 +89,8 @@ services:
       
       # === OPTIONAL: Forge ===
       - /path/to/storyteller/library:/storyteller_library
+      # === OPTIONAL: Storyteller transcript ingestion ===
+      - /path/to/storyteller/assets:/storyteller/assets
 ```
 
 ### Security Note: Split-Port Mode
@@ -102,6 +104,9 @@ If you want to expose the KOSync endpoint to the internet (for syncing on the go
 
 !!! tip "Optional Integrations"
     You can configure KOSync, Storyteller, and other integrations via enviroment variables during bootstrap, but it is easier to do it later in the Web UI!
+    
+    If you mount Storyteller assets at `/storyteller/assets`, set **Storyteller Assets Path** in Settings to `/storyteller`.
+    The assets path can be configured fully in the UI; `STORYTELLER_ASSETS_DIR` env is optional.
 
 ---
 
@@ -124,7 +129,8 @@ docker compose logs -f
 1. Open your browser and go to `http://localhost:8080/settings` (or your server IP).
 2. Enter your **Audiobookshelf Server URL** and **API Key** (from Step 1).
 3. (Optional) Enter your **KOSync**, **Booklore**, or **Storyteller** credentials.
-4. Click **Save Settings**. The application will restart automatically to apply changes.
+4. (Optional) If Storyteller assets are mounted, set **Storyteller Assets Path** to `/storyteller`.
+5. Click **Save Settings**. The application will restart automatically to apply changes.
 
 ---
 

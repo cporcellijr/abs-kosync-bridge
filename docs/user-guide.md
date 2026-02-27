@@ -24,7 +24,9 @@ Links an **Audiobook** in ABS to an **Ebook** in KOReader (and other platforms).
 
 - **Mechanism**: Transcription-based alignment.
 - **Use Case**: Listening on phone, reading on Kindle/Kobo.
-- **Process**: Mapping creates a transcript of the audiobook, then uses that text to find the corresponding page in the ebook.
+- **Process**:
+  - If Storyteller forced-alignment transcripts are available, they are ingested and used first.
+  - Otherwise, the system falls back to SMIL extraction, then Whisper transcription.
 
 ### 2. Ebook-Only Sync
 
@@ -105,6 +107,8 @@ Select the standard EPUB file you want to use for regular sync. The system searc
 ### Creating the Mapping
 
 Once you've made your selections, click **Create Mapping**. The system will download any necessary files (from CWA/ABS) and begin the alignment process.
+
+If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/Whisper for that book.
 
 ### Batch Match
 
@@ -194,6 +198,15 @@ You can edit or delete existing mappings from the Dashboard.
 
 - **Delete**: Stops syncing the book. Does NOT delete the files.
 - **Reset Progress**: Clears the stored sync state if things get out of whack.
+
+### Storyteller Backfill
+
+Use **Settings -> Storyteller Backfill** to bulk re-check all Storyteller-linked books:
+
+- Ingests any newly available Storyteller transcript files.
+- Sets transcript source to Storyteller where valid transcripts exist.
+- Rebuilds alignment maps from Storyteller word timelines (no Whisper/SMIL recompute).
+- Leaves books unchanged when transcripts are missing or incompatible.
 
 ### Viewing Logs
 
