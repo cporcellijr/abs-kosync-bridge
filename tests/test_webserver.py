@@ -495,6 +495,32 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         )
         self.mock_database_service.delete_book.assert_called_once_with('delete-st-1')
 
+    def test_delete_mapping_infers_storyteller_uuid_from_filename(self):
+        """Deleting a mapping should infer Storyteller UUID from filename when DB UUID is missing."""
+        from src.db.models import Book
+
+        inferred_uuid = 'bbe93e33-6b8d-4368-95a0-c357be1fa230'
+        test_book = Book(
+            abs_id='delete-st-2',
+            abs_title='Delete Story Book 2',
+            ebook_filename=f'storyteller_{inferred_uuid}.epub',
+            storyteller_uuid=None,
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.remove_from_collection_by_uuid.return_value = True
+        self.mock_booklore_client.is_configured.return_value = False
+        self.mock_manager.epub_cache_dir = None
+
+        response = self.client.post('/delete/delete-st-2')
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_storyteller_client.remove_from_collection_by_uuid.assert_called_once_with(
+            inferred_uuid,
+            'Synced with KOReader'
+        )
+        self.mock_database_service.delete_book.assert_called_once_with('delete-st-2')
+
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""
         # Setup mock book

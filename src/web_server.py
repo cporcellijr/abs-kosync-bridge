@@ -1661,12 +1661,23 @@ def cleanup_mapping_resources(book):
     except Exception as e:
         logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
 
-    if book.storyteller_uuid:
+    storyteller_uuid = getattr(book, 'storyteller_uuid', None)
+    if not storyteller_uuid and getattr(book, 'ebook_filename', None):
+        match = re.match(r"^storyteller_([0-9a-fA-F-]+)\.epub$", book.ebook_filename)
+        if match:
+            storyteller_uuid = match.group(1)
+            logger.info(f"Inferred Storyteller UUID for cleanup: '{storyteller_uuid[:8]}...'")
+
+    if storyteller_uuid:
         storyteller_collection_name = os.environ.get('STORYTELLER_COLLECTION_NAME', 'Synced with KOReader')
         try:
             st_client = container.storyteller_client()
             if hasattr(st_client, 'remove_from_collection_by_uuid'):
-                st_client.remove_from_collection_by_uuid(book.storyteller_uuid, storyteller_collection_name)
+                removed = st_client.remove_from_collection_by_uuid(storyteller_uuid, storyteller_collection_name)
+                if not removed:
+                    logger.warning(f"Storyteller collection removal returned no success for '{storyteller_uuid[:8]}...'")
+            else:
+                logger.warning("Storyteller client has no remove_from_collection_by_uuid method")
         except Exception as e:
             logger.warning(f"Failed to remove from Storyteller collection: {e}")
 
@@ -1868,6 +1879,11 @@ def api_storyteller_link(abs_id):
     if storyteller_uuid == "none" or not storyteller_uuid:
         logger.info(f"🔄 Unlinking Storyteller for '{book.abs_title}'")
         previous_storyteller_uuid = book.storyteller_uuid
+        if not previous_storyteller_uuid and getattr(book, 'ebook_filename', None):
+            match = re.match(r"^storyteller_([0-9a-fA-F-]+)\.epub$", book.ebook_filename)
+            if match:
+                previous_storyteller_uuid = match.group(1)
+                logger.info(f"Inferred Storyteller UUID for unlink: '{previous_storyteller_uuid[:8]}...'")
         book.storyteller_uuid = None
         book.transcript_source = None
         book.transcript_file = None
@@ -1877,7 +1893,11 @@ def api_storyteller_link(abs_id):
                 st_client = container.storyteller_client()
                 if hasattr(st_client, 'remove_from_collection_by_uuid'):
                     storyteller_collection_name = os.environ.get('STORYTELLER_COLLECTION_NAME', 'Synced with KOReader')
-                    st_client.remove_from_collection_by_uuid(previous_storyteller_uuid, storyteller_collection_name)
+                    removed = st_client.remove_from_collection_by_uuid(previous_storyteller_uuid, storyteller_collection_name)
+                    if not removed:
+                        logger.warning(f"Storyteller unlink removal returned no success for '{previous_storyteller_uuid[:8]}...'")
+                else:
+                    logger.warning("Storyteller client has no remove_from_collection_by_uuid method")
             except Exception as e:
                 logger.warning(f"Failed to remove Storyteller UUID from collection: {e}")
         
