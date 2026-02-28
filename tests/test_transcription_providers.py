@@ -74,9 +74,11 @@ class TestLocalWhisperProvider(unittest.TestCase):
         # Force GPU config via mock
         with patch.object(provider, '_get_device_config', return_value=('cuda', 'float16')):
             provider._get_model()
+            expected_download_root = str(Path(os.environ.get("DATA_DIR", "/data")) / "models")
             
             mock_whisper_model.assert_called_once_with(
                 'base', 
+                download_root=expected_download_root,
                 device='cuda', 
                 compute_type='float16'
             )

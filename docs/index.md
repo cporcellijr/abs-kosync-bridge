@@ -42,6 +42,7 @@ The system keeps your progress in sync across all major platforms:
 - **Multi-Platform Support**: Synchronize progress across five different ecosystems simultaneously.
 - **Smart Conflict Resolution**: "Furthest progress wins" logic with built-in anti-regression protection.
 - **Rich Positioning**: Support for XPath, CSS selectors, and EPUB CFI for pixel-perfect positioning.
+- **Storyteller Native Alignment**: For books with Storyteller forced-alignment transcripts, timestamp-to-text mapping is built directly from `wordTimeline` data.
 - **Resumable Jobs**: Background transcription jobs resume automatically if interrupted.
 
 ### 🖥️ Management Web UI
@@ -68,7 +69,10 @@ The sync engine operates on a sophisticated event-driven architecture (V2):
 2. **Normalization**: Progress from all clients is normalized into a common format (timestamp or percentage).
 3. **Discrepancy Check**: The system identifies if a significant change has occurred.
 4. **Leader Election**: The client with the most recent explicit progress becomes the "Leader".
-5. **Translation**: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system uses **Whisper AI transcripts** to translate the timestamp into an exact text position (or vice versa).
+5. **Translation**: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system resolves position via the best available transcript source:
+   - Storyteller forced-alignment transcript (direct mapping),
+   - then SMIL,
+   - then Whisper fallback.
 6. **Propagation**: The new position is sent to all other configured clients.
 
 ```mermaid
@@ -92,4 +96,5 @@ graph TD
 ```
 
 !!! note "Audio to Text Conversion"
-    The system extracts a snippet of text from the audiobook transcript at the current timestamp and performs a fuzzy search within the EPUB to find the corresponding ebook location.
+    For Storyteller-transcript books, the system can map timestamps directly to character offsets without fuzzy search.
+    For non-Storyteller transcript paths, it still uses transcript text extraction and fuzzy search in the EPUB.

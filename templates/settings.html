@@ -984,6 +984,13 @@
                         <div class="help-text">Target directory where Forge writes files for Storyteller to process.
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Storyteller Assets Path (Optional)</label>
+                        <input type="text" name="STORYTELLER_ASSETS_DIR"
+                            value="{{ get_val('STORYTELLER_ASSETS_DIR') }}"
+                            placeholder="Root containing /assets/{title}/transcriptions">
+                        <div class="help-text">Used to ingest Storyteller forced-alignment transcripts when available.</div>
+                    </div>
 
 
                     <div class="form-group">
@@ -1033,6 +1040,32 @@
                                 Deletes all suggestions for books that are not currently in your bridge library.
                                 This helps clear out junk suggestions and allows the bridge to re-suggest them if
                                 needed.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Storyteller Backfill</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-primary" onclick="backfillStorytellerTranscripts()">
+                                Backfill Storyteller Transcripts
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Re-scan all Storyteller-linked books, ingest available transcript files, and regenerate
+                                storyteller-native alignment maps without SMIL or Whisper reprocessing.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Cache Cleanup</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-danger" onclick="cleanInactiveCache()">
+                                Clean Inactive Cache
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Deletes audio cache and transcript files for books that are no longer active.
+                                Active books are not affected.
                             </p>
                         </div>
                     </div>
@@ -1289,6 +1322,63 @@
             } catch (err) {
                 console.error('Error clearing suggestions:', err);
                 alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
+        }
+
+        async function cleanInactiveCache() {
+            if (!confirm("Clean all cached audio and transcript files for inactive books?\n\nActive books will not be affected.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/cache/clean', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Cleaned ${data.deleted_audio} audio cache(s), ${data.deleted_transcripts} transcript folder(s), and ${data.deleted_epubs} cached epub(s).`);
+                } else {
+                    alert(`Failed: ${data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                console.error('Error cleaning cache:', err);
+                alert('An error occurred while cleaning cache. Check console for details.');
+            }
+        }
+
+        async function backfillStorytellerTranscripts() {
+            if (!confirm("Run Storyteller backfill now?\n\nThis will scan all Storyteller-linked books, ingest available transcript files, and regenerate storyteller alignment maps.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/storyteller/backfill', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (!response.ok || data.success === false) {
+                    alert(`Storyteller backfill failed: ${data.error || 'Unknown error'}`);
+                    return;
+                }
+
+                alert(
+                    `Storyteller backfill complete.\n` +
+                    `Scanned: ${data.scanned}\n` +
+                    `Ingested: ${data.ingested}\n` +
+                    `Aligned: ${data.aligned}\n` +
+                    `Missing: ${data.missing}\n` +
+                    `Failed: ${data.failed}\n` +
+                    `Duration: ${data.duration_seconds}s`
+                );
+            } catch (err) {
+                console.error('Error running storyteller backfill:', err);
+                alert('An error occurred while running storyteller backfill. Check console for details.');
             }
         }
 

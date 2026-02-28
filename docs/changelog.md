@@ -4,6 +4,23 @@ For the full history of changes, please refer to the **[GitHub Releases](https:/
 
 ---
 
+## [6.3.3] - 2026-02-27
+
+### Enhancements
+
+- Storyteller forced-alignment transcript JSON is now a top-priority transcript source (before SMIL and Whisper).
+- Added optional **Storyteller Assets Path** support (`STORYTELLER_ASSETS_DIR`) for ingesting files from `{root}/assets/{title}/transcriptions`.
+- Added storyteller-native direct alignment map generation from `wordTimeline`.
+- Added direct timestamp-to-EPUB locator resolution for Storyteller transcript books (bypasses fuzzy-search lookup path).
+- Added a Settings maintenance action to bulk backfill Storyteller transcripts and regenerate alignment maps for existing Storyteller-linked books.
+
+### Fixes
+
+- Accepted both `00000-xxxxx.json` and `00001-xxxxx.json` Storyteller chapter filename prefixes.
+- Added chapter format validation guardrails so incompatible JSON files are skipped cleanly during ingest/backfill.
+
+---
+
 ## [6.3.0] - 2026-02-18
 
 ### 🚀 Features

@@ -60,7 +60,7 @@ class KoSyncSyncClient(SyncClient):
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         ko_xpath = state.current.get('xpath')
         ko_pct = state.current.get('pct')
-        epub = book.ebook_filename
+        epub = getattr(book, "ebook_filename", None)
         if ko_xpath and epub:
             txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
             if txt:

@@ -6,8 +6,11 @@ and storing the results in the database.
 
 import json
 import logging
+import os
 import re
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 from src.db.models import BookAlignment
@@ -20,6 +23,12 @@ class AlignmentService:
     def __init__(self, database_service, polisher: Polisher):
         self.database_service = database_service
         self.polisher = polisher
+
+    @staticmethod
+    def _point_char(point: Dict) -> int:
+        if 'global_char' in point:
+            return int(point['global_char'])
+        return int(point.get('char', 0))
 
     @time_execution
     def align_and_store(self, abs_id: str, raw_segments: List[Dict], ebook_text: str, spine_chapters: List[Dict] = None):
@@ -66,6 +75,108 @@ class AlignmentService:
         self._save_alignment(abs_id, alignment_map)
         return True
 
+    @time_execution
+    def align_storyteller_and_store(self, abs_id: str, storyteller_transcript, ebook_text: str = None) -> bool:
+        """
+        Build a chapter-aware alignment map directly from Storyteller wordTimeline data,
+        anchored to the actual EPUB text to prevent global offset drifts.
+        """
+        raw_segments = []
+        for point in storyteller_transcript.iter_alignment_points():
+            pass
+
+        for chapter_index, meta in enumerate(storyteller_transcript.chapters):
+            try:
+                chapter = storyteller_transcript._load_chapter(chapter_index)
+                chapter_start = float(meta.get("start", 0.0) or 0.0)
+                
+                for word_data in chapter.get("word_timeline", []):
+                    text = word_data.get('text')
+                    if not text:
+                         start_utf16 = word_data.get('startOffsetUtf16', 0)
+                         length_utf16 = word_data.get('lengthUtf16', 0)
+                         pass
+            except Exception:
+                pass
+
+        if ebook_text:
+            logger.info(f"AlignmentService: Anchoring Storyteller transcript for {abs_id} to {len(ebook_text)} chars of text...")
+            
+            segments = []
+            current_seg_text = []
+            seg_start_ts = None
+            last_ts = 0.0
+            
+            for point in storyteller_transcript.iter_alignment_points():
+                pass
+
+            # iter_alignment_points yields only timestamps/offsets; build text segments from chapter transcripts.
+            for chapter_index, meta in enumerate(storyteller_transcript.chapters):
+                try:
+                    chapter = storyteller_transcript._load_chapter(chapter_index)
+                    chapter_start = float(meta.get("start", 0.0) or 0.0)
+                    transcript_text = chapter.get("transcript", "")
+                    timeline = chapter.get("word_timeline", [])
+                    
+                    if not timeline or not transcript_text: continue
+                    
+                    # Group words into ~5s segments
+                    seg_start = chapter_start + float(timeline[0].get("startTime", 0.0))
+                    seg_text_words = []
+                    
+                    for i, w in enumerate(timeline):
+                        ts = float(w.get("startTime", 0.0)) + chapter_start
+                        
+                        # Extract word text; fall back to offset-based slicing when absent
+                        word_text = w.get("word")
+                        if not word_text:
+                            # Use offset mapping
+                            py_start = chapter["start_offsets_py"][i]
+                            py_end = chapter["start_offsets_py"][i+1] if i+1 < len(timeline) else len(transcript_text)
+                            word_text = transcript_text[py_start:py_end]
+                            
+                        seg_text_words.append(word_text.strip())
+                        
+                        # Break segment every ~5 seconds or on last word
+                        if ts - seg_start > 5.0 or i == len(timeline) - 1:
+                            segments.append({
+                                "start": seg_start,
+                                "end": ts + 0.5, # +0.5s minimum duration for final word
+                                "text": " ".join(seg_text_words)
+                            })
+                            seg_start = ts
+                            seg_text_words = []
+                except Exception as e:
+                    logger.warning(f"Error reading Storyteller chapter {chapter_index}: {e}")
+                    
+            if segments:
+                rebuilt_segments = self.polisher.rebuild_fragmented_sentences(segments, ebook_text)
+                alignment_map = self._generate_alignment_map(rebuilt_segments, ebook_text)
+                if alignment_map:
+                    self._save_alignment(abs_id, alignment_map)
+                    logger.info(f"AlignmentService: Anchored Storyteller map stored for {abs_id} ({len(alignment_map)} points)")
+                    return True
+            
+            logger.warning(f"AlignmentService: Anchored alignment failed for {abs_id}, falling back to unanchored map")
+
+        # Fallback to unanchored map
+        alignment_map = list(storyteller_transcript.iter_alignment_points())
+        if not alignment_map:
+            logger.error("   Failed to generate storyteller alignment map.")
+            return False
+            
+        # Remap 'global_char' from iter_alignment_points to the 'char' key expected by _save_alignment.
+        clean_map = []
+        for pt in alignment_map:
+            clean_map.append({
+                "char": pt.get("global_char", 0),  # cumulative Python-index char offset
+                "ts": pt.get("ts", 0.0)
+            })
+            
+        self._save_alignment(abs_id, clean_map)
+        logger.info(f"AlignmentService: Unanchored Storyteller map stored for {abs_id} ({len(clean_map)} points)")
+        return True
+
     def get_time_for_text(self, abs_id: str, query_text: str, char_offset_hint: int = None) -> Optional[float]:
         """
         Precise time lookup.
@@ -94,16 +205,19 @@ class AlignmentService:
         # Points are [{'char': x, 'ts': y}, ...]
         # Find interval [p1, p2] where p1.char <= target <= p2.char
         
-        if target_offset < map_points[0]['char']:
+        first_char = self._point_char(map_points[0])
+        last_char = self._point_char(map_points[-1])
+
+        if target_offset < first_char:
             return map_points[0]['ts']
-        if target_offset > map_points[-1]['char']:
+        if target_offset > last_char:
             return map_points[-1]['ts']
 
         # Manual binary search to find floor
         floor_idx = 0
         while left <= right:
             mid = (left + right) // 2
-            if map_points[mid]['char'] <= target_offset:
+            if self._point_char(map_points[mid]) <= target_offset:
                 floor_idx = mid
                 left = mid + 1
             else:
@@ -118,14 +232,16 @@ class AlignmentService:
             return p1['ts']
 
         # Linear Interpolation
-        char_span = p2['char'] - p1['char']
+        p1_char = self._point_char(p1)
+        p2_char = self._point_char(p2)
+        char_span = p2_char - p1_char
         time_span = p2['ts'] - p1['ts']
-        
+
         if char_span == 0: return p1['ts']
-        
-        ratio = (target_offset - p1['char']) / char_span
+
+        ratio = (target_offset - p1_char) / char_span
         estimated_time = p1['ts'] + (time_span * ratio)
-        
+
         return float(estimated_time)
 
     def get_char_for_time(self, abs_id: str, timestamp: float) -> Optional[int]:
@@ -145,9 +261,9 @@ class AlignmentService:
         right = len(map_points) - 1
         
         if target_ts <= map_points[0]['ts']:
-            return int(map_points[0]['char'])
+            return self._point_char(map_points[0])
         if target_ts >= map_points[-1]['ts']:
-            return int(map_points[-1]['char'])
+            return self._point_char(map_points[-1])
             
         floor_idx = 0
         while left <= right:
@@ -162,17 +278,19 @@ class AlignmentService:
         if floor_idx + 1 < len(map_points):
             p2 = map_points[floor_idx + 1]
         else:
-            return int(p1['char'])
+            return self._point_char(p1)
             
         # 3. Interpolate
         time_span = p2['ts'] - p1['ts']
-        char_span = p2['char'] - p1['char']
-        
-        if time_span == 0: return int(p1['char'])
-        
+        p1_char = self._point_char(p1)
+        p2_char = self._point_char(p2)
+        char_span = p2_char - p1_char
+
+        if time_span == 0: return p1_char
+
         ratio = (target_ts - p1['ts']) / time_span
-        estimated_char = p1['char'] + (char_span * ratio)
-        
+        estimated_char = p1_char + (char_span * ratio)
+
         return int(estimated_char)
 
     def _generate_alignment_map(self, segments: List[Dict], full_text: str) -> List[Dict]:
@@ -181,6 +299,25 @@ class AlignmentService:
         Pass 1: High confidence (N=12) global search.
         Pass 2: Backfill start gap (N=6) if first anchor is late.
         """
+        def _build_linear_fallback_map(reason: str) -> List[Dict]:
+            end_ts = 0.0
+            if segments:
+                try:
+                    end_ts = float(segments[-1].get('end', 0.0) or 0.0)
+                except Exception:
+                    end_ts = 0.0
+
+            logger.warning(
+                "⚠️ Anchor alignment failed (%s) — falling back to linear map. "
+                "Sync will work but position accuracy may be reduced. "
+                "Consider using a larger Whisper model.",
+                reason,
+            )
+            return [
+                {"char": 0, "ts": 0.0},
+                {"char": len(full_text), "ts": max(0.0, end_ts)},
+            ]
+
         # 1. Tokenize Transcript
         transcript_words = []
         for seg in segments:
@@ -212,7 +349,7 @@ class AlignmentService:
             })
 
         if not transcript_words or not book_words:
-            return []
+            return _build_linear_fallback_map("insufficient normalized tokens")
 
         # --- Helper for N-Gram Logic ---
         def _find_anchors(t_tokens, b_tokens, n_size):
@@ -237,6 +374,7 @@ class AlignmentService:
                         # Safe access using indices
                         b_item = b_grams[key][0]
                         t_item = t_list[0]
+
                         found.append({
                             "ts": t_item['ts'],
                             "char": b_item['char'],
@@ -295,7 +433,7 @@ class AlignmentService:
         # 5. Build Final Map
         final_map = []
         if not valid_anchors:
-            return []
+            return _build_linear_fallback_map("no unique anchors found with N=12/N=6")
 
         # Force 0,0 if still missing (Linear Interpolation fallback)
         if valid_anchors[0]['char'] > 0:
@@ -311,6 +449,7 @@ class AlignmentService:
             final_map.append({"char": len(full_text), "ts": end_ts})
 
         logger.info(f"   ⚓ Anchored Alignment: Found {len(valid_anchors)} anchors (Total).")
+
         return final_map
 
     def _save_alignment(self, abs_id: str, alignment_map: List[Dict]):
@@ -329,7 +468,7 @@ class AlignmentService:
             
             # Context manager handles commit
             logger.info(f"   💾 Saved alignment for {abs_id} to DB.")
- 
+
     def _get_alignment(self, abs_id: str) -> Optional[List[Dict]]:
         with self.database_service.get_session() as session:
             entry = session.query(BookAlignment).filter_by(abs_id=abs_id).first()
@@ -343,3 +482,214 @@ class AlignmentService:
             # The last point in the alignment map should have the max timestamp
             return float(alignment[-1]['ts'])
         return None
+
+
+# ---------------------------------------------------------------------------
+# Storyteller transcript ingestion helpers (used by web_server and forge_service)
+# ---------------------------------------------------------------------------
+
+from src.utils.logging_utils import sanitize_log_data as _sanitize_log_data
+
+
+def _normalize_title_key(title: str) -> str:
+    """Normalize title for deterministic directory matching."""
+    lowered = (title or "").lower()
+    collapsed = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return re.sub(r"\s+", " ", collapsed).strip()
+
+
+def _storyteller_filename_for_abs_chapter(chapter_index: int, prefix: str = "00000") -> str:
+    """Map ABS chapter index N (0-based) to Storyteller filename N+1 (1-based)."""
+    return f"{prefix}-{chapter_index + 1:05d}.json"
+
+
+def _resolve_storyteller_title_dir(assets_root: Path, abs_title: str) -> Optional[Path]:
+    """
+    Resolve the Storyteller title directory using exact match first,
+    then normalized exact match (must be unique).
+    """
+    assets_dir = assets_root / "assets"
+    if not assets_dir.exists() or not assets_dir.is_dir():
+        return None
+
+    exact_dir = assets_dir / abs_title
+    if exact_dir.exists() and exact_dir.is_dir():
+        return exact_dir
+
+    target_key = _normalize_title_key(abs_title)
+    if not target_key:
+        return None
+
+    candidates = []
+    for child in assets_dir.iterdir():
+        if child.is_dir() and _normalize_title_key(child.name) == target_key:
+            candidates.append(child)
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if len(candidates) > 1:
+        logger.warning(
+            f"Storyteller assets match is ambiguous for '{_sanitize_log_data(abs_title)}' "
+            f"({len(candidates)} directories)"
+        )
+    return None
+
+
+def _is_storyteller_wordtimeline_chapter(chapter_path: Path) -> bool:
+    try:
+        with open(chapter_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        return isinstance(data.get("wordTimeline"), list)
+    except Exception:
+        return False
+
+
+def _validate_storyteller_chapters(
+    transcriptions_dir: Path, expected_count: int
+) -> tuple[bool, list[str], list[str]]:
+    """
+    Validate Storyteller chapter files by expected naming and exact count.
+    Accept both known prefixes: 00000-XXXXX.json and 00001-XXXXX.json.
+    Returns (is_valid, source_filenames, destination_filenames).
+    """
+    if expected_count <= 0:
+        return False, [], []
+
+    expected_files = [_storyteller_filename_for_abs_chapter(i, "00000") for i in range(expected_count)]
+    present = [
+        p.name
+        for p in transcriptions_dir.glob("*.json")
+        if re.match(r"^0000[01]-\d{5}\.json$", p.name)
+    ]
+    if len(present) != expected_count:
+        return False, [], []
+
+    for prefix in ("00000", "00001"):
+        source_files = [_storyteller_filename_for_abs_chapter(i, prefix) for i in range(expected_count)]
+        if all((transcriptions_dir / name).exists() for name in source_files):
+            if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+                return True, source_files, expected_files
+            return False, [], []
+
+    source_files = []
+    for i in range(expected_count):
+        canonical = _storyteller_filename_for_abs_chapter(i, "00000")
+        alt = _storyteller_filename_for_abs_chapter(i, "00001")
+        has_canonical = (transcriptions_dir / canonical).exists()
+        has_alt = (transcriptions_dir / alt).exists()
+        if has_canonical and not has_alt:
+            source_files.append(canonical)
+        elif has_alt and not has_canonical:
+            source_files.append(alt)
+        else:
+            return False, [], []
+
+    if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+        return True, source_files, expected_files
+    return False, [], []
+
+
+def ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list) -> Optional[str]:
+    """
+    Copy Storyteller chapter JSON files into bridge-managed data storage and write a manifest.
+    Returns manifest path on success.
+    """
+    assets_dir_raw = os.environ.get("STORYTELLER_ASSETS_DIR", "").strip()
+    if not assets_dir_raw:
+        return None
+
+    chapter_list = chapters if isinstance(chapters, list) else []
+    expected_count = len(chapter_list)
+    if expected_count <= 0:
+        logger.info(f"Storyteller ingest skipped for '{abs_id}': no ABS chapters available")
+        return None
+
+    assets_root = Path(assets_dir_raw)
+    title_dir = _resolve_storyteller_title_dir(assets_root, abs_title or "")
+    if not title_dir:
+        logger.info(f"Storyteller transcripts not found for '{abs_id}' (title='{_sanitize_log_data(abs_title)}')")
+        return None
+
+    transcriptions_dir = title_dir / "transcriptions"
+    if not transcriptions_dir.exists() or not transcriptions_dir.is_dir():
+        logger.info(f"Storyteller transcriptions directory missing for '{abs_id}' at '{transcriptions_dir}'")
+        return None
+
+    is_valid, source_files, expected_files = _validate_storyteller_chapters(transcriptions_dir, expected_count)
+    if not is_valid:
+        logger.info(
+            f"Storyteller transcripts rejected for '{abs_id}': expected {expected_count} chapter files at "
+            f"'{transcriptions_dir}'"
+        )
+        return None
+
+    data_dir = Path(os.environ.get("DATA_DIR", "/data"))
+    target_dir = data_dir / "transcripts" / "storyteller" / abs_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = target_dir / "manifest.json"
+
+    existing_json_files = [p.name for p in target_dir.glob("*.json") if re.match(r"^00000-\d{5}\.json$", p.name)]
+    existing_valid = (
+        manifest_path.exists()
+        and len(existing_json_files) == expected_count
+        and all((target_dir / name).exists() for name in expected_files)
+    )
+    if existing_valid:
+        logger.info(f"Storyteller ingest reuse for '{abs_id}' from '{target_dir}' ({len(expected_files)} files)")
+    else:
+        copied_count = 0
+        for source_name, target_name in zip(source_files, expected_files):
+            shutil.copy2(transcriptions_dir / source_name, target_dir / target_name)
+            copied_count += 1
+        logger.info(
+            f"Storyteller ingest copied for '{abs_id}': {copied_count} files from "
+            f"'{transcriptions_dir}' to '{target_dir}'"
+        )
+
+    chapter_entries = []
+    for idx, chapter in enumerate(chapter_list):
+        start = float(chapter.get("start", 0.0) or 0.0)
+        end = float(chapter.get("end", 0.0) or 0.0)
+        chapter_file_name = _storyteller_filename_for_abs_chapter(idx)
+        text_len = 0
+        text_len_utf16 = 0
+        chapter_file_path = target_dir / chapter_file_name
+        if chapter_file_path.exists():
+            try:
+                with open(chapter_file_path, "r", encoding="utf-8") as chapter_file:
+                    chapter_data = json.load(chapter_file)
+                chapter_text = chapter_data.get("transcript", "") if isinstance(chapter_data, dict) else ""
+                text_len = len(chapter_text)
+                text_len_utf16 = len(chapter_text.encode("utf-16-le")) // 2
+            except Exception:
+                text_len = 0
+                text_len_utf16 = 0
+        chapter_entries.append({
+            "index": idx,
+            "file": chapter_file_name,
+            "start": start,
+            "end": end,
+            "text_len": text_len,
+            "text_len_utf16": text_len_utf16,
+        })
+
+    duration = 0.0
+    if chapter_entries:
+        duration = float(chapter_entries[-1].get("end", 0.0) or 0.0)
+
+    manifest = {
+        "format": "storyteller_manifest",
+        "version": 1,
+        "abs_id": abs_id,
+        "abs_title": abs_title,
+        "duration": duration,
+        "chapter_count": expected_count,
+        "chapters": chapter_entries
+    }
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False)
+
+    return str(manifest_path)

@@ -644,27 +644,47 @@ class BookloreClient:
             logger.error(f"❌ Download error: {e}")
             return None
 
+    @staticmethod
+    def _to_progress_fraction(raw_pct):
+        """Convert Booklore percentage (0-100) to fraction (0-1) safely."""
+        if raw_pct in (None, ""):
+            return 0.0
+        try:
+            return float(raw_pct) / 100.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _get_progress_by_book_id(self, book_id):
+        """
+        Get progress tuple for a specific Booklore book id.
+        Returns: (pct_fraction, cfi) or (None, None) on failure.
+        """
+        response = self._make_request("GET", f"/api/v1/books/{book_id}")
+        if not response or response.status_code != 200:
+            return None, None
+
+        data = response.json()
+        book_type = str(
+            data.get('primaryFile', {}).get('bookType')
+            or data.get('bookType')
+            or ''
+        ).upper()
+        if book_type == 'EPUB':
+            progress = data.get('epubProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), progress.get('cfi')
+        if book_type == 'PDF':
+            progress = data.get('pdfProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), None
+        if book_type == 'CBX':
+            progress = data.get('cbxProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), None
+        return None, None
+
     def get_progress(self, ebook_filename):
         book = self.find_book_by_filename(ebook_filename)
-        if not book: return None, None
-
-        response = self._make_request("GET", f"/api/v1/books/{book['id']}")
-        if response and response.status_code == 200:
-            data = response.json()
-            book_type = data.get('primaryFile', {}).get('bookType', data.get('bookType', '')).upper()
-            if book_type == 'EPUB':
-                progress = data.get('epubProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), progress.get('cfi')
-            elif book_type == 'PDF':
-                progress = data.get('pdfProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), None
-            elif book_type == 'CBX':
-                progress = data.get('cbxProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), None
-        return None, None
+        if not book:
+            return None, None
+        return self._get_progress_by_book_id(book['id'])
 
     def update_progress(self, ebook_filename, percentage, rich_locator: Optional[LocatorResult] = None):
         book = self.find_book_by_filename(ebook_filename)
@@ -675,24 +695,55 @@ class BookloreClient:
         book_id = book['id']
         book_type = (book.get('bookType') or '').upper()
         pct_display = percentage * 100
+
+        clear_reset = book_type == 'EPUB' and percentage <= 0
         cfi = rich_locator.cfi if rich_locator and rich_locator.cfi else None
 
+        payload_variants = []
         if book_type == 'EPUB':
-            payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
-            if cfi:
-                payload["epubProgress"]["cfi"] = cfi
-                logger.debug(f"Booklore: Setting CFI: {cfi}")
+            base_payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
+            if clear_reset:
+                # Booklore variants differ by version/build. Try common clear forms.
+                payload_variants = [
+                    ("null_cfi", {"bookId": book_id, "epubProgress": {"percentage": pct_display, "cfi": None}}),
+                    ("no_cfi", base_payload),
+                ]
+            else:
+                if cfi is not None:
+                    base_payload["epubProgress"]["cfi"] = cfi
+                    logger.debug(f"Booklore: Setting CFI: {cfi}")
+                payload_variants = [("standard", base_payload)]
         elif book_type == 'PDF':
-            payload = {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}}
+            payload_variants = [("standard", {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}})]
         elif book_type == 'CBX':
-            payload = {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}}
+            payload_variants = [("standard", {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}})]
         else:
-            logger.warning(f"⚠️ Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
+            logger.warning(f"Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
             return False
 
-        response = self._make_request("POST", "/api/v1/books/progress", payload)
-        if response and response.status_code in [200, 201, 204]:
-            logger.info(f"✅ Booklore: {sanitize_log_data(ebook_filename)} → {pct_display:.1f}%")
+        last_status = "No response"
+        for variant_name, payload in payload_variants:
+            if clear_reset:
+                logger.debug(f"Booklore: Clearing CFI for 0% reset (variant={variant_name})")
+
+            response = self._make_request("POST", "/api/v1/books/progress", payload)
+            if not response or response.status_code not in [200, 201, 204]:
+                last_status = response.status_code if response else "No response"
+                continue
+
+            # For clear operations, verify Booklore actually persisted 0%.
+            if clear_reset:
+                verified_pct, _ = self._get_progress_by_book_id(book_id)
+                if verified_pct is not None and verified_pct > 0.001:
+                    logger.warning(
+                        f"Booklore clear did not persist for {sanitize_log_data(ebook_filename)} "
+                        f"(variant={variant_name}, observed={verified_pct * 100:.2f}%). Retrying..."
+                    )
+                    last_status = f"verify_failed:{verified_pct * 100:.2f}%"
+                    continue
+
+            logger.info(f"Booklore: {sanitize_log_data(ebook_filename)} -> {pct_display:.1f}%")
+
             # Update cache in-place instead of full library refresh
             try:
                 cached = self._book_id_cache.get(book_id)
@@ -701,8 +752,10 @@ class BookloreClient:
                         if not cached.get('epubProgress'):
                             cached['epubProgress'] = {}
                         cached['epubProgress']['percentage'] = pct_display
-                        if cfi:
-                            cached['epubProgress']['cfi'] = cfi
+                        if clear_reset:
+                            cached['epubProgress']['cfi'] = ""
+                        elif 'cfi' in payload.get('epubProgress', {}):
+                            cached['epubProgress']['cfi'] = payload['epubProgress']['cfi']
                     elif book_type == 'PDF':
                         if not cached.get('pdfProgress'):
                             cached['pdfProgress'] = {}
@@ -715,10 +768,9 @@ class BookloreClient:
             except Exception:
                 logger.debug("Booklore: In-place cache update failed, will refresh on next read")
             return True
-        else:
-            status = response.status_code if response else "No response"
-            logger.error(f"❌ Booklore update failed: {status}")
-            return False
+
+        logger.error(f"Booklore update failed: {last_status}")
+        return False
 
     def get_recent_activity(self, min_progress=0.01):
         if not self._book_cache: self._refresh_book_cache()

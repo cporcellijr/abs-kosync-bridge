@@ -7,6 +7,20 @@
 - **Check Volumes**: Ensure your `/books` volume is correctly mounted in `docker-compose.yml`. The path inside the container must match where you are looking.
 - **Permissions**: Ensure the user running the container has read permissions for the ebook files.
 
+### Storyteller transcripts not found?
+
+- **Issue**: You know transcript files exist on disk, but logs show "Storyteller transcripts not found" or "directory missing".
+- **Checks**:
+  - Verify the Docker volume is mounted: host storyteller assets -> container `/storyteller/assets`.
+  - In Settings, set **Storyteller Assets Path** to `/storyteller` (not `/storyteller/assets`).
+  - Confirm expected structure inside container: `/storyteller/assets/{title}/transcriptions/*.json`.
+
+### Storyteller backfill shows invalid chapter format?
+
+- **Issue**: Logs mention invalid storyteller chapter format for a chapter JSON file.
+- **Cause**: The file name pattern matches, but JSON is not Storyteller `wordTimeline` format.
+- **Behavior**: Backfill now skips these books as missing/incompatible instead of failing the whole run.
+
 ### Transcription taking too long?
 
 - **Model Size**: Try setting `WHISPER_MODEL=tiny` in the Settings page.

@@ -271,13 +271,15 @@ def kosync_put_progress():
     # Optional "furthest wins" protection
     furthest_wins = os.environ.get('KOSYNC_FURTHEST_WINS', 'true').lower() == 'true'
     force_update = data.get('force', False)
-    
-    # [NEW] Allow rewinds if:
+    is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
+
+    # Allow rewinds if:
     # 1. Force flag is set (e.g. from SyncManager)
     # 2. Update comes from the SAME device (user moved slider back)
+    # 3. Update is internal (sync-bot) — must reach debounce-clear logic below
     same_device = (kosync_doc and kosync_doc.device_id == device_id)
-    
-    if furthest_wins and kosync_doc and kosync_doc.percentage and not force_update and not same_device:
+
+    if furthest_wins and kosync_doc and kosync_doc.percentage and not force_update and not same_device and not is_internal:
         existing_pct = float(kosync_doc.percentage)
         new_pct = float(percentage)
 
@@ -299,7 +301,10 @@ def kosync_put_progress():
         )
         logger.info(f"KOSync: New document tracked: {doc_hash[:8]}... from device '{device}'")
     else:
-        logger.info(f"KOSync: Received progress from '{device}' for doc {doc_hash[:8]}... -> {float(percentage):.2f}% (Updated from {float(kosync_doc.percentage) if kosync_doc.percentage else 0:.2f}%)")
+        logger.info(
+            f"KOSync: Received progress from '{device}' for doc {doc_hash[:8]}... -> "
+            f"{float(percentage):.2%} (Updated from {float(kosync_doc.percentage) if kosync_doc.percentage else 0:.2%})"
+        )
         kosync_doc.progress = progress
         kosync_doc.percentage = percentage
         kosync_doc.device = device
@@ -450,8 +455,14 @@ def kosync_put_progress():
         # Debounce sync trigger — wait until the reader stops turning pages
         # Skip if the update came from the sync bot itself (prevents sync→PUT→sync loop)
         # Skip if instant sync is globally disabled.
-        is_internal = device and device.lower() in ('abs-sync-bot', 'abs-kosync-bridge')
         instant_sync_enabled = os.environ.get('INSTANT_SYNC_ENABLED', 'true').lower() != 'false'
+        if is_internal:
+            # Internal writes (sync/reset flows) should cancel any pending user debounce
+            # event for this book so we don't replay stale progress right after a reset.
+            with _kosync_debounce_lock:
+                if linked_book.abs_id in _kosync_debounce:
+                    del _kosync_debounce[linked_book.abs_id]
+                    logger.debug(f"KOSync PUT: Cleared pending debounce for internal update on '{linked_book.abs_title}'")
         if linked_book.status == 'active' and _manager and not is_internal and instant_sync_enabled:
             logger.debug(f"KOSync PUT: Progress event recorded for '{linked_book.abs_title}'")
             _record_kosync_event(linked_book.abs_id, linked_book.abs_title)

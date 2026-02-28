@@ -74,6 +74,8 @@ class StorytellerAPIClient:
                 response = self.session.post(url, headers=headers, json=json_data, timeout=10)
             elif method.upper() == "PUT":
                 response = self.session.put(url, headers=headers, json=json_data, timeout=10)
+            elif method.upper() == "DELETE":
+                response = self.session.delete(url, headers=headers, json=json_data, timeout=10)
             else: return None
 
             if response.status_code == 401:
@@ -87,6 +89,8 @@ class StorytellerAPIClient:
                     response = self.session.post(url, headers=headers, json=json_data, timeout=10)
                 elif method.upper() == "PUT":
                     response = self.session.put(url, headers=headers, json=json_data, timeout=10)
+                elif method.upper() == "DELETE":
+                    response = self.session.delete(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
             logger.error(f"❌ Storyteller API request failed ('{method}' '{endpoint}'): {e}")
@@ -300,6 +304,7 @@ class StorytellerAPIClient:
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
+        return bool(r_back and r_back.status_code in [200, 204])
         
     def add_to_collection_by_uuid(self, book_uuid: str, collection_name: str = None) -> bool:
         if not collection_name:
@@ -331,6 +336,41 @@ class StorytellerAPIClient:
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
         return bool(r_back and r_back.status_code in [200, 204])
+
+    def remove_from_collection_by_uuid(self, book_uuid: str, collection_name: str = None) -> bool:
+        """Remove a Storyteller book from a collection by UUID."""
+        if not book_uuid:
+            return False
+        if not collection_name:
+            collection_name = os.environ.get("STORYTELLER_COLLECTION_NAME", "Synced with KOReader")
+
+        # Resolve collection UUID (do not create missing collection on remove)
+        r = self._make_request("GET", "/api/v2/collections")
+        if not r or r.status_code != 200:
+            return False
+        collections = r.json()
+        target_col = next((c for c in collections if c.get('name') == collection_name), None)
+        if not target_col:
+            return False
+
+        col_uuid = target_col.get('uuid') or target_col.get('id')
+        if not col_uuid:
+            return False
+
+        # Try endpoint variants for compatibility across Storyteller builds.
+        attempts = [
+            ("DELETE", "/api/v2/collections/books", {"collections": [col_uuid], "books": [book_uuid]}),
+            ("DELETE", f"/api/v2/collections/{col_uuid}/books", {"books": [book_uuid]}),
+            ("DELETE", f"/api/v2/collections/{col_uuid}/books/{book_uuid}", None),
+        ]
+
+        for method, endpoint, payload in attempts:
+            resp = self._make_request(method, endpoint, payload)
+            if resp and resp.status_code in [200, 202, 204]:
+                logger.info(f"Removed '{book_uuid[:8]}' from Storyteller Collection: '{collection_name}'")
+                return True
+
+        return False
     def search_books(self, query: str) -> list:
         """Search for books in Storyteller."""
         response = self._make_request("GET", "/api/v2/books", None)

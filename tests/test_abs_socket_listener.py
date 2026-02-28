@@ -318,6 +318,50 @@ class TestKosyncPutInstantSync(unittest.TestCase):
             ks._database_service = original_db
             ks._manager = original_manager
 
+    def test_internal_put_clears_stale_debounce_entry(self):
+        """Internal sync-bot PUT should clear any stale pending debounce event."""
+        import src.api.kosync_server as ks
+        from src.db.models import KosyncDocument
+
+        mock_db = MagicMock()
+        original_db = ks._database_service
+        ks._database_service = mock_db
+        original_manager = ks._manager
+        ks._manager = MagicMock()
+
+        try:
+            mock_book = MagicMock()
+            mock_book.abs_id = "test-clear-stale"
+            mock_book.abs_title = "Clear Stale Book"
+            mock_book.status = "active"
+            mock_book.kosync_doc_id = "z" * 32
+
+            mock_doc = MagicMock(spec=KosyncDocument)
+            mock_doc.linked_abs_id = "test-clear-stale"
+            mock_doc.percentage = 0.4
+            mock_doc.device_id = "reader-1"
+
+            mock_db.get_kosync_document.return_value = mock_doc
+            mock_db.get_book.return_value = mock_book
+            mock_db.get_book_by_kosync_id.return_value = None
+
+            with ks._kosync_debounce_lock:
+                ks._kosync_debounce["test-clear-stale"] = {
+                    "last_event": time.time(),
+                    "title": "Clear Stale Book",
+                    "synced": False,
+                }
+
+            with self._make_put_context('z' * 32, percentage=0.0, device='abs-sync-bot'):
+                ks.kosync_put_progress.__wrapped__()
+
+            with ks._kosync_debounce_lock:
+                self.assertNotIn("test-clear-stale", ks._kosync_debounce)
+
+        finally:
+            ks._database_service = original_db
+            ks._manager = original_manager
+
 
 if __name__ == "__main__":
     unittest.main()

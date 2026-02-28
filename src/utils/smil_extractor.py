@@ -106,7 +106,7 @@ class SmilExtractor:
                             if idx < 3 or idx == len(smil_files) - 1:
                                 if segments:
                                     logger.debug(f"   ✓ {Path(smil_path).name}: {len(segments)} segments ({segments[0]['start']:.1f}s - {segments[-1]['end']:.1f}s)")
-                    # Relative timestamps - calculate offsets
+                elif timestamp_mode == 'relative':
                     if abs_chapters:
                         logger.info(f"   Using Smart Duration Mapping (Files: {len(smil_files)}, Chapters: {len(abs_chapters)})")
                         transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
