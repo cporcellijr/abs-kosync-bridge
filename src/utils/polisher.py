@@ -4,10 +4,7 @@ Handles cleanup of ebook text and reconstruction of fragmented audio sentences.
 """
 
 import re
-import logging
 from typing import List, Dict, Tuple
-
-logger = logging.getLogger(__name__)
 
 class Polisher:
     """
@@ -15,9 +12,6 @@ class Polisher:
     """
 
     def __init__(self):
-        # Debug tracker for Point 1
-        self._debug_log_count = 0
-        
         # Roman numeral pattern (I to X, simplistic for chapter numbers)
         self.roman_pattern = re.compile(r'^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$', re.IGNORECASE)
         # Spelled out numbers mapping (0-100 covering most common cases)
@@ -126,11 +120,7 @@ class Polisher:
         cleaned = self.text_to_digits(cleaned)
         
         result = self.collapse_whitespace(cleaned)
-        
-        if self._debug_log_count < 20:
-            logger.debug(f"DEBUG_POINT_1: Polisher.normalize() | Input: '{text}' -> Output: '{result}'")
-            self._debug_log_count += 1
-            
+
         return result
 
     def rebuild_fragmented_sentences(self, segments: List[Dict], ebook_full_text: str) -> List[Dict]:

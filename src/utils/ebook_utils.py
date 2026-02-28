@@ -237,109 +237,11 @@ class EbookParser:
 
             combined_text = " ".join(full_text_parts)
             self.cache.put(str_path, {'text': combined_text, 'map': spine_map})
-            self._debug_log_spine_parse(filepath.name, combined_text, spine_map)
             return combined_text, spine_map
 
         except Exception as e:
             logger.error(f"❌ Failed to parse EPUB '{filepath}': {e}")
             return "", []
-
-    def _offset_from_locator(self, locator: LocatorResult, spine_map: list, total_len: int) -> Optional[int]:
-        """Best-effort reverse mapping for debug round-trip checks."""
-        if not locator or not spine_map or total_len <= 0:
-            return None
-
-        if locator.href:
-            target_item = next((item for item in spine_map if item.get('href') == locator.href), None)
-            if not target_item:
-                target_item = next(
-                    (
-                        item for item in spine_map
-                        if item.get('href') and (locator.href in item['href'] or item['href'] in locator.href)
-                    ),
-                    None,
-                )
-            if target_item:
-                if locator.chapter_progress is not None:
-                    chapter_len = max(1, target_item['end'] - target_item['start'])
-                    chapter_progress = max(0.0, min(1.0, float(locator.chapter_progress)))
-                    local_offset = int(chapter_progress * chapter_len)
-                    calculated_offset = min(target_item['start'] + local_offset, target_item['end'] - 1)
-                    logger.debug(f"DEBUG_POINT_3: _offset_from_locator | href={locator.href} | "
-                                 f"chapter_progress={chapter_progress:.4f} | chapter_len={chapter_len} | "
-                                 f"local_offset={local_offset} | target_item['start']={target_item['start']} | "
-                                 f"calculated_offset={calculated_offset}")
-                    return calculated_offset
-                return target_item['start']
-
-        if locator.match_index is not None:
-            return max(0, min(int(locator.match_index), total_len - 1))
-
-        if locator.percentage is not None:
-            pct = max(0.0, min(1.0, float(locator.percentage)))
-            return int((total_len - 1) * pct) if total_len > 1 else 0
-
-        return None
-
-    def _debug_log_spine_parse(self, filename: str, full_text: str, spine_map: list):
-        """Debug-only telemetry for EPUB spine mapping and locator round-trip consistency."""
-        if not logger.isEnabledFor(logging.DEBUG):
-            return
-
-        total_len = len(full_text)
-        char_sum = sum(item.get('char_len', item['end'] - item['start']) for item in spine_map)
-        logger.debug(
-            "EPUB parse debug '%s': included_spine_items=%d, extracted_char_sum=%d, combined_text_len=%d",
-            filename, len(spine_map), char_sum, total_len
-        )
-        for item in spine_map:
-            logger.debug(
-                "EPUB parse debug '%s': spine_index=%d href=%s char_len=%d start=%d end=%d",
-                filename,
-                item['spine_index'],
-                item.get('href'),
-                item.get('char_len', item['end'] - item['start']),
-                item['start'],
-                item['end'],
-            )
-
-        if total_len <= 0 or not spine_map:
-            return
-
-        for pct in (0.1, 0.5, 0.9):
-            target_index = int((total_len - 1) * pct) if total_len > 1 else 0
-            target_item = next((item for item in spine_map if item['start'] <= target_index < item['end']), spine_map[-1])
-            logger.debug(
-                "EPUB parse debug '%s': progress=%.1f selected_spine_index=%d href=%s global_offset=%d",
-                filename,
-                pct,
-                target_item['spine_index'],
-                target_item.get('href'),
-                target_index,
-            )
-
-        sample_progresses = (0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99)
-        for pct in sample_progresses:
-            global_offset = int((total_len - 1) * pct) if total_len > 1 else 0
-            locator = self.get_locator_from_char_offset(filename, global_offset)
-            global_offset_back = self._offset_from_locator(locator, spine_map, total_len) if locator else None
-            if global_offset_back is None:
-                logger.debug(
-                    "EPUB round-trip debug '%s': pct=%.2f offset=%d -> no locator/offset_back",
-                    filename, pct, global_offset
-                )
-                continue
-
-            delta = global_offset_back - global_offset
-            logger.debug(
-                "EPUB round-trip debug '%s': pct=%.2f offset=%d -> offset_back=%d delta=%d",
-                filename, pct, global_offset, global_offset_back, delta
-            )
-            if abs(delta) > self.locator_roundtrip_tolerance:
-                logger.error(
-                    "DEBUG_POINT_5: EPUB round-trip drift '%s': pct=%.2f delta=%d (tolerance=%d)",
-                    filename, pct, delta, self.locator_roundtrip_tolerance
-                )
 
     def get_text_at_percentage(self, filename, percentage):
         """Get text snippet at a given percentage through the book."""
