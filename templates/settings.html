@@ -1057,6 +1057,19 @@
                         </div>
                     </div>
 
+                    <div class="form-group full-width">
+                        <label>Cache Cleanup</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-danger" onclick="cleanInactiveCache()">
+                                Clean Inactive Cache
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Deletes audio cache and transcript files for books that are no longer active.
+                                Active books are not affected.
+                            </p>
+                        </div>
+                    </div>
+
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 
                     <!-- Transcription Settings -->
@@ -1309,6 +1322,29 @@
             } catch (err) {
                 console.error('Error clearing suggestions:', err);
                 alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
+        }
+
+        async function cleanInactiveCache() {
+            if (!confirm("Clean all cached audio and transcript files for inactive books?\n\nActive books will not be affected.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/cache/clean', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Cleaned ${data.deleted_audio} audio cache(s), ${data.deleted_transcripts} transcript folder(s), and ${data.deleted_epubs} cached epub(s).`);
+                } else {
+                    alert(`Failed: ${data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                console.error('Error cleaning cache:', err);
+                alert('An error occurred while cleaning cache. Check console for details.');
             }
         }
 

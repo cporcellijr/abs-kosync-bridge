@@ -1248,26 +1248,46 @@ def match():
                 
                 logger.info(f"🔍 Using Storyteller Artifact: '{storyteller_uuid}'")
                 
-                if container.storyteller_client().download_book(storyteller_uuid, target_path):
-                    ebook_filename = target_filename # Override filename
-                    original_ebook_filename = selected_filename # Preserve original
-                    
-                    # [FIX] Conditionally compute KOSync ID
-                    if original_ebook_filename:
-                        # Tri-Link: Compute hash from the normal EPUB so it matches the user's device
-                        logger.info(f"⚡ Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
-                        booklore_id = None
-                        if container.booklore_client().is_configured():
-                            bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
-                            if bl_book:
-                                booklore_id = bl_book.get('id')
-                        kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
-                    else:
-                        # Storyteller-Only Link: Compute hash from the downloaded artifact
-                        logger.info("⚡ Storyteller-Only Link: Computing hash from downloaded artifact")
-                        kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
-                else:
+                downloaded = False
+                try:
+                    downloaded = container.storyteller_client().download_book(storyteller_uuid, target_path)
+                except Exception as dl_err:
+                    logger.warning(f"⚠️ Storyteller API download failed: {dl_err}")
+
+                if not downloaded:
+                    # Fallback: search Storyteller library for local readaloud EPUB
+                    st_lib = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
+                    if abs_title and st_lib.exists():
+                        for child in st_lib.iterdir():
+                            if not child.is_dir():
+                                continue
+                            readaloud = list(child.glob("*readaloud*.epub")) + list(child.glob("*synced*/*.epub"))
+                            if readaloud and child.name.lower().strip() == abs_title.lower().strip():
+                                shutil.copy2(readaloud[0], target_path)
+                                downloaded = True
+                                logger.warning(f"⚠️ Storyteller: Using local fallback: '{readaloud[0]}'")
+                                break
+
+                if not downloaded:
                     return "Failed to download Storyteller artifact", 500
+
+                ebook_filename = target_filename # Override filename
+                original_ebook_filename = selected_filename # Preserve original
+
+                # [FIX] Conditionally compute KOSync ID
+                if original_ebook_filename:
+                    # Tri-Link: Compute hash from the normal EPUB so it matches the user's device
+                    logger.info(f"⚡ Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                    booklore_id = None
+                    if container.booklore_client().is_configured():
+                        bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+                        if bl_book:
+                            booklore_id = bl_book.get('id')
+                    kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+                else:
+                    # Storyteller-Only Link: Compute hash from the downloaded artifact
+                    logger.info("⚡ Storyteller-Only Link: Computing hash from downloaded artifact")
+                    kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
                     
             except Exception as e:
                 logger.error(f"❌ Storyteller Link failed: {e}")
@@ -1580,6 +1600,24 @@ def cleanup_mapping_resources(book):
             Path(book.transcript_file).unlink()
         except Exception:
             pass
+
+    # Clean up audio cache directory (WAV files from whisper transcription)
+    audio_cache_dir = DATA_DIR / "audio_cache" / book.abs_id
+    if audio_cache_dir.exists():
+        try:
+            shutil.rmtree(audio_cache_dir)
+            logger.info(f"🗑️ Deleted audio cache: {audio_cache_dir}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to delete audio cache: {e}")
+
+    # Clean up full transcript directory (chapter JSON files + manifest)
+    transcript_dir = DATA_DIR / "transcripts" / "storyteller" / book.abs_id
+    if transcript_dir.exists():
+        try:
+            shutil.rmtree(transcript_dir)
+            logger.info(f"🗑️ Deleted transcript directory: {transcript_dir}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to delete transcript directory: {e}")
 
     if book.ebook_filename:
         cache_dirs = []
@@ -2136,6 +2174,58 @@ def clear_stale_suggestions():
     return jsonify({"success": True, "count": count})
 
 
+def clean_inactive_cache():
+    """Delete audio_cache, transcript dirs, and cached EPUBs for books that are not active."""
+    active_books = database_service.get_books_by_status('active')
+    active_ids = {b.abs_id for b in active_books}
+    active_ebook_files = {b.ebook_filename for b in active_books if b.ebook_filename}
+    active_orig_files = {b.original_ebook_filename for b in active_books if b.original_ebook_filename}
+    protected_files = active_ebook_files | active_orig_files
+
+    deleted_audio = 0
+    deleted_transcripts = 0
+    deleted_epubs = 0
+
+    audio_cache_root = DATA_DIR / "audio_cache"
+    if audio_cache_root.exists():
+        for entry in audio_cache_root.iterdir():
+            if entry.is_dir() and entry.name not in active_ids:
+                try:
+                    shutil.rmtree(entry)
+                    deleted_audio += 1
+                    logger.info(f"Cleaned audio cache: {entry.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean audio cache {entry.name}: {e}")
+
+    transcript_root = DATA_DIR / "transcripts" / "storyteller"
+    if transcript_root.exists():
+        for entry in transcript_root.iterdir():
+            if entry.is_dir() and entry.name not in active_ids:
+                try:
+                    shutil.rmtree(entry)
+                    deleted_transcripts += 1
+                    logger.info(f"Cleaned transcript dir: {entry.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean transcript dir {entry.name}: {e}")
+
+    try:
+        epub_cache_dir = Path(container.epub_cache_dir())
+    except Exception:
+        epub_cache_dir = DATA_DIR / "epub_cache"
+    if epub_cache_dir.exists():
+        for entry in epub_cache_dir.iterdir():
+            if entry.is_file() and entry.name not in protected_files:
+                try:
+                    entry.unlink()
+                    deleted_epubs += 1
+                    logger.info(f"Cleaned cached epub: {entry.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean cached epub {entry.name}: {e}")
+
+    logger.info(f"Cache cleanup complete: {deleted_audio} audio, {deleted_transcripts} transcript, {deleted_epubs} epub(s) removed")
+    return jsonify({"success": True, "deleted_audio": deleted_audio, "deleted_transcripts": deleted_transcripts, "deleted_epubs": deleted_epubs})
+
+
 def _run_storyteller_backfill():
     """
     Bulk backfill storyteller transcripts for currently matched storyteller books.
@@ -2317,6 +2407,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/clear_stale', 'clear_stale_suggestions', clear_stale_suggestions, methods=['POST'])
+    app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
 
