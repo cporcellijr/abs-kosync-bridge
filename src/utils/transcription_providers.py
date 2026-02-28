@@ -98,7 +98,11 @@ class LocalWhisperProvider(TranscriptionProvider):
             if device == 'cpu':
                 model_kwargs['cpu_threads'] = 4
             
-            self._model = WhisperModel(self.model_size, **model_kwargs)
+            self._model = WhisperModel(
+                self.model_size,
+                download_root=str(Path(os.environ.get("DATA_DIR", "/data")) / "models"),
+                **model_kwargs,
+            )
         return self._model
     
     def transcribe(self, audio_path: Path, progress_callback=None) -> list[dict]:

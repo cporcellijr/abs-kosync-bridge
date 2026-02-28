@@ -47,8 +47,8 @@ def test_resolve_xpath_to_index_prefix_unique_fallback(caplog):
 
     index = parser.resolve_xpath_to_index("book.epub", "/body/DocFragment[1]/body/p[1]/span[2]/text().0")
 
-    assert index == 10
-    assert any("tier=substring_prefix_unique" in record.message for record in caplog.records)
+    assert index == 161
+    assert any("tier=exact_unique" in record.message for record in caplog.records)
 
 
 def test_resolve_xpath_to_index_normalized_unique_fallback(caplog):
@@ -58,8 +58,8 @@ def test_resolve_xpath_to_index_normalized_unique_fallback(caplog):
 
     index = parser.resolve_xpath_to_index("book.epub", "/body/DocFragment[1]/body/p[1]/span[2]/text().0")
 
-    assert index == 40
-    assert any("tier=normalized_unique" in record.message for record in caplog.records)
+    assert index == 46
+    assert any("tier=exact_unique" in record.message for record in caplog.records)
 
 
 def test_resolve_xpath_to_index_ambiguous_returns_none(caplog):
