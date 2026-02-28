@@ -58,6 +58,26 @@ class AlignmentService:
         if ratio < 0.5 or ratio > 1.5:
              logger.warning(f"⚠️ Alignment Size Mismatch: Audio text is {ratio:.2%} of Ebook text size.")
 
+        # --- ALIGN_DEBUG_P5: Segment text before/after Polisher ---
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, seg in enumerate(raw_segments[:3]):
+                raw_text = seg.get('text', '')
+                norm_text = self.polisher.normalize(raw_text)
+                reduction = 1.0 - (len(norm_text) / len(raw_text)) if raw_text else 0.0
+                logger.debug(
+                    "ALIGN_DEBUG_P5: segment[%d] raw=%r (len=%d) | normalized=%r (len=%d) | reduction=%.0f%%",
+                    i, raw_text[:120], len(raw_text), norm_text[:120], len(norm_text), reduction * 100,
+                )
+                if reduction > 0.8:
+                    logger.warning(
+                        "ALIGN_DEBUG_P5: Drastic reduction in segment[%d] — %.0f%% of text lost after normalize",
+                        i, reduction * 100,
+                    )
+            # Check for any empty-after-normalize segments across all segments
+            empty_count = sum(1 for s in raw_segments if not self.polisher.normalize(s.get('text', '')))
+            if empty_count > 0:
+                logger.warning("ALIGN_DEBUG_P5: %d/%d segments normalize to empty string", empty_count, len(raw_segments))
+
         # 2. Normalize & Rebuild
         # Fix fragmented sentences (Mr. Smith case)
         # We pass ebook_text to help (though rebuild_fragmented_sentences uses simple heuristics currently)
@@ -73,6 +93,7 @@ class AlignmentService:
 
         # 4. Store to Database
         self._save_alignment(abs_id, alignment_map)
+        self._debug_validate_alignment_roundtrip(abs_id, len(ebook_text))
         return True
 
     @time_execution
@@ -236,12 +257,21 @@ class AlignmentService:
         p2_char = self._point_char(p2)
         char_span = p2_char - p1_char
         time_span = p2['ts'] - p1['ts']
-        
+
         if char_span == 0: return p1['ts']
-        
+
         ratio = (target_offset - p1_char) / char_span
         estimated_time = p1['ts'] + (time_span * ratio)
-        
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "ALIGN_DEBUG_P4: get_time_for_text | target_char=%d | "
+                "anchors=[char=%d ts=%.2f]->[char=%d ts=%.2f] | "
+                "char_span=%d ts_span=%.2f ratio=%.4f | result_ts=%.4f",
+                target_offset, p1_char, p1['ts'], p2_char, p2['ts'],
+                char_span, time_span, ratio, estimated_time,
+            )
+
         return float(estimated_time)
 
     def get_char_for_time(self, abs_id: str, timestamp: float) -> Optional[int]:
@@ -285,12 +315,22 @@ class AlignmentService:
         p1_char = self._point_char(p1)
         p2_char = self._point_char(p2)
         char_span = p2_char - p1_char
-        
+
         if time_span == 0: return p1_char
-        
+
         ratio = (target_ts - p1['ts']) / time_span
         estimated_char = p1_char + (char_span * ratio)
-        
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "ALIGN_DEBUG_P4: get_char_for_time | target_ts=%.2f | "
+                "anchors=[char=%d ts=%.2f]->[char=%d ts=%.2f] | "
+                "ts_span=%.2f char_span=%d ratio=%.4f | result_float=%.2f result_int=%d truncation_loss=%.2f",
+                target_ts, p1_char, p1['ts'], p2_char, p2['ts'],
+                time_span, char_span, ratio, estimated_char, int(estimated_char),
+                estimated_char - int(estimated_char),
+            )
+
         return int(estimated_char)
 
     def _generate_alignment_map(self, segments: List[Dict], full_text: str) -> List[Dict]:
@@ -299,6 +339,25 @@ class AlignmentService:
         Pass 1: High confidence (N=12) global search.
         Pass 2: Backfill start gap (N=6) if first anchor is late.
         """
+        def _build_linear_fallback_map(reason: str) -> List[Dict]:
+            end_ts = 0.0
+            if segments:
+                try:
+                    end_ts = float(segments[-1].get('end', 0.0) or 0.0)
+                except Exception:
+                    end_ts = 0.0
+
+            logger.warning(
+                "⚠️ Anchor alignment failed (%s) — falling back to linear map. "
+                "Sync will work but position accuracy may be reduced. "
+                "Consider using a larger Whisper model.",
+                reason,
+            )
+            return [
+                {"char": 0, "ts": 0.0},
+                {"char": len(full_text), "ts": max(0.0, end_ts)},
+            ]
+
         # 1. Tokenize Transcript
         transcript_words = []
         for seg in segments:
@@ -326,11 +385,28 @@ class AlignmentService:
             book_words.append({
                 "word": norm,
                 "char": match.start(),
-                "orig_index": len(book_words)
+                "orig_index": len(book_words),
+                "raw_word": raw_w
             })
 
         if not transcript_words or not book_words:
-            return []
+            return _build_linear_fallback_map("insufficient normalized tokens")
+
+        # --- ALIGN_DEBUG_P1: Polisher consistency check ---
+        if logger.isEnabledFor(logging.DEBUG):
+            # Count raw words before normalization filtering
+            raw_transcript_count = sum(len(seg['text'].split()) for seg in segments if seg['text'].split())
+            raw_book_count = len(list(re.finditer(r'\S+', full_text)))
+            logger.debug(
+                "ALIGN_DEBUG_P1: Tokenization | transcript_raw=%d transcript_after_norm=%d (lost=%d) | "
+                "book_raw=%d book_after_norm=%d (lost=%d)",
+                raw_transcript_count, len(transcript_words), raw_transcript_count - len(transcript_words),
+                raw_book_count, len(book_words), raw_book_count - len(book_words),
+            )
+            for i, tw in enumerate(transcript_words[:5]):
+                logger.debug("ALIGN_DEBUG_P1: transcript_sample[%d] word=%r ts=%.2f", i, tw['word'], tw['ts'])
+            for i, bw in enumerate(book_words[:5]):
+                logger.debug("ALIGN_DEBUG_P1: book_sample[%d] word=%r char=%d", i, bw['word'], bw['char'])
 
         # --- Helper for N-Gram Logic ---
         def _find_anchors(t_tokens, b_tokens, n_size):
@@ -355,6 +431,13 @@ class AlignmentService:
                         # Safe access using indices
                         b_item = b_grams[key][0]
                         t_item = t_list[0]
+                        
+                        # DEBUG_POINT_2: Log character matching boundaries
+                        if len(found) < 5 or (len(found) % 50 == 0):
+                            logger.debug(f"DEBUG_POINT_2: Matching '{key}' -> "
+                                         f"Transcript ts={t_item['ts']:.2f} | "
+                                         f"Book char={b_item['char']} (Original word: '{b_item.get('raw_word', 'N/A')}')")
+
                         found.append({
                             "ts": t_item['ts'],
                             "char": b_item['char'],
@@ -413,7 +496,7 @@ class AlignmentService:
         # 5. Build Final Map
         final_map = []
         if not valid_anchors:
-            return []
+            return _build_linear_fallback_map("no unique anchors found with N=12/N=6")
 
         # Force 0,0 if still missing (Linear Interpolation fallback)
         if valid_anchors[0]['char'] > 0:
@@ -429,10 +512,58 @@ class AlignmentService:
             final_map.append({"char": len(full_text), "ts": end_ts})
 
         logger.info(f"   ⚓ Anchored Alignment: Found {len(valid_anchors)} anchors (Total).")
+
+        # --- ALIGN_DEBUG_P2: Anchor quality metrics ---
+        if logger.isEnabledFor(logging.DEBUG) and len(final_map) >= 2:
+            forced_start = final_map[0]['ts'] == 0.0 and final_map[0]['char'] == 0 and (
+                not valid_anchors or valid_anchors[0]['char'] > 0
+            )
+            forced_end = final_map[-1]['char'] == len(full_text) and (
+                not valid_anchors or valid_anchors[-1]['char'] < len(full_text)
+            )
+            char_gaps = [final_map[i+1]['char'] - final_map[i]['char'] for i in range(len(final_map) - 1)]
+            ts_gaps = [final_map[i+1]['ts'] - final_map[i]['ts'] for i in range(len(final_map) - 1)]
+            max_char_gap = max(char_gaps) if char_gaps else 0
+            max_ts_gap = max(ts_gaps) if ts_gaps else 0.0
+            avg_char_gap = sum(char_gaps) / len(char_gaps) if char_gaps else 0
+            avg_ts_gap = sum(ts_gaps) / len(ts_gaps) if ts_gaps else 0.0
+            # First/last real (non-forced) anchors
+            real_first = valid_anchors[0] if valid_anchors else None
+            real_last = valid_anchors[-1] if valid_anchors else None
+            logger.debug(
+                "ALIGN_DEBUG_P2: Anchor quality | total_points=%d real_anchors=%d | "
+                "forced_start=%s forced_end=%s | "
+                "avg_char_gap=%.0f max_char_gap=%d avg_ts_gap=%.1fs max_ts_gap=%.1fs",
+                len(final_map), len(valid_anchors), forced_start, forced_end,
+                avg_char_gap, max_char_gap, avg_ts_gap, max_ts_gap,
+            )
+            if real_first:
+                logger.debug(
+                    "ALIGN_DEBUG_P2: First real anchor char=%d ts=%.1fs | Last real anchor char=%d ts=%.1fs",
+                    real_first['char'], real_first['ts'],
+                    real_last['char'] if real_last else -1, real_last['ts'] if real_last else -1,
+                )
+            # Flag large interpolation gaps
+            for i, (cg, tg) in enumerate(zip(char_gaps, ts_gaps)):
+                if cg > 5000 or tg > 120:
+                    logger.warning(
+                        "ALIGN_DEBUG_P2: Large gap at segment %d→%d | char_gap=%d ts_gap=%.1fs "
+                        "(anchors: char=%d→%d ts=%.1f→%.1f)",
+                        i, i + 1, cg, tg,
+                        final_map[i]['char'], final_map[i + 1]['char'],
+                        final_map[i]['ts'], final_map[i + 1]['ts'],
+                    )
+
         return final_map
 
     def _save_alignment(self, abs_id: str, alignment_map: List[Dict]):
         """Upsert alignment to SQLite."""
+        # DEBUG_POINT_4: Check what character offsets are being written
+        if alignment_map:
+            logger.debug(f"DEBUG_POINT_4: Storing anchors to DB for {abs_id}. "
+                         f"Sample 0: {alignment_map[0]}, "
+                         f"Sample mid: {alignment_map[len(alignment_map)//2]}, "
+                         f"Sample last: {alignment_map[-1]}")
         with self.database_service.get_session() as session:
             json_blob = json.dumps(alignment_map)
             
@@ -448,6 +579,34 @@ class AlignmentService:
             # Context manager handles commit
             logger.info(f"   💾 Saved alignment for {abs_id} to DB.")
  
+    def _debug_validate_alignment_roundtrip(self, abs_id: str, total_chars: int):
+        """ALIGN_DEBUG_P3: Validate char→time→char round-trip accuracy at sample points."""
+        if not logger.isEnabledFor(logging.DEBUG) or total_chars <= 0:
+            return
+        sample_pcts = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
+        for pct in sample_pcts:
+            original_char = int(pct * total_chars)
+            ts = self.get_time_for_text(abs_id, "", char_offset_hint=original_char)
+            if ts is None:
+                logger.debug("ALIGN_DEBUG_P3: pct=%.2f char=%d -> no timestamp", pct, original_char)
+                continue
+            roundtrip_char = self.get_char_for_time(abs_id, ts)
+            if roundtrip_char is None:
+                logger.debug("ALIGN_DEBUG_P3: pct=%.2f char=%d ts=%.2f -> no roundtrip char", pct, original_char, ts)
+                continue
+            delta = abs(roundtrip_char - original_char)
+            if delta > 50:
+                logger.warning(
+                    "ALIGN_DEBUG_P3: Round-trip drift | abs_id=%s pct=%.2f | "
+                    "original_char=%d -> ts=%.2f -> roundtrip_char=%d | delta=%d",
+                    abs_id, pct, original_char, ts, roundtrip_char, delta,
+                )
+            else:
+                logger.debug(
+                    "ALIGN_DEBUG_P3: Round-trip OK | pct=%.2f | char=%d -> ts=%.2f -> char=%d | delta=%d",
+                    pct, original_char, ts, roundtrip_char, delta,
+                )
+
     def _get_alignment(self, abs_id: str) -> Optional[List[Dict]]:
         with self.database_service.get_session() as session:
             entry = session.query(BookAlignment).filter_by(abs_id=abs_id).first()

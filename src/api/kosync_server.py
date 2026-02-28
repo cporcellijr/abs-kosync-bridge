@@ -301,7 +301,10 @@ def kosync_put_progress():
         )
         logger.info(f"KOSync: New document tracked: {doc_hash[:8]}... from device '{device}'")
     else:
-        logger.info(f"KOSync: Received progress from '{device}' for doc {doc_hash[:8]}... -> {float(percentage):.2f}% (Updated from {float(kosync_doc.percentage) if kosync_doc.percentage else 0:.2f}%)")
+        logger.info(
+            f"KOSync: Received progress from '{device}' for doc {doc_hash[:8]}... -> "
+            f"{float(percentage):.2%} (Updated from {float(kosync_doc.percentage) if kosync_doc.percentage else 0:.2%})"
+        )
         kosync_doc.progress = progress
         kosync_doc.percentage = percentage
         kosync_doc.device = device

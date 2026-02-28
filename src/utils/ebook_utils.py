@@ -384,6 +384,13 @@ class EbookParser:
         Useful for syncing from Storyteller or any Readium-based reader that uses DOM IDs.
         """
         try:
+            if not href:
+                logger.debug(f"resolve_locator_id: missing href for '{filename}'")
+                return None
+            if not fragment_id:
+                logger.debug(f"resolve_locator_id: missing fragment_id for href='{href}' in '{filename}'")
+                return None
+
             book_path = self.resolve_book_path(filename)
             full_text, spine_map = self.extract_text_and_map(book_path)
 
@@ -1114,17 +1121,8 @@ class EbookParser:
             # Instead of calculating offset via LXML iteration (which drifts),
             # grab the text and FIND it in the spine item content.
             
-            # 1. Extract a unique-ish fingerprint from the node
-            node_text = ""
-            if target_node.text: node_text += target_node.text.strip()
-            if target_node.tail: node_text += " " + target_node.tail.strip()
-            
-            # If node text is too short, grab parent context
-            if len(node_text) < 20:
-                parent = target_node.getparent()
-                if parent is not None:
-                    node_text = parent.text_content().strip()
-
+            # 1. Extract anchor text directly from target node content only.
+            node_text = target_node.text_content().strip()
             clean_anchor = " ".join(node_text.split())
             if not clean_anchor:
                 return None
@@ -1260,18 +1258,10 @@ class EbookParser:
 
             target_node = elements[0]
 
-            node_text = ""
-            if target_node.text:
-                node_text += target_node.text.strip()
-            if target_node.tail:
-                node_text += " " + target_node.tail.strip()
-
-            if len(node_text) < 20:
-                parent = target_node.getparent()
-                if parent is not None:
-                    node_text = parent.text_content().strip()
-
+            node_text = target_node.text_content().strip()
             clean_anchor = " ".join(node_text.split())
+            if not clean_anchor:
+                return None
             chapter_len = max(0, target_item['end'] - target_item['start'])
             chapter_base = target_item['start']
             full_len = len(full_text)

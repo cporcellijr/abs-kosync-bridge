@@ -74,7 +74,11 @@ class StorytellerSyncClient(SyncClient):
         # This needs to be updated to work with the new interface
         epub = book.ebook_filename
         st_pct, href, frag = state.current.get('pct'), state.current.get('href'), state.current.get('frag')
-        txt = self.ebook_parser.resolve_locator_id(epub, href, frag)
+        txt = None
+        if href and frag:
+            txt = self.ebook_parser.resolve_locator_id(epub, href, frag)
+        elif href and not frag:
+            logger.debug(f"Storyteller state missing fragment for href='{href}', falling back to percentage text")
         if not txt:
             txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
         return txt

@@ -331,6 +331,7 @@ class SyncManager:
                     normalization_source = "percent_fallback"
 
                 char_offset = max(0, min(char_offset, total_text_len - 1))
+                client_state.current["_normalization_source"] = normalization_source
                 if normalization_source in ("xpath", "cfi"):
                     client_state.current["_locator_pct"] = char_offset / float(total_text_len)
                 else:
@@ -490,11 +491,54 @@ class SyncManager:
             ) or ""
             logger.debug(
                 f"'{book.abs_id}' Storyteller direct locator resolved via chapter={story_pos['chapter']} "
-                f"offset_utf16={story_pos['offset_utf16']}"
+                f"offset_utf16={story_pos['offset_utf16']} epub='{sanitize_log_data(book.ebook_filename)}'"
             )
             return locator, context_txt
         except Exception as e:
             logger.warning(f"⚠️ '{book.abs_id}' Storyteller direct locator resolution failed: {e}")
+            return None, None
+
+    def _resolve_alignment_locator_from_abs_timestamp(self, book: Book, abs_timestamp: float):
+        """
+        Preferred ABS direct mapping for DB-managed books:
+        ABS timestamp -> alignment map char offset -> EPUB locator.
+        """
+        if (
+            not book
+            or abs_timestamp is None
+            or not getattr(book, "ebook_filename", None)
+            or not self.alignment_service
+            or getattr(book, "transcript_file", None) != "DB_MANAGED"
+        ):
+            return None, None
+
+        try:
+            char_offset = self.alignment_service.get_char_for_time(book.abs_id, float(abs_timestamp))
+            if char_offset is None:
+                return None, None
+
+            locator = self.ebook_parser.get_locator_from_char_offset(book.ebook_filename, int(char_offset))
+            if not locator:
+                return None, None
+
+            context_txt = ""
+            try:
+                book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
+                full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+                if full_text:
+                    start = max(0, int(char_offset) - 400)
+                    end = min(len(full_text), int(char_offset) + 400)
+                    context_txt = full_text[start:end]
+            except Exception:
+                context_txt = ""
+
+            logger.debug(
+                f"'{book.abs_id}' Alignment direct locator resolved via char_offset={int(char_offset)} "
+                f"from abs_ts={float(abs_timestamp):.2f}s epub='{sanitize_log_data(book.ebook_filename)}'"
+            )
+            return locator, context_txt
+        except Exception as e:
+            logger.warning(f"⚠️ '{book.abs_id}' Alignment direct locator resolution failed: {e}")
             return None, None
 
     # Suggestion Logic
@@ -1123,7 +1167,24 @@ class SyncManager:
         leader = None
         leader_pct = None
 
+        single_delta_low_conf = False
         if len(clients_with_delta) == 1:
+            changed_client = list(clients_with_delta.keys())[0]
+            changed_source = config[changed_client].current.get("_normalization_source")
+            if (
+                normalized_positions
+                and len(normalized_positions) > 1
+                and changed_client != "ABS"
+                and changed_source == "percent_fallback"
+                and "ABS" in vals
+            ):
+                single_delta_low_conf = True
+                logger.info(
+                    f"🔄 '{abs_id}' '{title_snip}' Ignoring single-client delta from "
+                    f"'{changed_client}' (low-confidence source=percent_fallback); evaluating all candidates"
+                )
+
+        if len(clients_with_delta) == 1 and not single_delta_low_conf:
             # Only one client changed - that client is the leader (most recent change wins)
             leader = list(clients_with_delta.keys())[0]
             leader_pct = vals[leader]
@@ -1131,15 +1192,33 @@ class SyncManager:
         else:
             # Multiple clients changed or this is a discrepancy resolution
             # Use "furthest wins" logic among changed clients (or all if none changed)
-            candidates = clients_with_delta if clients_with_delta else vals
+            candidates = vals if single_delta_low_conf else (clients_with_delta if clients_with_delta else vals)
             
             # For cross-format sync (audiobook vs ebook), use normalized timestamps
             if normalized_positions and len(normalized_positions) > 1:
                 # Filter normalized positions to only include candidates
                 normalized_candidates = {k: v for k, v in normalized_positions.items() if k in candidates}
                 if normalized_candidates:
-                    leader = max(normalized_candidates, key=normalized_candidates.get)
-                    leader_ts = normalized_candidates[leader]
+                    high_conf_normalized_candidates = {}
+                    for candidate_name, candidate_ts in normalized_candidates.items():
+                        candidate_source = config[candidate_name].current.get("_normalization_source")
+                        if candidate_name == "ABS" or candidate_source != "percent_fallback":
+                            high_conf_normalized_candidates[candidate_name] = candidate_ts
+                    selected_normalized_candidates = (
+                        high_conf_normalized_candidates
+                        if high_conf_normalized_candidates
+                        else normalized_candidates
+                    )
+                    if (
+                        high_conf_normalized_candidates
+                        and len(high_conf_normalized_candidates) != len(normalized_candidates)
+                    ):
+                        logger.debug(
+                            f"'{abs_id}' '{title_snip}' Demoting percent_fallback candidates during normalized leader selection"
+                        )
+
+                    leader = max(selected_normalized_candidates, key=selected_normalized_candidates.get)
+                    leader_ts = selected_normalized_candidates[leader]
                     leader_pct = vals[leader]
                     locator_pct = config[leader].current.get("_locator_pct")
                     if locator_pct is not None and abs(locator_pct - leader_pct) > 0.01:
@@ -1149,7 +1228,12 @@ class SyncManager:
                         )
                         leader_pct = locator_pct
                         config[leader].current['pct'] = leader_pct
-                    logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)} (normalized: {leader_ts:.1f}s)")
+                    leader_source = config[leader].current.get("_normalization_source", "abs")
+                    logger.info(
+                        f"🔄 '{abs_id}' '{title_snip}' {leader} leads at "
+                        f"{config[leader].value_formatter(leader_pct)} "
+                        f"(normalized: {leader_ts:.1f}s, source={leader_source})"
+                    )
                 else:
                     # Fallback to percentage-based comparison among candidates
                     leader = max(candidates, key=candidates.get)
@@ -1437,13 +1521,22 @@ class SyncManager:
                 epub = book.ebook_filename
                 txt = None
                 locator = None
+                locator_source = None
 
-                if leader == 'ABS' and getattr(book, 'transcript_source', None) == 'storyteller':
-                    locator, txt = self._resolve_storyteller_locator_from_abs_timestamp(
-                        book, leader_state.current.get('ts')
-                    )
+                if leader == 'ABS':
+                    abs_timestamp = leader_state.current.get('ts')
+                    locator, txt = self._resolve_alignment_locator_from_abs_timestamp(book, abs_timestamp)
                     if locator:
-                        logger.debug(f"'{abs_id}' '{title_snip}' Using storyteller direct timestamp->locator path")
+                        locator_source = "alignment_direct"
+                        logger.debug(f"'{abs_id}' '{title_snip}' Using alignment direct timestamp->locator path")
+
+                    if not locator and getattr(book, 'transcript_source', None) == 'storyteller':
+                        locator, txt = self._resolve_storyteller_locator_from_abs_timestamp(
+                            book, abs_timestamp
+                        )
+                        if locator:
+                            locator_source = "storyteller_direct"
+                            logger.debug(f"'{abs_id}' '{title_snip}' Using storyteller direct timestamp->locator path")
 
                 if not locator:
                     txt = leader_client.get_text_from_current_state(book, leader_state)
@@ -1452,6 +1545,8 @@ class SyncManager:
                         continue
 
                     locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+                    if locator:
+                        locator_source = "fuzzy_text"
                     if not locator:
                         if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
                             fallback_txt = leader_client.get_fallback_text(book, leader_state)
@@ -1460,12 +1555,20 @@ class SyncManager:
                                 locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
                                 if locator:
                                     logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
+                                    locator_source = "fuzzy_text_previous_segment"
 
                 if not locator:
                     logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not resolve locator from text for leader '{leader}', falling back to percentage of leader")
                     locator = LocatorResult(percentage=leader_pct)
+                    locator_source = "percent_fallback"
                 if txt is None:
                     txt = ""
+
+                logger.debug(
+                    f"'{abs_id}' '{title_snip}' Locator resolved via source={locator_source or 'unknown'} "
+                    f"epub='{sanitize_log_data(book.ebook_filename)}' "
+                    f"original_epub='{sanitize_log_data(getattr(book, 'original_ebook_filename', None))}'"
+                )
 
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}
