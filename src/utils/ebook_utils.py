@@ -264,7 +264,12 @@ class EbookParser:
                     chapter_len = max(1, target_item['end'] - target_item['start'])
                     chapter_progress = max(0.0, min(1.0, float(locator.chapter_progress)))
                     local_offset = int(chapter_progress * chapter_len)
-                    return min(target_item['start'] + local_offset, target_item['end'] - 1)
+                    calculated_offset = min(target_item['start'] + local_offset, target_item['end'] - 1)
+                    logger.debug(f"DEBUG_POINT_3: _offset_from_locator | href={locator.href} | "
+                                 f"chapter_progress={chapter_progress:.4f} | chapter_len={chapter_len} | "
+                                 f"local_offset={local_offset} | target_item['start']={target_item['start']} | "
+                                 f"calculated_offset={calculated_offset}")
+                    return calculated_offset
                 return target_item['start']
 
         if locator.match_index is not None:
@@ -331,8 +336,8 @@ class EbookParser:
                 filename, pct, global_offset, global_offset_back, delta
             )
             if abs(delta) > self.locator_roundtrip_tolerance:
-                logger.warning(
-                    "EPUB round-trip drift '%s': pct=%.2f delta=%d (tolerance=%d)",
+                logger.error(
+                    "DEBUG_POINT_5: EPUB round-trip drift '%s': pct=%.2f delta=%d (tolerance=%d)",
                     filename, pct, delta, self.locator_roundtrip_tolerance
                 )
 
@@ -1187,6 +1192,17 @@ class EbookParser:
         try:
             logger.debug(f"Resolving XPath->index (Hybrid): {xpath_str}")
 
+            def _find_unique_index(haystack: str, needle: str):
+                if not haystack or not needle:
+                    return None, 0
+                first = haystack.find(needle)
+                if first == -1:
+                    return None, 0
+                second = haystack.find(needle, first + 1)
+                if second != -1:
+                    return None, 2
+                return first, 1
+
             match = re.search(r'DocFragment\[(\d+)]', xpath_str)
             if not match:
                 return None
@@ -1198,6 +1214,8 @@ class EbookParser:
             target_item = next((i for i in spine_map if i['spine_index'] == spine_index), None)
             if not target_item:
                 return None
+
+            bs4_chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
 
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
             offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
@@ -1254,35 +1272,104 @@ class EbookParser:
                     node_text = parent.text_content().strip()
 
             clean_anchor = " ".join(node_text.split())
+            chapter_len = max(0, target_item['end'] - target_item['start'])
+            chapter_base = target_item['start']
+            full_len = len(full_text)
+
+            # Tier: exact unique match in BS4 coordinate space.
             if clean_anchor:
-                bs4_chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
-                local_start_index = bs4_chapter_text.find(clean_anchor)
-                if local_start_index != -1:
-                    safe_offset = min(target_offset, len(clean_anchor))
-                    return target_item['start'] + local_start_index + safe_offset
+                local_start_index, match_count = _find_unique_index(bs4_chapter_text, clean_anchor)
+                if local_start_index is not None:
+                    safe_offset = min(max(target_offset, 0), len(clean_anchor))
+                    local_offset = local_start_index + safe_offset
+                    if chapter_len > 0:
+                        local_offset = min(local_offset, chapter_len)
+                    global_offset = min(full_len, chapter_base + local_offset)
+                    logger.debug(
+                        "XPath->index BS4 fallback tier=exact_unique local_start=%s safe_offset=%s local_offset=%s global_offset=%s",
+                        local_start_index,
+                        safe_offset,
+                        local_offset,
+                        global_offset,
+                    )
+                    return global_offset
+                if match_count > 1:
+                    logger.debug("XPath->index exact anchor is ambiguous in BS4 chapter text")
+                else:
+                    logger.debug("XPath->index exact anchor not found in BS4 chapter text")
+            else:
+                logger.debug("XPath->index clean anchor empty after extraction")
 
-            logger.debug("Exact text match failed, falling back to LXML offset calculation")
-            preceding_len = 0
-            found_target = False
-            separator_len = 1
+            # Tier: deterministic unique prefix match in BS4 coordinate space.
+            if clean_anchor:
+                prefix_lengths = [100, 80, 60, 50, 40, 30]
+                for prefix_len in prefix_lengths:
+                    if len(clean_anchor) < prefix_len:
+                        continue
+                    prefix = clean_anchor[:prefix_len].strip()
+                    if not prefix:
+                        continue
+                    local_start_index, match_count = _find_unique_index(bs4_chapter_text, prefix)
+                    if local_start_index is None:
+                        if match_count > 1:
+                            logger.debug(
+                                "XPath->index prefix len=%s ambiguous in BS4 chapter text",
+                                prefix_len,
+                            )
+                        continue
 
-            for node in tree.iter():
-                if node == target_node:
-                    found_target = True
-                    if node.text and target_offset > 0:
-                        raw_segment = node.text[:min(len(node.text), target_offset)]
-                        preceding_len += len(raw_segment.strip())
-                    elif target_offset > 0:
-                        preceding_len += target_offset
-                    break
+                    local_offset = local_start_index
+                    if chapter_len > 0:
+                        local_offset = min(local_offset, chapter_len)
+                    global_offset = min(full_len, chapter_base + local_offset)
+                    logger.debug(
+                        "XPath->index BS4 fallback tier=substring_prefix_unique prefix_len=%s local_offset=%s global_offset=%s",
+                        prefix_len,
+                        local_offset,
+                        global_offset,
+                    )
+                    return global_offset
 
-                if node.text and node.text.strip():
-                    preceding_len += (len(node.text.strip()) + separator_len)
-                if node.tail and node.tail.strip():
-                    preceding_len += (len(node.tail.strip()) + separator_len)
+            # Tier: deterministic unique normalized match with normalized->raw map.
+            if clean_anchor:
+                normalized_chapter_text, norm_to_raw = self._normalize_with_map(bs4_chapter_text)
+                normalized_anchor = self._normalize(clean_anchor)
+                normalized_candidates = [normalized_anchor]
+                for prefix_len in [100, 80, 60, 50, 40, 30]:
+                    if len(normalized_anchor) >= prefix_len:
+                        normalized_candidates.append(normalized_anchor[:prefix_len])
 
-            if found_target:
-                return target_item['start'] + preceding_len
+                seen_candidates = set()
+                for candidate in normalized_candidates:
+                    if not candidate or candidate in seen_candidates:
+                        continue
+                    seen_candidates.add(candidate)
+
+                    norm_index, match_count = _find_unique_index(normalized_chapter_text, candidate)
+                    if norm_index is None:
+                        if match_count > 1:
+                            logger.debug(
+                                "XPath->index normalized candidate len=%s ambiguous in normalized chapter text",
+                                len(candidate),
+                            )
+                        continue
+                    if norm_index >= len(norm_to_raw):
+                        continue
+
+                    local_offset = norm_to_raw[norm_index]
+                    if chapter_len > 0:
+                        local_offset = min(local_offset, chapter_len)
+                    global_offset = min(full_len, chapter_base + local_offset)
+                    logger.debug(
+                        "XPath->index BS4 fallback tier=normalized_unique candidate_len=%s norm_index=%s local_offset=%s global_offset=%s",
+                        len(candidate),
+                        norm_index,
+                        local_offset,
+                        global_offset,
+                    )
+                    return global_offset
+
+            logger.debug("XPath->index BS4 fallback failed deterministically; returning None")
             return None
 
         except Exception as e:
