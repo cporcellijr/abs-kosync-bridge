@@ -446,6 +446,55 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         finally:
             src.web_server.get_kosync_id_for_ebook = original_get_kosync
 
+    def test_storyteller_unlink_removes_from_collection_by_uuid(self):
+        """Unlinking Storyteller should remove the prior UUID from Storyteller collection."""
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='st-unlink-1',
+            abs_title='Story Book',
+            ebook_filename='storyteller_uuid-1.epub',
+            original_ebook_filename='original.epub',
+            storyteller_uuid='uuid-1',
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.remove_from_collection_by_uuid.return_value = True
+
+        response = self.client.post('/api/storyteller/link/st-unlink-1', json={'uuid': 'none'})
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_storyteller_client.remove_from_collection_by_uuid.assert_called_once_with(
+            'uuid-1',
+            'Synced with KOReader'
+        )
+        self.mock_database_service.save_book.assert_called_once()
+
+    def test_delete_mapping_removes_storyteller_collection_by_uuid(self):
+        """Deleting a mapping should remove Storyteller UUID from collection when linked."""
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='delete-st-1',
+            abs_title='Delete Story Book',
+            ebook_filename='storyteller_uuid-del.epub',
+            storyteller_uuid='uuid-del',
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.remove_from_collection_by_uuid.return_value = True
+        self.mock_booklore_client.is_configured.return_value = False
+        self.mock_manager.epub_cache_dir = None
+
+        response = self.client.post('/delete/delete-st-1')
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_storyteller_client.remove_from_collection_by_uuid.assert_called_once_with(
+            'uuid-del',
+            'Synced with KOReader'
+        )
+        self.mock_database_service.delete_book.assert_called_once_with('delete-st-1')
+
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""
         # Setup mock book

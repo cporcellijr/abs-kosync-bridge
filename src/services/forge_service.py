@@ -428,9 +428,18 @@ class ForgeService:
                  ebook_files = self.abs_client.get_ebook_files(text_item.get('abs_id'))
                  if ebook_files: self.abs_client.download_file(ebook_files[0]['stream_url'], epub_dest)
             elif source == 'CWA':
-                 cwa_client = self.library_service.cwa_client
-                 url = text_item.get('download_url')
-                 if url: cwa_client.download_ebook(url, epub_dest)
+                 cwa_client = getattr(self.library_service, 'cwa_client', None)
+                 download_url = text_item.get('download_url')
+                 cwa_id = text_item.get('cwa_id')
+                 text_downloaded = False
+                 if download_url and cwa_client:
+                     text_downloaded = bool(cwa_client.download_ebook(download_url, epub_dest))
+                 elif cwa_id and cwa_client:
+                     book_info = cwa_client.get_book_by_id(cwa_id)
+                     if book_info and book_info.get('download_url'):
+                         text_downloaded = bool(cwa_client.download_ebook(book_info['download_url'], epub_dest))
+                 if not text_downloaded:
+                     logger.error(f"❌ Auto-Forge: CWA download failed for '{cwa_id or download_url or 'unknown'}'")
             else:
                  raise Exception(f"Unknown or missing text source type: '{source}'")
             
@@ -546,35 +555,40 @@ class ForgeService:
                  new_hash = self.ebook_parser.get_kosync_id(target_path)
                  logger.info(f"⚡ Auto-Forge: Generated New Hash (Artifact): {new_hash}")
 
-            # --- EXTRACT & ALIGN ---
-            logger.info("⚡ Auto-Forge: Extracting SMIL transcript and generating alignment map...")
+            # --- EXTRACT TEXT ---
             item_details = self.abs_client.get_item_details(abs_id)
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             book_text, _ = self.ebook_parser.extract_text_and_map(target_path)
-            raw_transcript = self.transcriber.transcribe_from_smil(
-                abs_id, target_path, chapters, full_book_text=book_text
-            )
-            if not raw_transcript:
-                raise Exception("Auto-Forge: SMIL extraction returned no transcript. Cannot build alignment map.")
-            success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
-            if not success:
-                raise Exception("Auto-Forge: align_and_store failed to generate a valid alignment map.")
-            logger.info(f"✅ Auto-Forge: Alignment map stored for '{abs_id}'")
 
-            # --- INGEST STORYTELLER TRANSCRIPT ---
+            # --- INGEST STORYTELLER TRANSCRIPT (PRIMARY) ---
             storyteller_manifest = ingest_storyteller_transcripts(abs_id, title, chapters)
+            storyteller_alignment_ok = False
             if storyteller_manifest:
-                logger.info(f"✅ Auto-Forge: Storyteller transcript ingested for '{abs_id}'")
+                logger.info(f"Auto-Forge: Storyteller transcript ingested for '{abs_id}'")
                 try:
                     st_transcript = StorytellerTranscript(storyteller_manifest)
                     if self.alignment_service.align_storyteller_and_store(abs_id, st_transcript, ebook_text=book_text):
-                        logger.info(f"✅ Auto-Forge: Storyteller-anchored alignment map stored for '{abs_id}'")
+                        storyteller_alignment_ok = True
+                        logger.info(f"Auto-Forge: Storyteller-anchored alignment map stored for '{abs_id}'")
                     else:
-                        logger.warning(f"⚠️ Auto-Forge: Storyteller alignment failed, keeping SMIL alignment for '{abs_id}'")
+                        logger.warning(f"Auto-Forge: Storyteller alignment failed, falling back to SMIL for '{abs_id}'")
                 except Exception as st_err:
-                    logger.warning(f"⚠️ Auto-Forge: Storyteller alignment error ({st_err}), keeping SMIL alignment for '{abs_id}'")
+                    logger.warning(f"Auto-Forge: Storyteller alignment error ({st_err}), falling back to SMIL for '{abs_id}'")
             else:
-                logger.info(f"ℹ️ Auto-Forge: No Storyteller transcript files found for '{abs_id}' (SMIL alignment only)")
+                logger.info(f"Auto-Forge: No Storyteller transcript files found for '{abs_id}'")
+
+            # --- SMIL FALLBACK (LAST RESORT) ---
+            if not storyteller_alignment_ok:
+                logger.info("Auto-Forge: Falling back to SMIL transcript extraction...")
+                raw_transcript = self.transcriber.transcribe_from_smil(
+                    abs_id, target_path, chapters, full_book_text=book_text
+                )
+                if not raw_transcript:
+                    raise Exception('Auto-Forge: SMIL extraction returned no transcript. Cannot build alignment map.')
+                success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
+                if not success:
+                    raise Exception('Auto-Forge: align_and_store failed to generate a valid alignment map.')
+                logger.info(f"Auto-Forge: SMIL alignment map stored for '{abs_id}'")
 
             # --- UPDATE DATABASE ---
             # NOTE: DB service calls need connection. Assuming database_service handles its own session.
@@ -603,7 +617,10 @@ class ForgeService:
                     self.booklore_client.add_to_shelf(shelf_filename, booklore_shelf_name)
 
                 if self.storyteller_client:
-                    self.storyteller_client.add_to_collection(target_filename)
+                    if found_uuid and hasattr(self.storyteller_client, 'add_to_collection_by_uuid'):
+                        self.storyteller_client.add_to_collection_by_uuid(found_uuid)
+                    else:
+                        self.storyteller_client.add_to_collection(target_filename)
                     
             except Exception as e:
                 logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")

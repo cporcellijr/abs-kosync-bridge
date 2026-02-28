@@ -524,6 +524,7 @@ def get_searchable_ebooks(search_term):
                                 name=fname,
                                 title=cr.get('title'),
                                 authors=cr.get('author'),
+                                path=cr.get('download_url'),
                                 source='CWA',
                                 source_id=cr.get('id')
                             ))
@@ -1180,12 +1181,16 @@ def match():
             # Map specific keys based on source
             if source_type == 'ABS': text_item['abs_id'] = source_id
             if source_type == 'Booklore': text_item['booklore_id'] = source_id
-            if source_type == 'CWA': text_item['cwa_id'] = source_id
+            if source_type == 'CWA':
+                text_item['cwa_id'] = source_id
+                if source_path:
+                    text_item['download_url'] = source_path
             if source_type == 'Local File': text_item['path'] = source_path
             
             # 2. Calculate initial Kosync ID (Original) - strictly for DB record
             # We use the ORIGINAL file for the ID initially (or forever if tri-linked).
-            kosync_doc_id = get_kosync_id_for_ebook(original_filename, None)
+            initial_booklore_id = source_id if source_type == 'Booklore' else None
+            kosync_doc_id = get_kosync_id_for_ebook(original_filename, initial_booklore_id)
             
             if not kosync_doc_id:
                 # If we can't get ID from original (e.g. remote only?), we might rely on the forged one later.
@@ -1656,6 +1661,15 @@ def cleanup_mapping_resources(book):
     except Exception as e:
         logger.warning(f"⚠️ Failed to remove from ABS collection: {e}")
 
+    if book.storyteller_uuid:
+        storyteller_collection_name = os.environ.get('STORYTELLER_COLLECTION_NAME', 'Synced with KOReader')
+        try:
+            st_client = container.storyteller_client()
+            if hasattr(st_client, 'remove_from_collection_by_uuid'):
+                st_client.remove_from_collection_by_uuid(book.storyteller_uuid, storyteller_collection_name)
+        except Exception as e:
+            logger.warning(f"Failed to remove from Storyteller collection: {e}")
+
     if book.ebook_filename and container.booklore_client().is_configured():
         shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
         try:
@@ -1853,9 +1867,19 @@ def api_storyteller_link(abs_id):
     # [NEW] Handle explicit unlinking
     if storyteller_uuid == "none" or not storyteller_uuid:
         logger.info(f"🔄 Unlinking Storyteller for '{book.abs_title}'")
+        previous_storyteller_uuid = book.storyteller_uuid
         book.storyteller_uuid = None
         book.transcript_source = None
         book.transcript_file = None
+
+        if previous_storyteller_uuid:
+            try:
+                st_client = container.storyteller_client()
+                if hasattr(st_client, 'remove_from_collection_by_uuid'):
+                    storyteller_collection_name = os.environ.get('STORYTELLER_COLLECTION_NAME', 'Synced with KOReader')
+                    st_client.remove_from_collection_by_uuid(previous_storyteller_uuid, storyteller_collection_name)
+            except Exception as e:
+                logger.warning(f"Failed to remove Storyteller UUID from collection: {e}")
         
         # Revert to original filename if it exists
         if book.original_ebook_filename:
@@ -2520,7 +2544,5 @@ if __name__ == '__main__':
         logger.info(f"🚀 Split-Port Mode Active: Sync-only server on port {sync_port}")
 
     app.run(host='0.0.0.0', port=5757, debug=False)
-
-
 
 
