@@ -129,7 +129,6 @@ class TestForgeService(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             storyteller_library = tmp_path / "storyteller_library"
-            processing_dir = tmp_path / "processing"
             epub_cache_dir = tmp_path / "epub_cache"
 
             title = "Auto Book"
@@ -177,7 +176,6 @@ class TestForgeService(unittest.TestCase):
                 os.environ,
                 {
                     "STORYTELLER_LIBRARY_DIR": str(storyteller_library),
-                    "PROCESSING_DIR": str(processing_dir),
                     "ABS_COLLECTION_NAME": "Synced with KOReader",
                     "BOOKLORE_SHELF_NAME": "Kobo",
                 },
