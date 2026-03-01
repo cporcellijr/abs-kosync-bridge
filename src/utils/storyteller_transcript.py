@@ -206,11 +206,18 @@ class StorytellerTranscript:
         with open(chapter_file, "r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        if not isinstance(raw, dict) or "wordTimeline" not in raw:
+        if not isinstance(raw, dict):
             raise ValueError(f"Invalid storyteller chapter format: {chapter_file}")
 
         transcript = raw.get("transcript", "")
-        timeline = list(raw.get("wordTimeline") or [])
+        timeline_raw = raw.get("wordTimeline")
+        if not isinstance(timeline_raw, list):
+            timeline_raw = raw.get("timeline")
+        if not isinstance(timeline_raw, list):
+            raise ValueError(
+                f"Invalid storyteller chapter format (missing 'wordTimeline' or 'timeline'): {chapter_file}"
+            )
+        timeline = list(timeline_raw)
         timeline.sort(key=lambda x: float(x.get("startTime", 0.0) or 0.0))
         start_times = [float(w.get("startTime", 0.0) or 0.0) for w in timeline]
         start_offsets_utf16 = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]

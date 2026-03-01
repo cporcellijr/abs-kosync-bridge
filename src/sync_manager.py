@@ -311,6 +311,8 @@ class SyncManager:
             client_pct = client_state.current.get('pct', 0)
             client_xpath = client_state.current.get('xpath')
             client_cfi = client_state.current.get('cfi')
+            client_href = client_state.current.get('href')
+            client_frag = client_state.current.get('frag')
             normalization_source = "percent_fallback"
             
             try:
@@ -325,6 +327,14 @@ class SyncManager:
                     char_offset = self.ebook_parser.resolve_cfi_to_index(book.ebook_filename, client_cfi)
                     if char_offset is not None:
                         normalization_source = "cfi"
+
+                if char_offset is None and client_href and client_frag:
+                    txt_at_loc = self.ebook_parser.resolve_locator_id(book.ebook_filename, client_href, client_frag)
+                    if txt_at_loc:
+                        idx = full_text.find(txt_at_loc[:100])
+                        if idx >= 0:
+                            char_offset = idx
+                            normalization_source = "href_frag"
 
                 if char_offset is None:
                     char_offset = int(client_pct * total_text_len)

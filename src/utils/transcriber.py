@@ -231,11 +231,25 @@ class AudioTranscriber:
         """Detect storyteller-rich vs legacy segment transcript formats."""
         if isinstance(data, dict) and data.get("format") == "storyteller_manifest":
             return "storyteller_manifest"
-        if isinstance(data, dict) and "wordTimeline" in data:
+        if isinstance(data, dict) and (
+            isinstance(data.get("wordTimeline"), list) or isinstance(data.get("timeline"), list)
+        ):
             return "storyteller_word_timeline"
         if isinstance(data, list) and data and isinstance(data[0], dict) and 'start' in data[0]:
             return "segment_list"
         return "unknown"
+
+    @staticmethod
+    def _get_storyteller_timeline(data):
+        if not isinstance(data, dict):
+            return []
+        timeline = data.get("wordTimeline")
+        if isinstance(timeline, list):
+            return timeline
+        timeline = data.get("timeline")
+        if isinstance(timeline, list):
+            return timeline
+        return []
 
     @staticmethod
     def _storyteller_floor(values, target):
@@ -260,7 +274,7 @@ class AudioTranscriber:
         return re.sub(r'\s+', ' ', transcript_text[start:end]).strip()
 
     def _storyteller_text_at_time(self, data, timestamp):
-        timeline = data.get("wordTimeline") or []
+        timeline = self._get_storyteller_timeline(data)
         if not timeline:
             return None
         start_times = [float(w.get("startTime", 0.0) or 0.0) for w in timeline]
@@ -271,7 +285,7 @@ class AudioTranscriber:
         return self._storyteller_context(data.get("transcript", ""), offset)
 
     def _storyteller_time_for_offset(self, data, offset):
-        timeline = data.get("wordTimeline") or []
+        timeline = self._get_storyteller_timeline(data)
         if not timeline:
             return None
         start_offsets = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]
@@ -621,7 +635,7 @@ class AudioTranscriber:
 
             if isinstance(data, StorytellerTranscript):
                 return data.get_text_at_time(timestamp)
-            if isinstance(data, dict) and 'wordTimeline' in data:
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
                 return self._storyteller_text_at_time(data, timestamp)
 
             # Find segment containing timestamp
@@ -700,7 +714,7 @@ class AudioTranscriber:
             if isinstance(data, StorytellerTranscript):
                 previous_ts = max(0.0, float(timestamp) - 0.5)
                 return data.get_text_at_time(previous_ts)
-            if isinstance(data, dict) and 'wordTimeline' in data:
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
                 previous_ts = max(0.0, float(timestamp) - 0.5)
                 return self._storyteller_text_at_time(data, previous_ts)
 
@@ -894,7 +908,7 @@ class AudioTranscriber:
                 chapter_start = float(chapter_meta.get("start", 0.0) or 0.0)
                 return chapter_start + float(local_ts)
 
-            if isinstance(data, dict) and 'wordTimeline' in data:
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
                 if char_offset is not None:
                     return self._storyteller_time_for_offset(data, int(char_offset))
 

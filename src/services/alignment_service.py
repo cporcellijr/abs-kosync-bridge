@@ -542,7 +542,9 @@ def _is_storyteller_wordtimeline_chapter(chapter_path: Path) -> bool:
             data = json.load(f)
         if not isinstance(data, dict):
             return False
-        return isinstance(data.get("wordTimeline"), list)
+        if isinstance(data.get("wordTimeline"), list):
+            return True
+        return isinstance(data.get("timeline"), list)
     except Exception:
         return False
 
@@ -556,6 +558,9 @@ def _validate_storyteller_chapters(
     Returns (is_valid, source_filenames, destination_filenames).
     """
     if expected_count <= 0:
+        logger.info(
+            f"Storyteller validation failed at '{transcriptions_dir}': expected_count={expected_count} (must be > 0)"
+        )
         return False, [], []
 
     expected_files = [_storyteller_filename_for_abs_chapter(i, "00000") for i in range(expected_count)]
@@ -565,13 +570,41 @@ def _validate_storyteller_chapters(
         if re.match(r"^0000[01]-\d{5}\.json$", p.name)
     ]
     if len(present) != expected_count:
+        all_json = sorted([p.name for p in transcriptions_dir.glob("*.json")])
+        logger.info(
+            "Storyteller validation failed at '%s': expected %d chapter files, found %d matching "
+            "pattern '^0000[01]-\\d{5}\\.json$' (total json=%d)",
+            transcriptions_dir,
+            expected_count,
+            len(present),
+            len(all_json),
+        )
+        if all_json:
+            sample = ", ".join(all_json[:10])
+            logger.info(
+                "Storyteller validation file sample at '%s': %s%s",
+                transcriptions_dir,
+                sample,
+                " ..." if len(all_json) > 10 else "",
+            )
         return False, [], []
 
     for prefix in ("00000", "00001"):
         source_files = [_storyteller_filename_for_abs_chapter(i, prefix) for i in range(expected_count)]
         if all((transcriptions_dir / name).exists() for name in source_files):
-            if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+            invalid_files = [
+                name for name in source_files
+                if not _is_storyteller_wordtimeline_chapter(transcriptions_dir / name)
+            ]
+            if not invalid_files:
                 return True, source_files, expected_files
+            logger.info(
+                "Storyteller validation failed at '%s': %d chapter file(s) are not storyteller timeline format "
+                "(expected 'wordTimeline' or 'timeline'); first invalid='%s'",
+                transcriptions_dir,
+                len(invalid_files),
+                invalid_files[0],
+            )
             return False, [], []
 
     source_files = []
@@ -585,10 +618,31 @@ def _validate_storyteller_chapters(
         elif has_alt and not has_canonical:
             source_files.append(alt)
         else:
+            logger.info(
+                "Storyteller validation failed at '%s': chapter index %d missing unique file "
+                "(canonical='%s' exists=%s, alt='%s' exists=%s)",
+                transcriptions_dir,
+                i,
+                canonical,
+                has_canonical,
+                alt,
+                has_alt,
+            )
             return False, [], []
 
-    if all(_is_storyteller_wordtimeline_chapter(transcriptions_dir / name) for name in source_files):
+    invalid_files = [
+        name for name in source_files
+        if not _is_storyteller_wordtimeline_chapter(transcriptions_dir / name)
+    ]
+    if not invalid_files:
         return True, source_files, expected_files
+    logger.info(
+        "Storyteller validation failed at '%s': mixed-prefix chapter set has %d file(s) without storyteller "
+        "timeline format ('wordTimeline' or 'timeline'); first invalid='%s'",
+        transcriptions_dir,
+        len(invalid_files),
+        invalid_files[0],
+    )
     return False, [], []
 
 
