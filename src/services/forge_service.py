@@ -237,7 +237,6 @@ class ForgeService:
 
                     # Step 1: Cross-device move to hidden folder inside Storyteller library
                     shutil.move(str(course_dir), str(hidden_staging_dir))
-
                     logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
@@ -456,7 +455,6 @@ class ForgeService:
 
                     # Step 1: Cross-device move to hidden folder inside Storyteller library
                     shutil.move(str(course_dir), str(hidden_staging_dir))
-
                     logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
