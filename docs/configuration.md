@@ -42,6 +42,8 @@ ports:
   - If your Docker volume is `/path/to/storyteller/assets:/storyteller/assets`, set this value to `/storyteller`.
   - This setting is optional and can be configured in the Web UI (no compose env var required).
 - **Storyteller Backfill**: Settings includes a maintenance action to scan all Storyteller-linked books, ingest available transcript JSON files, and rebuild alignment maps without re-running SMIL/Whisper.
+- **Forge Staging Directory (Optional env)**: `PROCESSING_DIR` controls temporary Forge staging before files are atomically presented to Storyteller.
+  - Default is `/tmp`, so no dedicated `PROCESSING_DIR` volume mount is required.
 
 > [!NOTE]
 > The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.

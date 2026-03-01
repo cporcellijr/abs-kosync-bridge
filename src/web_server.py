@@ -74,14 +74,13 @@ def setup_dependencies(app, test_container=None):
 
     # RELOAD GLOBALS from updated os.environ
 
-    global LINKER_BOOKS_DIR, DEST_BASE, STORYTELLER_INGEST, ABS_AUDIO_ROOT
+    global LINKER_BOOKS_DIR, STORYTELLER_INGEST, ABS_AUDIO_ROOT
     global STORYTELLER_LIBRARY_DIR, EBOOK_IMPORT_DIR
     global ABS_API_URL, ABS_API_TOKEN, ABS_LIBRARY_ID
     global ABS_COLLECTION_NAME, BOOKLORE_SHELF_NAME, MONITOR_INTERVAL
     global SYNC_PERIOD_MINS, SYNC_DELTA_ABS_SECONDS, SYNC_DELTA_KOSYNC_PERCENT, FUZZY_MATCH_THRESHOLD
 
     LINKER_BOOKS_DIR = Path(os.environ.get("LINKER_BOOKS_DIR", "/linker_books"))
-    DEST_BASE = Path(os.environ.get("PROCESSING_DIR", "/processing"))
     STORYTELLER_INGEST = Path(os.environ.get("STORYTELLER_INGEST_DIR", os.environ.get("LINKER_BOOKS_DIR", "/linker_books")))
     ABS_AUDIO_ROOT = Path(os.environ.get("AUDIOBOOKS_DIR", "/audiobooks"))
     STORYTELLER_LIBRARY_DIR = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
@@ -212,7 +211,6 @@ def inject_global_vars():
             'JOB_RETRY_DELAY_MINS': '15',
             'MONITOR_INTERVAL': '3600',
             'LINKER_BOOKS_DIR': '/linker_books',
-            'PROCESSING_DIR': '/processing',
             'STORYTELLER_INGEST_DIR': '/linker_books',
             'AUDIOBOOKS_DIR': '/audiobooks',
             'STORYTELLER_ASSETS_DIR': '',

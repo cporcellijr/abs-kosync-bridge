@@ -130,7 +130,7 @@ class ForgeService:
             safe_title = self.safe_folder_name(title) if title else "Unknown"
             
             st_lib_path = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
-            dest_base = Path(os.environ.get("PROCESSING_DIR", "/processing"))
+            dest_base = Path(os.environ.get("PROCESSING_DIR", "/tmp"))
 
             final_course_dir = st_lib_path / safe_title
             hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
@@ -238,7 +238,6 @@ class ForgeService:
                     # Step 1: Cross-device move to hidden folder inside Storyteller library
                     shutil.move(str(course_dir), str(hidden_staging_dir))
 
-                    # Step 2: Instant atomic rename to reveal to Storyteller scanner
                     logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir
@@ -399,7 +398,7 @@ class ForgeService:
             safe_author = self.safe_folder_name(author) if author else "Unknown"
             safe_title = self.safe_folder_name(title) if title else "Unknown"
             st_lib_path = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/storyteller_library"))
-            dest_base = Path(os.environ.get("PROCESSING_DIR", "/processing"))
+            dest_base = Path(os.environ.get("PROCESSING_DIR", "/tmp"))
 
             final_course_dir = st_lib_path / safe_title
             hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
@@ -458,7 +457,6 @@ class ForgeService:
                     # Step 1: Cross-device move to hidden folder inside Storyteller library
                     shutil.move(str(course_dir), str(hidden_staging_dir))
 
-                    # Step 2: Instant atomic rename to reveal to Storyteller scanner
                     logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
                     hidden_staging_dir.rename(final_course_dir)
                     course_dir = final_course_dir

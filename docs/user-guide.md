@@ -145,6 +145,8 @@ This is the recommended workflow for most users.
 
 The standalone **Forge** page (`/forge`) lets you stage and process a book through Storyteller without creating a sync mapping. Use this if you want to prepare a book for Storyteller independently and then link it manually via the Matcher later.
 
+Forge staging uses `PROCESSING_DIR` if configured, and defaults to `/tmp` if not set. This staging path does not require a dedicated Docker volume mount.
+
 ### When to use it
 
 Use Forge if you want the **immersive Read-Along experience** in the Storyteller app.
