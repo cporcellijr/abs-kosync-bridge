@@ -39,6 +39,21 @@ class ForgeService:
             name = name.replace(c, '_')
         return name.strip() or "Unknown"
 
+    @staticmethod
+    def _extract_original_filename(text_item, fallback_filename=None):
+        """
+        Resolve the user's source EPUB filename from forge payload data.
+        """
+        if not isinstance(text_item, dict):
+            return fallback_filename
+
+        original_name = (
+            text_item.get('original_ebook_filename')
+            or text_item.get('ebook_filename')
+            or text_item.get('filename')
+        )
+        return original_name or fallback_filename
+
     def _copy_audio_files(self, abs_id: str, dest_folder: Path):
         """Copy audiobook files from ABS - Book Linker version"""
         headers = {"Authorization": f"Bearer {self.ABS_API_TOKEN}"}
@@ -393,6 +408,8 @@ class ForgeService:
             self.active_tasks.add(title)
 
         try:
+            original_ebook_filename = self._extract_original_filename(text_item, original_filename)
+
             # --- STAGING & TRIGGER ---
             safe_author = self.safe_folder_name(author) if author else "Unknown"
             safe_title = self.safe_folder_name(title) if title else "Unknown"
@@ -591,6 +608,7 @@ class ForgeService:
             book = self.database_service.get_book(abs_id)
             if book:
                 book.ebook_filename = target_filename
+                book.original_ebook_filename = original_ebook_filename
                 book.storyteller_uuid = found_uuid
                 book.kosync_doc_id = new_hash
                 book.status = 'active'

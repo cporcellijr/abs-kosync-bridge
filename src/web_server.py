@@ -1133,7 +1133,7 @@ def match():
         abs_id = request.form.get('audiobook_id')
         selected_filename = request.form.get('ebook_filename')
         ebook_filename = selected_filename
-        original_ebook_filename = None
+        original_ebook_filename = selected_filename
         audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
         if not selected_ab: return "Audiobook not found", 404
@@ -1459,7 +1459,7 @@ def batch_match():
             for item in session.get('queue', []):
                 ebook_filename = item['ebook_filename']
                 storyteller_uuid = item.get('storyteller_uuid', '')
-                original_ebook_filename = None
+                original_ebook_filename = item['ebook_filename']
                 duration = item['duration']
                 booklore_id = None
                 kosync_doc_id = None
