@@ -178,6 +178,36 @@ def test_determine_leader_ignores_stale_booklore_raw_delta():
     assert leader == "KoSync"
 
 
+def test_single_non_abs_delta_must_be_ahead_on_normalized_timeline():
+    manager = SyncManager.__new__(SyncManager)
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {
+        "ABS": _Client(),
+        "KoSync": _Client(),
+        "BookLore": _Client(),
+    }
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: name == "BookLore")
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 2844.3, "KoSync": 2829.8, "BookLore": 2829.8}
+    )
+
+    book = SimpleNamespace(duration=19967, transcript_file="DB_MANAGED")
+    config = {
+        "ABS": _state({"pct": 0.1424530426, "ts": 2844.3}),
+        "KoSync": _state({"pct": 0.142680}),
+        "BookLore": _state({"pct": 0.105000, "_locator_pct": 0.142680, "_normalization_source": "cfi"}),
+    }
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "ABS"
+    assert leader_pct == config["ABS"].current["pct"]
+
+
 def test_parse_cfi_components_supports_minimal_cfi():
     parser = EbookParser.__new__(EbookParser)
 
@@ -186,6 +216,27 @@ def test_parse_cfi_components_supports_minimal_cfi():
     assert spine_step == 26
     assert element_steps == []
     assert char_offset == 0
+
+
+def test_parse_cfi_components_supports_point_cfi_with_low_spine_step():
+    parser = EbookParser.__new__(EbookParser)
+
+    spine_step, _, char_offset = parser._parse_cfi_components("epubcfi(/6/4!/4/4/208:0)")
+
+    assert spine_step == 4
+    assert char_offset == 0
+
+
+def test_parse_cfi_components_supports_range_cfi():
+    parser = EbookParser.__new__(EbookParser)
+
+    spine_step, element_steps, char_offset = parser._parse_cfi_components(
+        "epubcfi(/6/4!/4/4,/114/1:174,/158/1:176)"
+    )
+
+    assert spine_step == 4
+    assert char_offset == 174
+    assert len(element_steps) > 0
 
 
 def test_generate_cfi_never_emits_empty_element_path():

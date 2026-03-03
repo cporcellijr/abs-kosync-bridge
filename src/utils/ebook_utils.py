@@ -1275,17 +1275,48 @@ class EbookParser:
         """
         try:
             parsed_cfi = epubcfi.parse(cfi)
+            # epubcfi.parse() may return:
+            # - Path (point CFI): has .steps/.offset
+            # - PathRange (range CFI): has .parent/.start/.end
+            # We normalize both to a "combined" start-path step list.
+            if hasattr(parsed_cfi, "steps"):
+                combined_steps = list(parsed_cfi.steps)
+                parsed_offset = parsed_cfi.offset.value if getattr(parsed_cfi, "offset", None) else 0
+            elif hasattr(parsed_cfi, "parent") and hasattr(parsed_cfi, "start"):
+                parent_steps = list(getattr(parsed_cfi.parent, "steps", []) or [])
+                start_steps = list(getattr(parsed_cfi.start, "steps", []) or [])
+                combined_steps = parent_steps + start_steps
+                start_offset = getattr(parsed_cfi.start, "offset", None)
+                parsed_offset = start_offset.value if start_offset else 0
+            else:
+                raise ValueError(f"Unsupported parsed CFI type: {type(parsed_cfi).__name__}")
+
             spine_step = None
             element_steps = []
-            for step in parsed_cfi.steps:
-                if hasattr(step, 'index'):
-                    if step.index == 6:
-                        continue
-                    elif not spine_step and step.index > 6:
-                        spine_step = step.index
-                    elif isinstance(step, epubcfi.cfi.Step):
+
+            redirect_idx = next(
+                (i for i, step in enumerate(combined_steps) if step.__class__.__name__ == "Redirect"),
+                None
+            )
+
+            if redirect_idx is not None:
+                package_steps = [step for step in combined_steps[:redirect_idx] if hasattr(step, "index")]
+                for step in reversed(package_steps):
+                    if step.index != 6:
+                        spine_step = int(step.index)
+                        break
+                element_steps = [step for step in combined_steps[redirect_idx + 1:] if hasattr(step, "index")]
+            else:
+                indexed_steps = [step for step in combined_steps if hasattr(step, "index")]
+                for step in indexed_steps:
+                    if spine_step is None:
+                        if step.index == 6:
+                            continue
+                        spine_step = int(step.index)
+                    else:
                         element_steps.append(step)
-            char_offset = parsed_cfi.offset.value if parsed_cfi.offset else 0
+
+            char_offset = int(parsed_offset or 0)
             return spine_step, element_steps, char_offset
         except Exception as parse_err:
             fallback = re.match(
@@ -1340,7 +1371,7 @@ class EbookParser:
                     continue
 
                 step_index = step.index
-                step_assertion = step.assertion
+                step_assertion = getattr(step, 'assertion', None)
 
                 logger.debug(f"Step {i}: index={step_index}, assertion={step_assertion}")
 
@@ -1451,7 +1482,7 @@ class EbookParser:
                     continue
 
                 step_index = step.index
-                step_assertion = step.assertion
+                step_assertion = getattr(step, 'assertion', None)
 
                 if step_assertion:
                     candidates = current_element.xpath(

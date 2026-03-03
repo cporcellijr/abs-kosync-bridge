@@ -710,9 +710,13 @@ class BookloreClient:
                 ]
             else:
                 if cfi is not None:
-                    base_payload["epubProgress"]["cfi"] = cfi
                     logger.debug(f"Booklore: Setting CFI: {cfi}")
-                payload_variants = [("standard", base_payload)]
+                    payload_variants = [
+                        ("with_cfi", {"bookId": book_id, "epubProgress": {"percentage": pct_display, "cfi": cfi}}),
+                        ("no_cfi", base_payload),
+                    ]
+                else:
+                    payload_variants = [("standard", base_payload)]
         elif book_type == 'PDF':
             payload_variants = [("standard", {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}})]
         elif book_type == 'CBX':
@@ -731,16 +735,25 @@ class BookloreClient:
                 last_status = response.status_code if response else "No response"
                 continue
 
-            # For clear operations, verify Booklore actually persisted 0%.
-            if clear_reset:
+            # Verify EPUB writes to ensure the server actually persisted the target.
+            if book_type == 'EPUB':
                 verified_pct, _ = self._get_progress_by_book_id(book_id)
-                if verified_pct is not None and verified_pct > 0.001:
-                    logger.warning(
-                        f"Booklore clear did not persist for {sanitize_log_data(ebook_filename)} "
-                        f"(variant={variant_name}, observed={verified_pct * 100:.2f}%). Retrying..."
-                    )
-                    last_status = f"verify_failed:{verified_pct * 100:.2f}%"
-                    continue
+                if clear_reset:
+                    if verified_pct is not None and verified_pct > 0.001:
+                        logger.warning(
+                            f"Booklore clear did not persist for {sanitize_log_data(ebook_filename)} "
+                            f"(variant={variant_name}, observed={verified_pct * 100:.2f}%). Retrying..."
+                        )
+                        last_status = f"verify_failed:{verified_pct * 100:.2f}%"
+                        continue
+                elif verified_pct is not None:
+                    if abs(verified_pct - percentage) > 0.005:
+                        logger.warning(
+                            f"Booklore progress write mismatch for {sanitize_log_data(ebook_filename)} "
+                            f"(variant={variant_name}, expected={pct_display:.2f}%, observed={verified_pct * 100:.2f}%). Retrying..."
+                        )
+                        last_status = f"verify_mismatch:{verified_pct * 100:.2f}%"
+                        continue
 
             logger.info(f"Booklore: {sanitize_log_data(ebook_filename)} -> {pct_display:.1f}%")
 

@@ -1185,14 +1185,38 @@ class SyncManager:
                 normalized_positions
                 and len(normalized_positions) > 1
                 and changed_client != "ABS"
-                and changed_source == "percent_fallback"
-                and "ABS" in vals
             ):
-                single_delta_low_conf = True
-                logger.info(
-                    f"🔄 '{abs_id}' '{title_snip}' Ignoring single-client delta from "
-                    f"'{changed_client}' (low-confidence source=percent_fallback); evaluating all candidates"
-                )
+                changed_ts = normalized_positions.get(changed_client)
+                other_ts = [
+                    ts for name, ts in normalized_positions.items()
+                    if name != changed_client and name in vals
+                ]
+
+                if changed_source == "percent_fallback" and "ABS" in vals:
+                    single_delta_low_conf = True
+                    logger.info(
+                        f"🔄 '{abs_id}' '{title_snip}' Ignoring single-client delta from "
+                        f"'{changed_client}' (low-confidence source=percent_fallback); evaluating all candidates"
+                    )
+                elif changed_ts is not None and other_ts:
+                    changed_raw_pct = vals.get(changed_client)
+                    changed_locator_pct = config[changed_client].current.get("_locator_pct")
+                    has_locator_mismatch = (
+                        changed_raw_pct is not None
+                        and changed_locator_pct is not None
+                        and abs(changed_locator_pct - changed_raw_pct) > 0.01
+                    )
+
+                    if has_locator_mismatch:
+                        max_other_ts = max(other_ts)
+                        NORMALIZED_LEAD_EPSILON_SECONDS = 2.0
+                        if changed_ts <= (max_other_ts + NORMALIZED_LEAD_EPSILON_SECONDS):
+                            single_delta_low_conf = True
+                            logger.info(
+                                f"🔄 '{abs_id}' '{title_snip}' Ignoring single-client delta from "
+                                f"'{changed_client}' (raw/locator mismatch and not ahead on normalized timeline: "
+                                f"{changed_ts:.1f}s vs max peer {max_other_ts:.1f}s); evaluating all candidates"
+                            )
 
         if len(clients_with_delta) == 1 and not single_delta_low_conf:
             # Only one client changed - that client is the leader (most recent change wins)
