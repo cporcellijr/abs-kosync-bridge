@@ -501,6 +501,7 @@
             <div class="settings-section section-highlight">
                 <div class="section-header">
                     <h3 class="text-primary">Audiobookshelf (Required)</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('abs', this)">🔗 Test</button>
                 </div>
                 <div class="section-body">
                     <!-- Moved Checkbox to top -->
@@ -546,6 +547,7 @@
                 == '') %}
                 <div class="section-header">
                     <h3 class="text-primary">KOSync Integration</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('kosync', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -632,6 +634,7 @@
                 get_val('STORYTELLER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Storyteller</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('storyteller', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -666,6 +669,7 @@
                 get_val('BOOKLORE_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Booklore</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('booklore', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -713,6 +717,7 @@
                 {% set cwa_enabled = get_bool('CWA_ENABLED') %}
                 <div class="section-header">
                     <h3>Calibre-Web Automated</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('cwa', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -748,6 +753,7 @@
                 get_val('HARDCOVER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Hardcover.app</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('hardcover', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -773,6 +779,7 @@
                 get_val('TELEGRAM_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('telegram', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -1234,6 +1241,30 @@
                     btn.innerHTML = originalText;
                     btn.disabled = false;
                 });
+        }
+
+        function testConnection(service, btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⌛ Testing...';
+            btn.disabled = true;
+            fetch('/api/test-connection/' + service)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        btn.innerHTML = '✅ Connected';
+                        alert('✅ ' + data.message);
+                    } else {
+                        btn.innerHTML = '❌ Failed';
+                        alert('❌ ' + data.message);
+                    }
+                    setTimeout(() => { btn.innerHTML = originalText; }, 3000);
+                })
+                .catch(err => {
+                    btn.innerHTML = '❌ Error';
+                    alert('❌ Test failed: ' + err);
+                    setTimeout(() => { btn.innerHTML = originalText; }, 3000);
+                })
+                .finally(() => { btn.disabled = false; });
         }
 
         function toggleSection(bodyId, isChecked) {

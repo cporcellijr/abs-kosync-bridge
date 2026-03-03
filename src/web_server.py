@@ -2394,9 +2394,172 @@ def get_booklore_libraries():
     """Return available Booklore libraries."""
     if not container.booklore_client().is_configured():
         return jsonify({"error": "Booklore not configured"}), 400
-    
+
     libraries = container.booklore_client().get_libraries()
     return jsonify(libraries)
+
+
+def _test_conn_error(e: Exception) -> str:
+    """Extract a user-friendly message from a requests exception."""
+    msg = str(e)
+    if isinstance(e, requests.exceptions.ConnectionError):
+        inner = str(e.args[0]) if e.args else msg
+        if 'NameResolutionError' in inner or 'getaddrinfo' in inner or 'Name or service not known' in inner:
+            return "DNS lookup failed — check the hostname"
+        if 'Connection refused' in inner or 'No connection could be made' in inner:
+            return "Connection refused — is the server running?"
+        return "Cannot reach server — check the URL"
+    if isinstance(e, requests.exceptions.Timeout):
+        return "Connection timed out — server may be down"
+    if isinstance(e, requests.exceptions.MissingSchema):
+        return "Invalid URL — missing http:// or https://"
+    return msg
+
+
+def test_connection(service: str):
+    """Test connectivity with diagnostic error messages."""
+    testers = {
+        'abs': _test_abs,
+        'kosync': _test_kosync,
+        'storyteller': _test_storyteller,
+        'booklore': _test_booklore,
+        'cwa': _test_cwa,
+        'hardcover': _test_hardcover,
+        'telegram': _test_telegram,
+    }
+    tester = testers.get(service)
+    if not tester:
+        return jsonify({"ok": False, "message": f"Unknown service: {service}"}), 400
+    try:
+        return jsonify(tester())
+    except Exception as e:
+        return jsonify({"ok": False, "message": _test_conn_error(e)})
+
+
+def _test_abs() -> dict:
+    url = os.environ.get('ABS_SERVER', '').rstrip('/')
+    token = os.environ.get('ABS_KEY', '')
+    if not url or not token:
+        return {"ok": False, "message": "Missing server URL or API token"}
+    r = requests.get(f"{url}/api/me", headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    if r.status_code == 200:
+        username = r.json().get('username', 'unknown')
+        return {"ok": True, "message": f"Connected as '{username}'"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": f"Authentication failed ({r.status_code}) — check your API token"}
+    return {"ok": False, "message": f"Server returned {r.status_code}"}
+
+
+def _test_kosync() -> dict:
+    url = os.environ.get('KOSYNC_SERVER', '').rstrip('/')
+    if os.environ.get('KOSYNC_ENABLED', '').lower() == 'false' or not url:
+        return {"ok": False, "message": "KOSync not configured or disabled"}
+    r = requests.get(f"{url}/healthcheck", timeout=5)
+    if r.status_code == 200:
+        return {"ok": True, "message": "Server is reachable"}
+    return {"ok": False, "message": f"Healthcheck returned {r.status_code}"}
+
+
+def _test_storyteller() -> dict:
+    url = os.environ.get('STORYTELLER_API_URL', '').rstrip('/')
+    user = os.environ.get('STORYTELLER_USER', '')
+    pwd = os.environ.get('STORYTELLER_PASSWORD', '')
+    if os.environ.get('STORYTELLER_ENABLED', '').lower() == 'false':
+        return {"ok": False, "message": "Storyteller is disabled"}
+    if not url or not user or not pwd:
+        return {"ok": False, "message": "Missing URL, username, or password"}
+    r = requests.post(
+        f"{url}/api/token",
+        data={"username": user, "password": pwd},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=10,
+    )
+    if r.status_code == 200:
+        return {"ok": True, "message": "Authenticated successfully"}
+    if r.status_code in (401, 403, 422):
+        return {"ok": False, "message": "Invalid username or password"}
+    return {"ok": False, "message": f"Login returned {r.status_code}"}
+
+
+def _test_booklore() -> dict:
+    url = os.environ.get('BOOKLORE_SERVER', '').rstrip('/')
+    user = os.environ.get('BOOKLORE_USER', '')
+    pwd = os.environ.get('BOOKLORE_PASSWORD', '')
+    if os.environ.get('BOOKLORE_ENABLED', '').lower() == 'false':
+        return {"ok": False, "message": "Booklore is disabled"}
+    if not url or not user or not pwd:
+        return {"ok": False, "message": "Missing URL, username, or password"}
+    if not url.lower().startswith(('http://', 'https://')):
+        url = f"http://{url}"
+    r = requests.post(
+        f"{url}/api/v1/auth/login",
+        json={"username": user, "password": pwd},
+        timeout=10,
+    )
+    if r.status_code == 200:
+        return {"ok": True, "message": "Authenticated successfully"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": "Invalid username or password"}
+    return {"ok": False, "message": f"Login returned {r.status_code}"}
+
+
+def _test_cwa() -> dict:
+    url = os.environ.get('CWA_SERVER', '').rstrip('/')
+    user = os.environ.get('CWA_USERNAME', '').strip()
+    pwd = os.environ.get('CWA_PASSWORD', '').strip()
+    if os.environ.get('CWA_ENABLED', '').lower() != 'true' or not url:
+        return {"ok": False, "message": "CWA not configured or disabled"}
+    if not url.lower().startswith(('http://', 'https://')):
+        url = f"http://{url}"
+    r = requests.get(f"{url}/opds", auth=(user, pwd) if user else None, timeout=5)
+    if r.status_code == 200:
+        if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
+            return {"ok": False, "message": "Authentication failed — server returned login page instead of OPDS feed"}
+        return {"ok": True, "message": "Connected to OPDS feed"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": "Invalid credentials"}
+    return {"ok": False, "message": f"Server returned {r.status_code}"}
+
+
+def _test_hardcover() -> dict:
+    token = os.environ.get('HARDCOVER_TOKEN', '').strip()
+    if os.environ.get('HARDCOVER_ENABLED', '').lower() == 'false':
+        return {"ok": False, "message": "Hardcover is disabled"}
+    if not token:
+        return {"ok": False, "message": "Missing API token"}
+    if token.lower().startswith('bearer '):
+        token = token[7:].strip()
+    r = requests.post(
+        "https://api.hardcover.app/v1/graphql",
+        json={"query": "{ me { id username } }"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code == 200:
+        data = r.json()
+        if data.get('data', {}).get('me'):
+            username = data['data']['me'].get('username', 'unknown')
+            return {"ok": True, "message": f"Connected as '{username}'"}
+        errors = data.get('errors', [])
+        if errors:
+            return {"ok": False, "message": f"API error: {errors[0].get('message', 'unknown')}"}
+        return {"ok": False, "message": "Invalid API token — no user data returned"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": "Invalid API token"}
+    return {"ok": False, "message": f"API returned {r.status_code}"}
+
+
+def _test_telegram() -> dict:
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    if os.environ.get('TELEGRAM_ENABLED', '').lower() == 'false' or not token:
+        return {"ok": False, "message": "Telegram not configured or disabled"}
+    r = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+    if r.status_code == 200 and r.json().get('ok'):
+        bot_name = r.json().get('result', {}).get('username', 'unknown')
+        return {"ok": True, "message": f"Connected (bot: @{bot_name})"}
+    if r.status_code == 401:
+        return {"ok": False, "message": "Invalid bot token"}
+    return {"ok": False, "message": f"Telegram API returned {r.status_code}"}
 
 # ---------------- HELPER FUNCTIONS ----------------
 def safe_folder_name(name: str) -> str:
@@ -2453,6 +2616,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
+    app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['GET'])
 
     # Storyteller API routes
     app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])
