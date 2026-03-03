@@ -124,7 +124,9 @@ class TestForgeService(unittest.TestCase):
         self,
         text_item: dict,
         ingest_manifest: str = None,
-        storyteller_alignment_ok: bool = False
+        storyteller_alignment_ok: bool = False,
+        smil_transcript=None,
+        whisper_transcript=None,
     ):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -141,16 +143,27 @@ class TestForgeService(unittest.TestCase):
             if text_item.get("source") == "Local File" and not text_item.get("path"):
                 text_item["path"] = str(source_epub)
 
-            self.service._copy_audio_files = MagicMock(return_value=True)
+            def _copy_audio(_abs_id, dest_path):
+                dest = Path(dest_path)
+                dest.mkdir(parents=True, exist_ok=True)
+                (dest / "part_001.mp3").write_bytes(b"audio")
+                return True
+
+            self.service._copy_audio_files = MagicMock(side_effect=_copy_audio)
             self.mock_ebook_parser.epub_cache_dir = epub_cache_dir
             self.mock_ebook_parser.extract_text_and_map.return_value = ("full text", {})
             self.mock_alignment.align_storyteller_and_store.return_value = storyteller_alignment_ok
             self.mock_alignment.align_and_store.return_value = True
-            self.mock_transcriber.transcribe_from_smil.return_value = [{"ts": 0.0, "char": 0}]
+            if smil_transcript is None:
+                self.mock_transcriber.transcribe_from_smil.return_value = [{"ts": 0.0, "char": 0}]
+            else:
+                self.mock_transcriber.transcribe_from_smil.return_value = smil_transcript
+            self.mock_transcriber.process_audio.return_value = whisper_transcript
 
             self.mock_abs.get_item_details.return_value = {
                 "media": {"chapters": [{"start": 0.0, "end": 5.0}]}
             }
+            self.mock_abs.get_audio_files.return_value = [{"stream_url": "http://audio.test/1.mp3", "ext": "mp3"}]
             self.mock_abs.add_to_collection.return_value = True
             self.mock_booklore.add_to_shelf.return_value = True
 
@@ -237,6 +250,34 @@ class TestForgeService(unittest.TestCase):
         self.mock_alignment.align_storyteller_and_store.assert_called_once()
         self.mock_transcriber.transcribe_from_smil.assert_not_called()
         self.mock_alignment.align_and_store.assert_not_called()
+
+    def test_auto_forge_falls_back_to_whisper_when_smil_rejected(self):
+        """Auto-forge should run Whisper fallback if SMIL returns no transcript."""
+        self._run_auto_forge_pipeline(
+            text_item={"source": "Local File"},
+            ingest_manifest=None,
+            storyteller_alignment_ok=False,
+            smil_transcript=[],
+            whisper_transcript=[{"start": 0.0, "end": 1.0, "text": "hello"}],
+        )
+
+        self.mock_abs.get_audio_files.assert_called_once_with("abs-1")
+        self.mock_transcriber.process_audio.assert_called_once()
+        self.mock_alignment.align_and_store.assert_called_once()
+
+    def test_auto_forge_runs_final_cleanup_on_pipeline_failure(self):
+        """Auto-forge should still try source cleanup after post-download pipeline failures."""
+        with patch.object(self.service, "_cleanup_staged_sources", return_value=0) as mock_cleanup:
+            db_book = self._run_auto_forge_pipeline(
+                text_item={"source": "Local File"},
+                ingest_manifest=None,
+                storyteller_alignment_ok=False,
+                smil_transcript=[],
+                whisper_transcript=[],
+            )
+
+        mock_cleanup.assert_called_once()
+        self.assertEqual(db_book.status, "error")
 
 
 if __name__ == '__main__':

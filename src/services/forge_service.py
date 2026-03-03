@@ -12,6 +12,7 @@ from src.services.alignment_service import ingest_storyteller_transcripts
 from src.utils.storyteller_transcript import StorytellerTranscript
 
 logger = logging.getLogger(__name__)
+AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
 
 class ForgeService:
     def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service):
@@ -51,6 +52,68 @@ class ForgeService:
             return max(0, int(raw))
         except Exception:
             return default
+
+    @staticmethod
+    def _safe_resolve(path: Path) -> Path:
+        try:
+            return path.resolve()
+        except Exception:
+            return path
+
+    def _cleanup_staged_sources(
+        self,
+        course_dir: Path,
+        staged_epub_path: Path = None,
+        preserve_paths=None,
+        context: str = "Forge"
+    ) -> int:
+        """
+        Remove staged source audio/EPUB while preserving Storyteller output artifacts.
+        """
+        if not course_dir:
+            return 0
+
+        course_dir = Path(course_dir)
+        if not course_dir.exists():
+            return 0
+
+        preserve_resolved = set()
+        for path in preserve_paths or []:
+            if not path:
+                continue
+            preserve_resolved.add(self._safe_resolve(Path(path)))
+
+        deleted = 0
+        failed = 0
+
+        for file_path in course_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if self._safe_resolve(file_path) in preserve_resolved:
+                continue
+            if file_path.suffix.lower() in AUDIO_EXTENSIONS:
+                try:
+                    file_path.unlink()
+                    deleted += 1
+                except Exception as cleanup_err:
+                    failed += 1
+                    logger.debug(f"{context}: Failed to delete source audio '{file_path}': {cleanup_err}")
+
+        if staged_epub_path:
+            staged_epub_path = Path(staged_epub_path)
+            if (
+                staged_epub_path.exists()
+                and self._safe_resolve(staged_epub_path) not in preserve_resolved
+            ):
+                try:
+                    staged_epub_path.unlink()
+                    deleted += 1
+                except Exception as cleanup_err:
+                    failed += 1
+                    logger.debug(f"{context}: Failed to delete staged epub '{staged_epub_path}': {cleanup_err}")
+
+        logger.info(f"{context}: Cleanup complete - deleted {deleted} source file(s), failed {failed}.")
+        return deleted
 
     @staticmethod
     def _extract_original_filename(text_item, fallback_filename=None):
@@ -460,7 +523,6 @@ class ForgeService:
 
 
             # Step 3: Cleanup Monitor
-            AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
             MAX_WAIT = 3600  # 60 minutes
             POLL_INTERVAL = 30 # Check every 30s
             elapsed = 0
@@ -518,21 +580,13 @@ class ForgeService:
                             )
                             time.sleep(self.storyteller_cleanup_grace_seconds)
 
-                        deleted = 0
-                        for f in course_dir.iterdir():
-                            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-                                try:
-                                    f.unlink()
-                                    deleted += 1
-                                except Exception: pass
+                        self._cleanup_staged_sources(
+                            course_dir=course_dir,
+                            staged_epub_path=epub_dest,
+                            preserve_paths=[completed_epub_path],
+                            context="Forge",
+                        )
 
-                        if epub_dest.exists() and epub_dest != completed_epub_path:
-                            try:
-                                epub_dest.unlink()
-                                deleted += 1
-                            except Exception: pass
-
-                        logger.info(f"⚡ Forge: Cleanup complete - deleted {deleted} source files.")
                         return
 
                 except Exception as e:
@@ -567,6 +621,11 @@ class ForgeService:
         
         with self.lock:
             self.active_tasks.add(title)
+
+        course_dir = None
+        epub_dest = None
+        cleanup_requested = False
+        cleanup_preserve_paths = []
 
         try:
             original_ebook_filename = self._extract_original_filename(text_item, original_filename)
@@ -797,6 +856,10 @@ class ForgeService:
             else:
                 raise Exception("Auto-Forge completion detected but no downloadable artifact source was available")
 
+            cleanup_requested = True
+            if readaloud_path:
+                cleanup_preserve_paths.append(readaloud_path)
+
 
             # --- RECALCULATE HASH ---
             # [FIX] Prioritize original_hash if valid (Tri-Link Principle)
@@ -840,12 +903,14 @@ class ForgeService:
             # --- INGEST STORYTELLER TRANSCRIPT (PRIMARY) ---
             storyteller_manifest = ingest_storyteller_transcripts(abs_id, title, chapters)
             storyteller_alignment_ok = False
+            transcript_source = None
             if storyteller_manifest:
                 logger.info(f"Auto-Forge: Storyteller transcript ingested for '{abs_id}'")
                 try:
                     st_transcript = StorytellerTranscript(storyteller_manifest)
                     if self.alignment_service.align_storyteller_and_store(abs_id, st_transcript, ebook_text=book_text):
                         storyteller_alignment_ok = True
+                        transcript_source = "storyteller"
                         logger.info(f"Auto-Forge: Storyteller-anchored alignment map stored for '{abs_id}'")
                     else:
                         logger.warning(f"Auto-Forge: Storyteller alignment failed, falling back to SMIL for '{abs_id}'")
@@ -860,12 +925,24 @@ class ForgeService:
                 raw_transcript = self.transcriber.transcribe_from_smil(
                     abs_id, target_path, chapters, full_book_text=book_text
                 )
+                if raw_transcript:
+                    transcript_source = "smil"
                 if not raw_transcript:
-                    raise Exception('Auto-Forge: SMIL extraction returned no transcript. Cannot build alignment map.')
+                    logger.info("Auto-Forge: SMIL unavailable/rejected. Falling back to Whisper transcription...")
+                    audio_files = self.abs_client.get_audio_files(abs_id)
+                    if not audio_files:
+                        raise Exception("Auto-Forge: ABS returned no audio files for Whisper fallback.")
+                    raw_transcript = self.transcriber.process_audio(
+                        abs_id, audio_files, full_book_text=book_text
+                    )
+                    if raw_transcript:
+                        transcript_source = "whisper"
+                if not raw_transcript:
+                    raise Exception("Auto-Forge: Failed to generate transcript from both SMIL and Whisper.")
                 success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
                 if not success:
                     raise Exception('Auto-Forge: align_and_store failed to generate a valid alignment map.')
-                logger.info(f"Auto-Forge: SMIL alignment map stored for '{abs_id}'")
+                logger.info(f"Auto-Forge: {transcript_source.upper()} alignment map stored for '{abs_id}'")
 
             # --- UPDATE DATABASE ---
             # NOTE: DB service calls need connection. Assuming database_service handles its own session.
@@ -876,9 +953,11 @@ class ForgeService:
                 book.storyteller_uuid = found_uuid
                 book.kosync_doc_id = new_hash
                 book.status = 'active'
-                if storyteller_manifest:
+                if storyteller_manifest and transcript_source == "storyteller":
                     book.transcript_file = storyteller_manifest
-                    book.transcript_source = 'storyteller'
+                    book.transcript_source = "storyteller"
+                elif transcript_source:
+                    book.transcript_source = transcript_source
                 self.database_service.save_book(book)
                 logger.info(f"✅ Auto-Forge: Book {abs_id} updated successfully!")
             else:
@@ -903,16 +982,6 @@ class ForgeService:
             except Exception as e:
                 logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")
 
-            # --- CLEANUP ---
-            AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
-            for f in course_dir.iterdir():
-                if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
-                    try: f.unlink()
-                    except: pass
-            if epub_dest.exists(): 
-                try: epub_dest.unlink()
-                except: pass
-
         except Exception as e:
             logger.error(f"❌ Auto-Forge: Pipeline failed: {e}", exc_info=True)
             try:
@@ -923,6 +992,17 @@ class ForgeService:
             except: pass
             
         finally:
-             with self.lock:
+            try:
+                if cleanup_requested and course_dir and epub_dest:
+                    self._cleanup_staged_sources(
+                        course_dir=course_dir,
+                        staged_epub_path=epub_dest,
+                        preserve_paths=cleanup_preserve_paths,
+                        context="Auto-Forge",
+                    )
+            except Exception as cleanup_err:
+                logger.warning(f"Auto-Forge: Final cleanup failed: {cleanup_err}")
+
+            with self.lock:
                 self.active_tasks.discard(title)
 
