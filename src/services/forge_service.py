@@ -30,6 +30,11 @@ class ForgeService:
         self.ABS_API_TOKEN = os.environ.get("ABS_KEY")
         self.ABS_API_URL = os.environ.get("ABS_SERVER")
         self.ABS_AUDIO_ROOT = Path(os.environ.get("AUDIOBOOKS_DIR", "/audiobooks"))
+        self.storyteller_cleanup_grace_seconds = self._safe_int_env("STORYTELLER_CLEANUP_GRACE_SECONDS", 120)
+        self.storyteller_recovery_max_wait_seconds = self._safe_int_env("STORYTELLER_RECOVERY_MAX_WAIT_SECONDS", 21600)
+        self.storyteller_recovery_poll_interval_seconds = max(
+            30, self._safe_int_env("STORYTELLER_RECOVERY_POLL_INTERVAL_SECONDS", 120)
+        )
 
     @staticmethod
     def safe_folder_name(name: str) -> str:
@@ -38,6 +43,14 @@ class ForgeService:
         for c in invalid:
             name = name.replace(c, '_')
         return name.strip() or "Unknown"
+
+    @staticmethod
+    def _safe_int_env(name: str, default: int) -> int:
+        raw = os.environ.get(name, str(default))
+        try:
+            return max(0, int(raw))
+        except Exception:
+            return default
 
     @staticmethod
     def _extract_original_filename(text_item, fallback_filename=None):
@@ -53,6 +66,148 @@ class ForgeService:
             or text_item.get('filename')
         )
         return original_name or fallback_filename
+
+    def _find_processed_epub(self, course_dir: Path):
+        """
+        Find Storyteller-produced EPUB artifacts in the staged course directory.
+        Prefers latest modified candidate for robustness across naming variants.
+        """
+        candidates = {}
+        try:
+            for pattern in ("*readaloud*.epub", "*synced*.epub"):
+                for p in course_dir.rglob(pattern):
+                    if p.is_file():
+                        candidates[str(p)] = p
+
+            for p in course_dir.rglob("*.epub"):
+                if p.is_file() and "synced" in str(p.parent).lower():
+                    candidates[str(p)] = p
+        except Exception:
+            return None
+
+        if not candidates:
+            return None
+
+        return sorted(
+            candidates.values(),
+            key=lambda x: x.stat().st_mtime if x.exists() else 0,
+            reverse=True
+        )[0]
+
+    def _discover_storyteller_uuid(self, st_client, safe_title: str, epub_filename: str, title: str):
+        """
+        Try to discover Storyteller UUID using staged path first, then title search.
+        """
+        try:
+            found_uuid = st_client.find_book_by_staged_path(safe_title, epub_filename)
+            if found_uuid:
+                return found_uuid
+        except Exception as e:
+            logger.debug(f"Forge: staged-path UUID discovery failed: {e}")
+
+        try:
+            results = st_client.search_books(title) or []
+            title_norm = (title or "").strip().lower()
+            for book in results:
+                book_title = str(book.get('title', '')).strip().lower()
+                if title_norm and book_title == title_norm:
+                    return book.get('uuid') or book.get('id')
+            if results:
+                return results[0].get('uuid') or results[0].get('id')
+        except Exception as e:
+            logger.debug(f"Forge: title-search UUID discovery failed: {e}")
+
+        return None
+
+    def _poll_auto_forge_completion(
+        self,
+        st_client,
+        safe_title: str,
+        epub_filename: str,
+        title: str,
+        course_dir: Path,
+        epub_cache: Path,
+        found_uuid: str,
+        processing_triggered: bool,
+        poll_count: int,
+    ):
+        """
+        Execute one completion-poll cycle for auto-forge.
+        """
+        completion_method = None
+        readaloud_path = None
+        probe_download_path = None
+        api_ready_seen = False
+
+        if not found_uuid:
+            recovered_uuid = self._discover_storyteller_uuid(st_client, safe_title, epub_filename, title)
+            if recovered_uuid:
+                found_uuid = recovered_uuid
+                logger.info(f"Auto-Forge: Recovered Storyteller UUID during wait loop: {found_uuid}")
+
+        if found_uuid and not processing_triggered:
+            try:
+                st_client.trigger_processing(found_uuid)
+                processing_triggered = True
+            except Exception as trigger_err:
+                logger.debug(f"Auto-Forge: trigger retry failed for {found_uuid}: {trigger_err}")
+
+        readaloud_path = self._find_processed_epub(course_dir)
+        if readaloud_path:
+            completion_method = "local_readaloud"
+            return {
+                "found_uuid": found_uuid,
+                "processing_triggered": processing_triggered,
+                "readaloud_path": readaloud_path,
+                "completion_method": completion_method,
+                "probe_download_path": probe_download_path,
+                "api_ready_seen": api_ready_seen,
+            }
+
+        if found_uuid:
+            try:
+                details = st_client.get_book_details(found_uuid) if hasattr(st_client, "get_book_details") else None
+                readaloud_meta = details.get("readaloud", {}) if isinstance(details, dict) else {}
+                readaloud_filepath = readaloud_meta.get("filepath") if isinstance(readaloud_meta, dict) else None
+                if readaloud_filepath:
+                    api_ready_seen = True
+                    completion_method = "api_ready"
+                    return {
+                        "found_uuid": found_uuid,
+                        "processing_triggered": processing_triggered,
+                        "readaloud_path": readaloud_path,
+                        "completion_method": completion_method,
+                        "probe_download_path": probe_download_path,
+                        "api_ready_seen": api_ready_seen,
+                    }
+            except Exception as details_err:
+                logger.debug(f"Auto-Forge: get_book_details poll failed for {found_uuid}: {details_err}")
+
+            if poll_count % 4 == 0:
+                probe_path = epub_cache / f".storyteller_probe_{found_uuid}.epub"
+                try:
+                    if st_client.download_book(found_uuid, probe_path):
+                        if probe_path.exists() and probe_path.stat().st_size > 0:
+                            probe_download_path = probe_path
+                            api_ready_seen = True
+                            completion_method = "api_download"
+                except Exception as probe_err:
+                    logger.debug(f"Auto-Forge: probe download not ready for {found_uuid}: {probe_err}")
+                finally:
+                    if completion_method != "api_download" and probe_path.exists():
+                        try:
+                            probe_path.unlink()
+                        except Exception:
+                            pass
+
+        return {
+            "found_uuid": found_uuid,
+            "processing_triggered": processing_triggered,
+            "readaloud_path": readaloud_path,
+            "completion_method": completion_method,
+            "probe_download_path": probe_download_path,
+            "api_ready_seen": api_ready_seen,
+        }
 
     def _copy_audio_files(self, abs_id: str, dest_folder: Path):
         """Copy audiobook files from ABS - Book Linker version"""
@@ -317,10 +472,10 @@ class ForgeService:
                 elapsed += POLL_INTERVAL
 
                 try:
-                    readaloud_files = list(course_dir.glob("*readaloud*.epub")) + list(course_dir.glob("*synced*/*.epub"))
+                    processed_epub = self._find_processed_epub(course_dir)
                     
-                    if readaloud_files:
-                        logger.info(f"⚡ Forge: Readaloud detected: {readaloud_files[0].name}")
+                    if processed_epub:
+                        logger.info(f"⚡ Forge: Readaloud detected: {processed_epub.name}")
 
                         # [SAFETY CHECK]
                         if found_uuid:
@@ -337,7 +492,7 @@ class ForgeService:
                                 time.sleep(30)
 
                         # --- EXTRACT & ALIGN ---
-                        completed_epub_path = readaloud_files[0]
+                        completed_epub_path = processed_epub
                         try:
                             logger.info(f"⚡ Forge: Extracting SMIL transcript from {completed_epub_path.name}...")
                             item_details = self.abs_client.get_item_details(abs_id)
@@ -357,6 +512,12 @@ class ForgeService:
                         except Exception as e:
                             logger.error(f"❌ Forge: Alignment extraction failed: {e}")
 
+                        if self.storyteller_cleanup_grace_seconds > 0:
+                            logger.info(
+                                f"Forge: Grace wait before cleanup: {self.storyteller_cleanup_grace_seconds}s"
+                            )
+                            time.sleep(self.storyteller_cleanup_grace_seconds)
+
                         deleted = 0
                         for f in course_dir.iterdir():
                             if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
@@ -365,7 +526,7 @@ class ForgeService:
                                     deleted += 1
                                 except Exception: pass
 
-                        if epub_dest.exists() and epub_dest not in readaloud_files:
+                        if epub_dest.exists() and epub_dest != completed_epub_path:
                             try:
                                 epub_dest.unlink()
                                 deleted += 1
@@ -490,73 +651,147 @@ class ForgeService:
             found_uuid = None
             epub_filename = f"{safe_title}.epub"
 
-            for _ in range(240): # Wait up to 20 mins for initial detection
+            processing_triggered = False
+            for _ in range(240):  # Wait up to 20 mins for initial detection
                 time.sleep(5)
-                try:
-                    # Primary: match by staged file path (deterministic)
-                    found_uuid = st_client.find_book_by_staged_path(safe_title, epub_filename)
-
-                    # Fallback: title search
-                    if not found_uuid:
-                        results = st_client.search_books(title)
-                        for b in results:
-                            if b.get('title') == title:
-                                found_uuid = b.get('uuid') or b.get('id')
-                                break
-
-                    if found_uuid:
-                        logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
-                        time.sleep(60)
-                        break
-                except Exception as e:
-                    logger.debug(f"Forge: Storyteller detection error (retrying): {e}")
+                found_uuid = self._discover_storyteller_uuid(st_client, safe_title, epub_filename, title)
+                if found_uuid:
+                    logger.info(f"Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
+                    time.sleep(60)
+                    break
 
             if found_uuid:
-                logger.info(f"⚡ Auto-Forge: Triggering processing for {found_uuid}")
-                st_client.trigger_processing(found_uuid)
+                logger.info(f"Auto-Forge: Triggering processing for {found_uuid}")
+                try:
+                    st_client.trigger_processing(found_uuid)
+                    processing_triggered = True
+                except Exception as trigger_err:
+                    logger.warning(f"Auto-Forge: Failed to trigger processing for {found_uuid}: {trigger_err}")
             else:
-                logger.warning("⚠️ Auto-Forge: Storyteller scan timed out — Proceeding anyway in hopes it picks up")
+                logger.warning("Auto-Forge: Storyteller scan timed out - continuing with recovery polling")
 
             # --- WAIT FOR COMPLETION ---
             MAX_WAIT = 3600
+            POLL_INTERVAL = 30
             elapsed = 0
-            readaloud_found = False
-            
-            while elapsed < MAX_WAIT:
-                time.sleep(30)
-                elapsed += 30
-                
-                # Check for readaloud
-                readaloud_files = list(course_dir.glob("*readaloud*.epub")) + list(course_dir.glob("*synced*/*.epub"))
-                if readaloud_files:
-                    readaloud_found = True
-                    break
-            
-            if not readaloud_found:
-                 raise Exception("Timeout waiting for Storyteller processing")
+            poll_count = 0
+            readaloud_path = None
+            completion_method = None
+            api_ready_seen = False
+            probe_download_path = None
 
-            readaloud_path = readaloud_files[0] if readaloud_files else None
+            epub_cache = self.ebook_parser.epub_cache_dir
+            if not epub_cache.exists():
+                epub_cache.mkdir(parents=True, exist_ok=True)
+
+            while elapsed < MAX_WAIT:
+                time.sleep(POLL_INTERVAL)
+                elapsed += POLL_INTERVAL
+                poll_count += 1
+
+                poll_result = self._poll_auto_forge_completion(
+                    st_client=st_client,
+                    safe_title=safe_title,
+                    epub_filename=epub_filename,
+                    title=title,
+                    course_dir=course_dir,
+                    epub_cache=epub_cache,
+                    found_uuid=found_uuid,
+                    processing_triggered=processing_triggered,
+                    poll_count=poll_count,
+                )
+                found_uuid = poll_result["found_uuid"]
+                processing_triggered = poll_result["processing_triggered"]
+                readaloud_path = poll_result["readaloud_path"] or readaloud_path
+                probe_download_path = poll_result["probe_download_path"] or probe_download_path
+                api_ready_seen = api_ready_seen or poll_result["api_ready_seen"]
+                completion_method = poll_result["completion_method"]
+                if completion_method:
+                    break
+
+            if not completion_method:
+                timeout_reason = []
+                if not found_uuid:
+                    timeout_reason.append("no_uuid")
+                if not self._find_processed_epub(course_dir):
+                    timeout_reason.append("no_artifact_local")
+                if found_uuid and not api_ready_seen:
+                    timeout_reason.append("api_not_ready")
+                reason_str = ",".join(timeout_reason) if timeout_reason else "unknown"
+
+                logger.warning(
+                    f"Auto-Forge timeout: abs_id={abs_id} elapsed={elapsed}s polls={poll_count} reason={reason_str} "
+                    f"found_uuid={bool(found_uuid)} api_ready_seen={api_ready_seen}"
+                )
+                book = self.database_service.get_book(abs_id)
+                if book:
+                    book.status = "forging"
+                    self.database_service.save_book(book)
+                logger.info(
+                    f"Auto-Forge: entering extended recovery polling for {self.storyteller_recovery_max_wait_seconds}s "
+                    f"(interval={self.storyteller_recovery_poll_interval_seconds}s)"
+                )
+
+                recovery_elapsed = 0
+                while recovery_elapsed < self.storyteller_recovery_max_wait_seconds and not completion_method:
+                    time.sleep(self.storyteller_recovery_poll_interval_seconds)
+                    recovery_elapsed += self.storyteller_recovery_poll_interval_seconds
+                    poll_count += 1
+
+                    poll_result = self._poll_auto_forge_completion(
+                        st_client=st_client,
+                        safe_title=safe_title,
+                        epub_filename=epub_filename,
+                        title=title,
+                        course_dir=course_dir,
+                        epub_cache=epub_cache,
+                        found_uuid=found_uuid,
+                        processing_triggered=processing_triggered,
+                        poll_count=poll_count,
+                    )
+                    found_uuid = poll_result["found_uuid"]
+                    processing_triggered = poll_result["processing_triggered"]
+                    readaloud_path = poll_result["readaloud_path"] or readaloud_path
+                    probe_download_path = poll_result["probe_download_path"] or probe_download_path
+                    api_ready_seen = api_ready_seen or poll_result["api_ready_seen"]
+                    completion_method = poll_result["completion_method"]
+
+                if not completion_method:
+                    logger.warning(
+                        f"Auto-Forge: extended recovery timed out for abs_id={abs_id} "
+                        f"elapsed={recovery_elapsed}s; keeping status='forging'"
+                    )
+                    return
+
+            completion_msg = f"Auto-Forge: Completion detected via {completion_method}"
+            if readaloud_path:
+                completion_msg += f" ({readaloud_path})"
+            logger.info(completion_msg)
 
             # Safety Wait
             time.sleep(60)
 
             # --- DOWNLOAD ---
-            logger.info("⚡ Auto-Forge: Processing complete. Downloading artifact...")
-            epub_cache = self.ebook_parser.epub_cache_dir
-            if not epub_cache.exists(): epub_cache.mkdir(parents=True, exist_ok=True)
-
-            target_filename = f"storyteller_{found_uuid}.epub"
+            logger.info("Auto-Forge: Processing complete. Downloading artifact...")
+            target_filename = f"storyteller_{found_uuid or abs_id}.epub"
             target_path = epub_cache / target_filename
 
-            try:
-                if not st_client.download_book(found_uuid, target_path):
-                    raise Exception("API download returned False")
-            except Exception as api_err:
-                if readaloud_path and readaloud_path.exists():
-                    logger.warning(f"⚠️ Auto-Forge: API download failed ({api_err}). Using local file: '{readaloud_path}'")
-                    shutil.copy2(readaloud_path, target_path)
-                else:
-                    raise Exception(f"Failed to download Storyteller artifact and no local fallback available: {api_err}")
+            if probe_download_path and probe_download_path.exists():
+                shutil.move(str(probe_download_path), str(target_path))
+            elif found_uuid:
+                try:
+                    if not st_client.download_book(found_uuid, target_path):
+                        raise Exception("API download returned False")
+                except Exception as api_err:
+                    if readaloud_path and readaloud_path.exists():
+                        logger.warning(f"Auto-Forge: API download failed ({api_err}). Using local file: {readaloud_path}")
+                        shutil.copy2(readaloud_path, target_path)
+                    else:
+                        raise Exception(f"Failed to download Storyteller artifact and no local fallback available: {api_err}")
+            elif readaloud_path and readaloud_path.exists():
+                shutil.copy2(readaloud_path, target_path)
+            else:
+                raise Exception("Auto-Forge completion detected but no downloadable artifact source was available")
 
 
             # --- RECALCULATE HASH ---
@@ -571,7 +806,32 @@ class ForgeService:
             # --- EXTRACT TEXT ---
             item_details = self.abs_client.get_item_details(abs_id)
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
-            book_text, _ = self.ebook_parser.extract_text_and_map(target_path)
+            text_source_path = target_path
+            if original_filename:
+                original_candidates = []
+                original_name = Path(str(original_ebook_filename or original_filename)).name
+                if original_name:
+                    original_candidates.append(self.ebook_parser.epub_cache_dir / original_name)
+
+                source_path = text_item.get('path') if isinstance(text_item, dict) else None
+                if source_path:
+                    original_candidates.append(Path(source_path))
+
+                try:
+                    resolved_path = self.ebook_parser.resolve_book_path(original_name)
+                    original_candidates.append(resolved_path)
+                except Exception:
+                    pass
+
+                for candidate in original_candidates:
+                    try:
+                        if candidate and Path(candidate).exists():
+                            text_source_path = Path(candidate)
+                            break
+                    except Exception:
+                        continue
+
+            book_text, _ = self.ebook_parser.extract_text_and_map(text_source_path)
 
             # --- INGEST STORYTELLER TRANSCRIPT (PRIMARY) ---
             storyteller_manifest = ingest_storyteller_transcripts(abs_id, title, chapters)
@@ -641,6 +901,11 @@ class ForgeService:
 
             # --- CLEANUP ---
             AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
+            if self.storyteller_cleanup_grace_seconds > 0:
+                logger.info(
+                    f"Auto-Forge: Grace wait before cleanup: {self.storyteller_cleanup_grace_seconds}s"
+                )
+                time.sleep(self.storyteller_cleanup_grace_seconds)
             for f in course_dir.iterdir():
                 if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
                     try: f.unlink()
@@ -661,3 +926,4 @@ class ForgeService:
         finally:
              with self.lock:
                 self.active_tasks.discard(title)
+

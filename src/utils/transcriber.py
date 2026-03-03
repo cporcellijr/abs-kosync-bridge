@@ -894,19 +894,55 @@ class AudioTranscriber:
                     chapter_index, local_offset = char_offset[0], char_offset[1]
 
                 if chapter_index is None or local_offset is None:
-                    logger.warning(
-                        f"âš ï¸ {title_prefix}Storyteller lookup requires chapter-aware char offset "
-                        f"(received: {type(char_offset).__name__})"
-                    )
-                    return None
+                    synthetic_data = []
+                    for idx, meta in enumerate(data.chapters):
+                        try:
+                            chapter = data._load_chapter(idx)
+                            chapter_start = float(meta.get("start", 0.0) or 0.0)
+                            transcript_text = chapter.get("transcript", "")
+                            timeline = chapter.get("word_timeline", [])
+                            if not timeline:
+                                continue
 
-                local_ts = data.char_offset_to_timestamp(int(local_offset), int(chapter_index))
-                if local_ts is None:
-                    return None
+                            seg_start = chapter_start + float(timeline[0].get("startTime", 0.0) or 0.0)
+                            seg_text_words = []
 
-                chapter_meta = data.chapters[int(chapter_index)] if int(chapter_index) < len(data.chapters) else {}
-                chapter_start = float(chapter_meta.get("start", 0.0) or 0.0)
-                return chapter_start + float(local_ts)
+                            for i, word in enumerate(timeline):
+                                ts = chapter_start + float(word.get("startTime", 0.0) or 0.0)
+                                word_text = word.get("word")
+                                if not word_text:
+                                    py_start = chapter["start_offsets_py"][i] if i < len(chapter["start_offsets_py"]) else 0
+                                    py_end = chapter["start_offsets_py"][i + 1] if i + 1 < len(chapter["start_offsets_py"]) else len(transcript_text)
+                                    word_text = transcript_text[py_start:py_end]
+
+                                cleaned_word = self._clean_text(word_text)
+                                if cleaned_word:
+                                    seg_text_words.append(cleaned_word)
+
+                                if ts - seg_start > 5.0 or i == len(timeline) - 1:
+                                    segment_text = " ".join(seg_text_words).strip()
+                                    if segment_text:
+                                        synthetic_data.append({
+                                            "start": seg_start,
+                                            "end": ts + 0.5,
+                                            "text": segment_text
+                                        })
+                                    seg_start = ts
+                                    seg_text_words = []
+                        except Exception:
+                            continue
+
+                    data = synthetic_data
+                    if not synthetic_data:
+                        return None
+                else:
+                    local_ts = data.char_offset_to_timestamp(int(local_offset), int(chapter_index))
+                    if local_ts is None:
+                        return None
+
+                    chapter_meta = data.chapters[int(chapter_index)] if int(chapter_index) < len(data.chapters) else {}
+                    chapter_start = float(chapter_meta.get("start", 0.0) or 0.0)
+                    return chapter_start + float(local_ts)
 
             if isinstance(data, dict) and self._get_storyteller_timeline(data):
                 if char_offset is not None:
@@ -978,3 +1014,4 @@ class AudioTranscriber:
             logger.error(f"❌ {title_prefix}Error searching transcript '{transcript_path}': {e}")
         return None
 # [END FILE]
+

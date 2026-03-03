@@ -137,8 +137,8 @@ class AlignmentService:
                             
                         seg_text_words.append(word_text.strip())
                         
-                        # Break segment every ~5 seconds or on last word
-                        if ts - seg_start > 5.0 or i == len(timeline) - 1:
+                        # Break segment every ~15 seconds or on last word
+                        if ts - seg_start > 15.0 or i == len(timeline) - 1:
                             segments.append({
                                 "start": seg_start,
                                 "end": ts + 0.5, # +0.5s minimum duration for final word
@@ -160,11 +160,20 @@ class AlignmentService:
             logger.warning(f"AlignmentService: Anchored alignment failed for {abs_id}, falling back to unanchored map")
 
         # Fallback to unanchored map
+        if ebook_text:
+            clean_map = [
+                {"char": 0, "ts": 0.0},
+                {"char": len(ebook_text), "ts": storyteller_transcript.get_duration()},
+            ]
+            self._save_alignment(abs_id, clean_map)
+            logger.info(f"AlignmentService: Linear fallback map stored for {abs_id} ({len(clean_map)} points)")
+            return True
+
         alignment_map = list(storyteller_transcript.iter_alignment_points())
         if not alignment_map:
             logger.error("   Failed to generate storyteller alignment map.")
             return False
-            
+
         # Remap 'global_char' from iter_alignment_points to the 'char' key expected by _save_alignment.
         clean_map = []
         for pt in alignment_map:
@@ -172,7 +181,7 @@ class AlignmentService:
                 "char": pt.get("global_char", 0),  # cumulative Python-index char offset
                 "ts": pt.get("ts", 0.0)
             })
-            
+
         self._save_alignment(abs_id, clean_map)
         logger.info(f"AlignmentService: Unanchored Storyteller map stored for {abs_id} ({len(clean_map)} points)")
         return True

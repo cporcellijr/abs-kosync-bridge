@@ -2327,7 +2327,8 @@ def _run_storyteller_backfill():
                 book_text = ""
                 if ebook_parser and book.ebook_filename:
                     try:
-                        epub_path = container.epub_cache_dir() / book.ebook_filename
+                        epub_filename = book.original_ebook_filename or book.ebook_filename
+                        epub_path = container.epub_cache_dir() / epub_filename
                         if epub_path.exists():
                             book_text, _ = ebook_parser.extract_text_and_map(epub_path)
                     except Exception as e:
