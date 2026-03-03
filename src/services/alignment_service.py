@@ -4,6 +4,7 @@ Handles the core logic for aligning ebook text with audio transcriptions
 and storing the results in the database.
 """
 
+import bisect
 import json
 import logging
 import os
@@ -103,10 +104,6 @@ class AlignmentService:
             logger.info(f"AlignmentService: Anchoring Storyteller transcript for {abs_id} to {len(ebook_text)} chars of text...")
             
             segments = []
-            current_seg_text = []
-            seg_start_ts = None
-            last_ts = 0.0
-            chapters_processed = 0
             
             for point in storyteller_transcript.iter_alignment_points():
                 pass
@@ -114,17 +111,10 @@ class AlignmentService:
             # iter_alignment_points yields only timestamps/offsets; build text segments from chapter transcripts.
             for chapter_index, meta in enumerate(storyteller_transcript.chapters):
                 try:
-                    chapters_processed += 1
                     chapter = storyteller_transcript._load_chapter(chapter_index)
                     chapter_start = float(meta.get("start", 0.0) or 0.0)
                     transcript_text = chapter.get("transcript", "")
                     timeline = chapter.get("word_timeline", [])
-                    first_word_ts = float(timeline[0].get("startTime", 0.0) or 0.0) if timeline else 0.0
-                    logger.debug(
-                        f"      📊 Ch {chapter_index}: start={chapter_start:.1f}s, words={len(timeline)}, "
-                        f"text_len={len(transcript_text)}, first_word_ts={first_word_ts:.1f}s, "
-                        f"text_preview='{transcript_text[:60]}...'"
-                    )
                     
                     if not timeline or not transcript_text: continue
                     
@@ -156,36 +146,6 @@ class AlignmentService:
                             seg_text_words = []
                 except Exception as e:
                     logger.warning(f"Error reading Storyteller chapter {chapter_index}: {e}")
-
-            logger.info(f"   📊 Segment Assembly Stats:")
-            logger.info(f"      Chapters processed: {chapters_processed}")
-            logger.info(f"      Total segments built: {len(segments)}")
-            if segments:
-                logger.info(f"      First segment: start={segments[0]['start']:.1f}s, text='{segments[0]['text'][:80]}...'")
-                logger.info(f"      Last segment: start={segments[-1]['start']:.1f}s, text='{segments[-1]['text'][:80]}...'")
-                non_mono = 0
-                for i in range(1, len(segments)):
-                    if segments[i]['start'] < segments[i - 1]['start']:
-                        if non_mono == 0:
-                            logger.warning(
-                                f"      ⚠️ First non-monotonic at segment {i}: "
-                                f"{segments[i - 1]['start']:.1f}s -> {segments[i]['start']:.1f}s"
-                            )
-                        non_mono += 1
-                if non_mono:
-                    logger.warning(f"      ⚠️ Total non-monotonic transitions: {non_mono}/{len(segments)}")
-                else:
-                    logger.info(f"      ✅ All segment timestamps monotonically increasing")
-                if logger.isEnabledFor(logging.INFO):
-                    total_transcript_text = " ".join(s['text'] for s in segments)
-                    for pct in [0.25, 0.50, 0.75]:
-                        t_pos = int(len(total_transcript_text) * pct)
-                        e_pos = int(len(ebook_text) * pct)
-                        t_sample = total_transcript_text[max(0, t_pos - 40):t_pos + 40].replace('\n', ' ')
-                        e_sample = ebook_text[max(0, e_pos - 40):e_pos + 40].replace('\n', ' ')
-                        logger.info(f"   🔬 Text comparison at {pct:.0%}:")
-                        logger.info(f"      Transcript: '...{t_sample}...'")
-                        logger.info(f"      EPUB:       '...{e_sample}...'")
                     
             if segments:
                 rebuilt_segments = self.polisher.rebuild_fragmented_sentences(segments, ebook_text)
@@ -340,6 +300,40 @@ class AlignmentService:
 
         return int(estimated_char)
 
+    @staticmethod
+    def _filter_monotonic_lis(anchors: List[Dict]) -> List[Dict]:
+        """
+        Return the longest subsequence of anchors (already sorted by 'char')
+        with strictly increasing 'ts' values. O(n log n) patience sort.
+        """
+        n = len(anchors)
+        if n <= 1:
+            return list(anchors)
+
+        tails: List[float] = []
+        tail_idx: List[int] = []
+        parent: List[int] = [-1] * n
+
+        for i, anchor in enumerate(anchors):
+            ts = anchor['ts']
+            pos = bisect.bisect_left(tails, ts)
+            if pos == len(tails):
+                tails.append(ts)
+                tail_idx.append(i)
+            else:
+                tails[pos] = ts
+                tail_idx[pos] = i
+            if pos > 0:
+                parent[i] = tail_idx[pos - 1]
+
+        result_indices: List[int] = []
+        idx = tail_idx[-1]
+        while idx != -1:
+            result_indices.append(idx)
+            idx = parent[idx]
+        result_indices.reverse()
+        return [anchors[i] for i in result_indices]
+
     def _generate_alignment_map(self, segments: List[Dict], full_text: str) -> List[Dict]:
         """
         Core Anchored Alignment Algorithm (Two-Pass).
@@ -413,16 +407,6 @@ class AlignmentService:
 
             t_grams = build_ngrams(t_tokens, False)
             b_grams = build_ngrams(b_tokens, True)
-            if logger.isEnabledFor(logging.INFO):
-                t_unique = sum(1 for v in t_grams.values() if len(v) == 1)
-                b_unique = sum(1 for v in b_grams.values() if len(v) == 1)
-                shared = set(t_grams.keys()) & set(b_grams.keys())
-                unique_both = sum(1 for k in shared if len(t_grams[k]) == 1 and len(b_grams[k]) == 1)
-                logger.info(f"   📊 N-Gram Stats (N={n_size}):")
-                logger.info(f"      Transcript n-grams: {len(t_grams)} total, {t_unique} unique")
-                logger.info(f"      Book n-grams: {len(b_grams)} total, {b_unique} unique")
-                logger.info(f"      Shared n-grams: {len(shared)}")
-                logger.info(f"      Unique in both (= anchor candidates): {unique_both}")
 
             found = []
             for key, t_list in t_grams.items():
@@ -438,11 +422,6 @@ class AlignmentService:
                             "t_idx": t_item['orig_index'],
                             "b_idx": b_item['orig_index']
                         })
-            logger.info(f"      📊 Anchors found this pass: {len(found)}")
-            if found:
-                found_sorted = sorted(found, key=lambda x: x['char'])
-                logger.info(f"      📊 First anchor: char={found_sorted[0]['char']}, ts={found_sorted[0]['ts']:.1f}s")
-                logger.info(f"      📊 Last anchor: char={found_sorted[-1]['char']}, ts={found_sorted[-1]['ts']:.1f}s")
             return found
 
         # 3. PASS 1: Global Search (N=12)
@@ -451,14 +430,9 @@ class AlignmentService:
         # Sort by character position
         anchors.sort(key=lambda x: x['char'])
         
-        # Filter Monotonic (Global)
-        valid_anchors = []
-        if anchors:
-            valid_anchors.append(anchors[0])
-            for a in anchors[1:]:
-                if a['ts'] > valid_anchors[-1]['ts']:
-                    valid_anchors.append(a)
-        logger.info(f"   📊 Monotonic filter: {len(anchors)} candidates -> {len(valid_anchors)} valid")
+        # Filter Monotonic (Global) — Longest Increasing Subsequence
+        valid_anchors = self._filter_monotonic_lis(anchors)
+        logger.info(f"   📊 Monotonic LIS filter: {len(anchors)} candidates -> {len(valid_anchors)} valid")
         if len(anchors) > len(valid_anchors):
             logger.info(f"      📊 Dropped {len(anchors) - len(valid_anchors)} non-monotonic anchors")
 
@@ -481,12 +455,7 @@ class AlignmentService:
                 
                 # Filter Early Anchors (Must be monotonic with themselves)
                 early_anchors.sort(key=lambda x: x['char'])
-                valid_early = []
-                if early_anchors:
-                    valid_early.append(early_anchors[0])
-                    for a in early_anchors[1:]:
-                        if a['ts'] > valid_early[-1]['ts']:
-                            valid_early.append(a)
+                valid_early = self._filter_monotonic_lis(early_anchors)
                 
                 if valid_early:
                     logger.info(f"   ✅ Backfill success: Recovered {len(valid_early)} early anchors.")
@@ -662,10 +631,6 @@ def _validate_storyteller_chapters(
                 if not _is_storyteller_wordtimeline_chapter(transcriptions_dir / name)
             ]
             if not invalid_files:
-                logger.info(
-                    f"   📋 Storyteller file order ({len(source_files)} files): "
-                    f"{source_files[:5]}...{source_files[-3:]}"
-                )
                 return True, source_files, expected_files
             logger.info(
                 "Storyteller validation failed at '%s': %d chapter file(s) are not storyteller timeline format "
@@ -704,10 +669,6 @@ def _validate_storyteller_chapters(
         if not _is_storyteller_wordtimeline_chapter(transcriptions_dir / name)
     ]
     if not invalid_files:
-        logger.info(
-            f"   📋 Storyteller file order ({len(source_files)} files): "
-            f"{source_files[:5]}...{source_files[-3:]}"
-        )
         return True, source_files, expected_files
     logger.info(
         "Storyteller validation failed at '%s': mixed-prefix chapter set has %d file(s) without storyteller "

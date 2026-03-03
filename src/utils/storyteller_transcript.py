@@ -7,13 +7,10 @@ Reads BookBridge storyteller manifests and chapter JSON files lazily.
 from __future__ import annotations
 
 import json
-import logging
 from bisect import bisect_right
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-
-logger = logging.getLogger(__name__)
 
 
 class StorytellerTranscript:
@@ -222,14 +219,6 @@ class StorytellerTranscript:
             )
         timeline = list(timeline_raw)
         timeline.sort(key=lambda x: float(x.get("startTime", 0.0) or 0.0))
-        if timeline:
-            first_ts = float(timeline[0].get("startTime", 0.0) or 0.0)
-            last_ts = float(timeline[-1].get("startTime", 0.0) or 0.0)
-            logger.debug(f"   📖 Chapter {chapter_index} loaded: {len(timeline)} words, ts_range=[{first_ts:.1f}s, {last_ts:.1f}s]")
-            if chapter_index > 0 and first_ts > 3600:
-                logger.warning(
-                    f"   ⚠️ Chapter {chapter_index} startTime looks GLOBAL ({first_ts:.1f}s) - possible double-offset risk"
-                )
         start_times = [float(w.get("startTime", 0.0) or 0.0) for w in timeline]
         start_offsets_utf16 = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]
         start_offsets_py = self._utf16_offsets_to_py_indices(transcript, start_offsets_utf16)
