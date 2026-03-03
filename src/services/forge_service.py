@@ -186,7 +186,7 @@ class ForgeService:
             if poll_count % 4 == 0:
                 probe_path = epub_cache / f".storyteller_probe_{found_uuid}.epub"
                 try:
-                    if st_client.download_book(found_uuid, probe_path):
+                    if st_client.download_book(found_uuid, probe_path, polling=True):
                         if probe_path.exists() and probe_path.stat().st_size > 0:
                             probe_download_path = probe_path
                             api_ready_seen = True
@@ -768,8 +768,12 @@ class ForgeService:
                 completion_msg += f" ({readaloud_path})"
             logger.info(completion_msg)
 
-            # Safety Wait
-            time.sleep(60)
+            # Grace wait before download/cleanup to let Storyteller finish internal writes.
+            if self.storyteller_cleanup_grace_seconds > 0:
+                logger.info(
+                    f"Auto-Forge: Grace wait before download/cleanup: {self.storyteller_cleanup_grace_seconds}s"
+                )
+                time.sleep(self.storyteller_cleanup_grace_seconds)
 
             # --- DOWNLOAD ---
             logger.info("Auto-Forge: Processing complete. Downloading artifact...")
@@ -901,11 +905,6 @@ class ForgeService:
 
             # --- CLEANUP ---
             AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
-            if self.storyteller_cleanup_grace_seconds > 0:
-                logger.info(
-                    f"Auto-Forge: Grace wait before cleanup: {self.storyteller_cleanup_grace_seconds}s"
-                )
-                time.sleep(self.storyteller_cleanup_grace_seconds)
             for f in course_dir.iterdir():
                 if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
                     try: f.unlink()

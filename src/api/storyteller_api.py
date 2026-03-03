@@ -440,7 +440,12 @@ class StorytellerAPIClient:
 
         return False
 
-    def download_book(self, book_uuid: str, output_path: Path) -> bool:
+    @staticmethod
+    def _is_readaloud_not_ready(status_code: int, body: str) -> bool:
+        body_lower = (body or "").lower()
+        return status_code == 404 and "could not open readaloud" in body_lower
+
+    def download_book(self, book_uuid: str, output_path: Path, polling: bool = False) -> bool:
         """Download the processed EPUB3 artifact."""
         # Endpoint: GET /api/v2/books/{uuid}/files?format=readaloud
         # Note: 'readaloud' format usually implies the processed EPUB3
@@ -452,7 +457,10 @@ class StorytellerAPIClient:
         
         # Try API Download First
         try:
-            logger.info(f"⚡ Attempting download from '{url}'")
+            if polling:
+                logger.debug(f"Storyteller poll: probing readaloud download for '{book_uuid[:8]}...'")
+            else:
+                logger.info(f"⚡ Attempting download from '{url}'")
             with self.session.get(url, headers=headers, params={"format": "readaloud"}, stream=True, timeout=60) as r:
                 if r.status_code == 200:
                     with open(output_path, 'wb') as f:
@@ -461,15 +469,30 @@ class StorytellerAPIClient:
                     logger.info(f"✅ Downloaded Storyteller artifact for '{book_uuid}' to '{output_path}'")
                     return True
                 else:
-                    logger.warning(f"⚠️ Storyteller API download failed: {r.status_code} - {r.text[:200]}")
+                    body_excerpt = (r.text or "")[:200]
+                    if self._is_readaloud_not_ready(r.status_code, body_excerpt):
+                        if polling:
+                            logger.debug(f"Storyteller poll: readaloud not ready yet for '{book_uuid[:8]}...'")
+                            return False
+                        logger.info(f"Storyteller readaloud not ready yet for '{book_uuid}'")
+                    else:
+                        log_fn = logger.debug if polling else logger.warning
+                        log_fn(f"⚠️ Storyteller API download failed: {r.status_code} - {body_excerpt}")
         except Exception as e:
-            logger.warning(f"⚠️ API download raised exception: {e}")
+            log_fn = logger.debug if polling else logger.warning
+            log_fn(f"⚠️ API download raised exception: {e}")
 
         # Fallback: Local File Copy
         try:
             # 1. Get Book Details for Filepath
             r_details = self._make_request("GET", f"/api/v2/books/{book_uuid}")
             if not r_details or r_details.status_code != 200:
+                if polling:
+                    logger.debug(
+                        f"Storyteller poll: details unavailable for '{book_uuid[:8]}...' "
+                        f"({r_details.status_code if r_details else 'No Response'})"
+                    )
+                    return False
                 logger.error(f"❌ Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
                 raise Exception("API download failed and could not fetch details for fallback.")
 
@@ -479,6 +502,9 @@ class StorytellerAPIClient:
             source_path = readaloud.get('filepath')
             
             if not source_path:
+                if polling:
+                    logger.debug(f"Storyteller poll: readaloud filepath not yet available for '{book_uuid[:8]}...'")
+                    return False
                 logger.error("❌ No filepath found in book details for fallback")
                 raise Exception("No filepath in book details")
 
@@ -499,6 +525,9 @@ class StorytellerAPIClient:
                 logger.info(f"✅ Downloaded (via Local Copy) Storyteller artifact for '{book_uuid}'")
                 return True
             else:
+                 if polling:
+                     logger.debug(f"Storyteller poll: local fallback file not ready yet: '{local_path}'")
+                     return False
                  logger.error(f"❌ Local fallback file not found: '{local_path}'")
                  # Try unmapped?
                  if Path(source_path).exists():
@@ -509,6 +538,9 @@ class StorytellerAPIClient:
                  raise Exception(f"File not found at {local_path} or {source_path}")
 
         except Exception as e:
+            if polling:
+                logger.debug(f"Storyteller poll: download not ready for '{book_uuid[:8]}...': {e}")
+                return False
             logger.error(f"❌ Failed to download Storyteller book '{book_uuid}' (API & Fallback): {e}")
             raise e
 
