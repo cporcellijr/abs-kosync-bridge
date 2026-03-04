@@ -4,6 +4,27 @@ For the full history of changes, please refer to the **[GitHub Releases](https:/
 
 ---
 
+## [6.3.4] - 2026-03-04
+
+### Enhancements
+
+- Added a dedicated **Library Suggestions** workspace at `/suggestions` with a split review + queue layout.
+- Added asynchronous background scan execution with progress polling.
+- Added persisted incremental scan cache (`/data/suggestions_scan_cache.json`) so routine scans can reuse prior work.
+- Added an explicit **Full Refresh** action to force a complete rescan when needed.
+
+### Fixes
+
+- Fixed suggestion-scan completion failures caused by oversized cookie-backed Flask sessions by moving large payloads to server-side state.
+- Reduced heavy ABS/Booklore scan traffic by loading ebook candidates once per scan and fuzzy matching in memory, rather than searching external providers per audiobook.
+- Updated scan workload behavior to use Booklore `get_all_books()` for empty-query suggestions scans.
+
+### Maintenance
+
+- Kept suggestions scan logic centralized in `src/services/suggestions_service.py` for cleaner route handling.
+
+---
+
 ## [6.3.3] - 2026-02-27
 
 ### Enhancements

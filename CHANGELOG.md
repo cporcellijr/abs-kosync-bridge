@@ -4,6 +4,25 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
+## [6.3.4] - 2026-03-04
+
+### Enhancements
+
+- **Library Suggestions Workspace**: Added a dedicated `/suggestions` page with a split layout for suggestion review plus always-visible batch queue controls.
+- **Background Suggestions Scan**: Suggestions scanning now runs as an async background job with status polling and progress phases.
+- **Incremental Suggestions Cache**: Added persisted suggestions scan cache at `/data/suggestions_scan_cache.json` so normal scans can reuse prior results and only scan new unmatched audiobooks.
+- **Full Refresh Control**: Added explicit full refresh scanning to force a complete rescan when desired.
+
+### Bug Fixes
+
+- **Suggestions Session Cookie Overflow**: Fixed oversized Flask session cookie failures (including 502 completion failures) by moving large scan payloads out of cookie-backed session storage into server-side state.
+- **Suggestions Provider Hammering**: Reduced ABS/Booklore scan load by switching suggestions matching to a one-time ebook candidate pool per scan with in-memory fuzzy matching, instead of per-audiobook provider searches.
+- **Booklore Scan Query Path**: `get_searchable_ebooks('')` now uses Booklore `get_all_books()` for scan workloads to avoid aggressive per-query refresh behavior.
+
+### Maintenance
+
+- **Suggestions Service Layer**: Isolated suggestions scan logic in `src/services/suggestions_service.py` to keep route handlers focused on web actions and state handling.
+
 ## [6.3.2] - 2026-02-27
 
 ### Enhancements

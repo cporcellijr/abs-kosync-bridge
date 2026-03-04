@@ -50,6 +50,7 @@ The system keeps your progress in sync across all major platforms:
 - **Real-Time Dashboard**: Monitor progress and sync status across all your books.
 - **Advanced Matcher**: Manual mapping for complex titles or different editions.
 - **Batch Processing**: Queue and process multiple books for synchronization in bulk.
+- **Library Suggestions**: Scan for likely audiobook + ebook pairs and send the good ones straight to your queue.
 - **Forge**: Automated workflow for Storyteller readaloud generation.
 - **Dynamic Settings**: Configure your entire system from the Web UI with instant hot-reloading.
 
