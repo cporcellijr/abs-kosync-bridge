@@ -27,7 +27,10 @@ class BookloreClient:
         self._book_cache = {} 
         self._book_id_cache = {}
         self._cache_timestamp = 0
-        
+        self._last_refresh_failed = False
+        self._last_refresh_attempt = 0
+        self._refresh_cooldown = 300  # 5 min cooldown after failed refresh
+
         self._token = None
         self._token_timestamp = 0
         self._token_max_age = 300
@@ -261,11 +264,22 @@ class BookloreClient:
             logger.debug(f"Booklore: Error fetching book {book_id}: {e}")
             return None
 
+    def _is_refresh_on_cooldown(self) -> bool:
+        """Return True if last refresh failed and cooldown hasn't elapsed."""
+        if not self._last_refresh_failed:
+            return False
+        elapsed = time.time() - self._last_refresh_attempt
+        if elapsed < self._refresh_cooldown:
+            logger.debug(f"Booklore cache refresh on cooldown ({self._refresh_cooldown - elapsed:.0f}s remaining)")
+            return True
+        return False
+
     def _refresh_book_cache(self):
         """
         Refresh the book cache using robust pagination.
         Fetches books in batches to ensure complete library sync.
         """
+        self._last_refresh_attempt = time.time()
         all_books_list = []
         page = 0
         batch_size = 200  # Reasonable chunk size
@@ -280,6 +294,7 @@ class BookloreClient:
             
             if not response or response.status_code != 200:
                 logger.error(f"❌ Booklore: Failed to fetch page {page}")
+                self._last_refresh_failed = True
                 return False
 
             data = response.json()
@@ -329,6 +344,7 @@ class BookloreClient:
             self._book_id_cache = {}
             self._cache_timestamp = time.time()
             self._save_cache() # No-op now
+            self._last_refresh_failed = False
             return True
 
         logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
@@ -418,7 +434,9 @@ class BookloreClient:
         if new_book_ids:
             logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
             token = self._get_fresh_token()
-            if not token: return False
+            if not token:
+                self._last_refresh_failed = True
+                return False
 
             def fetch_one(book_id):
                 return book_id, self._fetch_book_detail(book_id, token)
@@ -441,6 +459,7 @@ class BookloreClient:
 
         self._cache_timestamp = time.time()
         # self._save_cache() # DB is updated inside _process_book_detail
+        self._last_refresh_failed = False
         return True
 
     def _process_book_detail(self, detail):
@@ -521,11 +540,11 @@ class BookloreClient:
         Find a book by its filename using exact, stem, or normalized matching.
         """
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
-        if not self._book_cache and allow_refresh: 
+        if not self._book_cache and allow_refresh and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
-            
+
         # Check cache freshness if refresh is allowed
-        if allow_refresh and time.time() - self._cache_timestamp > 3600:
+        if allow_refresh and time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
 
         target_name = Path(ebook_filename).name.lower()
@@ -568,7 +587,7 @@ class BookloreClient:
                 return best_match[1]
 
         # If not found, try refreshing cache once
-        if allow_refresh and time.time() - self._cache_timestamp > 60:
+        if allow_refresh and time.time() - self._cache_timestamp > 60 and not self._is_refresh_on_cooldown():
             if self._refresh_book_cache():
                 return self.find_book_by_filename(ebook_filename, allow_refresh=False)
 
@@ -577,14 +596,14 @@ class BookloreClient:
     def get_all_books(self):
         """Get all books from cache, refreshing if necessary."""
         # Use a reasonable cache time of 1 hour, similar to find_book_by_filename
-        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+        if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         return list(self._book_cache.values())
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
-        if time.time() - self._cache_timestamp > 5: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+        if time.time() - self._cache_timestamp > 5 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
 
         if not search_term:
             return list(self._book_cache.values())
@@ -786,7 +805,7 @@ class BookloreClient:
         return False
 
     def get_recent_activity(self, min_progress=0.01):
-        if not self._book_cache: self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         results = []
         for filename, book in list(self._book_cache.items()):
             progress = 0

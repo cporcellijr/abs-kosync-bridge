@@ -581,9 +581,12 @@ def restart_server():
     logger.info("♻️  Stopping application (Supervisor will restart it)...")
     time.sleep(1.0)  # Give Flask time to send the redirect response
 
-    # Exit with 0 so start.sh loop restarts the process
-    logger.info("👋 Exiting process to trigger restart...")
-    sys.exit(0)
+    # Send SIGTERM to our own process so the main thread's signal handler fires.
+    # Note: sys.exit() does NOT work here because this runs in a background thread —
+    # sys.exit() only raises SystemExit in the calling thread, not the main process.
+    logger.info("👋 Sending SIGTERM to trigger restart...")
+    import signal
+    os.kill(os.getpid(), signal.SIGTERM)
 
 def settings():
     # Application Defaults
