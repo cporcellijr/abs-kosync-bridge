@@ -24,7 +24,9 @@ Links an **Audiobook** in ABS to an **Ebook** in KOReader (and other platforms).
 
 - **Mechanism**: Transcription-based alignment.
 - **Use Case**: Listening on phone, reading on Kindle/Kobo.
-- **Process**: Mapping creates a transcript of the audiobook, then uses that text to find the corresponding page in the ebook.
+- **Process**:
+  - If Storyteller forced-alignment transcripts are available, they are ingested and used first.
+  - Otherwise, the system falls back to SMIL extraction, then Whisper transcription.
 
 ### 2. Ebook-Only Sync
 
@@ -32,14 +34,41 @@ Links your ebook status across platforms.
 
 - **Mechanism**: Direct percentage/text position sync.
 - **Triggers**:
-  - **Internal KOSync**: Instant (Push-based).
-  - **ABS/Booklore**: Periodic Polling (every ~5 mins).
+  - **KOReader**: Instant — syncs the moment you close or pause reading.
+  - **Audiobookshelf**: Near-instant (~30s) during audiobook playback.
+  - **Booklore/Others**: Picked up on the regular background sync (every ~5 mins).
 - **Supported Clients**:
   - **KOReader** (via Internal KOSync Server)
   - **Booklore** (Requires `BOOKLORE_ENABLED=true`)
   - **ABS Ebook** (Requires `SYNC_ABS_EBOOK=true`)
 - **Hardcover**: Updates Hardcover.app presence (if configured).
-- **Note**: If you only use Booklore and ABS Web Reader (no KOReader), syncs will occur only during the periodic poll interval.
+
+---
+
+## Real-Time Sync
+
+By default, the bridge checks all your clients for progress changes every 5 minutes. **Real-time sync** makes this happen much faster — within seconds instead of minutes.
+
+### How It Works
+
+There are two ways progress can sync instantly:
+
+1. **Audiobook Playback** — When you listen to an audiobook in Audiobookshelf (web player, mobile app, etc.), the bridge detects the playback activity automatically. Once you stop or pause for about 30 seconds, it syncs your position to all your other platforms right away.
+
+2. **KOReader Reading** — If you use the built-in KoSync server (configured in Settings), KOReader sends your reading position to the bridge the moment you close a book or turn the page. The bridge then pushes that position to all your other clients immediately.
+
+> [!NOTE]
+> The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it.
+
+### Disabling Instant Sync
+
+If you prefer to rely solely on the background poll (e.g., to reduce network activity), you can turn off instant sync entirely from **Settings → Sync Behavior → Instant Sync**. This disables the ABS socket listener and the KoSync push trigger. The global poll cycle continues as normal.
+
+### Per-Client Polling (Storyteller & Booklore)
+
+By default, Storyteller and Booklore are only checked during the global sync cycle. If you make changes directly in one of those apps and want the bridge to notice faster, you can configure a **custom poll interval** for that client under **Settings → Sync Behavior → Per-Client Polling**.
+
+Set the mode to **Custom** and choose how often (in seconds) the bridge should check that client for position changes. Only books with an active mapping are checked, and a full sync is triggered only when a real change is detected — so the overhead is minimal.
 
 ---
 
@@ -79,6 +108,8 @@ Select the standard EPUB file you want to use for regular sync. The system searc
 
 Once you've made your selections, click **Create Mapping**. The system will download any necessary files (from CWA/ABS) and begin the alignment process.
 
+If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/Whisper for that book.
+
 ### Batch Match
 
 For users with large libraries, the **Batch Matcher** speeds up the process.
@@ -113,6 +144,8 @@ This is the recommended workflow for most users.
 #### 2. Manual Forge (from the Forge page)
 
 The standalone **Forge** page (`/forge`) lets you stage and process a book through Storyteller without creating a sync mapping. Use this if you want to prepare a book for Storyteller independently and then link it manually via the Matcher later.
+
+Forge staging uses `PROCESSING_DIR` if configured, and defaults to `/tmp` if not set. This staging path does not require a dedicated Docker volume mount.
 
 ### When to use it
 
@@ -167,6 +200,15 @@ You can edit or delete existing mappings from the Dashboard.
 
 - **Delete**: Stops syncing the book. Does NOT delete the files.
 - **Reset Progress**: Clears the stored sync state if things get out of whack.
+
+### Storyteller Backfill
+
+Use **Settings -> Storyteller Backfill** to bulk re-check all Storyteller-linked books:
+
+- Ingests any newly available Storyteller transcript files.
+- Sets transcript source to Storyteller where valid transcripts exist.
+- Rebuilds alignment maps from Storyteller word timelines (no Whisper/SMIL recompute).
+- Leaves books unchanged when transcripts are missing or incompatible.
 
 ### Viewing Logs
 

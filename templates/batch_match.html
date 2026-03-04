@@ -410,6 +410,38 @@
             line-height: 1.2;
         }
 
+        /* Source badge */
+        .source-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+        }
+
+        .source-badge.booklore {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+        }
+
+        .source-badge.abs {
+            background: rgba(102, 126, 234, 0.2);
+            color: #93a5f6;
+        }
+
+        .source-badge.cwa {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ffb74d;
+        }
+
+        .source-badge.localfile {
+            background: rgba(156, 39, 176, 0.2);
+            color: #ce93d8;
+        }
+
         /* Ebook Select (kept for fallback but hidden when cards shown) */
         select.ebook-select {
             width: 100%;
@@ -786,6 +818,10 @@
                             </div>
                             {% if eb.authors %}
                             <div class="resource-subtitle">{{ eb.authors }}</div>
+                            {% endif %}
+                            {% if eb.source %}
+                            {% set badge_cls = eb.source.lower().replace(' ', '') %}
+                            <span class="source-badge {{ badge_cls }}">{{ eb.source }}</span>
                             {% endif %}
                         </div>
                         {% endfor %}

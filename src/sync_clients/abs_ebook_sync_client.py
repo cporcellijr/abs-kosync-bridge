@@ -81,6 +81,11 @@ class ABSEbookSyncClient(SyncClient):
         target_id = book.abs_ebook_item_id if book.abs_ebook_item_id else book.abs_id
         cfi = locator.cfi
         success = self.abs_client.update_ebook_progress(target_id, pct, cfi)
+        try:
+            from src.services.abs_socket_listener import record_abs_write
+            record_abs_write(book.abs_id)
+        except ImportError:
+            pass
         updated_state = {
             'pct': pct,
             'cfi': cfi

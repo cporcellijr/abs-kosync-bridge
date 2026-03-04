@@ -4,10 +4,7 @@ Handles cleanup of ebook text and reconstruction of fragmented audio sentences.
 """
 
 import re
-import logging
 from typing import List, Dict, Tuple
-
-logger = logging.getLogger(__name__)
 
 class Polisher:
     """
@@ -122,7 +119,9 @@ class Polisher:
         # Let's apply it as it helps match "Chapter 1" to "Chapter One" in audio.
         cleaned = self.text_to_digits(cleaned)
         
-        return self.collapse_whitespace(cleaned)
+        result = self.collapse_whitespace(cleaned)
+
+        return result
 
     def rebuild_fragmented_sentences(self, segments: List[Dict], ebook_full_text: str) -> List[Dict]:
         """

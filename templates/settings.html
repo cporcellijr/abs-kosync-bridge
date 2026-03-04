@@ -501,6 +501,7 @@
             <div class="settings-section section-highlight">
                 <div class="section-header">
                     <h3 class="text-primary">Audiobookshelf (Required)</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('abs', this)">🔗 Test</button>
                 </div>
                 <div class="section-body">
                     <!-- Moved Checkbox to top -->
@@ -546,6 +547,7 @@
                 == '') %}
                 <div class="section-header">
                     <h3 class="text-primary">KOSync Integration</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('kosync', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -632,6 +634,7 @@
                 get_val('STORYTELLER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Storyteller</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('storyteller', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -666,6 +669,7 @@
                 get_val('BOOKLORE_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Booklore</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('booklore', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -713,6 +717,7 @@
                 {% set cwa_enabled = get_bool('CWA_ENABLED') %}
                 <div class="section-header">
                     <h3>Calibre-Web Automated</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('cwa', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -748,6 +753,7 @@
                 get_val('HARDCOVER_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Hardcover.app</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('hardcover', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -773,6 +779,7 @@
                 get_val('TELEGRAM_ENABLED') == '') %}
                 <div class="section-header">
                     <h3>Telegram Notifications</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('telegram', this)">🔗 Test</button>
                     <div class="toggle-switch-wrapper">
                         <span class="toggle-label">Enable</span>
                         <label class="toggle-switch">
@@ -894,6 +901,71 @@
                             to regenerate it (which may require re-transcription).
                         </div>
                     </div>
+
+                    <!-- Instant Sync (slider reveals Per-Client Polling options) -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color, #ddd);">
+                        <div>
+                            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600;">Instant Sync</h4>
+                            <p class="help-text" style="margin: 4px 0 0 0;">Triggers immediate sync on ABS playback or KOReader progress. Disable to rely solely on polling.</p>
+                        </div>
+                        <div class="toggle-switch-wrapper">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle_instant_sync" name="INSTANT_SYNC_ENABLED"
+                                    onchange="toggleSection('instant_sync_body', this.checked)"
+                                    {% if get_bool('INSTANT_SYNC_ENABLED') %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Advanced sync options (hidden when Instant Sync is off) -->
+                    <div id="instant_sync_body" class="section-body {% if not get_bool('INSTANT_SYNC_ENABLED') %}collapsed{% endif %}" style="grid-column: 1 / -1; padding: 16px 0 0 0;">
+
+                        <!-- Per-Client Polling -->
+                        <div style="width: 100%; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color, #ddd);">
+                            <h4 style="margin: 0; font-size: 0.9rem; font-weight: 600;">Per-Client Polling</h4>
+                            <p class="help-text" style="margin: 4px 0 0 0;">
+                                <em>Global</em> uses the main sync interval. <em>Custom</em> sets a separate check frequency per client.
+                            </p>
+                        </div>
+
+                        {% if get_bool('STORYTELLER_ENABLED') %}
+                        <div class="form-group" style="align-items: center;">
+                            <label>Storyteller Poll Mode</label>
+                            <select name="STORYTELLER_POLL_MODE" id="storyteller_poll_mode"
+                                    onchange="togglePollSeconds('storyteller_poll_seconds_row', this.value)">
+                                <option value="global" {% if get_val('STORYTELLER_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('STORYTELLER_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="storyteller_poll_seconds_row"
+                             {% if get_val('STORYTELLER_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Storyteller Poll Interval (seconds)</label>
+                            <input type="number" name="STORYTELLER_POLL_SECONDS" min="10"
+                                   value="{{ get_val('STORYTELLER_POLL_SECONDS', '45') }}">
+                            <div class="help-text">Recommended: 30–60s for Storyteller (active reading source).</div>
+                        </div>
+                        {% endif %}
+
+                        {% if get_bool('BOOKLORE_ENABLED') %}
+                        <div class="form-group" style="align-items: center;">
+                            <label>Booklore Poll Mode</label>
+                            <select name="BOOKLORE_POLL_MODE" id="booklore_poll_mode"
+                                    onchange="togglePollSeconds('booklore_poll_seconds_row', this.value)">
+                                <option value="global" {% if get_val('BOOKLORE_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('BOOKLORE_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="booklore_poll_seconds_row"
+                             {% if get_val('BOOKLORE_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Booklore Poll Interval (seconds)</label>
+                            <input type="number" name="BOOKLORE_POLL_SECONDS" min="10"
+                                   value="{{ get_val('BOOKLORE_POLL_SECONDS', '300') }}">
+                            <div class="help-text">Recommended: 300s for Booklore.</div>
+                        </div>
+                        {% endif %}
+
+                    </div>
                 </div>
             </div>
 
@@ -918,6 +990,13 @@
                             placeholder="Where Storyteller scans for books">
                         <div class="help-text">Target directory where Forge writes files for Storyteller to process.
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Storyteller Assets Path (Optional)</label>
+                        <input type="text" name="STORYTELLER_ASSETS_DIR"
+                            value="{{ get_val('STORYTELLER_ASSETS_DIR') }}"
+                            placeholder="Root containing /assets/{title}/transcriptions">
+                        <div class="help-text">Used to ingest Storyteller forced-alignment transcripts when available.</div>
                     </div>
 
 
@@ -968,6 +1047,32 @@
                                 Deletes all suggestions for books that are not currently in your bridge library.
                                 This helps clear out junk suggestions and allows the bridge to re-suggest them if
                                 needed.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Storyteller Backfill</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-primary" onclick="backfillStorytellerTranscripts()">
+                                Backfill Storyteller Transcripts
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Re-scan all Storyteller-linked books, ingest available transcript files, and regenerate
+                                storyteller-native alignment maps without SMIL or Whisper reprocessing.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Cache Cleanup</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-danger" onclick="cleanInactiveCache()">
+                                Clean Inactive Cache
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Deletes audio cache and transcript files for books that are no longer active.
+                                Active books are not affected.
                             </p>
                         </div>
                     </div>
@@ -1138,6 +1243,30 @@
                 });
         }
 
+        function testConnection(service, btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⌛ Testing...';
+            btn.disabled = true;
+            fetch('/api/test-connection/' + service)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        btn.innerHTML = '✅ Connected';
+                        alert('✅ ' + data.message);
+                    } else {
+                        btn.innerHTML = '❌ Failed';
+                        alert('❌ ' + data.message);
+                    }
+                    setTimeout(() => { btn.innerHTML = originalText; }, 3000);
+                })
+                .catch(err => {
+                    btn.innerHTML = '❌ Error';
+                    alert('❌ Test failed: ' + err);
+                    setTimeout(() => { btn.innerHTML = originalText; }, 3000);
+                })
+                .finally(() => { btn.disabled = false; });
+        }
+
         function toggleSection(bodyId, isChecked) {
             const body = document.getElementById(bodyId);
             if (isChecked) {
@@ -1146,6 +1275,18 @@
                 body.classList.add('collapsed');
                 // Optional: Clear inputs when disabling?
                 // For now, we prefer keeping values in UI so user doesn't lose config by accidental toggle
+            }
+        }
+
+        function togglePollSeconds(rowId, mode) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            if (mode === 'custom') {
+                row.style.opacity = '';
+                row.style.pointerEvents = '';
+            } else {
+                row.style.opacity = '0.45';
+                row.style.pointerEvents = 'none';
             }
         }
 
@@ -1212,6 +1353,63 @@
             } catch (err) {
                 console.error('Error clearing suggestions:', err);
                 alert('❌ An error occurred while clearing suggestions. Check console for details.');
+            }
+        }
+
+        async function cleanInactiveCache() {
+            if (!confirm("Clean all cached audio and transcript files for inactive books?\n\nActive books will not be affected.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/cache/clean', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(`Cleaned ${data.deleted_audio} audio cache(s), ${data.deleted_transcripts} transcript folder(s), and ${data.deleted_epubs} cached epub(s).`);
+                } else {
+                    alert(`Failed: ${data.error || 'Unknown error'}`);
+                }
+            } catch (err) {
+                console.error('Error cleaning cache:', err);
+                alert('An error occurred while cleaning cache. Check console for details.');
+            }
+        }
+
+        async function backfillStorytellerTranscripts() {
+            if (!confirm("Run Storyteller backfill now?\n\nThis will scan all Storyteller-linked books, ingest available transcript files, and regenerate storyteller alignment maps.")) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/storyteller/backfill', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (!response.ok || data.success === false) {
+                    alert(`Storyteller backfill failed: ${data.error || 'Unknown error'}`);
+                    return;
+                }
+
+                alert(
+                    `Storyteller backfill complete.\n` +
+                    `Scanned: ${data.scanned}\n` +
+                    `Ingested: ${data.ingested}\n` +
+                    `Aligned: ${data.aligned}\n` +
+                    `Missing: ${data.missing}\n` +
+                    `Failed: ${data.failed}\n` +
+                    `Duration: ${data.duration_seconds}s`
+                );
+            } catch (err) {
+                console.error('Error running storyteller backfill:', err);
+                alert('An error occurred while running storyteller backfill. Check console for details.');
             }
         }
 

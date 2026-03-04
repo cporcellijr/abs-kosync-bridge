@@ -182,6 +182,61 @@ class TestStorytellerAPIClientDownload(unittest.TestCase):
             self.assertTrue(output_path.exists())
 
 
+class TestStorytellerAPIClientCollectionRemoval(unittest.TestCase):
+    """Test Storyteller collection removal by UUID."""
+
+    @patch.dict(os.environ, {
+        'STORYTELLER_API_URL': 'http://test-storyteller:8001',
+        'STORYTELLER_USER': 'testuser',
+        'STORYTELLER_PASSWORD': 'testpass'
+    })
+    def test_remove_from_collection_by_uuid_uses_batch_delete_endpoint(self):
+        from src.api.storyteller_api import StorytellerAPIClient
+
+        client = StorytellerAPIClient()
+        resp_collections = Mock(status_code=200)
+        resp_collections.json.return_value = [
+            {'uuid': 'col-1', 'name': 'Synced with KOReader'}
+        ]
+        resp_delete = Mock(status_code=204)
+
+        with patch.object(client, '_make_request', side_effect=[resp_collections, resp_delete]) as mock_req:
+            result = client.remove_from_collection_by_uuid('book-1')
+
+        self.assertTrue(result)
+        mock_req.assert_any_call(
+            'DELETE',
+            '/api/v2/collections/books',
+            {'collections': ['col-1'], 'books': ['book-1']}
+        )
+
+    @patch.dict(os.environ, {
+        'STORYTELLER_API_URL': 'http://test-storyteller:8001',
+        'STORYTELLER_USER': 'testuser',
+        'STORYTELLER_PASSWORD': 'testpass'
+    })
+    def test_remove_from_collection_by_uuid_falls_back_to_item_delete_endpoint(self):
+        from src.api.storyteller_api import StorytellerAPIClient
+
+        client = StorytellerAPIClient()
+        resp_collections = Mock(status_code=200)
+        resp_collections.json.return_value = [
+            {'uuid': 'col-1', 'name': 'Synced with KOReader'}
+        ]
+        resp_fail = Mock(status_code=404)
+        resp_ok = Mock(status_code=204)
+
+        with patch.object(
+            client,
+            '_make_request',
+            side_effect=[resp_collections, resp_fail, resp_fail, resp_ok]
+        ) as mock_req:
+            result = client.remove_from_collection_by_uuid('book-2')
+
+        self.assertTrue(result)
+        mock_req.assert_any_call('DELETE', '/api/v2/collections/col-1/books/book-2', None)
+
+
 
 
 class TestWebServerAPIRoutes(unittest.TestCase):

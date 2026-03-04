@@ -74,7 +74,11 @@ class StorytellerSyncClient(SyncClient):
         # This needs to be updated to work with the new interface
         epub = book.ebook_filename
         st_pct, href, frag = state.current.get('pct'), state.current.get('href'), state.current.get('frag')
-        txt = self.ebook_parser.resolve_locator_id(epub, href, frag)
+        txt = None
+        if href and frag:
+            txt = self.ebook_parser.resolve_locator_id(epub, href, frag)
+        elif href and not frag:
+            logger.debug(f"Storyteller state missing fragment for href='{href}', falling back to percentage text")
         if not txt:
             txt = self.ebook_parser.get_text_at_percentage(epub, st_pct)
         return txt
@@ -113,11 +117,17 @@ class StorytellerSyncClient(SyncClient):
 
         if book.storyteller_uuid:
             success = self.storyteller_client.update_position(book.storyteller_uuid, pct, locator)
+            if success:
+                try:
+                    from src.services.write_tracker import record_write
+                    record_write('Storyteller', book.abs_id, pct)
+                except ImportError:
+                    pass
         else:
             # Strict mode: Do not update if not linked via UUID
             logger.debug(f"Skipping Storyteller update for {book.abs_title}: No linked UUID")
             success = False
-        
+
         return SyncResult(pct, success)
 
     def _resolve_href_from_percentage(self, epub: str, pct: float) -> Optional[str]:

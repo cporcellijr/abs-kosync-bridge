@@ -27,7 +27,10 @@ class BookloreClient:
         self._book_cache = {} 
         self._book_id_cache = {}
         self._cache_timestamp = 0
-        
+        self._last_refresh_failed = False
+        self._last_refresh_attempt = 0
+        self._refresh_cooldown = 300  # 5 min cooldown after failed refresh
+
         self._token = None
         self._token_timestamp = 0
         self._token_max_age = 300
@@ -261,11 +264,22 @@ class BookloreClient:
             logger.debug(f"Booklore: Error fetching book {book_id}: {e}")
             return None
 
+    def _is_refresh_on_cooldown(self) -> bool:
+        """Return True if last refresh failed and cooldown hasn't elapsed."""
+        if not self._last_refresh_failed:
+            return False
+        elapsed = time.time() - self._last_refresh_attempt
+        if elapsed < self._refresh_cooldown:
+            logger.debug(f"Booklore cache refresh on cooldown ({self._refresh_cooldown - elapsed:.0f}s remaining)")
+            return True
+        return False
+
     def _refresh_book_cache(self):
         """
         Refresh the book cache using robust pagination.
         Fetches books in batches to ensure complete library sync.
         """
+        self._last_refresh_attempt = time.time()
         all_books_list = []
         page = 0
         batch_size = 200  # Reasonable chunk size
@@ -280,6 +294,7 @@ class BookloreClient:
             
             if not response or response.status_code != 200:
                 logger.error(f"❌ Booklore: Failed to fetch page {page}")
+                self._last_refresh_failed = True
                 return False
 
             data = response.json()
@@ -329,6 +344,7 @@ class BookloreClient:
             self._book_id_cache = {}
             self._cache_timestamp = time.time()
             self._save_cache() # No-op now
+            self._last_refresh_failed = False
             return True
 
         logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
@@ -418,7 +434,9 @@ class BookloreClient:
         if new_book_ids:
             logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
             token = self._get_fresh_token()
-            if not token: return False
+            if not token:
+                self._last_refresh_failed = True
+                return False
 
             def fetch_one(book_id):
                 return book_id, self._fetch_book_detail(book_id, token)
@@ -441,6 +459,7 @@ class BookloreClient:
 
         self._cache_timestamp = time.time()
         # self._save_cache() # DB is updated inside _process_book_detail
+        self._last_refresh_failed = False
         return True
 
     def _process_book_detail(self, detail):
@@ -487,9 +506,6 @@ class BookloreClient:
             'koreaderProgress': detail.get('koreaderProgress'),
         }
 
-        self._book_cache[filename] = book_info # Filename case sensitivity might issue used to be filename.lower()
-        # The key in _book_cache seems to be filename (exact) or lower? 
-        # Original code line 300: self._book_cache[filename.lower()] = book_info
         # Let's keep it consistent with what we see in database migration
         
         self._book_cache[filename.lower()] = book_info
@@ -524,11 +540,11 @@ class BookloreClient:
         Find a book by its filename using exact, stem, or normalized matching.
         """
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
-        if not self._book_cache and allow_refresh: 
+        if not self._book_cache and allow_refresh and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
-            
+
         # Check cache freshness if refresh is allowed
-        if allow_refresh and time.time() - self._cache_timestamp > 3600:
+        if allow_refresh and time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
 
         target_name = Path(ebook_filename).name.lower()
@@ -571,7 +587,7 @@ class BookloreClient:
                 return best_match[1]
 
         # If not found, try refreshing cache once
-        if allow_refresh and time.time() - self._cache_timestamp > 60:
+        if allow_refresh and time.time() - self._cache_timestamp > 60 and not self._is_refresh_on_cooldown():
             if self._refresh_book_cache():
                 return self.find_book_by_filename(ebook_filename, allow_refresh=False)
 
@@ -580,14 +596,14 @@ class BookloreClient:
     def get_all_books(self):
         """Get all books from cache, refreshing if necessary."""
         # Use a reasonable cache time of 1 hour, similar to find_book_by_filename
-        if time.time() - self._cache_timestamp > 3600: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+        if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         return list(self._book_cache.values())
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
-        if time.time() - self._cache_timestamp > 5: self._refresh_book_cache()
-        if not self._book_cache: self._refresh_book_cache()
+        if time.time() - self._cache_timestamp > 5 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
 
         if not search_term:
             return list(self._book_cache.values())
@@ -647,27 +663,47 @@ class BookloreClient:
             logger.error(f"❌ Download error: {e}")
             return None
 
+    @staticmethod
+    def _to_progress_fraction(raw_pct):
+        """Convert Booklore percentage (0-100) to fraction (0-1) safely."""
+        if raw_pct in (None, ""):
+            return 0.0
+        try:
+            return float(raw_pct) / 100.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _get_progress_by_book_id(self, book_id):
+        """
+        Get progress tuple for a specific Booklore book id.
+        Returns: (pct_fraction, cfi) or (None, None) on failure.
+        """
+        response = self._make_request("GET", f"/api/v1/books/{book_id}")
+        if not response or response.status_code != 200:
+            return None, None
+
+        data = response.json()
+        book_type = str(
+            data.get('primaryFile', {}).get('bookType')
+            or data.get('bookType')
+            or ''
+        ).upper()
+        if book_type == 'EPUB':
+            progress = data.get('epubProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), progress.get('cfi')
+        if book_type == 'PDF':
+            progress = data.get('pdfProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), None
+        if book_type == 'CBX':
+            progress = data.get('cbxProgress') or {}
+            return self._to_progress_fraction(progress.get('percentage', 0)), None
+        return None, None
+
     def get_progress(self, ebook_filename):
         book = self.find_book_by_filename(ebook_filename)
-        if not book: return None, None
-
-        response = self._make_request("GET", f"/api/v1/books/{book['id']}")
-        if response and response.status_code == 200:
-            data = response.json()
-            book_type = data.get('primaryFile', {}).get('bookType', data.get('bookType', '')).upper()
-            if book_type == 'EPUB':
-                progress = data.get('epubProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), progress.get('cfi')
-            elif book_type == 'PDF':
-                progress = data.get('pdfProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), None
-            elif book_type == 'CBX':
-                progress = data.get('cbxProgress') or {}
-                pct = progress.get('percentage', 0)
-                return (pct / 100.0 if pct else 0.0), None
-        return None, None
+        if not book:
+            return None, None
+        return self._get_progress_by_book_id(book['id'])
 
     def update_progress(self, ebook_filename, percentage, rich_locator: Optional[LocatorResult] = None):
         book = self.find_book_by_filename(ebook_filename)
@@ -678,37 +714,98 @@ class BookloreClient:
         book_id = book['id']
         book_type = (book.get('bookType') or '').upper()
         pct_display = percentage * 100
+
+        clear_reset = book_type == 'EPUB' and percentage <= 0
         cfi = rich_locator.cfi if rich_locator and rich_locator.cfi else None
 
+        payload_variants = []
         if book_type == 'EPUB':
-            payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
-            if cfi:
-                payload["epubProgress"]["cfi"] = cfi
-                logger.debug(f"Booklore: Setting CFI: {cfi}")
+            base_payload = {"bookId": book_id, "epubProgress": {"percentage": pct_display}}
+            if clear_reset:
+                # Booklore variants differ by version/build. Try common clear forms.
+                payload_variants = [
+                    ("null_cfi", {"bookId": book_id, "epubProgress": {"percentage": pct_display, "cfi": None}}),
+                    ("no_cfi", base_payload),
+                ]
+            else:
+                if cfi is not None:
+                    logger.debug(f"Booklore: Setting CFI: {cfi}")
+                    payload_variants = [
+                        ("with_cfi", {"bookId": book_id, "epubProgress": {"percentage": pct_display, "cfi": cfi}}),
+                        ("no_cfi", base_payload),
+                    ]
+                else:
+                    payload_variants = [("standard", base_payload)]
         elif book_type == 'PDF':
-            payload = {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}}
+            payload_variants = [("standard", {"bookId": book_id, "pdfProgress": {"page": 1, "percentage": pct_display}})]
         elif book_type == 'CBX':
-            payload = {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}}
+            payload_variants = [("standard", {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}})]
         else:
-            logger.warning(f"⚠️ Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
+            logger.warning(f"Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
             return False
 
-        response = self._make_request("POST", "/api/v1/books/progress", payload)
-        if response and response.status_code in [200, 201, 204]:
-            logger.info(f"✅ Booklore: {sanitize_log_data(ebook_filename)} → {pct_display:.1f}%")
-            # Refresh cache to reflect recent update so subsequent gets return fresh values
+        last_status = "No response"
+        for variant_name, payload in payload_variants:
+            if clear_reset:
+                logger.debug(f"Booklore: Clearing CFI for 0% reset (variant={variant_name})")
+
+            response = self._make_request("POST", "/api/v1/books/progress", payload)
+            if not response or response.status_code not in [200, 201, 204]:
+                last_status = response.status_code if response else "No response"
+                continue
+
+            # Verify EPUB writes to ensure the server actually persisted the target.
+            if book_type == 'EPUB':
+                verified_pct, _ = self._get_progress_by_book_id(book_id)
+                if clear_reset:
+                    if verified_pct is not None and verified_pct > 0.001:
+                        logger.warning(
+                            f"Booklore clear did not persist for {sanitize_log_data(ebook_filename)} "
+                            f"(variant={variant_name}, observed={verified_pct * 100:.2f}%). Retrying..."
+                        )
+                        last_status = f"verify_failed:{verified_pct * 100:.2f}%"
+                        continue
+                elif verified_pct is not None:
+                    if abs(verified_pct - percentage) > 0.005:
+                        logger.warning(
+                            f"Booklore progress write mismatch for {sanitize_log_data(ebook_filename)} "
+                            f"(variant={variant_name}, expected={pct_display:.2f}%, observed={verified_pct * 100:.2f}%). Retrying..."
+                        )
+                        last_status = f"verify_mismatch:{verified_pct * 100:.2f}%"
+                        continue
+
+            logger.info(f"Booklore: {sanitize_log_data(ebook_filename)} -> {pct_display:.1f}%")
+
+            # Update cache in-place instead of full library refresh
             try:
-                self._refresh_book_cache()
+                cached = self._book_id_cache.get(book_id)
+                if cached:
+                    if book_type == 'EPUB':
+                        if not cached.get('epubProgress'):
+                            cached['epubProgress'] = {}
+                        cached['epubProgress']['percentage'] = pct_display
+                        if clear_reset:
+                            cached['epubProgress']['cfi'] = ""
+                        elif 'cfi' in payload.get('epubProgress', {}):
+                            cached['epubProgress']['cfi'] = payload['epubProgress']['cfi']
+                    elif book_type == 'PDF':
+                        if not cached.get('pdfProgress'):
+                            cached['pdfProgress'] = {}
+                        cached['pdfProgress']['percentage'] = pct_display
+                    elif book_type == 'CBX':
+                        if not cached.get('cbxProgress'):
+                            cached['cbxProgress'] = {}
+                        cached['cbxProgress']['percentage'] = pct_display
+                    logger.debug(f"Booklore: Cache updated in-place for book {book_id}")
             except Exception:
-                logger.debug("Booklore: Cache refresh failed after update")
+                logger.debug("Booklore: In-place cache update failed, will refresh on next read")
             return True
-        else:
-            status = response.status_code if response else "No response"
-            logger.error(f"❌ Booklore update failed: {status}")
-            return False
+
+        logger.error(f"Booklore update failed: {last_status}")
+        return False
 
     def get_recent_activity(self, min_progress=0.01):
-        if not self._book_cache: self._refresh_book_cache()
+        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         results = []
         for filename, book in list(self._book_cache.items()):
             progress = 0

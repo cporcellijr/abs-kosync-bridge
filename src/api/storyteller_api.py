@@ -74,6 +74,8 @@ class StorytellerAPIClient:
                 response = self.session.post(url, headers=headers, json=json_data, timeout=10)
             elif method.upper() == "PUT":
                 response = self.session.put(url, headers=headers, json=json_data, timeout=10)
+            elif method.upper() == "DELETE":
+                response = self.session.delete(url, headers=headers, json=json_data, timeout=10)
             else: return None
 
             if response.status_code == 401:
@@ -87,6 +89,8 @@ class StorytellerAPIClient:
                     response = self.session.post(url, headers=headers, json=json_data, timeout=10)
                 elif method.upper() == "PUT":
                     response = self.session.put(url, headers=headers, json=json_data, timeout=10)
+                elif method.upper() == "DELETE":
+                    response = self.session.delete(url, headers=headers, json=json_data, timeout=10)
             return response
         except Exception as e:
             logger.error(f"❌ Storyteller API request failed ('{method}' '{endpoint}'): {e}")
@@ -300,6 +304,7 @@ class StorytellerAPIClient:
         # Backup strategy (singular)
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
+        return bool(r_back and r_back.status_code in [200, 204])
         
     def add_to_collection_by_uuid(self, book_uuid: str, collection_name: str = None) -> bool:
         if not collection_name:
@@ -331,6 +336,41 @@ class StorytellerAPIClient:
         fallback = f"/api/v2/collections/{col_uuid}/books"
         r_back = self._make_request("POST", fallback, {"books": [book_uuid]})
         return bool(r_back and r_back.status_code in [200, 204])
+
+    def remove_from_collection_by_uuid(self, book_uuid: str, collection_name: str = None) -> bool:
+        """Remove a Storyteller book from a collection by UUID."""
+        if not book_uuid:
+            return False
+        if not collection_name:
+            collection_name = os.environ.get("STORYTELLER_COLLECTION_NAME", "Synced with KOReader")
+
+        # Resolve collection UUID (do not create missing collection on remove)
+        r = self._make_request("GET", "/api/v2/collections")
+        if not r or r.status_code != 200:
+            return False
+        collections = r.json()
+        target_col = next((c for c in collections if c.get('name') == collection_name), None)
+        if not target_col:
+            return False
+
+        col_uuid = target_col.get('uuid') or target_col.get('id')
+        if not col_uuid:
+            return False
+
+        # Try endpoint variants for compatibility across Storyteller builds.
+        attempts = [
+            ("DELETE", "/api/v2/collections/books", {"collections": [col_uuid], "books": [book_uuid]}),
+            ("DELETE", f"/api/v2/collections/{col_uuid}/books", {"books": [book_uuid]}),
+            ("DELETE", f"/api/v2/collections/{col_uuid}/books/{book_uuid}", None),
+        ]
+
+        for method, endpoint, payload in attempts:
+            resp = self._make_request(method, endpoint, payload)
+            if resp and resp.status_code in [200, 202, 204]:
+                logger.info(f"Removed '{book_uuid[:8]}' from Storyteller Collection: '{collection_name}'")
+                return True
+
+        return False
     def search_books(self, query: str) -> list:
         """Search for books in Storyteller."""
         response = self._make_request("GET", "/api/v2/books", None)
@@ -400,7 +440,12 @@ class StorytellerAPIClient:
 
         return False
 
-    def download_book(self, book_uuid: str, output_path: Path) -> bool:
+    @staticmethod
+    def _is_readaloud_not_ready(status_code: int, body: str) -> bool:
+        body_lower = (body or "").lower()
+        return status_code == 404 and "could not open readaloud" in body_lower
+
+    def download_book(self, book_uuid: str, output_path: Path, polling: bool = False) -> bool:
         """Download the processed EPUB3 artifact."""
         # Endpoint: GET /api/v2/books/{uuid}/files?format=readaloud
         # Note: 'readaloud' format usually implies the processed EPUB3
@@ -412,7 +457,10 @@ class StorytellerAPIClient:
         
         # Try API Download First
         try:
-            logger.info(f"⚡ Attempting download from '{url}'")
+            if polling:
+                logger.debug(f"Storyteller poll: probing readaloud download for '{book_uuid[:8]}...'")
+            else:
+                logger.info(f"⚡ Attempting download from '{url}'")
             with self.session.get(url, headers=headers, params={"format": "readaloud"}, stream=True, timeout=60) as r:
                 if r.status_code == 200:
                     with open(output_path, 'wb') as f:
@@ -421,15 +469,30 @@ class StorytellerAPIClient:
                     logger.info(f"✅ Downloaded Storyteller artifact for '{book_uuid}' to '{output_path}'")
                     return True
                 else:
-                    logger.warning(f"⚠️ Storyteller API download failed: {r.status_code} - {r.text[:200]}")
+                    body_excerpt = (r.text or "")[:200]
+                    if self._is_readaloud_not_ready(r.status_code, body_excerpt):
+                        if polling:
+                            logger.debug(f"Storyteller poll: readaloud not ready yet for '{book_uuid[:8]}...'")
+                            return False
+                        logger.info(f"Storyteller readaloud not ready yet for '{book_uuid}'")
+                    else:
+                        log_fn = logger.debug if polling else logger.warning
+                        log_fn(f"⚠️ Storyteller API download failed: {r.status_code} - {body_excerpt}")
         except Exception as e:
-            logger.warning(f"⚠️ API download raised exception: {e}")
+            log_fn = logger.debug if polling else logger.warning
+            log_fn(f"⚠️ API download raised exception: {e}")
 
         # Fallback: Local File Copy
         try:
             # 1. Get Book Details for Filepath
             r_details = self._make_request("GET", f"/api/v2/books/{book_uuid}")
             if not r_details or r_details.status_code != 200:
+                if polling:
+                    logger.debug(
+                        f"Storyteller poll: details unavailable for '{book_uuid[:8]}...' "
+                        f"({r_details.status_code if r_details else 'No Response'})"
+                    )
+                    return False
                 logger.error(f"❌ Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
                 raise Exception("API download failed and could not fetch details for fallback.")
 
@@ -439,6 +502,9 @@ class StorytellerAPIClient:
             source_path = readaloud.get('filepath')
             
             if not source_path:
+                if polling:
+                    logger.debug(f"Storyteller poll: readaloud filepath not yet available for '{book_uuid[:8]}...'")
+                    return False
                 logger.error("❌ No filepath found in book details for fallback")
                 raise Exception("No filepath in book details")
 
@@ -459,6 +525,9 @@ class StorytellerAPIClient:
                 logger.info(f"✅ Downloaded (via Local Copy) Storyteller artifact for '{book_uuid}'")
                 return True
             else:
+                 if polling:
+                     logger.debug(f"Storyteller poll: local fallback file not ready yet: '{local_path}'")
+                     return False
                  logger.error(f"❌ Local fallback file not found: '{local_path}'")
                  # Try unmapped?
                  if Path(source_path).exists():
@@ -469,6 +538,9 @@ class StorytellerAPIClient:
                  raise Exception(f"File not found at {local_path} or {source_path}")
 
         except Exception as e:
+            if polling:
+                logger.debug(f"Storyteller poll: download not ready for '{book_uuid[:8]}...': {e}")
+                return False
             logger.error(f"❌ Failed to download Storyteller book '{book_uuid}' (API & Fallback): {e}")
             raise e
 

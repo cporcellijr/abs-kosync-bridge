@@ -268,6 +268,28 @@ class ABSClient:
             pass
         return None
 
+    def mark_finished(self, abs_id):
+        """Mark an ABS item as finished."""
+        if not self.is_configured():
+            logger.error("❌ Cannot mark ABS item finished: ABS is not configured")
+            return False
+
+        self._update_session_headers()
+        url = f"{self.base_url}/api/me/progress/{abs_id}"
+        payload = {"isFinished": True}
+
+        try:
+            r = self.session.patch(url, json=payload, timeout=self.timeout)
+            if r.status_code in (200, 204):
+                logger.info(f"✅ Marked ABS item as finished: {abs_id}")
+                return True
+
+            logger.error(f"❌ Failed to mark ABS item finished: {r.status_code} - {sanitize_log_data(r.text)}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error marking ABS item finished '{abs_id}': {e}")
+            return False
+
     def update_ebook_progress(self, item_id, progress, location):
         """
         Update ebook progress for an item.

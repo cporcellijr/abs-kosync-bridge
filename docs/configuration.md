@@ -37,6 +37,13 @@ ports:
 - **Storyteller URL**: URL to your Storyteller instance.
 - **Storyteller Username / Password**: Credentials for your Storyteller admin account.
 - **Sync Mode**: REST API only. The bridge communicates exclusively via the Storyteller API.
+- **Storyteller Assets Path (Optional)**: Root path containing Storyteller `assets/`.
+  - Expected structure: `{assets_root}/assets/{book_title}/transcriptions/`
+  - If your Docker volume is `/path/to/storyteller/assets:/storyteller/assets`, set this value to `/storyteller`.
+  - This setting is optional and can be configured in the Web UI (no compose env var required).
+- **Storyteller Backfill**: Settings includes a maintenance action to scan all Storyteller-linked books, ingest available transcript JSON files, and rebuild alignment maps without re-running SMIL/Whisper.
+- **Forge Staging Directory (Optional env)**: `PROCESSING_DIR` controls temporary Forge staging before files are atomically presented to Storyteller.
+  - Default is `/tmp`, so no dedicated `PROCESSING_DIR` volume mount is required.
 
 > [!NOTE]
 > The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.
@@ -81,6 +88,9 @@ ports:
 
 Configure the engine used for audio-to-text alignment.
 
+> [!TIP]
+> For books with Storyteller forced-alignment transcript files, that source is prioritized over SMIL and Whisper.
+
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | **Provider** | `local` | `local` (faster-whisper), `deepgram`, or `whisper_cpp` (via server). |
@@ -118,6 +128,21 @@ Advanced settings to fine-tune the synchronization logic.
 - **Use KOSync Percentage from Server**: If enabled, uses the raw percentage value returned by the KOSync server instead of performing text-based position matching. Useful if text matching is unreliable for a specific book.
 - **XPath Fallback**: Strategy for handling position lookups when exact paths fail.
 - **Reprocess on Clear**: (`REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT`) If enabled, clearing a mapping in the UI will also delete the alignment cache, forcing a full re-transcription next time.
+- **Instant Sync**: (`INSTANT_SYNC_ENABLED`) Controls whether event-driven instant sync is active. When disabled, the ABS Socket.IO listener and KoSync PUT trigger are both turned off — sync falls back to the regular background poll only.
+
+### Per-Client Polling
+
+By default, Storyteller and Booklore are only checked during the global sync cycle. If you want the bridge to watch those clients more (or less) frequently than everything else, set their poll mode to **Custom**.
+
+| Setting | Default | Description |
+| :--- | :--- | :--- |
+| **Storyteller Poll Mode** | `global` | `global` uses the normal sync cycle. `custom` polls at its own interval. |
+| **Storyteller Poll Interval** | `45s` | How often (in seconds) to check Storyteller for position changes when in `custom` mode. |
+| **Booklore Poll Mode** | `global` | `global` uses the normal sync cycle. `custom` polls at its own interval. |
+| **Booklore Poll Interval** | `300s` | How often (in seconds) to check Booklore for position changes when in `custom` mode. |
+
+> [!NOTE]
+> Per-client polling only watches for changes *from* that client and triggers a targeted sync when one is detected. It is much lighter than a full global sync cycle.
 
 ---
 

@@ -22,11 +22,13 @@ from pathlib import Path
 from typing import Optional
 import math
 import re
+from bisect import bisect_right
 from collections import OrderedDict
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
 from src.utils.transcription_providers import get_transcription_provider
 from src.utils.polisher import Polisher
+from src.utils.storyteller_transcript import StorytellerTranscript
 # We keep the import for type hinting, but we don't instantiate it directly anymore
 
 logger = logging.getLogger(__name__)
@@ -211,14 +213,86 @@ class AudioTranscriber:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            self._transcript_cache[path_str] = data
+            data_format = self._detect_transcript_format(data)
+            if data_format == "storyteller_manifest":
+                loaded = StorytellerTranscript(path, cache_capacity=self._cache_capacity)
+            else:
+                loaded = data
+            self._transcript_cache[path_str] = loaded
             self._transcript_cache.move_to_end(path_str)
             if len(self._transcript_cache) > self._cache_capacity:
                 self._transcript_cache.popitem(last=False)
-            return data
+            return loaded
         except Exception as e:
             logger.error(f"❌ Error loading transcript '{path}': {e}")
             return None
+
+    def _detect_transcript_format(self, data):
+        """Detect storyteller-rich vs legacy segment transcript formats."""
+        if isinstance(data, dict) and data.get("format") == "storyteller_manifest":
+            return "storyteller_manifest"
+        if isinstance(data, dict) and (
+            isinstance(data.get("wordTimeline"), list) or isinstance(data.get("timeline"), list)
+        ):
+            return "storyteller_word_timeline"
+        if isinstance(data, list) and data and isinstance(data[0], dict) and 'start' in data[0]:
+            return "segment_list"
+        return "unknown"
+
+    @staticmethod
+    def _get_storyteller_timeline(data):
+        if not isinstance(data, dict):
+            return []
+        timeline = data.get("wordTimeline")
+        if isinstance(timeline, list):
+            return timeline
+        timeline = data.get("timeline")
+        if isinstance(timeline, list):
+            return timeline
+        return []
+
+    @staticmethod
+    def _storyteller_floor(values, target):
+        if not values:
+            return None
+        idx = bisect_right(values, target) - 1
+        if idx < 0:
+            return 0
+        if idx >= len(values):
+            return len(values) - 1
+        return idx
+
+    @staticmethod
+    def _storyteller_context(transcript_text, offset, target_len=800):
+        if not transcript_text:
+            return ""
+        half = target_len // 2
+        start = max(0, int(offset) - half)
+        end = min(len(transcript_text), start + target_len)
+        if end - start < target_len and start > 0:
+            start = max(0, end - target_len)
+        return re.sub(r'\s+', ' ', transcript_text[start:end]).strip()
+
+    def _storyteller_text_at_time(self, data, timestamp):
+        timeline = self._get_storyteller_timeline(data)
+        if not timeline:
+            return None
+        start_times = [float(w.get("startTime", 0.0) or 0.0) for w in timeline]
+        idx = self._storyteller_floor(start_times, float(timestamp))
+        if idx is None:
+            return None
+        offset = int(timeline[idx].get("startOffsetUtf16", 0) or 0)
+        return self._storyteller_context(data.get("transcript", ""), offset)
+
+    def _storyteller_time_for_offset(self, data, offset):
+        timeline = self._get_storyteller_timeline(data)
+        if not timeline:
+            return None
+        start_offsets = [int(w.get("startOffsetUtf16", 0) or 0) for w in timeline]
+        idx = self._storyteller_floor(start_offsets, int(offset))
+        if idx is None:
+            return None
+        return float(timeline[idx].get("startTime", 0.0) or 0.0)
 
     def _clean_text(self, text):
         """Aggressive text cleaner to boost fuzzy match scores."""
@@ -559,6 +633,11 @@ class AudioTranscriber:
             if not data:
                 return None
 
+            if isinstance(data, StorytellerTranscript):
+                return data.get_text_at_time(timestamp)
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
+                return self._storyteller_text_at_time(data, timestamp)
+
             # Find segment containing timestamp
             target_idx = -1
             for i, seg in enumerate(data):
@@ -631,6 +710,13 @@ class AudioTranscriber:
             data = self._get_cached_transcript(transcript_path)
             if not data:
                 return None
+
+            if isinstance(data, StorytellerTranscript):
+                previous_ts = max(0.0, float(timestamp) - 0.5)
+                return data.get_text_at_time(previous_ts)
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
+                previous_ts = max(0.0, float(timestamp) - 0.5)
+                return self._storyteller_text_at_time(data, previous_ts)
 
             # Find segment containing timestamp
             target_idx = -1
@@ -797,6 +883,80 @@ class AudioTranscriber:
             if not data:
                 return None
 
+            if isinstance(data, StorytellerTranscript):
+                chapter_index = None
+                local_offset = None
+
+                if isinstance(char_offset, dict):
+                    chapter_index = char_offset.get("chapter")
+                    local_offset = char_offset.get("offset")
+                elif isinstance(char_offset, (list, tuple)) and len(char_offset) == 2:
+                    chapter_index, local_offset = char_offset[0], char_offset[1]
+
+                if chapter_index is None or local_offset is None:
+                    synthetic_data = []
+                    for idx, meta in enumerate(data.chapters):
+                        try:
+                            chapter = data._load_chapter(idx)
+                            chapter_start = float(meta.get("start", 0.0) or 0.0)
+                            transcript_text = chapter.get("transcript", "")
+                            timeline = chapter.get("word_timeline", [])
+                            if not timeline:
+                                continue
+
+                            seg_start = chapter_start + float(timeline[0].get("startTime", 0.0) or 0.0)
+                            seg_text_words = []
+
+                            for i, word in enumerate(timeline):
+                                ts = chapter_start + float(word.get("startTime", 0.0) or 0.0)
+                                word_text = word.get("word")
+                                if not word_text:
+                                    py_start = chapter["start_offsets_py"][i] if i < len(chapter["start_offsets_py"]) else 0
+                                    py_end = chapter["start_offsets_py"][i + 1] if i + 1 < len(chapter["start_offsets_py"]) else len(transcript_text)
+                                    word_text = transcript_text[py_start:py_end]
+
+                                cleaned_word = self._clean_text(word_text)
+                                if cleaned_word:
+                                    seg_text_words.append(cleaned_word)
+
+                                if ts - seg_start > 5.0 or i == len(timeline) - 1:
+                                    segment_text = " ".join(seg_text_words).strip()
+                                    if segment_text:
+                                        synthetic_data.append({
+                                            "start": seg_start,
+                                            "end": ts + 0.5,
+                                            "text": segment_text
+                                        })
+                                    seg_start = ts
+                                    seg_text_words = []
+                        except Exception:
+                            continue
+
+                    data = synthetic_data
+                    if not synthetic_data:
+                        return None
+                else:
+                    local_ts = data.char_offset_to_timestamp(int(local_offset), int(chapter_index))
+                    if local_ts is None:
+                        return None
+
+                    chapter_meta = data.chapters[int(chapter_index)] if int(chapter_index) < len(data.chapters) else {}
+                    chapter_start = float(chapter_meta.get("start", 0.0) or 0.0)
+                    return chapter_start + float(local_ts)
+
+            if isinstance(data, dict) and self._get_storyteller_timeline(data):
+                if char_offset is not None:
+                    return self._storyteller_time_for_offset(data, int(char_offset))
+
+                transcript_text = self._clean_text(data.get("transcript", ""))
+                clean_search = self._clean_text(search_text)
+                if not clean_search or not transcript_text:
+                    return None
+                search_idx = transcript_text.lower().find(clean_search.lower())
+                if search_idx < 0:
+                    return None
+                return self._storyteller_time_for_offset(data, search_idx)
+
             clean_search = self._clean_text(search_text)
 
             # Build windows for searching
@@ -854,3 +1014,4 @@ class AudioTranscriber:
             logger.error(f"❌ {title_prefix}Error searching transcript '{transcript_path}': {e}")
         return None
 # [END FILE]
+
