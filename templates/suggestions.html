@@ -30,6 +30,10 @@
         .subtitle { color: rgba(255,255,255,0.65); }
         .toolbar { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
         .toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .toolbar-meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+        .sort-controls { display: inline-flex; gap: 8px; align-items: center; }
+        .sort-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,0.66); }
+        .sort-select { padding: 7px 10px; border-radius: 8px; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); font-size: 13px; }
         .count { font-size: 14px; color: rgba(255,255,255,0.7); }
         .flash-error { margin-top: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(244,67,54,0.35); background: rgba(244,67,54,0.14); color: #ffb3ad; font-size: 14px; }
         .layout { margin-top: 20px; display: grid; grid-template-columns: minmax(0,1fr) 420px; gap: 20px; align-items: start; }
@@ -141,7 +145,16 @@
                     <button type="submit" class="btn btn-muted" {% if scan_in_progress %}disabled{% endif %}>Full Refresh</button>
                 </form>
             </div>
-            <span class="count" id="topCount">Showing {{ suggestions|length }} suggestions</span>
+            <div class="toolbar-meta">
+                <div class="sort-controls">
+                    <label class="sort-label" for="sortMode">Sort</label>
+                    <select id="sortMode" class="sort-select">
+                        <option value="best">Best Match</option>
+                        <option value="az">A-Z</option>
+                    </select>
+                </div>
+                <span class="count" id="topCount">Showing {{ suggestions|length }} suggestions</span>
+            </div>
         </div>
         {% if scan_stats %}
         <div class="count" style="margin-top: 8px;">
@@ -169,7 +182,12 @@
                     {% if suggestions %}
                     <div class="suggestions-list" id="suggestionsList">
                         {% for s in suggestions %}
-                        <div class="suggestion-card" id="suggestion-{{ s.abs_id }}" data-abs-id="{{ s.abs_id }}" onclick="selectSuggestion('{{ s.abs_id }}')">
+                        <div class="suggestion-card"
+                             id="suggestion-{{ s.abs_id }}"
+                             data-abs-id="{{ s.abs_id }}"
+                             data-best-score="{% if s.matches and s.matches|length > 0 %}{{ s.matches[0].score }}{% else %}0{% endif %}"
+                             data-title="{{ s.abs_title or '' }}"
+                             onclick="selectSuggestion('{{ s.abs_id }}')">
                             <div class="suggestion-main">
                                 <img src="{{ s.cover_url }}" alt="Cover" class="cover" onerror="this.style.opacity='0.25';">
                                 <div>
@@ -370,6 +388,30 @@
             document.getElementById('addToQueueBtn').disabled = !(document.getElementById('selected_audiobook_id').value && hasOption && option.value);
         }
 
+        function applySuggestionSort(mode) {
+            const list = document.getElementById('suggestionsList');
+            if (!list) return;
+
+            const cards = Array.from(list.querySelectorAll('.suggestion-card'));
+            if (cards.length < 2) return;
+
+            if (mode === 'az') {
+                cards.sort((a, b) => {
+                    const titleA = (a.dataset.title || '').trim().toLowerCase();
+                    const titleB = (b.dataset.title || '').trim().toLowerCase();
+                    return titleA.localeCompare(titleB);
+                });
+            } else {
+                cards.sort((a, b) => {
+                    const scoreA = Number.parseFloat(a.dataset.bestScore || '0');
+                    const scoreB = Number.parseFloat(b.dataset.bestScore || '0');
+                    return scoreB - scoreA;
+                });
+            }
+
+            cards.forEach((card) => list.appendChild(card));
+        }
+
         function clearSelection() {
             selectedSuggestionId = null;
             document.querySelectorAll('.suggestion-card').forEach((card) => card.classList.remove('selected'));
@@ -447,6 +489,20 @@
 
         document.getElementById('scanForm').addEventListener('submit', handleScanSubmit);
         document.getElementById('scanFullForm').addEventListener('submit', handleScanSubmit);
+
+        const sortModeSelect = document.getElementById('sortMode');
+        if (sortModeSelect) {
+            const savedSortMode = localStorage.getItem('suggestionsSortMode');
+            if (savedSortMode === 'az' || savedSortMode === 'best') {
+                sortModeSelect.value = savedSortMode;
+            }
+            applySuggestionSort(sortModeSelect.value || 'best');
+            sortModeSelect.addEventListener('change', () => {
+                const sortMode = sortModeSelect.value || 'best';
+                localStorage.setItem('suggestionsSortMode', sortMode);
+                applySuggestionSort(sortMode);
+            });
+        }
 
         if (scanInProgress) {
             document.getElementById('scanOverlay').classList.add('show');
