@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Library Suggestions - ABS-KoSync</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #0a0a0a; color: #fff; }
+        .top-nav { background: rgba(20,20,20,0.95); border-bottom: 1px solid rgba(255,255,255,0.08); padding: 16px 28px; position: sticky; top: 0; z-index: 100; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .logo-section { display: flex; align-items: center; gap: 20px; }
+        .logo-section a { text-decoration: none; }
+        .logo-section h1 { font-size: 28px; font-weight: 700; background: linear-gradient(135deg,#667eea,#764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .library-links { display: flex; align-items: center; gap: 10px; padding-left: 16px; border-left: 1px solid rgba(255,255,255,0.1); }
+        .nav-icon-link { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.04); text-decoration: none; }
+        .nav-icon-link:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .nav-icon-link svg { width: 19px; height: 19px; }
+        .nav-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+        .btn { padding: 9px 14px; font-size: 14px; border-radius: 8px; border: 1px solid rgba(102,126,234,0.35); background: rgba(102,126,234,0.16); color: #9fb2ff; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn:hover { background: rgba(102,126,234,0.28); }
+        .btn:disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+        .btn-primary { background: rgba(102,126,234,0.28); color: #d9e0ff; border-color: rgba(102,126,234,0.55); }
+        .btn-success { background: linear-gradient(135deg,#4caf50,#3f9744); color: #fff; border: none; }
+        .btn-success:disabled { background: rgba(76,175,80,0.24); color: rgba(255,255,255,0.45); cursor: not-allowed; }
+        .btn-danger { background: rgba(244,67,54,0.16); color: #f17f78; border-color: rgba(244,67,54,0.35); }
+        .btn-muted { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.82); border-color: rgba(255,255,255,0.2); }
+        .btn-small { padding: 5px 10px; font-size: 12px; }
+        .container { max-width: 1800px; margin: 0 auto; padding: 28px 24px 36px; }
+        .page-header h2 { font-size: 32px; margin-bottom: 8px; }
+        .subtitle { color: rgba(255,255,255,0.65); }
+        .toolbar { margin-top: 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .count { font-size: 14px; color: rgba(255,255,255,0.7); }
+        .flash-error { margin-top: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(244,67,54,0.35); background: rgba(244,67,54,0.14); color: #ffb3ad; font-size: 14px; }
+        .layout { margin-top: 20px; display: grid; grid-template-columns: minmax(0,1fr) 420px; gap: 20px; align-items: start; }
+        .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
+        .panel-head { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }
+        .panel-head h3 { font-size: 18px; }
+        .left-wrap { position: relative; min-height: 280px; }
+        .scan-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; background: rgba(10,10,10,0.72); border-radius: 0 0 12px 12px; z-index: 10; }
+        .scan-overlay.show { display: flex; }
+        .spinner { width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #9fb2ff; border-radius: 50%; animation: spin .8s linear infinite; }
+        .scan-progress-wrap { width: min(360px, 70%); height: 10px; border-radius: 999px; background: rgba(255,255,255,0.14); overflow: hidden; margin-top: 2px; }
+        .scan-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#6ea8ff,#8bda9d); transition: width 0.4s ease; }
+        .scan-progress-text { font-size: 13px; color: rgba(255,255,255,0.85); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .suggestions-list { max-height: calc(100vh - 290px); overflow-y: auto; padding: 12px; display: grid; gap: 10px; }
+        .suggestion-card { border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); border-radius: 10px; padding: 10px; cursor: pointer; }
+        .suggestion-card:hover { border-color: rgba(102,126,234,0.5); }
+        .suggestion-card.selected { border-color: rgba(102,126,234,0.85); background: rgba(102,126,234,0.14); }
+        .suggestion-main { display: grid; grid-template-columns: 54px 1fr auto; gap: 10px; align-items: center; }
+        .cover { width: 54px; height: 54px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); }
+        .title { font-size: 15px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
+        .author { font-size: 12px; color: rgba(255,255,255,0.68); margin-bottom: 3px; }
+        .best { font-size: 12px; color: rgba(255,255,255,0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .score { font-size: 22px; font-weight: 700; color: #7ec8ff; }
+        .card-actions { margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; }
+        .empty { text-align: center; color: rgba(255,255,255,0.62); padding: 38px 16px; }
+        .queue-panel { position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: hidden; display: flex; flex-direction: column; }
+        .selection { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .selection h4 { font-size: 16px; margin-bottom: 8px; }
+        .selection-placeholder { color: rgba(255,255,255,0.64); font-size: 14px; }
+        .selection-details.hidden { display: none; }
+        .selected-book { display: grid; grid-template-columns: 50px 1fr; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .selected-book img { width: 50px; height: 50px; border-radius: 7px; object-fit: cover; background: rgba(255,255,255,0.1); }
+        .selected-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
+        .selected-author { font-size: 12px; color: rgba(255,255,255,0.68); margin-top: 3px; }
+        .field-label { display: block; margin-bottom: 5px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
+        .ebook-select { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 8px; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); }
+        .queue-list { padding: 12px 14px; overflow-y: auto; }
+        .queue-item { display: flex; align-items: center; gap: 11px; padding: 9px; margin-bottom: 9px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(255,255,255,0.05); }
+        .queue-item-cover { width: 40px; height: 60px; border-radius: 4px; object-fit: cover; background: rgba(255,255,255,0.1); }
+        .queue-item-info { flex: 1; min-width: 0; }
+        .queue-item-title { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; }
+        .queue-item-ebook { font-size: 11px; color: rgba(255,255,255,0.62); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .queue-remove { width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(244,67,54,0.24); color: #f44336; font-size: 16px; cursor: pointer; }
+        .queue-actions { margin-top: 6px; display: grid; gap: 10px; }
+        .w-100 { width: 100%; }
+        .inline-form { display: inline-flex; }
+        @media (max-width: 1180px) { .layout { grid-template-columns: 1fr; } .queue-panel { position: static; max-height: none; } .suggestions-list { max-height: 440px; } }
+        @media (max-width: 920px) {
+            .top-nav { padding: 14px; flex-direction: column; align-items: flex-start; }
+            .logo-section h1 { font-size: 22px; }
+            .container { padding: 20px 14px 28px; }
+            .nav-actions { width: 100%; justify-content: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-nav">
+        <div class="logo-section">
+            <a href="/"><h1>ABS-KoSync Bridge</h1></a>
+            <div class="library-links">
+                {% if abs_server %}
+                <a href="{{ abs_server }}" class="nav-icon-link" target="_blank" title="Audiobookshelf">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M11 5L6 9H2v6h4l5 4V5z"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    </svg>
+                </a>
+                {% endif %}
+                {% if booklore_server %}
+                <a href="{{ booklore_server }}" class="nav-icon-link" target="_blank" title="Ebook Library">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                </a>
+                {% endif %}
+                {% if shelfmark_url %}
+                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="nav-actions">
+            <a href="https://cporcellijr.github.io/abs-kosync-bridge/" class="btn" target="_blank" rel="noopener noreferrer">📚 Docs</a>
+            <a href="/" class="btn">← Dashboard</a>
+            <a href="/logs" class="btn">📊 Logs</a>
+            <a href="/settings" class="btn">⚙️ Settings</a>
+            <a href="/match" class="btn">➕ Add Book</a>
+            <a href="/batch-match" class="btn">📋 Batch</a>
+            <a href="/suggestions" class="btn btn-primary">💡 Suggestions</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="page-header">
+            <h2>Library Suggestions</h2>
+            <p class="subtitle">Scan your library to find unmatched audiobook/ebook pairs</p>
+        </div>
+        <div class="toolbar">
+            <div class="toolbar-actions">
+                <form method="POST" action="/suggestions" id="scanForm">
+                    <input type="hidden" name="action" value="scan">
+                    <button type="submit" class="btn btn-primary" {% if scan_in_progress %}disabled{% endif %}>Scan Library</button>
+                </form>
+                <form method="POST" action="/suggestions" id="scanFullForm">
+                    <input type="hidden" name="action" value="scan_full">
+                    <button type="submit" class="btn btn-muted" {% if scan_in_progress %}disabled{% endif %}>Full Refresh</button>
+                </form>
+            </div>
+            <span class="count" id="topCount">Showing {{ suggestions|length }} suggestions</span>
+        </div>
+        {% if scan_stats %}
+        <div class="count" style="margin-top: 8px;">
+            Last scan: {{ scan_stats.scanned_new or 0 }} new scanned, {{ scan_stats.reused_cached or 0 }} reused from cache
+        </div>
+        {% endif %}
+        {% if scan_error %}
+        <div class="flash-error">Last scan failed: {{ scan_error }}</div>
+        {% endif %}
+
+        <div class="layout">
+            <div class="panel">
+                <div class="panel-head">
+                    <h3>Suggestions</h3>
+                    <span class="count" id="panelCount">{{ suggestions|length }} items</span>
+                </div>
+                <div class="left-wrap">
+                    <div class="scan-overlay {% if scan_in_progress %}show{% endif %}" id="scanOverlay">
+                        <div class="spinner"></div>
+                        <div class="scan-progress-wrap">
+                            <div class="scan-progress-bar" id="scanProgressBar"></div>
+                        </div>
+                        <p class="scan-progress-text" id="scanProgressText">Scanning library... 0%</p>
+                    </div>
+                    {% if suggestions %}
+                    <div class="suggestions-list" id="suggestionsList">
+                        {% for s in suggestions %}
+                        <div class="suggestion-card" id="suggestion-{{ s.abs_id }}" data-abs-id="{{ s.abs_id }}" onclick="selectSuggestion('{{ s.abs_id }}')">
+                            <div class="suggestion-main">
+                                <img src="{{ s.cover_url }}" alt="Cover" class="cover" onerror="this.style.opacity='0.25';">
+                                <div>
+                                    <div class="title">{{ s.abs_title }}</div>
+                                    {% if s.abs_author %}<div class="author">{{ s.abs_author }}</div>{% endif %}
+                                    {% if s.matches and s.matches|length > 0 %}
+                                    <div class="best" title="{{ s.matches[0].display_name }}">Best: {{ s.matches[0].display_name }} ({{ s.matches[0].score|round|int }}%)</div>
+                                    {% endif %}
+                                </div>
+                                <div class="score">{% if s.matches and s.matches|length > 0 %}{{ s.matches[0].score|round|int }}%{% else %}--{% endif %}</div>
+                            </div>
+                            <div class="card-actions">
+                                <button type="button" class="btn btn-muted btn-small" onclick="dismissSuggestion(event, '{{ s.abs_id }}')">Dismiss</button>
+                                <form method="POST" action="/suggestions" class="inline-form" onsubmit="event.stopPropagation();">
+                                    <input type="hidden" name="action" value="never">
+                                    <input type="hidden" name="abs_id" value="{{ s.abs_id }}">
+                                    <input type="hidden" name="abs_title" value="{{ s.abs_title }}">
+                                    <input type="hidden" name="abs_author" value="{{ s.abs_author }}">
+                                    <input type="hidden" name="cover_url" value="{{ s.cover_url }}">
+                                    <button type="submit" class="btn btn-danger btn-small" onclick="event.stopPropagation();">Never</button>
+                                </form>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="empty" id="emptyState">
+                        {% if scan_has_run %}
+                        <p>No suggestions found above 60% confidence.<br>Run another scan after your library changes.</p>
+                        {% else %}
+                        <p>No scan results yet.<br>Click "Scan Library" to begin.</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="panel queue-panel">
+                <div class="panel-head">
+                    <h3>Batch Match Queue</h3>
+                    <span class="count">{{ queue|length }} items</span>
+                </div>
+
+                <div class="selection">
+                    <h4>Selected Suggestion</h4>
+                    <p class="selection-placeholder" id="selectionPlaceholder">Click a suggestion to review and add to queue.</p>
+                    <div class="selection-details hidden" id="selectionDetails">
+                        <div class="selected-book">
+                            <img id="selectedCover" src="" alt="Selected">
+                            <div>
+                                <div class="selected-title" id="selectedTitle"></div>
+                                <div class="selected-author" id="selectedAuthor"></div>
+                            </div>
+                        </div>
+                        <form method="POST" action="/suggestions" id="addToQueueForm">
+                            <input type="hidden" name="action" value="add_to_queue">
+                            <input type="hidden" name="audiobook_id" id="selected_audiobook_id">
+                            <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
+                            <input type="hidden" name="ebook_display_name" id="selected_ebook_display_name" value="">
+                            <input type="hidden" name="storyteller_uuid" value="">
+                            <label class="field-label" for="ebookSelect">Ebook Match</label>
+                            <select id="ebookSelect" class="ebook-select" onchange="handleEbookChange()" disabled></select>
+                            <button type="submit" class="btn btn-success w-100" id="addToQueueBtn" disabled>➕ Add to Queue</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="queue-list">
+                    {% if queue %}
+                    {% for item in queue %}
+                    <div class="queue-item">
+                        <img src="{{ item.cover_url }}" alt="Cover" class="queue-item-cover" onerror="this.style.opacity='0.25';">
+                        <div class="queue-item-info">
+                            <p class="queue-item-title" title="{{ item.abs_title }}">{{ item.abs_title }}</p>
+                            {% if item.storyteller_uuid %}
+                            <p class="queue-item-ebook"><span style="color:#a78bfa;">⚡ Storyteller</span>{% if item.ebook_display_name %} + {{ item.ebook_display_name }}{% endif %}</p>
+                            {% else %}
+                            <p class="queue-item-ebook" title="{{ item.ebook_filename }}">📖 {{ item.ebook_display_name or item.ebook_filename }}</p>
+                            {% endif %}
+                        </div>
+                        <form method="POST" action="/suggestions" class="inline-form">
+                            <input type="hidden" name="action" value="remove_from_queue">
+                            <input type="hidden" name="abs_id" value="{{ item.abs_id }}">
+                            <button type="submit" class="queue-remove">×</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                    <div class="queue-actions">
+                        <form method="POST" action="/suggestions">
+                            <input type="hidden" name="action" value="process_queue">
+                            <button type="submit" class="btn btn-success w-100">✅ Process All ({{ queue|length }})</button>
+                        </form>
+                        <form method="POST" action="/suggestions">
+                            <input type="hidden" name="action" value="clear_queue">
+                            <button type="submit" class="btn btn-danger w-100" onclick="return confirm('Clear entire queue?')">🗑️ Clear Queue</button>
+                        </form>
+                    </div>
+                    {% else %}
+                    <div class="empty"><p>Queue is empty<br>Add items to get started</p></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let suggestionsData = {{ suggestions|tojson }};
+        let selectedSuggestionId = null;
+        const scanInProgress = {{ scan_in_progress|tojson }};
+        let fakeScanProgress = 0;
+        let fakeScanTimer = null;
+        let displayedScanProgress = 0;
+        let reportedScanProgress = 0;
+
+        function setScanProgress(percent, label) {
+            const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            const progressBar = document.getElementById('scanProgressBar');
+            const progressText = document.getElementById('scanProgressText');
+            displayedScanProgress = clamped;
+            if (progressBar) progressBar.style.width = `${clamped}%`;
+            if (progressText) progressText.textContent = label || `Scanning library... ${clamped}%`;
+        }
+
+        function startFakeScanProgress() {
+            if (fakeScanTimer) return;
+            fakeScanProgress = 2;
+            setScanProgress(fakeScanProgress);
+            fakeScanTimer = setInterval(() => {
+                if (fakeScanProgress >= 35) return;
+                fakeScanProgress = Math.min(35, fakeScanProgress + 1);
+                setScanProgress(fakeScanProgress);
+            }, 900);
+        }
+
+        function stopFakeScanProgress(finalLabel) {
+            if (fakeScanTimer) {
+                clearInterval(fakeScanTimer);
+                fakeScanTimer = null;
+            }
+            if (finalLabel) {
+                setScanProgress(100, finalLabel);
+            }
+        }
+
+        function applyBackendProgress(progressData) {
+            if (!progressData || typeof progressData !== 'object') {
+                return;
+            }
+
+            const rawPercent = Number(progressData.percent);
+            if (!Number.isFinite(rawPercent)) {
+                return;
+            }
+
+            reportedScanProgress = Math.max(reportedScanProgress, Math.max(0, Math.min(100, rawPercent)));
+            const nextPercent = Math.max(displayedScanProgress, reportedScanProgress);
+            const message = progressData.message
+                ? `${progressData.message} (${Math.round(nextPercent)}%)`
+                : undefined;
+            setScanProgress(nextPercent, message);
+        }
+
+        function pollScanStatus() {
+            fetch('/api/suggestions/scan-status')
+                .then((response) => response.json())
+                .then((data) => {
+                    const status = data.status || 'idle';
+                    if (status === 'running') {
+                        applyBackendProgress(data.progress || {});
+                    }
+                    if (status === 'done') {
+                        stopFakeScanProgress('Finalizing results... 100%');
+                        setTimeout(() => { window.location.href = '/suggestions'; }, 350);
+                        return;
+                    }
+                    if (status === 'error') {
+                        stopFakeScanProgress('Scan failed');
+                        setTimeout(() => { window.location.href = '/suggestions'; }, 350);
+                        return;
+                    }
+                    if (status === 'idle') {
+                        window.location.href = '/suggestions';
+                        return;
+                    }
+                    setTimeout(pollScanStatus, 1500);
+                })
+                .catch(() => {
+                    setTimeout(pollScanStatus, 2000);
+                });
+        }
+
+        function handleEbookChange() {
+            const ebookSelect = document.getElementById('ebookSelect');
+            const option = ebookSelect.options[ebookSelect.selectedIndex];
+            const hasOption = !!option;
+            document.getElementById('selected_ebook_filename').value = hasOption ? option.value : '';
+            document.getElementById('selected_ebook_display_name').value = hasOption ? (option.dataset.displayName || option.value) : '';
+            document.getElementById('addToQueueBtn').disabled = !(document.getElementById('selected_audiobook_id').value && hasOption && option.value);
+        }
+
+        function clearSelection() {
+            selectedSuggestionId = null;
+            document.querySelectorAll('.suggestion-card').forEach((card) => card.classList.remove('selected'));
+            document.getElementById('selectionDetails').classList.add('hidden');
+            document.getElementById('selectionPlaceholder').style.display = 'block';
+            document.getElementById('selected_audiobook_id').value = '';
+            document.getElementById('selected_ebook_filename').value = '';
+            document.getElementById('selected_ebook_display_name').value = '';
+            document.getElementById('addToQueueBtn').disabled = true;
+        }
+
+        function selectSuggestion(absId) {
+            const suggestion = suggestionsData.find((item) => item.abs_id === absId);
+            if (!suggestion || !suggestion.matches || suggestion.matches.length === 0) return;
+
+            selectedSuggestionId = absId;
+            document.querySelectorAll('.suggestion-card').forEach((card) => card.classList.toggle('selected', card.dataset.absId === absId));
+
+            document.getElementById('selectionPlaceholder').style.display = 'none';
+            document.getElementById('selectionDetails').classList.remove('hidden');
+            document.getElementById('selected_audiobook_id').value = suggestion.abs_id || '';
+            document.getElementById('selectedTitle').textContent = suggestion.abs_title || '';
+            document.getElementById('selectedAuthor').textContent = suggestion.abs_author || '';
+            document.getElementById('selectedCover').src = suggestion.cover_url || '';
+
+            const matches = [...suggestion.matches].sort((a, b) => (b.score || 0) - (a.score || 0));
+            const select = document.getElementById('ebookSelect');
+            select.innerHTML = '';
+            matches.forEach((match) => {
+                const option = document.createElement('option');
+                option.value = match.ebook_filename || '';
+                option.dataset.displayName = match.display_name || match.ebook_filename || '';
+                option.textContent = `${option.dataset.displayName} (${Math.round(match.score || 0)}%)`;
+                select.appendChild(option);
+            });
+            select.disabled = matches.length === 0;
+            if (matches.length > 0) {
+                select.selectedIndex = 0;
+                handleEbookChange();
+            }
+        }
+
+        function updateVisibleCounts() {
+            const count = document.querySelectorAll('.suggestion-card').length;
+            document.getElementById('topCount').textContent = `Showing ${count} suggestions`;
+            document.getElementById('panelCount').textContent = `${count} items`;
+            if (count === 0 && !document.getElementById('emptyState')) {
+                const wrap = document.querySelector('.left-wrap');
+                const empty = document.createElement('div');
+                empty.className = 'empty';
+                empty.id = 'emptyState';
+                empty.innerHTML = '<p>All current suggestions are hidden.<br>Run Scan Library to refresh.</p>';
+                wrap.appendChild(empty);
+                const list = document.getElementById('suggestionsList');
+                if (list) list.remove();
+            }
+        }
+
+        function dismissSuggestion(event, absId) {
+            event.preventDefault();
+            event.stopPropagation();
+            const card = document.getElementById(`suggestion-${absId}`);
+            if (card) card.remove();
+            suggestionsData = suggestionsData.filter((item) => item.abs_id !== absId);
+            if (selectedSuggestionId === absId) clearSelection();
+            updateVisibleCounts();
+        }
+
+        function handleScanSubmit() {
+            document.getElementById('scanOverlay').classList.add('show');
+            displayedScanProgress = 0;
+            reportedScanProgress = 0;
+            startFakeScanProgress();
+        }
+
+        document.getElementById('scanForm').addEventListener('submit', handleScanSubmit);
+        document.getElementById('scanFullForm').addEventListener('submit', handleScanSubmit);
+
+        if (scanInProgress) {
+            document.getElementById('scanOverlay').classList.add('show');
+            startFakeScanProgress();
+            pollScanStatus();
+        }
+    </script>
+</body>
+</html>
