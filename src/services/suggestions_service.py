@@ -24,6 +24,49 @@ class SuggestionsService:
         self.get_abs_author = get_abs_author
         self.logger = logger
 
+    @staticmethod
+    def _candidate_title(candidate: Any) -> str:
+        return (
+            getattr(candidate, 'title', None)
+            or getattr(candidate, 'stem', None)
+            or getattr(candidate, 'name', '')
+            or ''
+        ).strip()
+
+    @staticmethod
+    def _candidate_author(candidate: Any) -> str:
+        return (getattr(candidate, 'authors', None) or '').strip()
+
+    def _build_ebook_candidate_pool(self) -> List[dict]:
+        """
+        Build searchable ebook candidates once per scan to avoid per-book provider calls.
+        """
+        try:
+            candidates = self.get_searchable_ebooks('')
+        except Exception as e:
+            self.logger.warning(f"Suggestion scan failed to load candidate ebook pool: {e}")
+            return []
+
+        return self._prepare_candidate_pool(candidates)
+
+    def _prepare_candidate_pool(self, candidates: List[Any]) -> List[dict]:
+        prepared = []
+        for candidate in candidates or []:
+            candidate_title = self._candidate_title(candidate)
+            if not candidate_title:
+                continue
+
+            candidate_author = self._candidate_author(candidate)
+            prepared.append({
+                "title": candidate_title,
+                "author": candidate_author,
+                "search_text": f"{candidate_title} {candidate_author}".strip(),
+                "name": getattr(candidate, 'name', ''),
+                "display_name": getattr(candidate, 'display_name', None) or getattr(candidate, 'name', ''),
+            })
+
+        return prepared
+
     def get_ignored_suggestion_source_ids(self) -> Set[str]:
         """Return ABS source IDs that are marked as ignored."""
         if hasattr(self.database_service, 'get_ignored_suggestion_source_ids'):
@@ -49,7 +92,7 @@ class SuggestionsService:
 
         return ignored_source_ids
 
-    def _scan_single_audiobook(self, ab: dict) -> Optional[dict]:
+    def _scan_single_audiobook(self, ab: dict, candidate_pool: List[dict]) -> Optional[dict]:
         """Scan one unmatched audiobook and return a suggestion dict or None."""
         from rapidfuzz import fuzz
 
@@ -59,26 +102,19 @@ class SuggestionsService:
         if not abs_id or not abs_title:
             return None
 
-        try:
-            candidates = self.get_searchable_ebooks(abs_title)
-        except Exception as e:
-            self.logger.warning(f"Suggestion scan failed to search ebooks for '{abs_title}': {e}")
-            return None
+        per_book_pool = candidate_pool
+        if not per_book_pool:
+            # Fallback keeps prior behavior in source setups where no shared pool is available.
+            try:
+                per_book_pool = self._prepare_candidate_pool(self.get_searchable_ebooks(abs_title))
+            except Exception as e:
+                self.logger.warning(f"Suggestion scan failed to search ebooks for '{abs_title}': {e}")
+                return None
 
         matches = []
-        for candidate in candidates:
-            candidate_title = (
-                getattr(candidate, 'title', None)
-                or getattr(candidate, 'stem', None)
-                or candidate.name
-                or ''
-            ).strip()
-            candidate_author = (getattr(candidate, 'authors', None) or '').strip()
-            if not candidate_title:
-                continue
-
-            candidate_search_text = f"{candidate_title} {candidate_author}".strip()
-            direct_match = self.audiobook_matches_search(ab, candidate_search_text) if candidate_search_text else False
+        for candidate_info in per_book_pool:
+            candidate_title = candidate_info["title"]
+            candidate_author = candidate_info["author"]
 
             title_score = float(fuzz.token_sort_ratio(abs_title, candidate_title))
             if abs_author:
@@ -90,9 +126,12 @@ class SuggestionsService:
             if score < 60:
                 continue
 
+            candidate_search_text = candidate_info["search_text"]
+            direct_match = self.audiobook_matches_search(ab, candidate_search_text) if candidate_search_text else False
+
             matches.append({
-                "ebook_filename": candidate.name,
-                "display_name": candidate.display_name or candidate.name,
+                "ebook_filename": candidate_info["name"],
+                "display_name": candidate_info["display_name"],
                 "score": round(score, 1),
                 "_direct_match": direct_match
             })
@@ -225,9 +264,27 @@ class SuggestionsService:
                 total_unmatched=total_unmatched,
             )
 
+        candidate_pool = []
+        if scanned_new_total > 0:
+            emit_progress(
+                phase="loading_candidates",
+                percent=(reused_cached_count / total_unmatched) * 100 if total_unmatched else 0,
+                message="Loading ebook candidates...",
+                scanned_new_done=0,
+                scanned_new_total=scanned_new_total,
+                reused_cached=reused_cached_count,
+                total_unmatched=total_unmatched,
+            )
+            candidate_pool = self._build_ebook_candidate_pool()
+            self.logger.info(
+                "Suggestions scan candidate pool loaded: %s ebooks for %s new audiobooks",
+                len(candidate_pool),
+                scanned_new_total,
+            )
+
         for idx, ab in enumerate(new_scan_candidates, start=1):
             abs_id = ab.get('id')
-            suggestion = self._scan_single_audiobook(ab)
+            suggestion = self._scan_single_audiobook(ab, candidate_pool)
             if suggestion:
                 cache_by_abs[abs_id] = suggestion
                 no_match_abs_ids_set.discard(abs_id)
@@ -267,5 +324,6 @@ class SuggestionsService:
                 "scanned_new": len(new_scan_candidates),
                 "reused_cached": reused_cached_count,
                 "total_unmatched": total_unmatched,
+                "candidate_pool_size": len(candidate_pool),
             },
         }

@@ -473,7 +473,12 @@ def get_searchable_ebooks(search_term):
     # 1. Booklore
     if container.booklore_client().is_configured():
         try:
-            books = container.booklore_client().search_books(search_term)
+            if search_term:
+                books = container.booklore_client().search_books(search_term)
+            else:
+                # For scan workloads, use the broader cache-oriented API to avoid
+                # repeated aggressive refresh behavior from per-query search calls.
+                books = container.booklore_client().get_all_books()
             if books:
                 for b in books:
                     fname = b.get('fileName', '')
