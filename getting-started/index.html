@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -1017,6 +1017,8 @@ mkdir<span class="w"> </span>data
 
 <span class="w">      </span><span class="c1"># === OPTIONAL: Forge ===</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/path/to/storyteller/library:/storyteller_library</span>
+<span class="w">      </span><span class="c1"># === OPTIONAL: Storyteller transcript ingestion ===</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/path/to/storyteller/assets:/storyteller/assets</span>
 </code></pre></div>
 <h3 id="security-note-split-port-mode">Security Note: Split-Port Mode</h3>
 <p>By default, the container listens on port <strong>8080</strong> (mapped to 5757 int). This port exposes <strong>everything</strong>: the Admin Dashboard, Settings, and API.</p>
@@ -1028,6 +1030,8 @@ mkdir<span class="w"> </span>data
 <div class="admonition tip">
 <p class="admonition-title">Optional Integrations</p>
 <p>You can configure KOSync, Storyteller, and other integrations via enviroment variables during bootstrap, but it is easier to do it later in the Web UI!</p>
+<p>If you mount Storyteller assets at <code>/storyteller/assets</code>, set <strong>Storyteller Assets Path</strong> in Settings to <code>/storyteller</code>.
+The assets path can be configured fully in the UI; <code>STORYTELLER_ASSETS_DIR</code> env is optional.</p>
 </div>
 <hr />
 <h2 id="step-4-start-the-service">Step 4: Start the Service</h2>
@@ -1042,6 +1046,7 @@ mkdir<span class="w"> </span>data
 <li>Open your browser and go to <code>http://localhost:8080/settings</code> (or your server IP).</li>
 <li>Enter your <strong>Audiobookshelf Server URL</strong> and <strong>API Key</strong> (from Step 1).</li>
 <li>(Optional) Enter your <strong>KOSync</strong>, <strong>Booklore</strong>, or <strong>Storyteller</strong> credentials.</li>
+<li>(Optional) If Storyteller assets are mounted, set <strong>Storyteller Assets Path</strong> to <code>/storyteller</code>.</li>
 <li>Click <strong>Save Settings</strong>. The application will restart automatically to apply changes.</li>
 </ol>
 <hr />

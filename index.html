@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -875,6 +875,7 @@
 <li><strong>Multi-Platform Support</strong>: Synchronize progress across five different ecosystems simultaneously.</li>
 <li><strong>Smart Conflict Resolution</strong>: "Furthest progress wins" logic with built-in anti-regression protection.</li>
 <li><strong>Rich Positioning</strong>: Support for XPath, CSS selectors, and EPUB CFI for pixel-perfect positioning.</li>
+<li><strong>Storyteller Native Alignment</strong>: For books with Storyteller forced-alignment transcripts, timestamp-to-text mapping is built directly from <code>wordTimeline</code> data.</li>
 <li><strong>Resumable Jobs</strong>: Background transcription jobs resume automatically if interrupted.</li>
 </ul>
 <h3 id="management-web-ui">🖥️ Management Web UI</h3>
@@ -899,7 +900,10 @@
 <li><strong>Normalization</strong>: Progress from all clients is normalized into a common format (timestamp or percentage).</li>
 <li><strong>Discrepancy Check</strong>: The system identifies if a significant change has occurred.</li>
 <li><strong>Leader Election</strong>: The client with the most recent explicit progress becomes the "Leader".</li>
-<li><strong>Translation</strong>: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system uses <strong>Whisper AI transcripts</strong> to translate the timestamp into an exact text position (or vice versa).</li>
+<li><strong>Translation</strong>: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system resolves position via the best available transcript source:</li>
+<li>Storyteller forced-alignment transcript (direct mapping),</li>
+<li>then SMIL,</li>
+<li>then Whisper fallback.</li>
 <li><strong>Propagation</strong>: The new position is sent to all other configured clients.</li>
 </ol>
 <div class="highlight"><pre><span></span><code>graph TD
@@ -922,7 +926,8 @@
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Audio to Text Conversion</p>
-<p>The system extracts a snippet of text from the audiobook transcript at the current timestamp and performs a fuzzy search within the EPUB to find the corresponding ebook location.</p>
+<p>For Storyteller-transcript books, the system can map timestamps directly to character offsets without fuzzy search.
+For non-Storyteller transcript paths, it still uses transcript text extraction and fuzzy search in the EPUB.</p>
 </div>
 
 

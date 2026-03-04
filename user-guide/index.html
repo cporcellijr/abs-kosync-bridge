@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -551,6 +551,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#real-time-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-Time Sync
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Real-Time Sync">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disabling-instant-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disabling Instant Sync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-client-polling-storyteller-booklore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-Client Polling (Storyteller &amp; Booklore)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#matcher" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -730,7 +780,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#how-it-works_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         How it works
@@ -773,6 +823,17 @@
     <span class="md-ellipsis">
       
         Editing Mappings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storyteller-backfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller Backfill
       
     </span>
   </a>
@@ -961,6 +1022,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#real-time-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-Time Sync
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Real-Time Sync">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disabling-instant-sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disabling Instant Sync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-client-polling-storyteller-booklore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-Client Polling (Storyteller &amp; Booklore)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#matcher" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1140,7 +1251,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#how-it-works_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         How it works
@@ -1183,6 +1294,17 @@
     <span class="md-ellipsis">
       
         Editing Mappings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storyteller-backfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller Backfill
       
     </span>
   </a>
@@ -1244,22 +1366,46 @@
 <ul>
 <li><strong>Mechanism</strong>: Transcription-based alignment.</li>
 <li><strong>Use Case</strong>: Listening on phone, reading on Kindle/Kobo.</li>
-<li><strong>Process</strong>: Mapping creates a transcript of the audiobook, then uses that text to find the corresponding page in the ebook.</li>
+<li><strong>Process</strong>:</li>
+<li>If Storyteller forced-alignment transcripts are available, they are ingested and used first.</li>
+<li>Otherwise, the system falls back to SMIL extraction, then Whisper transcription.</li>
 </ul>
 <h3 id="2-ebook-only-sync">2. Ebook-Only Sync</h3>
 <p>Links your ebook status across platforms.</p>
 <ul>
 <li><strong>Mechanism</strong>: Direct percentage/text position sync.</li>
 <li><strong>Triggers</strong>:</li>
-<li><strong>Internal KOSync</strong>: Instant (Push-based).</li>
-<li><strong>ABS/Booklore</strong>: Periodic Polling (every ~5 mins).</li>
+<li><strong>KOReader</strong>: Instant — syncs the moment you close or pause reading.</li>
+<li><strong>Audiobookshelf</strong>: Near-instant (~30s) during audiobook playback.</li>
+<li><strong>Booklore/Others</strong>: Picked up on the regular background sync (every ~5 mins).</li>
 <li><strong>Supported Clients</strong>:</li>
 <li><strong>KOReader</strong> (via Internal KOSync Server)</li>
 <li><strong>Booklore</strong> (Requires <code>BOOKLORE_ENABLED=true</code>)</li>
 <li><strong>ABS Ebook</strong> (Requires <code>SYNC_ABS_EBOOK=true</code>)</li>
 <li><strong>Hardcover</strong>: Updates Hardcover.app presence (if configured).</li>
-<li><strong>Note</strong>: If you only use Booklore and ABS Web Reader (no KOReader), syncs will occur only during the periodic poll interval.</li>
 </ul>
+<hr />
+<h2 id="real-time-sync">Real-Time Sync</h2>
+<p>By default, the bridge checks all your clients for progress changes every 5 minutes. <strong>Real-time sync</strong> makes this happen much faster — within seconds instead of minutes.</p>
+<h3 id="how-it-works">How It Works</h3>
+<p>There are two ways progress can sync instantly:</p>
+<ol>
+<li>
+<p><strong>Audiobook Playback</strong> — When you listen to an audiobook in Audiobookshelf (web player, mobile app, etc.), the bridge detects the playback activity automatically. Once you stop or pause for about 30 seconds, it syncs your position to all your other platforms right away.</p>
+</li>
+<li>
+<p><strong>KOReader Reading</strong> — If you use the built-in KoSync server (configured in Settings), KOReader sends your reading position to the bridge the moment you close a book or turn the page. The bridge then pushes that position to all your other clients immediately.</p>
+</li>
+</ol>
+<blockquote>
+<p>[!NOTE]
+The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it.</p>
+</blockquote>
+<h3 id="disabling-instant-sync">Disabling Instant Sync</h3>
+<p>If you prefer to rely solely on the background poll (e.g., to reduce network activity), you can turn off instant sync entirely from <strong>Settings → Sync Behavior → Instant Sync</strong>. This disables the ABS socket listener and the KoSync push trigger. The global poll cycle continues as normal.</p>
+<h3 id="per-client-polling-storyteller-booklore">Per-Client Polling (Storyteller &amp; Booklore)</h3>
+<p>By default, Storyteller and Booklore are only checked during the global sync cycle. If you make changes directly in one of those apps and want the bridge to notice faster, you can configure a <strong>custom poll interval</strong> for that client under <strong>Settings → Sync Behavior → Per-Client Polling</strong>.</p>
+<p>Set the mode to <strong>Custom</strong> and choose how often (in seconds) the bridge should check that client for position changes. Only books with an active mapping are checked, and a full sync is triggered only when a real change is detected — so the overhead is minimal.</p>
 <hr />
 <h2 id="matcher">Matcher</h2>
 <p>The <strong>Matcher</strong> is where you link an Audiobookshelf audiobook to its corresponding text format. The new <strong>3-Column Interface</strong> makes it easy to select the best source for your needs.</p>
@@ -1288,6 +1434,7 @@
 <p><strong>Source Badges</strong>: Look for the colored badges on ebook cards to know where the file is coming from (e.g., <code>BOOKLORE</code>, <code>ABS</code>, <code>CWA</code>, <code>LOCAL</code>).</p>
 <h3 id="creating-the-mapping">Creating the Mapping</h3>
 <p>Once you've made your selections, click <strong>Create Mapping</strong>. The system will download any necessary files (from CWA/ABS) and begin the alignment process.</p>
+<p>If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/Whisper for that book.</p>
 <h3 id="batch-match">Batch Match</h3>
 <p>For users with large libraries, the <strong>Batch Matcher</strong> speeds up the process.</p>
 <ol>
@@ -1314,6 +1461,7 @@
 <p>This is the recommended workflow for most users.</p>
 <h4 id="2-manual-forge-from-the-forge-page">2. Manual Forge (from the Forge page)</h4>
 <p>The standalone <strong>Forge</strong> page (<code>/forge</code>) lets you stage and process a book through Storyteller without creating a sync mapping. Use this if you want to prepare a book for Storyteller independently and then link it manually via the Matcher later.</p>
+<p>Forge staging uses <code>PROCESSING_DIR</code> if configured, and defaults to <code>/tmp</code> if not set. This staging path does not require a dedicated Docker volume mount.</p>
 <h3 id="when-to-use-it">When to use it</h3>
 <p>Use Forge if you want the <strong>immersive Read-Along experience</strong> in the Storyteller app.</p>
 <blockquote>
@@ -1327,7 +1475,7 @@
 <p>[!TIP]
 <strong>Built-in KOSync Bridge</strong>: In the Settings page, under <strong>KOSync Integration</strong>, enable the integration and check <strong>"Use Built-in KOSync Bridge"</strong>. The UI will display the URL to enter into KOReader's sync settings.</p>
 </blockquote>
-<h3 id="how-it-works">How it works</h3>
+<h3 id="how-it-works_1">How it works</h3>
 <ol>
 <li><strong>Push</strong>: You open a book in KOReader. It pushes progress to the bridge instantaneously.</li>
 <li><strong>Match</strong>: The bridge looks for a matching audiobook in your ABS library.</li>
@@ -1361,6 +1509,14 @@
 <ul>
 <li><strong>Delete</strong>: Stops syncing the book. Does NOT delete the files.</li>
 <li><strong>Reset Progress</strong>: Clears the stored sync state if things get out of whack.</li>
+</ul>
+<h3 id="storyteller-backfill">Storyteller Backfill</h3>
+<p>Use <strong>Settings -&gt; Storyteller Backfill</strong> to bulk re-check all Storyteller-linked books:</p>
+<ul>
+<li>Ingests any newly available Storyteller transcript files.</li>
+<li>Sets transcript source to Storyteller where valid transcripts exist.</li>
+<li>Rebuilds alignment maps from Storyteller word timelines (no Whisper/SMIL recompute).</li>
+<li>Leaves books unchanged when transcripts are missing or incompatible.</li>
 </ul>
 <h3 id="viewing-logs">Viewing Logs</h3>
 <p>Navigate to <strong>Logs</strong> in the sidebar to view the live application logs. This is useful for troubleshooting why a specific book might not be syncing.</p>

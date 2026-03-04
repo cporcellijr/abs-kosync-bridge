@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -578,6 +578,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#storyteller-transcripts-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller transcripts not found?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storyteller-backfill-shows-invalid-chapter-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller backfill shows invalid chapter format?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#transcription-taking-too-long" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -733,6 +755,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#storyteller-transcripts-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller transcripts not found?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storyteller-backfill-shows-invalid-chapter-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storyteller backfill shows invalid chapter format?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#transcription-taking-too-long" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -829,6 +873,20 @@
 <ul>
 <li><strong>Check Volumes</strong>: Ensure your <code>/books</code> volume is correctly mounted in <code>docker-compose.yml</code>. The path inside the container must match where you are looking.</li>
 <li><strong>Permissions</strong>: Ensure the user running the container has read permissions for the ebook files.</li>
+</ul>
+<h3 id="storyteller-transcripts-not-found">Storyteller transcripts not found?</h3>
+<ul>
+<li><strong>Issue</strong>: You know transcript files exist on disk, but logs show "Storyteller transcripts not found" or "directory missing".</li>
+<li><strong>Checks</strong>:</li>
+<li>Verify the Docker volume is mounted: host storyteller assets -&gt; container <code>/storyteller/assets</code>.</li>
+<li>In Settings, set <strong>Storyteller Assets Path</strong> to <code>/storyteller</code> (not <code>/storyteller/assets</code>).</li>
+<li>Confirm expected structure inside container: <code>/storyteller/assets/{title}/transcriptions/*.json</code>.</li>
+</ul>
+<h3 id="storyteller-backfill-shows-invalid-chapter-format">Storyteller backfill shows invalid chapter format?</h3>
+<ul>
+<li><strong>Issue</strong>: Logs mention invalid storyteller chapter format for a chapter JSON file.</li>
+<li><strong>Cause</strong>: The file name pattern matches, but JSON is not Storyteller <code>wordTimeline</code> format.</li>
+<li><strong>Behavior</strong>: Backfill now skips these books as missing/incompatible instead of failing the whole run.</li>
 </ul>
 <h3 id="transcription-taking-too-long">Transcription taking too long?</h3>
 <ul>

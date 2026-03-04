@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../static/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -716,6 +716,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#per-client-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-Client Polling
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1048,6 +1059,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#per-client-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-Client Polling
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1155,6 +1177,13 @@ Environment variables can be used for initial bootstrapping, but values set in t
 <li><strong>Storyteller URL</strong>: URL to your Storyteller instance.</li>
 <li><strong>Storyteller Username / Password</strong>: Credentials for your Storyteller admin account.</li>
 <li><strong>Sync Mode</strong>: REST API only. The bridge communicates exclusively via the Storyteller API.</li>
+<li><strong>Storyteller Assets Path (Optional)</strong>: Root path containing Storyteller <code>assets/</code>.</li>
+<li>Expected structure: <code>{assets_root}/assets/{book_title}/transcriptions/</code></li>
+<li>If your Docker volume is <code>/path/to/storyteller/assets:/storyteller/assets</code>, set this value to <code>/storyteller</code>.</li>
+<li>This setting is optional and can be configured in the Web UI (no compose env var required).</li>
+<li><strong>Storyteller Backfill</strong>: Settings includes a maintenance action to scan all Storyteller-linked books, ingest available transcript JSON files, and rebuild alignment maps without re-running SMIL/Whisper.</li>
+<li><strong>Forge Staging Directory (Optional env)</strong>: <code>PROCESSING_DIR</code> controls temporary Forge staging before files are atomically presented to Storyteller.</li>
+<li>Default is <code>/tmp</code>, so no dedicated <code>PROCESSING_DIR</code> volume mount is required.</li>
 </ul>
 <blockquote>
 <p>[!NOTE]
@@ -1198,6 +1227,10 @@ The legacy method of mapping a local Storyteller database (<code>/storyteller_da
 </ul>
 <h3 id="transcription-settings">Transcription Settings</h3>
 <p>Configure the engine used for audio-to-text alignment.</p>
+<blockquote>
+<p>[!TIP]
+For books with Storyteller forced-alignment transcript files, that source is prioritized over SMIL and Whisper.</p>
+</blockquote>
 <table>
 <thead>
 <tr>
@@ -1293,7 +1326,45 @@ The legacy method of mapping a local Storyteller database (<code>/storyteller_da
 <li><strong>Use KOSync Percentage from Server</strong>: If enabled, uses the raw percentage value returned by the KOSync server instead of performing text-based position matching. Useful if text matching is unreliable for a specific book.</li>
 <li><strong>XPath Fallback</strong>: Strategy for handling position lookups when exact paths fail.</li>
 <li><strong>Reprocess on Clear</strong>: (<code>REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT</code>) If enabled, clearing a mapping in the UI will also delete the alignment cache, forcing a full re-transcription next time.</li>
+<li><strong>Instant Sync</strong>: (<code>INSTANT_SYNC_ENABLED</code>) Controls whether event-driven instant sync is active. When disabled, the ABS Socket.IO listener and KoSync PUT trigger are both turned off — sync falls back to the regular background poll only.</li>
 </ul>
+<h3 id="per-client-polling">Per-Client Polling</h3>
+<p>By default, Storyteller and Booklore are only checked during the global sync cycle. If you want the bridge to watch those clients more (or less) frequently than everything else, set their poll mode to <strong>Custom</strong>.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Setting</th>
+<th style="text-align: left;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Storyteller Poll Mode</strong></td>
+<td style="text-align: left;"><code>global</code></td>
+<td style="text-align: left;"><code>global</code> uses the normal sync cycle. <code>custom</code> polls at its own interval.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Storyteller Poll Interval</strong></td>
+<td style="text-align: left;"><code>45s</code></td>
+<td style="text-align: left;">How often (in seconds) to check Storyteller for position changes when in <code>custom</code> mode.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Booklore Poll Mode</strong></td>
+<td style="text-align: left;"><code>global</code></td>
+<td style="text-align: left;"><code>global</code> uses the normal sync cycle. <code>custom</code> polls at its own interval.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Booklore Poll Interval</strong></td>
+<td style="text-align: left;"><code>300s</code></td>
+<td style="text-align: left;">How often (in seconds) to check Booklore for position changes when in <code>custom</code> mode.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[!NOTE]
+Per-client polling only watches for changes <em>from</em> that client and triggers a targeted sync when one is detected. It is much lighter than a full global sync cycle.</p>
+</blockquote>
 <hr />
 <h2 id="gpu-support-optional">GPU Support (Optional)</h2>
 <p>For significantly faster transcription (when using <code>local</code> provider), you can enable NVIDIA GPU acceleration.</p>
