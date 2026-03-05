@@ -279,6 +279,37 @@ class TestForgeService(unittest.TestCase):
         mock_cleanup.assert_called_once()
         self.assertEqual(db_book.status, "error")
 
+    def test_poll_auto_forge_completion_api_metadata_does_not_mark_complete(self):
+        """Metadata readiness alone should not mark auto-forge complete."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            course_dir = tmp_path / "course"
+            course_dir.mkdir(parents=True, exist_ok=True)
+            epub_cache = tmp_path / "epub_cache"
+            epub_cache.mkdir(parents=True, exist_ok=True)
+
+            st_client = MagicMock()
+            st_client.get_book_details.return_value = {
+                "readaloud": {"filepath": "/storyteller/output/readaloud.epub"}
+            }
+            st_client.download_book.return_value = False
+
+            with patch.object(self.service, "_find_processed_epub", return_value=None):
+                result = self.service._poll_auto_forge_completion(
+                    st_client=st_client,
+                    safe_title="Auto Book",
+                    epub_filename="Auto Book.epub",
+                    title="Auto Book",
+                    course_dir=course_dir,
+                    epub_cache=epub_cache,
+                    found_uuid="uuid-1",
+                    processing_triggered=True,
+                    poll_count=1,
+                )
+
+            self.assertTrue(result["api_ready_seen"])
+            self.assertIsNone(result["completion_method"])
+
 
 if __name__ == '__main__':
     unittest.main()
