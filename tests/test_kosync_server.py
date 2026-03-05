@@ -5,6 +5,7 @@ Verifies compatibility with kosync-dotnet behavior.
 import unittest
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import os
 import shutil
@@ -511,6 +512,49 @@ class TestKosyncEndpoints(unittest.TestCase):
         # Clean up
         with web_server.database_service.get_session() as session:
             session.query(Book).filter(Book.abs_id == 'test-filename-book').delete()
+
+    def test_try_find_epub_by_hash_uses_in_memory_booklore_cache_when_db_cache_empty(self):
+        from src.api import kosync_server
+
+        db = MagicMock()
+        db.get_kosync_document.return_value = None
+        db.get_all_booklore_books.return_value = []
+        db.get_kosync_doc_by_booklore_id.return_value = None
+
+        target_hash = 'm' * 32
+        booklore_client = MagicMock()
+        booklore_client.is_configured.return_value = True
+        booklore_client.get_all_books.return_value = [
+            {'id': 'bl-1', 'title': 'Target Book', 'fileName': None, '_needs_detail': True}
+        ]
+        booklore_client._fetch_and_cache_detail.return_value = {
+            'id': 'bl-1',
+            'title': 'Target Book',
+            'fileName': 'target-book.epub',
+        }
+        booklore_client.download_book.return_value = b'epub-bytes'
+
+        ebook_parser = MagicMock()
+        ebook_parser.get_kosync_id_from_bytes.return_value = target_hash
+
+        container = MagicMock()
+        container.booklore_client.return_value = booklore_client
+        container.ebook_parser.return_value = ebook_parser
+        container.data_dir.return_value = Path(TEST_DIR)
+
+        with patch.object(kosync_server, '_database_service', db), \
+             patch.object(kosync_server, '_container', container), \
+             patch.object(kosync_server, '_ebook_dir', None):
+            result = kosync_server._try_find_epub_by_hash(target_hash)
+
+        self.assertEqual(result, 'target-book.epub')
+        booklore_client.get_all_books.assert_called_once()
+        booklore_client._fetch_and_cache_detail.assert_called_once_with('bl-1')
+        booklore_client.download_book.assert_called_once_with('bl-1')
+        db.save_kosync_document.assert_called_once()
+        saved_doc = db.save_kosync_document.call_args[0][0]
+        self.assertEqual(saved_doc.filename, 'target-book.epub')
+        self.assertEqual(saved_doc.booklore_id, 'bl-1')
 
 
 if __name__ == '__main__':

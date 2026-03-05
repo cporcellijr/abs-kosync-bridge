@@ -14,6 +14,9 @@ from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
+BULK_DETAIL_FETCH_LIMIT = 500
+MAX_DETAIL_FETCHES_PER_SEARCH = 20
+
 class BookloreClient:
     def __init__(self, database_service=None):
         raw_url = os.environ.get("BOOKLORE_SERVER", "").rstrip('/')
@@ -33,6 +36,7 @@ class BookloreClient:
         self._refresh_cooldown = 300  # 5 min cooldown after failed refresh
         self._search_miss_refresh_min_age = 60  # Avoid repeated refreshes on rapid search misses
         self._refresh_lock = threading.Lock()
+        self._cache_lock = threading.RLock()
 
         self._token = None
         self._token_timestamp = 0
@@ -44,6 +48,7 @@ class BookloreClient:
 
         # Load cache from DB (and migrate if needed)
         self.target_library_id = os.environ.get("BOOKLORE_LIBRARY_ID")
+        self._server_side_filter_supported = None
         self._load_cache()
 
     def _load_cache(self):
@@ -90,33 +95,36 @@ class BookloreClient:
         if self.db:
             try:
                 db_books = self.db.get_all_booklore_books()
-                self._book_cache = {}
-                self._book_id_cache = {}
-                
-                for db_book in db_books:
-                    # Parse raw metadata back to dict
-                    book_info = db_book.raw_metadata_dict
-                    # Ensure minimal fields exist
-                    if not book_info:
-                        book_info = {
-                            'fileName': db_book.filename,
-                            'title': db_book.title,
-                            'authors': db_book.authors
-                        }
-                    
-                    self._book_cache[db_book.filename] = book_info
-                    
-                    # Update ID cache
-                    bid = book_info.get('id')
-                    if bid:
-                        self._book_id_cache[bid] = book_info
+                with self._cache_lock:
+                    self._book_cache = {}
+                    self._book_id_cache = {}
+
+                    for db_book in db_books:
+                        # Parse raw metadata back to dict
+                        book_info = db_book.raw_metadata_dict
+                        # Ensure minimal fields exist
+                        if not book_info:
+                            book_info = {
+                                'fileName': db_book.filename,
+                                'title': db_book.title,
+                                'authors': db_book.authors
+                            }
+
+                        self._book_cache[db_book.filename] = book_info
+
+                        # Update ID cache
+                        bid = book_info.get('id')
+                        if bid:
+                            self._book_id_cache[bid] = book_info
                         
                 # Set to 0 to force a refresh/validation against API on next access
                 self._cache_timestamp = 0
                 logger.info(f"📚 Booklore: Loaded {len(self._book_cache)} books from database")
             except Exception as e:
                 logger.error(f"❌ Failed to load Booklore cache from DB: {e}")
-                self._book_cache = {}
+                with self._cache_lock:
+                    self._book_cache = {}
+                    self._book_id_cache = {}
 
     def _save_cache(self):
         """
@@ -277,6 +285,93 @@ class BookloreClient:
             return True
         return False
 
+    def _has_cached_books(self) -> bool:
+        with self._cache_lock:
+            return bool(self._book_cache or self._book_id_cache)
+
+    def _snapshot_book_cache_items(self):
+        with self._cache_lock:
+            return list(self._book_cache.items())
+
+    def _snapshot_book_cache_values(self):
+        with self._cache_lock:
+            return list(self._book_cache.values())
+
+    def _snapshot_book_id_items(self):
+        with self._cache_lock:
+            return list(self._book_id_cache.items())
+
+    def _build_books_endpoint(self, page, batch_size, use_server_side_filter):
+        endpoint = f"/api/v1/books?page={page}&size={batch_size}"
+        if use_server_side_filter and self.target_library_id:
+            endpoint = f"{endpoint}&libraryId={self.target_library_id}"
+        return endpoint
+
+    def _filter_books_by_library(self, books):
+        if not self.target_library_id:
+            return list(books)
+
+        filtered_batch = []
+        for b in books:
+            lid = b.get('libraryId')
+            lname = b.get('libraryName', 'Unknown')
+
+            if lid is not None and str(lid) == str(self.target_library_id):
+                filtered_batch.append(b)
+            elif lid is None:
+                filtered_batch.append(b)
+            else:
+                logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
+
+        return filtered_batch
+
+    def _upsert_lightweight_entry(self, book):
+        bid = book.get('id')
+        if bid is None:
+            return
+
+        with self._cache_lock:
+            existing = self._book_id_cache.get(bid)
+            if existing and not existing.get('_needs_detail'):
+                return
+
+            lightweight_info = dict(existing or {})
+            lightweight_info.update({
+                'id': bid,
+                'title': book.get('title', ''),
+                'authors': lightweight_info.get('authors') or '',
+                'fileName': None,
+                'libraryId': book.get('libraryId'),
+                'libraryName': book.get('libraryName'),
+                '_needs_detail': True,
+            })
+            self._book_id_cache[bid] = lightweight_info
+
+    def _prune_stale_cache_entries(self, live_ids):
+        live_id_strings = {str(bid) for bid in live_ids}
+        stale_entries = []
+
+        with self._cache_lock:
+            stale_ids = [bid for bid in list(self._book_id_cache.keys()) if str(bid) not in live_id_strings]
+            for bid in stale_ids:
+                stale_entry = self._book_id_cache.pop(bid)
+                stale_entries.append(stale_entry)
+
+                filename = (stale_entry.get('fileName') or '').lower()
+                if filename:
+                    self._book_cache.pop(filename, None)
+
+        for stale_entry in stale_entries:
+            filename = (stale_entry.get('fileName') or '').lower()
+            if self.db and filename and not stale_entry.get('_needs_detail'):
+                try:
+                    self.db.delete_booklore_book(filename)
+                except Exception as e:
+                    logger.error(f"âŒ Failed to prune stale book {filename}: {e}")
+
+        if stale_entries:
+            logger.info(f"📚 Booklore: Pruned {len(stale_entries)} books no longer in library")
+
     def _refresh_book_cache(self):
         """
         Refresh the book cache using robust pagination.
@@ -294,11 +389,13 @@ class BookloreClient:
             all_books_list = []
             page = 0
             batch_size = 200  # Reasonable chunk size
+            use_server_side_filter = bool(self.target_library_id and self._server_side_filter_supported is not False)
+            should_probe_server_side_filter = bool(self.target_library_id and self._server_side_filter_supported is None)
 
             logger.info("📚 Booklore: Starting full library scan...")
 
             while True:
-                endpoint = f"/api/v1/books?page={page}&size={batch_size}"
+                endpoint = self._build_books_endpoint(page, batch_size, use_server_side_filter)
                 response = self._make_request("GET", endpoint)
 
                 if not response or response.status_code != 200:
@@ -314,35 +411,46 @@ class BookloreClient:
                 elif isinstance(data, dict) and 'content' in data:
                     current_batch = data['content']
 
+                raw_batch_size = len(current_batch)
+                if should_probe_server_side_filter and page == 0 and not current_batch:
+                    self._server_side_filter_supported = True
+                    should_probe_server_side_filter = False
+
                 if not current_batch:
                     break
 
-                if self.target_library_id and current_batch:
-                    filtered_batch = []
-                    for b in current_batch:
-                        lid = b.get('libraryId')
-                        lname = b.get('libraryName', 'Unknown')
+                if should_probe_server_side_filter and page == 0:
+                    if any(
+                        b.get('libraryId') is not None and str(b.get('libraryId')) != str(self.target_library_id)
+                        for b in current_batch
+                    ):
+                        self._server_side_filter_supported = False
+                        should_probe_server_side_filter = False
+                        use_server_side_filter = False
+                        all_books_list = []
+                        page = 0
+                        logger.info("Booklore: Server-side library filter not supported, using client-side filtering")
+                        continue
 
-                        if lid is not None and str(lid) == str(self.target_library_id):
-                            filtered_batch.append(b)
-                        elif lid is None:
-                            filtered_batch.append(b)
-                        else:
-                            logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
-                    current_batch = filtered_batch
+                    self._server_side_filter_supported = True
+                    should_probe_server_side_filter = False
+
+                if self.target_library_id and not use_server_side_filter:
+                    current_batch = self._filter_books_by_library(current_batch)
 
                 all_books_list.extend(current_batch)
                 logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
 
-                if len(current_batch) != batch_size:
+                if raw_batch_size != batch_size:
                     break
 
                 page += 1
 
+            live_ids = {b.get('id') for b in all_books_list if b.get('id') is not None}
+            self._prune_stale_cache_entries(live_ids)
+
             if not all_books_list:
                 logger.debug("Booklore: No books found in library")
-                self._book_cache = {}
-                self._book_id_cache = {}
                 self._cache_timestamp = time.time()
                 self._save_cache()  # No-op now
                 self._last_refresh_failed = False
@@ -350,8 +458,8 @@ class BookloreClient:
 
             logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
 
-            # --- Pruning Stale Data ---
-            if self.db and all_books_list:
+            # Legacy stale pruning path left disabled; _book_id_cache pruning now runs above.
+            if False and self.db and all_books_list:
                 live_map = {str(b['id']): b for b in all_books_list if b.get('id')}
 
                 cached_filenames = list(self._book_cache.keys())
@@ -407,31 +515,50 @@ class BookloreClient:
                 if stale_count > 0:
                     logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
 
-            new_book_ids = [b['id'] for b in all_books_list if b['id'] not in self._book_id_cache]
-
-            if new_book_ids:
-                logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
-                token = self._get_fresh_token()
-                if not token:
-                    self._last_refresh_failed = True
-                    return False
-
-                def fetch_one(book_id):
-                    return book_id, self._fetch_book_detail(book_id, token)
-
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
-                    for future in as_completed(futures):
-                        try:
-                            _, detail = future.result()
-                            if detail and isinstance(detail, dict):
-                                self._process_book_detail(detail)
-                        except Exception as e:
-                            logger.debug(f"Booklore: Error fetching details: {e}")
+            id_snapshot = self._snapshot_book_id_items()
+            existing_id_strings = {str(bid) for bid, _ in id_snapshot}
+            existing_lightweight_ids = {
+                str(bid) for bid, book_info in id_snapshot if book_info.get('_needs_detail')
+            }
+            new_book_ids = [
+                b.get('id') for b in all_books_list
+                if b.get('id') is not None and str(b.get('id')) not in existing_id_strings
+            ]
 
             for book in all_books_list:
-                if book['id'] in self._book_id_cache:
-                    pass
+                if str(book.get('id')) in existing_lightweight_ids:
+                    self._upsert_lightweight_entry(book)
+
+            if new_book_ids:
+                if len(new_book_ids) > BULK_DETAIL_FETCH_LIMIT:
+                    for book in all_books_list:
+                        self._upsert_lightweight_entry(book)
+
+                    logger.warning(
+                        f"📚 Booklore: {len(new_book_ids)} new books detected. "
+                        f"Skipping bulk detail fetch (limit: {BULK_DETAIL_FETCH_LIMIT}). "
+                        f"Book details will be fetched on demand. "
+                        f"Consider setting BOOKLORE_LIBRARY_ID to reduce scan scope."
+                    )
+                else:
+                    logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
+                    token = self._get_fresh_token()
+                    if not token:
+                        self._last_refresh_failed = True
+                        return False
+
+                    def fetch_one(book_id):
+                        return book_id, self._fetch_book_detail(book_id, token)
+
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
+                        for future in as_completed(futures):
+                            try:
+                                _, detail = future.result()
+                                if detail and isinstance(detail, dict):
+                                    self._process_book_detail(detail)
+                            except Exception as e:
+                                logger.debug(f"Booklore: Error fetching details: {e}")
 
             self._cache_timestamp = time.time()
             self._last_refresh_failed = False
@@ -484,9 +611,9 @@ class BookloreClient:
         }
 
         # Let's keep it consistent with what we see in database migration
-        
-        self._book_cache[filename.lower()] = book_info
-        self._book_id_cache[detail['id']] = book_info
+        with self._cache_lock:
+            self._book_cache[filename.lower()] = book_info
+            self._book_id_cache[detail['id']] = book_info
 
         # Persist to DB
         if self.db:
@@ -506,6 +633,24 @@ class BookloreClient:
 
         return None
 
+    def _fetch_and_cache_detail(self, book_id):
+        """Fetch detail for a single book on demand and add it to cache."""
+        with self._cache_lock:
+            cached = self._book_id_cache.get(book_id)
+            if cached and not cached.get('_needs_detail'):
+                return cached
+
+        token = self._get_fresh_token()
+        if not token:
+            return None
+
+        detail = self._fetch_book_detail(book_id, token)
+        if detail and isinstance(detail, dict):
+            self._process_book_detail(detail)
+            with self._cache_lock:
+                return self._book_id_cache.get(book_id)
+        return None
+
     def _normalize_string(self, s):
         """Remove non-alphanumeric characters and lowercase."""
         import re
@@ -517,7 +662,7 @@ class BookloreClient:
         Find a book by its filename using exact, stem, or normalized matching.
         """
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
-        if not self._book_cache and allow_refresh and not self._is_refresh_on_cooldown():
+        if not self._has_cached_books() and allow_refresh and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
 
         # Check cache freshness if refresh is allowed
@@ -525,18 +670,23 @@ class BookloreClient:
             self._refresh_book_cache()
 
         target_name = Path(ebook_filename).name.lower()
-        
+
         # 1. Exact Filename Match
-        if target_name in self._book_cache: return self._book_cache[target_name]
+        with self._cache_lock:
+            exact_match = self._book_cache.get(target_name)
+        if exact_match:
+            return exact_match
 
         target_stem = Path(ebook_filename).stem.lower()
-        
+        cache_items = self._snapshot_book_cache_items()
+
         # 2. Strict Stem Match
-        for cached_name, book_info in list(self._book_cache.items()):
-            if Path(cached_name).stem.lower() == target_stem: return book_info
+        for cached_name, book_info in cache_items:
+            if Path(cached_name).stem.lower() == target_stem:
+                return book_info
 
         # 3. Partial Stem Match
-        for cached_name, book_info in list(self._book_cache.items()):
+        for cached_name, book_info in cache_items:
             if target_stem in cached_name or cached_name.replace('.epub', '') in target_stem:
                 # High confidence check: ensure significant overlap
                 return book_info
@@ -548,21 +698,23 @@ class BookloreClient:
             from difflib import SequenceMatcher
             best_match = None
             best_ratio = 0.0
-            
-            for cached_name, book_info in list(self._book_cache.items()):
+
+            for cached_name, book_info in cache_items:
                 cached_norm = self._normalize_string(Path(cached_name).stem)
                 # Calculate similarity ratio
                 ratio = SequenceMatcher(None, target_norm, cached_norm).ratio()
-                
+
                 # Require high similarity (90%+) to avoid matching sequels
                 if ratio > 0.90 and ratio > best_ratio:
                     best_ratio = ratio
                     best_match = (cached_name, book_info)
-            
+
             if best_match:
                 logger.debug(f"Fuzzy match: '{target_stem}' ~= '{best_match[0]}' (similarity: {best_ratio:.1%})")
                 return best_match[1]
 
+        # Lightweight entries do not carry fileName, so filename lookup still
+        # depends on hydrated cache entries.
         # If not found, try refreshing cache once
         if allow_refresh and time.time() - self._cache_timestamp > 60 and not self._is_refresh_on_cooldown():
             if self._refresh_book_cache():
@@ -574,17 +726,25 @@ class BookloreClient:
         """Get all books from cache, refreshing if necessary."""
         # Use a reasonable cache time of 1 hour, similar to find_book_by_filename
         if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
-        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
-        return list(self._book_cache.values())
+        if not self._has_cached_books() and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+
+        with self._cache_lock:
+            all_books = list(self._book_cache.values())
+            fully_cached_ids = {str(b.get('id')) for b in all_books if b.get('id') is not None}
+            for bid, book_info in self._book_id_cache.items():
+                if str(bid) not in fully_cached_ids and book_info.get('_needs_detail'):
+                    all_books.append(book_info)
+        return all_books
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
         def search_in_cache(term):
             search_lower = term.lower()
             search_norm = self._normalize_string(term)
-
             matches = []
-            for book_info in list(self._book_cache.values()):
+            matched_ids = set()
+
+            for book_info in self._snapshot_book_cache_values():
                 title = (book_info.get('title') or '').lower()
                 authors = (book_info.get('authors') or '').lower()
                 filename = (book_info.get('fileName') or '').lower()
@@ -592,6 +752,8 @@ class BookloreClient:
                 # 1. Standard substring match
                 if search_lower in title or search_lower in authors or search_lower in filename:
                     matches.append(book_info)
+                    if book_info.get('id') is not None:
+                        matched_ids.add(str(book_info.get('id')))
                     continue
 
                 # 2. Normalized match (for "Dragon's" vs "Dragons")
@@ -607,16 +769,43 @@ class BookloreClient:
                         search_norm in filename_norm
                     ):
                         matches.append(book_info)
+                        if book_info.get('id') is not None:
+                            matched_ids.add(str(book_info.get('id')))
+
+            detail_fetch_count = 0
+            for bid, book_info in self._snapshot_book_id_items():
+                if not book_info.get('_needs_detail'):
+                    continue
+                if str(bid) in matched_ids:
+                    continue
+
+                title = (book_info.get('title') or '').lower()
+                title_norm = self._normalize_string(title)
+                is_match = search_lower in title
+                if not is_match and len(search_norm) > 3:
+                    is_match = search_norm in title_norm
+                if not is_match:
+                    continue
+
+                if detail_fetch_count >= MAX_DETAIL_FETCHES_PER_SEARCH:
+                    logger.debug("Booklore: Hit detail fetch limit for search, returning partial results")
+                    break
+
+                hydrated = self._fetch_and_cache_detail(bid)
+                detail_fetch_count += 1
+                if hydrated and hydrated.get('fileName'):
+                    matches.append(hydrated)
+                    matched_ids.add(str(hydrated.get('id')))
 
             return matches
 
         # Avoid expensive full-library refreshes on rapid UI search requests.
         # Keep refresh cadence aligned with other read paths.
         if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
-        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._has_cached_books() and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
 
         if not search_term:
-            return list(self._book_cache.values())
+            return self.get_all_books()
 
         results = search_in_cache(search_term)
         if results:
@@ -789,25 +978,26 @@ class BookloreClient:
 
             # Update cache in-place instead of full library refresh
             try:
-                cached = self._book_id_cache.get(book_id)
-                if cached:
-                    if book_type == 'EPUB':
-                        if not cached.get('epubProgress'):
-                            cached['epubProgress'] = {}
-                        cached['epubProgress']['percentage'] = pct_display
-                        if clear_reset:
-                            cached['epubProgress']['cfi'] = ""
-                        elif 'cfi' in payload.get('epubProgress', {}):
-                            cached['epubProgress']['cfi'] = payload['epubProgress']['cfi']
-                    elif book_type == 'PDF':
-                        if not cached.get('pdfProgress'):
-                            cached['pdfProgress'] = {}
-                        cached['pdfProgress']['percentage'] = pct_display
-                    elif book_type == 'CBX':
-                        if not cached.get('cbxProgress'):
-                            cached['cbxProgress'] = {}
-                        cached['cbxProgress']['percentage'] = pct_display
-                    logger.debug(f"Booklore: Cache updated in-place for book {book_id}")
+                with self._cache_lock:
+                    cached = self._book_id_cache.get(book_id)
+                    if cached:
+                        if book_type == 'EPUB':
+                            if not cached.get('epubProgress'):
+                                cached['epubProgress'] = {}
+                            cached['epubProgress']['percentage'] = pct_display
+                            if clear_reset:
+                                cached['epubProgress']['cfi'] = ""
+                            elif 'cfi' in payload.get('epubProgress', {}):
+                                cached['epubProgress']['cfi'] = payload['epubProgress']['cfi']
+                        elif book_type == 'PDF':
+                            if not cached.get('pdfProgress'):
+                                cached['pdfProgress'] = {}
+                            cached['pdfProgress']['percentage'] = pct_display
+                        elif book_type == 'CBX':
+                            if not cached.get('cbxProgress'):
+                                cached['cbxProgress'] = {}
+                            cached['cbxProgress']['percentage'] = pct_display
+                        logger.debug(f"Booklore: Cache updated in-place for book {book_id}")
             except Exception:
                 logger.debug("Booklore: In-place cache update failed, will refresh on next read")
             return True
@@ -816,9 +1006,9 @@ class BookloreClient:
         return False
 
     def get_recent_activity(self, min_progress=0.01):
-        if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        if not self._has_cached_books() and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         results = []
-        for filename, book in list(self._book_cache.items()):
+        for filename, book in self._snapshot_book_cache_items():
             progress = 0
             if book.get('epubProgress'):
                 progress = (book['epubProgress'].get('percentage') or 0) / 100.0
