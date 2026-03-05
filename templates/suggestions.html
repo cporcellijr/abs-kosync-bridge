@@ -57,9 +57,21 @@
         .cover { width: 54px; height: 54px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); }
         .title { font-size: 15px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
         .author { font-size: 12px; color: rgba(255,255,255,0.68); margin-bottom: 3px; }
-        .best { font-size: 12px; color: rgba(255,255,255,0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .best-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .best { flex: 1; min-width: 0; font-size: 12px; color: rgba(255,255,255,0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .source-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+        .source-badge.booklore { background: rgba(76,175,80,0.2); color: #81c784; }
+        .source-badge.abs { background: rgba(102,126,234,0.2); color: #93a5f6; }
+        .source-badge.cwa { background: rgba(255,152,0,0.2); color: #ffb74d; }
+        .source-badge.localfile { background: rgba(156,39,176,0.2); color: #ce93d8; }
+        .source-badge.unknown { background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.85); }
         .score { font-size: 22px; font-weight: 700; color: #7ec8ff; }
-        .card-actions { margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; }
+        .card-actions { margin-top: 8px; width: 100%; display: flex; gap: 8px; justify-content: flex-start; flex-wrap: wrap; }
+        .card-actions .btn { opacity: 1; border-width: 1px; font-weight: 700; }
+        .card-actions .btn-dismiss { background: rgba(255,255,255,0.2); color: #f3f5ff; border-color: rgba(255,255,255,0.32); }
+        .card-actions .btn-dismiss:hover { background: rgba(255,255,255,0.28); }
+        .card-actions .btn-reject { background: rgba(244,67,54,0.24); color: #ffc8c4; border-color: rgba(244,67,54,0.5); }
+        .card-actions .btn-reject:hover { background: rgba(244,67,54,0.34); }
         .empty { text-align: center; color: rgba(255,255,255,0.62); padding: 38px 16px; }
         .queue-panel { position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: hidden; display: flex; flex-direction: column; }
         .selection { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -70,9 +82,17 @@
         .selected-book img { width: 50px; height: 50px; border-radius: 7px; object-fit: cover; background: rgba(255,255,255,0.1); }
         .selected-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
         .selected-author { font-size: 12px; color: rgba(255,255,255,0.68); margin-top: 3px; }
-        .field-label { display: block; margin-bottom: 5px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
-        .ebook-select { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 8px; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); }
-        .ebook-select option { color: #111; background: #fff; }
+        .field-label { display: block; margin-bottom: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
+        .ebook-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .ebook-card { cursor: pointer; border: 2px solid rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; transition: all 0.25s; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 8px; text-align: center; gap: 6px; min-height: 122px; position: relative; }
+        .ebook-card:hover { border-color: rgba(102,126,234,0.5); transform: translateY(-2px); box-shadow: 0 4px 14px rgba(102,126,234,0.2); }
+        .ebook-card.selected { border-color: #667eea; background: rgba(102,126,234,0.15); box-shadow: 0 8px 24px rgba(102,126,234,0.3); }
+        .ebook-card.selected::after { content: '✓'; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; box-shadow: 0 2px 8px rgba(99,102,241,0.5); }
+        .ebook-icon { font-size: 26px; line-height: 1; }
+        .ebook-title { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .ebook-subtitle { font-size: 11px; color: rgba(255,255,255,0.6); line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ebook-grid-empty { margin-bottom: 10px; font-size: 12px; color: rgba(255,255,255,0.5); }
+        .ebook-grid-empty.hidden { display: none; }
         .queue-list { padding: 12px 14px; overflow-y: auto; }
         .queue-item { display: flex; align-items: center; gap: 11px; padding: 9px; margin-bottom: 9px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(255,255,255,0.05); }
         .queue-item-cover { width: 40px; height: 60px; border-radius: 4px; object-fit: cover; background: rgba(255,255,255,0.1); }
@@ -170,7 +190,7 @@
         <div class="layout">
             <div class="panel">
                 <div class="panel-head">
-                    <h3>Suggestions</h3>
+                    <h3>Audiobooks</h3>
                     <span class="count" id="panelCount">{{ suggestions|length }} items</span>
                 </div>
                 <div class="left-wrap">
@@ -202,14 +222,14 @@
                                 <div class="score">{% if s.matches and s.matches|length > 0 %}{{ s.matches[0].score|round|int }}%{% else %}--{% endif %}</div>
                             </div>
                             <div class="card-actions">
-                                <button type="button" class="btn btn-muted btn-small" onclick="dismissSuggestion(event, '{{ s.abs_id }}')">Dismiss</button>
+                                <button type="button" class="btn btn-small btn-dismiss" onclick="dismissSuggestion(event, '{{ s.abs_id }}')">Dismiss</button>
                                 <form method="POST" action="/suggestions" class="inline-form" onsubmit="event.stopPropagation();">
                                     <input type="hidden" name="action" value="never">
                                     <input type="hidden" name="abs_id" value="{{ s.abs_id }}">
                                     <input type="hidden" name="abs_title" value="{{ s.abs_title }}">
                                     <input type="hidden" name="abs_author" value="{{ s.abs_author }}">
                                     <input type="hidden" name="cover_url" value="{{ s.cover_url }}">
-                                    <button type="submit" class="btn btn-danger btn-small" onclick="event.stopPropagation();">Never</button>
+                                    <button type="submit" class="btn btn-small btn-reject" onclick="event.stopPropagation();">Reject</button>
                                 </form>
                             </div>
                         </div>
@@ -250,8 +270,9 @@
                             <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
                             <input type="hidden" name="ebook_display_name" id="selected_ebook_display_name" value="">
                             <input type="hidden" name="storyteller_uuid" value="">
-                            <label class="field-label" for="ebookSelect">Ebook Match</label>
-                            <select id="ebookSelect" class="ebook-select" onchange="handleEbookChange()" disabled></select>
+                            <label class="field-label" for="ebookCardGrid">Ebook Match</label>
+                            <div id="ebookCardGrid" class="ebook-grid"></div>
+                            <p id="ebookGridEmpty" class="ebook-grid-empty hidden">No ebook matches available for this suggestion.</p>
                             <button type="submit" class="btn btn-success w-100" id="addToQueueBtn" disabled>➕ Add to Queue</button>
                         </form>
                     </div>
@@ -381,13 +402,39 @@
                 });
         }
 
-        function handleEbookChange() {
-            const ebookSelect = document.getElementById('ebookSelect');
-            const option = ebookSelect.options[ebookSelect.selectedIndex];
-            const hasOption = !!option;
-            document.getElementById('selected_ebook_filename').value = hasOption ? option.value : '';
-            document.getElementById('selected_ebook_display_name').value = hasOption ? (option.dataset.displayName || option.value) : '';
-            document.getElementById('addToQueueBtn').disabled = !(document.getElementById('selected_audiobook_id').value && hasOption && option.value);
+        function setSelectedEbook(filename, displayName) {
+            const hasSelection = !!filename;
+            document.getElementById('selected_ebook_filename').value = hasSelection ? filename : '';
+            document.getElementById('selected_ebook_display_name').value = hasSelection ? (displayName || filename) : '';
+            document.getElementById('addToQueueBtn').disabled = !(
+                document.getElementById('selected_audiobook_id').value && hasSelection
+            );
+        }
+
+        function clearSelectedEbookCards() {
+            document.querySelectorAll('#ebookCardGrid .ebook-card').forEach((card) => card.classList.remove('selected'));
+        }
+
+        function selectEbookCard(element, filename, displayName) {
+            clearSelectedEbookCards();
+            if (element) element.classList.add('selected');
+            setSelectedEbook(filename, displayName);
+        }
+
+        function sourceBadgeClass(source) {
+            const normalized = (source || '').toLowerCase().replace(/\s+/g, '');
+            if (normalized === 'booklore' || normalized === 'abs' || normalized === 'cwa' || normalized === 'localfile') {
+                return normalized;
+            }
+            return 'unknown';
+        }
+
+        function inferSourceFromFilename(filename) {
+            const name = (filename || '').toLowerCase();
+            if (!name) return '';
+            if (name.includes('_abs.')) return 'ABS';
+            if (name.startsWith('cwa_') || name.includes('_cwa.')) return 'CWA';
+            return '';
         }
 
         function applySuggestionSort(mode) {
@@ -420,9 +467,11 @@
             document.getElementById('selectionDetails').classList.add('hidden');
             document.getElementById('selectionPlaceholder').style.display = 'block';
             document.getElementById('selected_audiobook_id').value = '';
-            document.getElementById('selected_ebook_filename').value = '';
-            document.getElementById('selected_ebook_display_name').value = '';
-            document.getElementById('addToQueueBtn').disabled = true;
+            setSelectedEbook('', '');
+            const grid = document.getElementById('ebookCardGrid');
+            if (grid) grid.innerHTML = '';
+            const emptyLabel = document.getElementById('ebookGridEmpty');
+            if (emptyLabel) emptyLabel.classList.add('hidden');
         }
 
         function selectSuggestion(absId) {
@@ -440,19 +489,66 @@
             document.getElementById('selectedCover').src = suggestion.cover_url || '';
 
             const matches = [...suggestion.matches].sort((a, b) => (b.score || 0) - (a.score || 0));
-            const select = document.getElementById('ebookSelect');
-            select.innerHTML = '';
+            const grid = document.getElementById('ebookCardGrid');
+            const emptyLabel = document.getElementById('ebookGridEmpty');
+            grid.innerHTML = '';
+
             matches.forEach((match) => {
-                const option = document.createElement('option');
-                option.value = match.ebook_filename || '';
-                option.dataset.displayName = match.display_name || match.ebook_filename || '';
-                option.textContent = `${option.dataset.displayName} (${Math.round(match.score || 0)}%)`;
-                select.appendChild(option);
+                const ebookFilename = match.ebook_filename || '';
+                const displayName = match.display_name || ebookFilename;
+                const source = match.source || inferSourceFromFilename(ebookFilename);
+                const author = match.author || '';
+                const score = Math.round(match.score || 0);
+
+                const card = document.createElement('div');
+                card.className = 'ebook-card';
+                card.dataset.value = ebookFilename;
+                card.dataset.displayName = displayName;
+                card.onclick = () => selectEbookCard(card, ebookFilename, displayName);
+
+                const icon = document.createElement('div');
+                icon.className = 'ebook-icon';
+                icon.textContent = '\uD83D\uDCD6';
+
+                const title = document.createElement('div');
+                title.className = 'ebook-title';
+                title.title = displayName;
+                title.textContent = displayName;
+
+                const subtitle = document.createElement('div');
+                subtitle.className = 'ebook-subtitle';
+                subtitle.textContent = author || `${score}% match`;
+
+                card.appendChild(icon);
+                card.appendChild(title);
+                card.appendChild(subtitle);
+
+                if (author) {
+                    const confidence = document.createElement('div');
+                    confidence.className = 'ebook-subtitle';
+                    confidence.textContent = `${score}% match`;
+                    card.appendChild(confidence);
+                }
+
+                if (source) {
+                    const badge = document.createElement('span');
+                    badge.className = `source-badge ${sourceBadgeClass(source)}`;
+                    badge.textContent = source;
+                    card.appendChild(badge);
+                }
+
+                grid.appendChild(card);
             });
-            select.disabled = matches.length === 0;
+
             if (matches.length > 0) {
-                select.selectedIndex = 0;
-                handleEbookChange();
+                emptyLabel.classList.add('hidden');
+                const firstCard = grid.querySelector('.ebook-card');
+                if (firstCard) {
+                    selectEbookCard(firstCard, firstCard.dataset.value || '', firstCard.dataset.displayName || '');
+                }
+            } else {
+                setSelectedEbook('', '');
+                emptyLabel.classList.remove('hidden');
             }
         }
 
@@ -514,3 +610,4 @@
     </script>
 </body>
 </html>
+

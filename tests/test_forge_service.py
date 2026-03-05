@@ -265,6 +265,19 @@ class TestForgeService(unittest.TestCase):
         self.mock_transcriber.process_audio.assert_called_once()
         self.mock_alignment.align_and_store.assert_called_once()
 
+    def test_auto_forge_uses_smil_and_skips_whisper_when_smil_available(self):
+        """Auto-forge should not call Whisper when SMIL transcript is valid."""
+        self._run_auto_forge_pipeline(
+            text_item={"source": "Local File"},
+            ingest_manifest=None,
+            storyteller_alignment_ok=False,
+            smil_transcript=[{"start": 0.0, "end": 1.0, "text": "from smil"}],
+            whisper_transcript=[{"start": 0.0, "end": 1.0, "text": "from whisper"}],
+        )
+
+        self.mock_transcriber.process_audio.assert_not_called()
+        self.mock_alignment.align_and_store.assert_called_once()
+
     def test_auto_forge_runs_final_cleanup_on_pipeline_failure(self):
         """Auto-forge should still try source cleanup after post-download pipeline failures."""
         with patch.object(self.service, "_cleanup_staged_sources", return_value=0) as mock_cleanup:

@@ -57,9 +57,11 @@ class SuggestionsService:
                 continue
 
             candidate_author = self._candidate_author(candidate)
+            candidate_source = (getattr(candidate, 'source', None) or '').strip()
             prepared.append({
                 "title": candidate_title,
                 "author": candidate_author,
+                "source": candidate_source,
                 "search_text": f"{candidate_title} {candidate_author}".strip(),
                 "name": getattr(candidate, 'name', ''),
                 "display_name": getattr(candidate, 'display_name', None) or getattr(candidate, 'name', ''),
@@ -115,6 +117,7 @@ class SuggestionsService:
         for candidate_info in per_book_pool:
             candidate_title = candidate_info["title"]
             candidate_author = candidate_info["author"]
+            candidate_source = candidate_info.get("source", "")
 
             title_score = float(fuzz.token_sort_ratio(abs_title, candidate_title))
             if abs_author:
@@ -132,6 +135,8 @@ class SuggestionsService:
             matches.append({
                 "ebook_filename": candidate_info["name"],
                 "display_name": candidate_info["display_name"],
+                "author": candidate_author,
+                "source": candidate_source,
                 "score": round(score, 1),
                 "_direct_match": direct_match
             })
