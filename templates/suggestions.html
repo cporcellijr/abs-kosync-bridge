@@ -83,6 +83,17 @@
         .selected-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
         .selected-author { font-size: 12px; color: rgba(255,255,255,0.68); margin-top: 3px; }
         .field-label { display: block; margin-bottom: 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
+        .field-hint { margin-top: -4px; margin-bottom: 8px; font-size: 11px; color: rgba(255,255,255,0.52); }
+        .resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .resource-card { cursor: pointer; border: 2px solid rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; transition: all 0.25s; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 8px; text-align: center; gap: 6px; min-height: 122px; position: relative; }
+        .resource-card:hover { border-color: rgba(102,126,234,0.5); transform: translateY(-2px); box-shadow: 0 4px 14px rgba(102,126,234,0.2); }
+        .resource-card.selected { border-color: #667eea; background: rgba(102,126,234,0.15); box-shadow: 0 8px 24px rgba(102,126,234,0.3); }
+        .resource-card.selected::after { content: '✓'; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; box-shadow: 0 2px 8px rgba(99,102,241,0.5); }
+        .resource-card.ghost-card { border-style: dashed; background: transparent; }
+        .resource-card.ghost-card:hover { background: rgba(102,126,234,0.06); }
+        .resource-icon { font-size: 26px; line-height: 1; }
+        .resource-title { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .resource-subtitle { font-size: 11px; color: rgba(255,255,255,0.6); line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ebook-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
         .ebook-card { cursor: pointer; border: 2px solid rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; transition: all 0.25s; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 8px; text-align: center; gap: 6px; min-height: 122px; position: relative; }
         .ebook-card:hover { border-color: rgba(102,126,234,0.5); transform: translateY(-2px); box-shadow: 0 4px 14px rgba(102,126,234,0.2); }
@@ -269,10 +280,14 @@
                             <input type="hidden" name="audiobook_id" id="selected_audiobook_id">
                             <input type="hidden" name="ebook_filename" id="selected_ebook_filename">
                             <input type="hidden" name="ebook_display_name" id="selected_ebook_display_name" value="">
-                            <input type="hidden" name="storyteller_uuid" value="">
+                            <input type="hidden" name="storyteller_uuid" id="selected_storyteller_uuid" value="">
+                            <label class="field-label" for="storytellerCardGrid">Storyteller (Preferred)</label>
+                            <p class="field-hint">Optional. Choose this to create a tri-link.</p>
+                            <div id="storytellerCardGrid" class="resource-grid"></div>
+                            <p id="storytellerGridEmpty" class="ebook-grid-empty hidden"></p>
                             <label class="field-label" for="ebookCardGrid">Ebook Match</label>
                             <div id="ebookCardGrid" class="ebook-grid"></div>
-                            <p id="ebookGridEmpty" class="ebook-grid-empty hidden">No ebook matches available for this suggestion.</p>
+                            <p id="ebookGridEmpty" class="ebook-grid-empty hidden">No ebook matches available for this suggestion. Storyteller-only queue is allowed.</p>
                             <button type="submit" class="btn btn-success w-100" id="addToQueueBtn" disabled>➕ Add to Queue</button>
                         </form>
                     </div>
@@ -319,6 +334,9 @@
     <script>
         let suggestionsData = {{ suggestions|tojson }};
         let selectedSuggestionId = null;
+        let selectedStorytellerUuid = '';
+        let storytellerFetchToken = 0;
+        const storytellerEnabled = {{ storyteller_enabled|default(false)|tojson }};
         const scanInProgress = {{ scan_in_progress|tojson }};
         let fakeScanProgress = 0;
         let fakeScanTimer = null;
@@ -406,9 +424,7 @@
             const hasSelection = !!filename;
             document.getElementById('selected_ebook_filename').value = hasSelection ? filename : '';
             document.getElementById('selected_ebook_display_name').value = hasSelection ? (displayName || filename) : '';
-            document.getElementById('addToQueueBtn').disabled = !(
-                document.getElementById('selected_audiobook_id').value && hasSelection
-            );
+            updateAddButton();
         }
 
         function clearSelectedEbookCards() {
@@ -419,6 +435,129 @@
             clearSelectedEbookCards();
             if (element) element.classList.add('selected');
             setSelectedEbook(filename, displayName);
+        }
+
+        function updateAddButton() {
+            const hasAudiobook = !!document.getElementById('selected_audiobook_id').value;
+            const hasEbook = !!document.getElementById('selected_ebook_filename').value;
+            const hasStoryteller = !!document.getElementById('selected_storyteller_uuid').value;
+            document.getElementById('addToQueueBtn').disabled = !(hasAudiobook && (hasEbook || hasStoryteller));
+        }
+
+        function clearSelectedStorytellerCards() {
+            document.querySelectorAll('#storytellerCardGrid .st-card').forEach((card) => card.classList.remove('selected'));
+        }
+
+        function selectStoryteller(element, uuid) {
+            clearSelectedStorytellerCards();
+            if (element) element.classList.add('selected');
+            selectedStorytellerUuid = uuid || '';
+            document.getElementById('selected_storyteller_uuid').value = selectedStorytellerUuid;
+            updateAddButton();
+        }
+
+        function renderStorytellerOptions(suggestion) {
+            const grid = document.getElementById('storytellerCardGrid');
+            const emptyLabel = document.getElementById('storytellerGridEmpty');
+            grid.innerHTML = '';
+            emptyLabel.classList.add('hidden');
+            emptyLabel.textContent = '';
+
+            const noneCard = document.createElement('div');
+            noneCard.className = 'resource-card st-card ghost-card selected';
+            noneCard.dataset.value = '';
+            noneCard.onclick = () => selectStoryteller(noneCard, '');
+            noneCard.innerHTML = '<div class="resource-icon" style="color: rgba(255,255,255,0.35);">⊘</div><div class="resource-title" style="color: rgba(255,255,255,0.5);">None / Skip</div>';
+            grid.appendChild(noneCard);
+            selectStoryteller(noneCard, '');
+
+            if (!storytellerEnabled) {
+                emptyLabel.textContent = 'Storyteller is not configured.';
+                emptyLabel.classList.remove('hidden');
+                return;
+            }
+
+            const queryParts = [suggestion.abs_title || '', suggestion.abs_author || '']
+                .map((s) => (s || '').trim())
+                .filter((s) => !!s);
+            if (!queryParts.length) {
+                emptyLabel.textContent = 'No title/author available to search Storyteller.';
+                emptyLabel.classList.remove('hidden');
+                return;
+            }
+
+            const token = ++storytellerFetchToken;
+            emptyLabel.textContent = 'Searching Storyteller...';
+            emptyLabel.classList.remove('hidden');
+
+            const query = queryParts.join(' ');
+            fetch(`/api/storyteller/search?q=${encodeURIComponent(query)}`)
+                .then((response) => response.json())
+                .then((results) => {
+                    if (token !== storytellerFetchToken) return;
+                    if (!Array.isArray(results) || results.length === 0) {
+                        emptyLabel.textContent = 'No Storyteller matches found.';
+                        emptyLabel.classList.remove('hidden');
+                        return;
+                    }
+
+                    emptyLabel.classList.add('hidden');
+                    const parsed = [];
+                    results.forEach((item) => {
+                        const uuid = item?.uuid || item?.id || '';
+                        if (!uuid) return;
+                        const title = (item?.title || 'Untitled').toString();
+                        const subtitle = (item?.subtitle || '').toString();
+                        let authors = '';
+                        if (Array.isArray(item?.authors)) {
+                            authors = item.authors.join(', ');
+                        } else if (typeof item?.authors === 'string') {
+                            authors = item.authors;
+                        }
+                        parsed.push({ uuid, title, subtitle, authors });
+                    });
+
+                    parsed.forEach((st) => {
+                        const card = document.createElement('div');
+                        card.className = 'resource-card st-card';
+                        card.dataset.value = st.uuid;
+                        card.onclick = () => selectStoryteller(card, st.uuid);
+
+                        const icon = document.createElement('div');
+                        icon.className = 'resource-icon';
+                        icon.textContent = '⚡';
+
+                        const title = document.createElement('div');
+                        title.className = 'resource-title';
+                        const fullTitle = st.subtitle ? `${st.title}: ${st.subtitle}` : st.title;
+                        title.title = fullTitle;
+                        title.textContent = fullTitle;
+
+                        card.appendChild(icon);
+                        card.appendChild(title);
+
+                        if (st.authors) {
+                            const subtitle = document.createElement('div');
+                            subtitle.className = 'resource-subtitle';
+                            subtitle.textContent = st.authors;
+                            card.appendChild(subtitle);
+                        }
+
+                        grid.appendChild(card);
+                    });
+
+                    if (parsed.length === 1) {
+                        const single = grid.querySelector('.st-card:not(.ghost-card)');
+                        if (single) {
+                            selectStoryteller(single, single.dataset.value || '');
+                        }
+                    }
+                })
+                .catch(() => {
+                    if (token !== storytellerFetchToken) return;
+                    emptyLabel.textContent = 'Storyteller search failed.';
+                    emptyLabel.classList.remove('hidden');
+                });
         }
 
         function sourceBadgeClass(source) {
@@ -468,10 +607,18 @@
             document.getElementById('selectionPlaceholder').style.display = 'block';
             document.getElementById('selected_audiobook_id').value = '';
             setSelectedEbook('', '');
+            selectedStorytellerUuid = '';
+            document.getElementById('selected_storyteller_uuid').value = '';
             const grid = document.getElementById('ebookCardGrid');
             if (grid) grid.innerHTML = '';
             const emptyLabel = document.getElementById('ebookGridEmpty');
             if (emptyLabel) emptyLabel.classList.add('hidden');
+            const stGrid = document.getElementById('storytellerCardGrid');
+            if (stGrid) stGrid.innerHTML = '';
+            const stEmptyLabel = document.getElementById('storytellerGridEmpty');
+            if (stEmptyLabel) stEmptyLabel.classList.add('hidden');
+            storytellerFetchToken += 1;
+            updateAddButton();
         }
 
         function selectSuggestion(absId) {
@@ -487,6 +634,7 @@
             document.getElementById('selectedTitle').textContent = suggestion.abs_title || '';
             document.getElementById('selectedAuthor').textContent = suggestion.abs_author || '';
             document.getElementById('selectedCover').src = suggestion.cover_url || '';
+            renderStorytellerOptions(suggestion);
 
             const matches = [...suggestion.matches].sort((a, b) => (b.score || 0) - (a.score || 0));
             const grid = document.getElementById('ebookCardGrid');

@@ -2151,6 +2151,7 @@ def suggestions_page():
         scan_in_progress=scan_in_progress,
         scan_error=scan_error,
         scan_stats=suggestions_state.get('scan_last_stats', {}),
+        storyteller_enabled=bool(container.storyteller_client().is_configured()),
     )
 
 
