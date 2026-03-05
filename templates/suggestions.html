@@ -53,7 +53,7 @@
         .suggestion-card { border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); border-radius: 10px; padding: 10px; cursor: pointer; }
         .suggestion-card:hover { border-color: rgba(102,126,234,0.5); }
         .suggestion-card.selected { border-color: rgba(102,126,234,0.85); background: rgba(102,126,234,0.14); }
-        .suggestion-main { display: grid; grid-template-columns: 54px 1fr auto; gap: 10px; align-items: center; }
+        .suggestion-main { display: grid; grid-template-columns: 54px minmax(0,1fr); gap: 10px; align-items: center; }
         .cover { width: 54px; height: 54px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); }
         .title { font-size: 15px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
         .author { font-size: 12px; color: rgba(255,255,255,0.68); margin-bottom: 3px; }
@@ -65,7 +65,7 @@
         .source-badge.cwa { background: rgba(255,152,0,0.2); color: #ffb74d; }
         .source-badge.localfile { background: rgba(156,39,176,0.2); color: #ce93d8; }
         .source-badge.unknown { background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.85); }
-        .score { font-size: 22px; font-weight: 700; color: #7ec8ff; }
+        .score { display: inline-block; margin-bottom: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #7ec8ff; background: rgba(126,200,255,0.12); border: 1px solid rgba(126,200,255,0.32); }
         .card-actions { margin-top: 8px; width: 100%; display: flex; gap: 8px; justify-content: flex-start; flex-wrap: wrap; }
         .card-actions .btn { opacity: 1; border-width: 1px; font-weight: 700; }
         .card-actions .btn-dismiss { background: rgba(255,255,255,0.2); color: #f3f5ff; border-color: rgba(255,255,255,0.32); }
@@ -215,11 +215,11 @@
                                 <div>
                                     <div class="title">{{ s.abs_title }}</div>
                                     {% if s.abs_author %}<div class="author">{{ s.abs_author }}</div>{% endif %}
+                                    <div class="score">{% if s.matches and s.matches|length > 0 %}Match {{ s.matches[0].score|round|int }}%{% else %}Match --{% endif %}</div>
                                     {% if s.matches and s.matches|length > 0 %}
                                     <div class="best" title="{{ s.matches[0].display_name }}">Best: {{ s.matches[0].display_name }} ({{ s.matches[0].score|round|int }}%)</div>
                                     {% endif %}
                                 </div>
-                                <div class="score">{% if s.matches and s.matches|length > 0 %}{{ s.matches[0].score|round|int }}%{% else %}--{% endif %}</div>
                             </div>
                             <div class="card-actions">
                                 <button type="button" class="btn btn-small btn-dismiss" onclick="dismissSuggestion(event, '{{ s.abs_id }}')">Dismiss</button>
