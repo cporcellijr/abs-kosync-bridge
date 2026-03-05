@@ -80,6 +80,7 @@ class SyncManager:
             val = 1.0
         self.sync_delta_between_clients = val / 100.0
         self.delta_chars_thresh = 2000  # ~400 words
+        self.cross_format_deadband_seconds = float(os.getenv("CROSSFORMAT_DEADBAND_SECONDS", 2.0))
         self.epub_cache_dir = epub_cache_dir or (self.data_dir / "epub_cache" if self.data_dir else Path("/data/epub_cache"))
 
         self._job_queue = []
@@ -89,10 +90,83 @@ class SyncManager:
         self._last_library_sync = 0
         self._suggestion_in_flight: set[str] = set()
         self._suggestion_lock = threading.Lock()
+        self._sync_cycle_ebook_cache: dict[str, tuple[str, int]] = {}
 
         self._setup_sync_clients(sync_clients)
         self.startup_checks()
         self.cleanup_stale_jobs()
+
+    def _get_cached_ebook_text(self, ebook_filename: str):
+        """Return (full_text, total_len) cached for current sync cycle."""
+        if not hasattr(self, "_sync_cycle_ebook_cache"):
+            self._sync_cycle_ebook_cache = {}
+        if not ebook_filename:
+            return None, 0
+
+        cached = self._sync_cycle_ebook_cache.get(ebook_filename)
+        if cached is not None:
+            return cached
+
+        book_path = self.ebook_parser.resolve_book_path(ebook_filename)
+        full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
+        result = (full_text or "", len(full_text or ""))
+        self._sync_cycle_ebook_cache[ebook_filename] = result
+        return result
+
+    def _build_text_anchors(self, full_text: str, char_offset: int):
+        if not full_text:
+            return "", "", ""
+
+        text_len = len(full_text)
+        idx = max(0, min(int(char_offset), text_len - 1))
+        prefix_anchor = full_text[max(0, idx - 60):idx][-60:]
+        suffix_anchor = full_text[idx:min(text_len, idx + 60)][:60]
+        context_window = full_text[max(0, idx - 120):min(text_len, idx + 120)]
+        return prefix_anchor, suffix_anchor, context_window
+
+    def _validate_and_stabilize_locator(self, book: Book, target_offset: int, locator: LocatorResult):
+        """Round-trip validate locator fields and deterministically degrade to safer fields."""
+        if not locator or not getattr(book, "ebook_filename", None):
+            return locator
+
+        tolerance = int(os.getenv("CROSSFORMAT_ROUNDTRIP_TOLERANCE_CHARS", self.ebook_parser.locator_roundtrip_tolerance))
+        safe_locator = LocatorResult(**vars(locator))
+        fallback = []
+
+        ko_offset = None
+        if safe_locator.perfect_ko_xpath:
+            ko_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, safe_locator.perfect_ko_xpath)
+        if ko_offset is None and safe_locator.xpath:
+            ko_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, safe_locator.xpath)
+        if ko_offset is None:
+            ko_offset = target_offset
+
+        ko_error = abs(int(ko_offset) - int(target_offset))
+        if ko_error > tolerance:
+            sentence_xpath = self.ebook_parser.get_sentence_level_ko_xpath(book.ebook_filename, safe_locator.percentage)
+            sentence_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, sentence_xpath) if sentence_xpath else None
+            sentence_error = abs(int(sentence_offset) - int(target_offset)) if sentence_offset is not None else None
+            if sentence_xpath and sentence_offset is not None and sentence_error <= tolerance:
+                safe_locator.xpath = sentence_xpath
+                safe_locator.perfect_ko_xpath = sentence_xpath
+                fallback.append("ko=sentence_xpath")
+            else:
+                safe_locator.xpath = None
+                safe_locator.perfect_ko_xpath = None
+                fallback.append("ko=percent_only")
+
+        cfi_offset = self.ebook_parser.resolve_cfi_to_index(book.ebook_filename, safe_locator.cfi) if safe_locator.cfi else None
+        cfi_error = abs(int(cfi_offset) - int(target_offset)) if cfi_offset is not None else None
+        if cfi_offset is None or cfi_error > tolerance:
+            safe_locator.cfi = None
+            fallback.append("booklore=percent_only")
+
+        logger.debug(
+            f"'{book.abs_id}' time->ebook locator roundtrip: ts_target_offset={int(target_offset)} "
+            f"ko_offset={ko_offset} ko_error={ko_error} cfi_offset={cfi_offset} cfi_error={cfi_error} "
+            f"fallback={','.join(fallback) if fallback else 'none'}"
+        )
+        return safe_locator
 
 
     def _setup_sync_clients(self, clients: dict[str, SyncClient]):
@@ -255,58 +329,34 @@ class SyncManager:
         return media.get('duration', 0)
 
     def _normalize_for_cross_format_comparison(self, book, config):
-        """
-        Normalize positions for cross-format comparison (audiobook vs ebook).
-        
-        When syncing between audiobook (ABS) and ebook clients (KoSync, etc.),
-        raw percentages are not comparable because:
-        - Audiobook % = time position / total duration
-        - Ebook % = text position / total text
-        
-        These don't correlate linearly. This method converts ebook positions
-        to equivalent audiobook timestamps using text-matching, enabling
-        accurate comparison of "who is further in the story".
-        
-        Returns:
-            dict: {client_name: normalized_timestamp} for comparison,
-                  or None if normalization not possible/needed
-        """
-        # Check if we have both ABS and ebook clients in the mix
+        """Normalize ebook locators to audiobook timeline with deterministic anchors."""
         has_abs = 'ABS' in config
         ebook_clients = [k for k in config.keys() if k != 'ABS']
-        
+
         if not has_abs or not ebook_clients:
-            # Same-format sync, raw percentages are fine
             return None
-            
+
         if not book.transcript_file:
             logger.debug(f"'{book.abs_id}' No transcript available for cross-format normalization")
             return None
-            
+
         normalized = {}
-        
-        # ABS already has timestamp
-        abs_state = config['ABS']
-        abs_ts = abs_state.current.get('ts', 0)
+        abs_ts = config['ABS'].current.get('ts', 0)
         normalized['ABS'] = abs_ts
 
         try:
-            book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
-            full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
-            total_text_len = len(full_text)
+            full_text, total_text_len = self._get_cached_ebook_text(book.ebook_filename)
             if total_text_len <= 0:
                 logger.debug(f"'{book.abs_id}' Empty ebook text during cross-format normalization")
                 return None
         except Exception as e:
             logger.warning(f"⚠️ '{book.abs_id}' Failed to load ebook text for normalization: {e}")
             return None
-        
-        # For each ebook client, get their text and find equivalent timestamp
+
         for client_name in ebook_clients:
-            client = self.sync_clients.get(client_name)
-            if not client:
+            if client_name not in self.sync_clients:
                 continue
-                
+
             client_state = config[client_name]
             client_pct = client_state.current.get('pct', 0)
             client_xpath = client_state.current.get('xpath')
@@ -314,9 +364,8 @@ class SyncManager:
             client_href = client_state.current.get('href')
             client_frag = client_state.current.get('frag')
             normalization_source = "percent_fallback"
-            
+
             try:
-                # Resolution order: xpath → cfi → percentage.
                 char_offset = None
                 if client_xpath:
                     char_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, client_xpath)
@@ -331,52 +380,49 @@ class SyncManager:
                 if char_offset is None and client_href and client_frag:
                     txt_at_loc = self.ebook_parser.resolve_locator_id(book.ebook_filename, client_href, client_frag)
                     if txt_at_loc:
-                        idx = full_text.find(txt_at_loc[:100])
+                        idx = full_text.find(txt_at_loc[:120])
                         if idx >= 0:
                             char_offset = idx
                             normalization_source = "href_frag"
 
                 if char_offset is None:
                     char_offset = int(client_pct * total_text_len)
-                    normalization_source = "percent_fallback"
 
-                char_offset = max(0, min(char_offset, total_text_len - 1))
+                char_offset = max(0, min(int(char_offset), total_text_len - 1))
                 client_state.current["_normalization_source"] = normalization_source
-                if normalization_source in ("xpath", "cfi"):
+                if normalization_source in ("xpath", "cfi", "href_frag"):
                     client_state.current["_locator_pct"] = char_offset / float(total_text_len)
                 else:
                     client_state.current.pop("_locator_pct", None)
-                txt = full_text[max(0, char_offset - 400):min(total_text_len, char_offset + 400)]
-                
-                if not txt:
-                    logger.debug(f"'{book.abs_id}' Could not get text from '{client_name}' for normalization")
+
+                prefix_anchor, suffix_anchor, window_txt = self._build_text_anchors(full_text, char_offset)
+                if not window_txt:
                     continue
-                    
-                # Find equivalent timestamp in audiobook using the precise aligner if available
+
+                ts_for_text = None
                 if self.alignment_service:
                     ts_for_text = self.alignment_service.get_time_for_text(
-                        book.abs_id, txt, 
-                        char_offset_hint=char_offset
+                        book.abs_id,
+                        window_txt,
+                        char_offset_hint=char_offset,
                     )
-                else:
-                    # Fallback or strict error? 
-                    ts_for_text = None
-                
-                if ts_for_text is not None:
-                    normalized[client_name] = ts_for_text
-                    logger.debug(
-                        f"'{book.abs_id}' Normalized '{client_name}' {client_pct:.2%} -> {ts_for_text:.1f}s "
-                        f"(source={normalization_source}, char_offset={char_offset})"
-                    )
-                else:
+
+                if ts_for_text is None:
                     logger.debug(f"'{book.abs_id}' Could not find timestamp for '{client_name}' text")
+                    continue
+
+                normalized[client_name] = ts_for_text
+                client_state.current["_normalization_confidence"] = "high" if normalization_source != "percent_fallback" else "low"
+                logger.debug(
+                    f"'{book.abs_id}' ebook->time normalized client={client_name} source={normalization_source} "
+                    f"offset={char_offset} prefix_len={len(prefix_anchor)} suffix_len={len(suffix_anchor)} "
+                    f"window_len={len(window_txt)} confidence={client_state.current['_normalization_confidence']} "
+                    f"ts={ts_for_text:.2f}s"
+                )
             except Exception as e:
                 logger.warning(f"⚠️ '{book.abs_id}' Cross-format normalization failed for '{client_name}': {e}")
-                
-        # Only return if we successfully normalized at least one ebook client
-        if len(normalized) > 1:
-            return normalized
-        return None
+
+        return normalized if len(normalized) > 1 else None
 
 
     def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, bulk_states_per_client=None, clients_to_use=None):
@@ -509,10 +555,7 @@ class SyncManager:
             return None, None
 
     def _resolve_alignment_locator_from_abs_timestamp(self, book: Book, abs_timestamp: float):
-        """
-        Preferred ABS direct mapping for DB-managed books:
-        ABS timestamp -> alignment map char offset -> EPUB locator.
-        """
+        """Preferred ABS direct mapping: timestamp -> char -> roundtrip-safe locator."""
         if (
             not book
             or abs_timestamp is None
@@ -530,21 +573,19 @@ class SyncManager:
             locator = self.ebook_parser.get_locator_from_char_offset(book.ebook_filename, int(char_offset))
             if not locator:
                 return None, None
+            locator = self._validate_and_stabilize_locator(book, int(char_offset), locator)
 
+            full_text, _ = self._get_cached_ebook_text(book.ebook_filename)
             context_txt = ""
-            try:
-                book_path = self.ebook_parser.resolve_book_path(book.ebook_filename)
-                full_text, _ = self.ebook_parser.extract_text_and_map(book_path)
-                if full_text:
-                    start = max(0, int(char_offset) - 400)
-                    end = min(len(full_text), int(char_offset) + 400)
-                    context_txt = full_text[start:end]
-            except Exception:
-                context_txt = ""
+            if full_text:
+                start = max(0, int(char_offset) - 400)
+                end = min(len(full_text), int(char_offset) + 400)
+                context_txt = full_text[start:end]
 
             logger.debug(
-                f"'{book.abs_id}' Alignment direct locator resolved via char_offset={int(char_offset)} "
-                f"from abs_ts={float(abs_timestamp):.2f}s epub='{sanitize_log_data(book.ebook_filename)}'"
+                f"'{book.abs_id}' time->ebook mapping ts={float(abs_timestamp):.2f}s offset0={int(char_offset)} "
+                f"locator_xpath={'yes' if locator.xpath else 'no'} locator_cfi={'yes' if locator.cfi else 'no'} "
+                f"epub='{sanitize_log_data(book.ebook_filename)}'"
             )
             return locator, context_txt
         except Exception as e:
@@ -1253,6 +1294,16 @@ class SyncManager:
 
                     leader = max(selected_normalized_candidates, key=selected_normalized_candidates.get)
                     leader_ts = selected_normalized_candidates[leader]
+                    if leader != "ABS" and "ABS" in selected_normalized_candidates:
+                        abs_ts = selected_normalized_candidates["ABS"]
+                        ts_delta = leader_ts - abs_ts
+                        if ts_delta <= getattr(self, "cross_format_deadband_seconds", 2.0):
+                            logger.debug(
+                                f"'{abs_id}' '{title_snip}' Deadband prevents cross-format switch: "
+                                f"candidate={leader} ts={leader_ts:.1f}s abs_ts={abs_ts:.1f}s delta={ts_delta:.2f}s"
+                            )
+                            leader = "ABS"
+                            leader_ts = abs_ts
                     leader_pct = vals[leader]
                     locator_pct = config[leader].current.get("_locator_pct")
                     if locator_pct is not None and abs(locator_pct - leader_pct) > 0.01:
@@ -1315,6 +1366,7 @@ class SyncManager:
 
     def _sync_cycle_internal(self, target_abs_id=None):
         # Clear caches at start of cycle
+        self._sync_cycle_ebook_cache.clear()
         storyteller_client = self.sync_clients.get('Storyteller')
         if storyteller_client and hasattr(storyteller_client, 'storyteller_client'):
             if hasattr(storyteller_client.storyteller_client, 'clear_cache'):

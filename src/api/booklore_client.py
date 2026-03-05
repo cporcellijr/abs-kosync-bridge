@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import threading
 from typing import Optional
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +31,8 @@ class BookloreClient:
         self._last_refresh_failed = False
         self._last_refresh_attempt = 0
         self._refresh_cooldown = 300  # 5 min cooldown after failed refresh
+        self._search_miss_refresh_min_age = 60  # Avoid repeated refreshes on rapid search misses
+        self._refresh_lock = threading.Lock()
 
         self._token = None
         self._token_timestamp = 0
@@ -279,188 +282,162 @@ class BookloreClient:
         Refresh the book cache using robust pagination.
         Fetches books in batches to ensure complete library sync.
         """
-        self._last_refresh_attempt = time.time()
-        all_books_list = []
-        page = 0
-        batch_size = 200  # Reasonable chunk size
-        
-        logger.info("📚 Booklore: Starting full library scan...")
-        
-        while True:
-            # Request specific page and size
-            # Note: Booklore/Spring usually expects 'page' (0-indexed) and 'size'
-            endpoint = f"/api/v1/books?page={page}&size={batch_size}"
-            response = self._make_request("GET", endpoint)
-            
-            if not response or response.status_code != 200:
-                logger.error(f"❌ Booklore: Failed to fetch page {page}")
-                self._last_refresh_failed = True
-                return False
-
-            data = response.json()
-            
-            # Handle different response shapes (List vs Page Object)
-            current_batch = []
-            if isinstance(data, list):
-                current_batch = data
-            elif isinstance(data, dict) and 'content' in data:
-                # Spring Data Page object wrapper
-                current_batch = data['content']
-            
-            if not current_batch:
-                break  # No more books, we are done
-            
-            # Filter by libraryId if configured
-            if self.target_library_id and current_batch:
-                filtered_batch = []
-                for b in current_batch:
-                    lid = b.get('libraryId')
-                    lname = b.get('libraryName', 'Unknown')
-
-                    # Robust comparison (str vs int)
-                    if lid is not None and str(lid) == str(self.target_library_id):
-                        filtered_batch.append(b)
-                    elif lid is None:
-                        # Conservative: Keep if ID missing, verify later
-                        filtered_batch.append(b)
-                    else:
-                        # Log exclusion at DEBUG
-                        logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
-                current_batch = filtered_batch
-
-            all_books_list.extend(current_batch)
-            logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
-            
-            # If we got fewer items than requested, we are on the last page
-            # Also break if we got MORE items than requested (server ignored size param)
-            if len(current_batch) != batch_size:
-                break
-                
-            page += 1
-
-        if not all_books_list:
-            logger.debug("Booklore: No books found in library")
-            self._book_cache = {}
-            self._book_id_cache = {}
-            self._cache_timestamp = time.time()
-            self._save_cache() # No-op now
-            self._last_refresh_failed = False
+        # Avoid overlapping full scans from concurrent API requests.
+        # Returning True here means "refresh skipped because another one is running",
+        # which allows callers to continue serving from the current cache.
+        if not self._refresh_lock.acquire(blocking=False):
+            logger.debug("Booklore: Cache refresh already in progress; skipping duplicate refresh request")
             return True
 
-        logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+        self._last_refresh_attempt = time.time()
+        try:
+            all_books_list = []
+            page = 0
+            batch_size = 200  # Reasonable chunk size
 
-        # --- Pruning Stale Data ---
-        if self.db and all_books_list:
-            # 1. Map valid IDs to their live data for strict verification
-            live_map = {str(b['id']): b for b in all_books_list if b.get('id')}
-            
-            # 2. Check existing cache for ghosts
-            cached_filenames = list(self._book_cache.keys())
-            stale_count = 0
-            
-            for fname in cached_filenames:
-                book_info = self._book_cache[fname]
-                bid = book_info.get('id')
-                
-                is_stale = False
-                
-                # Check 1: ID Validity
-                if not bid or str(bid) not in live_map:
-                    is_stale = True
-                    logger.debug(f"   Pruning {fname}: ID {bid} not in live map")
-                else:
-                    # Check 2: Content Consistency
-                    
-                    # A. Filename Check
-                    # Ideally, we compare the Live filename with the Cached filename.
-                    # Problem 1: The Live API 'List' view might return empty filenames (Live: '').
-                    # Problem 2: Cache Key 'fname' is lowercase, but real filename is in book_info['fileName'].
-                    
-                    live_book = live_map[str(bid)]
-                    raw_live_filename = live_book.get('primaryFile', {}).get('fileName', live_book.get('fileName', ''))
-                    # Clean filename to ensure we don't treat whitespace/control chars as valid names
-                    live_filename = str(raw_live_filename).strip() if raw_live_filename else ''
-                    
-                    cached_real_filename = book_info.get('fileName', fname)
-                    
-                    # Only prune if we HAVE a valid, non-empty live filename to compare against
-                    if live_filename:
-                        # Strict check: If API returns explicit filename, it must match.
-                        # We compare against the REAL cached filename (preserving case if possible)
-                        # Normalize both sides to be safe (strip)
-                        if live_filename != str(cached_real_filename).strip():
-                             is_stale = True
-                             # Use repr() to reveal any invisible characters/whitespace in debug logs
-                             logger.debug(f"   Pruning {fname}: Filename mismatch. Live: {repr(raw_live_filename)} vs Cache: {repr(cached_real_filename)}")
+            logger.info("📚 Booklore: Starting full library scan...")
+
+            while True:
+                endpoint = f"/api/v1/books?page={page}&size={batch_size}"
+                response = self._make_request("GET", endpoint)
+
+                if not response or response.status_code != 200:
+                    logger.error(f"❌ Booklore: Failed to fetch page {page}")
+                    self._last_refresh_failed = True
+                    return False
+
+                data = response.json()
+
+                current_batch = []
+                if isinstance(data, list):
+                    current_batch = data
+                elif isinstance(data, dict) and 'content' in data:
+                    current_batch = data['content']
+
+                if not current_batch:
+                    break
+
+                if self.target_library_id and current_batch:
+                    filtered_batch = []
+                    for b in current_batch:
+                        lid = b.get('libraryId')
+                        lname = b.get('libraryName', 'Unknown')
+
+                        if lid is not None and str(lid) == str(self.target_library_id):
+                            filtered_batch.append(b)
+                        elif lid is None:
+                            filtered_batch.append(b)
+                        else:
+                            logger.debug(f"Booklore: Ignoring book '{b.get('title')}' in Library '{lname}' (ID: {lid})")
+                    current_batch = filtered_batch
+
+                all_books_list.extend(current_batch)
+                logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
+
+                if len(current_batch) != batch_size:
+                    break
+
+                page += 1
+
+            if not all_books_list:
+                logger.debug("Booklore: No books found in library")
+                self._book_cache = {}
+                self._book_id_cache = {}
+                self._cache_timestamp = time.time()
+                self._save_cache()  # No-op now
+                self._last_refresh_failed = False
+                return True
+
+            logger.info(f"📚 Booklore: Scan complete. Found {len(all_books_list)} total books.")
+
+            # --- Pruning Stale Data ---
+            if self.db and all_books_list:
+                live_map = {str(b['id']): b for b in all_books_list if b.get('id')}
+
+                cached_filenames = list(self._book_cache.keys())
+                stale_count = 0
+
+                for fname in cached_filenames:
+                    book_info = self._book_cache[fname]
+                    bid = book_info.get('id')
+
+                    is_stale = False
+
+                    if not bid or str(bid) not in live_map:
+                        is_stale = True
+                        logger.debug(f"   Pruning {fname}: ID {bid} not in live map")
                     else:
-                        # B. Fallback Title Check (if filename is missing in List View)
-                        # If titles differ significantly, it's likely a reused ID (Ghost)
-                        live_title = live_book.get('title')
-                        cached_title = book_info.get('title')
-                        
-                        if live_title and cached_title:
-                            # Normalize for safety (ignore case/whitespace/symbols)
-                            # This catches "The Book" vs "Another Book" (ID Reuse)
-                            lt_norm = self._normalize_string(live_title)
-                            ct_norm = self._normalize_string(cached_title)
-                            
-                            # Use a generous equality check to avoid false positives on minor edits
-                            if lt_norm and ct_norm and lt_norm != ct_norm:
-                                 is_stale = True
-                                 logger.debug(f"   Pruning {fname}: Title mismatch (ID Reuse?). Live: '{live_title}' vs Cache: '{cached_title}'")
+                        live_book = live_map[str(bid)]
+                        raw_live_filename = live_book.get('primaryFile', {}).get('fileName', live_book.get('fileName', ''))
+                        live_filename = str(raw_live_filename).strip() if raw_live_filename else ''
 
-                if is_stale:
-                    stale_count += 1
-                    # Remove from Memory
-                    self._book_cache.pop(fname, None)
-                    if bid:
-                        self._book_id_cache.pop(bid, None)
-                    
-                    # Remove from Database
-                    try:
-                        # Use the CACHE KEY (fname) which corresponds to the database `filename` column (lowercase)
-                        self.db.delete_booklore_book(fname)
-                    except Exception as e:
-                        logger.error(f"❌ Failed to prune stale book {fname}: {e}")
+                        cached_real_filename = book_info.get('fileName', fname)
 
-            if stale_count > 0:
-                logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
+                        if live_filename:
+                            if live_filename != str(cached_real_filename).strip():
+                                is_stale = True
+                                logger.debug(
+                                    f"   Pruning {fname}: Filename mismatch. Live: {repr(raw_live_filename)} vs Cache: {repr(cached_real_filename)}"
+                                )
+                        else:
+                            live_title = live_book.get('title')
+                            cached_title = book_info.get('title')
 
-        # --- Proceed with Step 2: Detail Fetching (Same as before) ---
-        
-        # Step 2: For books not in cache, fetch details to get fileName
-        new_book_ids = [b['id'] for b in all_books_list if b['id'] not in self._book_id_cache]
+                            if live_title and cached_title:
+                                lt_norm = self._normalize_string(live_title)
+                                ct_norm = self._normalize_string(cached_title)
 
-        if new_book_ids:
-            logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
-            token = self._get_fresh_token()
-            if not token:
-                self._last_refresh_failed = True
-                return False
+                                if lt_norm and ct_norm and lt_norm != ct_norm:
+                                    is_stale = True
+                                    logger.debug(
+                                        f"   Pruning {fname}: Title mismatch (ID Reuse?). Live: '{live_title}' vs Cache: '{cached_title}'"
+                                    )
 
-            def fetch_one(book_id):
-                return book_id, self._fetch_book_detail(book_id, token)
+                    if is_stale:
+                        stale_count += 1
+                        self._book_cache.pop(fname, None)
+                        if bid:
+                            self._book_id_cache.pop(bid, None)
 
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
-                for future in as_completed(futures):
-                    try:
-                        book_id, detail = future.result()
-                        if detail and isinstance(detail, dict):
-                            self._process_book_detail(detail)
-                    except Exception as e:
-                        logger.debug(f"Booklore: Error fetching details: {e}")
+                        try:
+                            self.db.delete_booklore_book(fname)
+                        except Exception as e:
+                            logger.error(f"❌ Failed to prune stale book {fname}: {e}")
 
-        # Refresh existing items from the new list
-        for book in all_books_list:
-             if book['id'] in self._book_id_cache:
-                 # Optional: Update shallow fields if needed
-                 pass
+                if stale_count > 0:
+                    logger.info(f"🧹 Booklore: Pruned {stale_count} stale books from database.")
 
-        self._cache_timestamp = time.time()
-        # self._save_cache() # DB is updated inside _process_book_detail
-        self._last_refresh_failed = False
-        return True
+            new_book_ids = [b['id'] for b in all_books_list if b['id'] not in self._book_id_cache]
+
+            if new_book_ids:
+                logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
+                token = self._get_fresh_token()
+                if not token:
+                    self._last_refresh_failed = True
+                    return False
+
+                def fetch_one(book_id):
+                    return book_id, self._fetch_book_detail(book_id, token)
+
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = {executor.submit(fetch_one, bid): bid for bid in new_book_ids}
+                    for future in as_completed(futures):
+                        try:
+                            _, detail = future.result()
+                            if detail and isinstance(detail, dict):
+                                self._process_book_detail(detail)
+                        except Exception as e:
+                            logger.debug(f"Booklore: Error fetching details: {e}")
+
+            for book in all_books_list:
+                if book['id'] in self._book_id_cache:
+                    pass
+
+            self._cache_timestamp = time.time()
+            self._last_refresh_failed = False
+            return True
+        finally:
+            self._refresh_lock.release()
 
     def _process_book_detail(self, detail):
         """Process a book detail response and add to cache."""
@@ -602,38 +579,72 @@ class BookloreClient:
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
-        if time.time() - self._cache_timestamp > 5 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
+        def search_in_cache(term):
+            search_lower = term.lower()
+            search_norm = self._normalize_string(term)
+
+            matches = []
+            for book_info in list(self._book_cache.values()):
+                title = (book_info.get('title') or '').lower()
+                authors = (book_info.get('authors') or '').lower()
+                filename = (book_info.get('fileName') or '').lower()
+
+                # 1. Standard substring match
+                if search_lower in title or search_lower in authors or search_lower in filename:
+                    matches.append(book_info)
+                    continue
+
+                # 2. Normalized match (for "Dragon's" vs "Dragons")
+                # Only perform if standard match failed
+                title_norm = self._normalize_string(title)
+                authors_norm = self._normalize_string(authors)
+                filename_norm = self._normalize_string(filename)
+
+                if len(search_norm) > 3:  # Avoid extremely short noisy matches
+                    if (
+                        search_norm in title_norm or
+                        search_norm in authors_norm or
+                        search_norm in filename_norm
+                    ):
+                        matches.append(book_info)
+
+            return matches
+
+        # Avoid expensive full-library refreshes on rapid UI search requests.
+        # Keep refresh cadence aligned with other read paths.
+        if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
         if not self._book_cache and not self._is_refresh_on_cooldown(): self._refresh_book_cache()
 
         if not search_term:
             return list(self._book_cache.values())
 
-        search_lower = search_term.lower()
-        search_norm = self._normalize_string(search_term)
-        
-        results = []
-        for book_info in list(self._book_cache.values()):
-            title = (book_info.get('title') or '').lower()
-            authors = (book_info.get('authors') or '').lower()
-            filename = (book_info.get('fileName') or '').lower()
+        results = search_in_cache(search_term)
+        if results:
+            return results
 
-            # 1. Standard substring match
-            if search_lower in title or search_lower in authors or search_lower in filename:
-                results.append(book_info)
-                continue
-            
-            # 2. Normalized match (for "Dragon's" vs "Dragons")
-            # Only perform if standard match failed
-            title_norm = self._normalize_string(title)
-            authors_norm = self._normalize_string(authors)
-            filename_norm = self._normalize_string(filename)
-            
-            if len(search_norm) > 3: # Avoid extremely short noisy matches
-                if (search_norm in title_norm or 
-                    search_norm in authors_norm or 
-                    search_norm in filename_norm):
-                    results.append(book_info)
-        
+        cache_age = time.time() - self._cache_timestamp
+        safe_term = sanitize_log_data(search_term)
+        if self._is_refresh_on_cooldown():
+            logger.debug(
+                f"Booklore search miss: refresh skipped due to cooldown "
+                f"(term='{safe_term}', cache_age={cache_age:.0f}s)"
+            )
+            return results
+
+        if cache_age <= self._search_miss_refresh_min_age:
+            logger.debug(
+                f"Booklore search miss: refresh skipped (cache too fresh) "
+                f"(term='{safe_term}', cache_age={cache_age:.0f}s)"
+            )
+            return results
+
+        logger.debug(
+            f"Booklore search miss: refreshing cache once "
+            f"(term='{safe_term}', cache_age={cache_age:.0f}s)"
+        )
+        if self._refresh_book_cache():
+            return search_in_cache(search_term)
+
         return results
 
     def download_book(self, book_id):
