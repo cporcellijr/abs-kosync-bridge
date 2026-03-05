@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from flask import Blueprint, jsonify, request
@@ -575,46 +576,63 @@ def _try_find_epub_by_hash(doc_hash: str) -> Optional[str]:
             try:
                 # Query BookloreBook cache in DB first
                 books = _database_service.get_all_booklore_books()
+                scan_source = "Booklore DB cache"
                 if not books:
-                    # If DB cache empty, fetch from API
-                    raw_books = _container.booklore_client().get_all_books()
-                    # (Note: LibraryService syncs this, but we'll do a quick check here if needed)
-                    # For now, let's just assume they might be in the BookloreBook table already if synced.
-                    logger.info("Booklore cache in DB is empty. Consider running a library sync.")
-                    # Fallback to direct API call for scan
-                    from src.services.library_service import LibraryService
-                    lib_service = LibraryService(_database_service, _container.booklore_client())
-                    lib_service.sync_library_books()
-                    books = _database_service.get_all_booklore_books()
+                    books = _container.booklore_client().get_all_books() or []
+                    scan_source = "Booklore in-memory cache"
 
-                logger.info(f"Scanning {len(books)} books from Booklore DB cache...")
+                logger.info(f"Scanning {len(books)} books from {scan_source}...")
 
                 for book in books:
-                    book_id = str(book.raw_metadata_dict.get('id')) if hasattr(book, 'raw_metadata_dict') else None
-                    # Fallback to parsing raw_metadata if needed
-                    if not book_id:
-                        import json
-                        try:
-                            meta = json.loads(book.raw_metadata)
-                            book_id = str(meta.get('id'))
-                        except (json.JSONDecodeError, AttributeError) as e:
-                            logger.debug(f"Failed to parse raw_metadata JSON: {e}")
-                            continue
+                    if hasattr(book, 'raw_metadata_dict'):
+                        raw_id = book.raw_metadata_dict.get('id')
+                        book_id = str(raw_id) if raw_id is not None else None
+                        filename = book.filename
+                        book_title = getattr(book, 'title', None)
+
+                        # Fallback to parsing raw_metadata if needed
+                        if not book_id:
+                            import json
+                            try:
+                                meta = json.loads(book.raw_metadata)
+                                raw_id = meta.get('id')
+                                book_id = str(raw_id) if raw_id is not None else None
+                            except (json.JSONDecodeError, AttributeError) as e:
+                                logger.debug(f"Failed to parse raw_metadata JSON: {e}")
+                                continue
+                    else:
+                        raw_id = book.get('id')
+                        book_id = str(raw_id) if raw_id is not None else None
+                        filename = book.get('fileName')
+                        book_title = book.get('title')
+
+                        if book_id and not filename:
+                            hydrated = _container.booklore_client()._fetch_and_cache_detail(raw_id)
+                            if hydrated:
+                                book = hydrated
+                                filename = hydrated.get('fileName')
+                                book_title = hydrated.get('title')
+
+                    if not book_id or not filename:
+                        logger.debug("Skipping Booklore candidate without both id and filename")
+                        continue
+                    if not hasattr(book, 'raw_metadata_dict'):
+                        book = SimpleNamespace(filename=filename, title=book_title)
 
                     # Check if we have a KosyncDocument for this Booklore ID
                     cached_doc = _database_service.get_kosync_doc_by_booklore_id(book_id)
                     if cached_doc:
                         if cached_doc.document_hash == doc_hash:
                             logger.info(f"📚 Matched EPUB via Booklore ID in DB: {book.filename}")
-                            return book.filename
+                            return filename
 
                     try:
                         book_content = _container.booklore_client().download_book(book_id)
                         if book_content:
-                            computed_hash = _container.ebook_parser().get_kosync_id_from_bytes(book.filename, book_content)
+                            computed_hash = _container.ebook_parser().get_kosync_id_from_bytes(filename, book_content)
 
                             if computed_hash == doc_hash:
-                                safe_title = book.filename
+                                safe_title = filename
                                 cache_dir = _container.data_dir() / "epub_cache"
                                 cache_dir.mkdir(parents=True, exist_ok=True)
                                 cache_path = cache_dir / safe_title
