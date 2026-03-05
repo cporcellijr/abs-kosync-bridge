@@ -4,6 +4,20 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
+## [6.3.4] - 2026-03-05
+
+### Bug Fixes
+
+- **Booklore Duplicate Scan Suppression**: Added a non-blocking refresh lock around full-library scans to prevent overlapping `_refresh_book_cache()` runs under concurrent requests. Duplicate refresh attempts now skip safely, and lock release is guaranteed via `try/finally`.
+- **Booklore Search Miss Freshness**: Updated `search_books()` to use cache-first lookup with a single refresh-on-miss path. On non-empty misses, it performs one refresh only when cache age exceeds 60 seconds and cooldown is not active, then retries the in-memory search once.
+- **Booklore Search Refresh Guardrails**: Added explicit debug logs for miss-refresh trigger, fresh-cache skip, and cooldown skip to make runtime behavior and throttling decisions visible in logs.
+
+### Tests
+
+- **Booklore Search Miss Coverage**: Added unit tests for refresh-on-miss success, fresh-cache skip, cooldown skip, and refresh-failure single-attempt behavior.
+
+---
+
 ## [6.3.2] - 2026-02-27
 
 ### Enhancements

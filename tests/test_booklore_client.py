@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch, mock_open
 import json
 import os
+import time
 from pathlib import Path
 
 # Adjust path to import src
@@ -262,3 +263,70 @@ def test_update_progress_retries_without_cfi_if_verified_pct_mismatch(booklore_c
     second_post = booklore_client._make_request.call_args_list[2][0]
     assert first_post[2]["epubProgress"]["cfi"] == "epubcfi(/6/4!/4/4/208:0)"
     assert "cfi" not in second_post[2]["epubProgress"]
+
+
+def test_search_books_miss_triggers_single_refresh_and_returns_new_match(booklore_client):
+    booklore_client._book_cache = {
+        "old.epub": {"fileName": "old.epub", "title": "Old Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+
+    def refresh_side_effect():
+        booklore_client._book_cache["new-book.epub"] = {
+            "fileName": "new-book.epub",
+            "title": "New Arrival",
+            "authors": "New Author",
+        }
+        booklore_client._cache_timestamp = time.time()
+        return True
+
+    booklore_client._refresh_book_cache = MagicMock(side_effect=refresh_side_effect)
+
+    results = booklore_client.search_books("new arrival")
+
+    assert len(results) == 1
+    assert results[0]["fileName"] == "new-book.epub"
+    booklore_client._refresh_book_cache.assert_called_once()
+
+
+def test_search_books_miss_skips_refresh_when_cache_is_fresh(booklore_client):
+    booklore_client._book_cache = {
+        "old.epub": {"fileName": "old.epub", "title": "Old Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 10
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+
+    results = booklore_client.search_books("new arrival")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_not_called()
+
+
+def test_search_books_miss_respects_cooldown(booklore_client):
+    booklore_client._book_cache = {
+        "old.epub": {"fileName": "old.epub", "title": "Old Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=True)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+
+    results = booklore_client.search_books("new arrival")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_not_called()
+
+
+def test_search_books_miss_refresh_failure_returns_empty_without_retry_loop(booklore_client):
+    booklore_client._book_cache = {
+        "old.epub": {"fileName": "old.epub", "title": "Old Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=False)
+
+    results = booklore_client.search_books("new arrival")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_called_once()
