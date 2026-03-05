@@ -101,6 +101,104 @@ def test_normalization_falls_back_to_percent_when_no_locator():
     assert kwargs["char_offset_hint"] == 400
 
 
+def test_build_text_anchors_clamps_bounds():
+    manager = SyncManager.__new__(SyncManager)
+    full_text = "".join(chr(65 + (i % 26)) for i in range(300))
+
+    prefix_start, suffix_start, window_start = manager._build_text_anchors(full_text, 0)
+    assert len(prefix_start) == 0
+    assert len(suffix_start) == 60
+    assert len(window_start) == 120
+
+    prefix_mid, suffix_mid, window_mid = manager._build_text_anchors(full_text, 150)
+    assert len(prefix_mid) == 60
+    assert len(suffix_mid) == 60
+    assert len(window_mid) == 240
+
+    prefix_end, suffix_end, window_end = manager._build_text_anchors(full_text, 9999)
+    assert len(prefix_end) == 60
+    assert len(suffix_end) == 1
+    assert len(window_end) == 121
+
+
+def test_normalization_sets_high_low_confidence_by_source():
+    manager = _manager_with_mocks()
+    full_text = "abcdefghijklmnopqrstuvwxyz " * 80
+    manager.ebook_parser.resolve_book_path.return_value = "book.epub"
+    manager.ebook_parser.extract_text_and_map.return_value = (full_text, [])
+    manager.alignment_service.get_time_for_text.return_value = 111.0
+    book = SimpleNamespace(abs_id="abs-1", transcript_file="DB_MANAGED", ebook_filename="book.epub")
+
+    # xpath -> high
+    manager.ebook_parser.resolve_xpath_to_index.return_value = 150
+    manager.ebook_parser.resolve_cfi_to_index.return_value = None
+    manager.ebook_parser.resolve_locator_id.return_value = None
+    cfg_xpath = {
+        "ABS": _state({"ts": 10.0}),
+        "KoSync": _state({"pct": 0.1, "xpath": "/body/DocFragment[1]/body/p[1]/text().0"}),
+    }
+    manager._normalize_for_cross_format_comparison(book, cfg_xpath)
+    assert cfg_xpath["KoSync"].current["_normalization_source"] == "xpath"
+    assert cfg_xpath["KoSync"].current["_normalization_confidence"] == "high"
+
+    # cfi -> high
+    manager.ebook_parser.resolve_xpath_to_index.return_value = None
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 220
+    manager.ebook_parser.resolve_locator_id.return_value = None
+    cfg_cfi = {
+        "ABS": _state({"ts": 10.0}),
+        "BookLore": _state({"pct": 0.1, "cfi": "epubcfi(/6/10!/4:0)"}),
+    }
+    manager._normalize_for_cross_format_comparison(book, cfg_cfi)
+    assert cfg_cfi["BookLore"].current["_normalization_source"] == "cfi"
+    assert cfg_cfi["BookLore"].current["_normalization_confidence"] == "high"
+
+    # href_frag -> high
+    manager.ebook_parser.resolve_xpath_to_index.return_value = None
+    manager.ebook_parser.resolve_cfi_to_index.return_value = None
+    manager.ebook_parser.resolve_locator_id.return_value = full_text[300:460]
+    cfg_href = {
+        "ABS": _state({"ts": 10.0}),
+        "BookLore": _state({"pct": 0.1, "href": "chapter.xhtml", "frag": "p1"}),
+    }
+    manager._normalize_for_cross_format_comparison(book, cfg_href)
+    assert cfg_href["BookLore"].current["_normalization_source"] == "href_frag"
+    assert cfg_href["BookLore"].current["_normalization_confidence"] == "high"
+
+    # percent fallback -> low
+    manager.ebook_parser.resolve_xpath_to_index.return_value = None
+    manager.ebook_parser.resolve_cfi_to_index.return_value = None
+    manager.ebook_parser.resolve_locator_id.return_value = None
+    cfg_pct = {
+        "ABS": _state({"ts": 10.0}),
+        "BookLore": _state({"pct": 0.1}),
+    }
+    manager._normalize_for_cross_format_comparison(book, cfg_pct)
+    assert cfg_pct["BookLore"].current["_normalization_source"] == "percent_fallback"
+    assert cfg_pct["BookLore"].current["_normalization_confidence"] == "low"
+
+
+def test_normalization_uses_cached_extract_once_per_book_per_cycle():
+    manager = _manager_with_mocks()
+    manager.ebook_parser.resolve_book_path.return_value = "book.epub"
+    manager.ebook_parser.extract_text_and_map.return_value = ("a" * 1000, [])
+    manager.ebook_parser.resolve_xpath_to_index.return_value = 123
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 321
+    manager.alignment_service.get_time_for_text.return_value = 500.0
+
+    book = SimpleNamespace(abs_id="abs-1", transcript_file="DB_MANAGED", ebook_filename="book.epub")
+    config = {
+        "ABS": _state({"ts": 10.0}),
+        "KoSync": _state({"pct": 0.5, "xpath": "/body/DocFragment[1]/body/p[1]/text().0"}),
+        "BookLore": _state({"pct": 0.5, "cfi": "epubcfi(/6/10!/4:0)"}),
+    }
+
+    manager._normalize_for_cross_format_comparison(book, config)
+    manager._normalize_for_cross_format_comparison(book, config)
+
+    assert manager.ebook_parser.extract_text_and_map.call_count == 1
+
+
 def test_determine_leader_uses_locator_pct_when_raw_pct_is_inconsistent():
     manager = SyncManager.__new__(SyncManager)
 
@@ -245,3 +343,140 @@ def test_generate_cfi_never_emits_empty_element_path():
     cfi = parser._generate_cfi(12, "plain text without body wrapper", 1)
 
     assert "!/:" not in cfi
+
+
+def test_deadband_keeps_abs_as_leader_for_tiny_crossformat_gap():
+    manager = SyncManager.__new__(SyncManager)
+    manager.cross_format_deadband_seconds = 2.0
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {"ABS": _Client(), "KoSync": _Client()}
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: True)
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 1000.0, "KoSync": 1001.2}
+    )
+
+    config = {
+        "ABS": _state({"pct": 0.2, "ts": 1000.0}),
+        "KoSync": _state({"pct": 0.21, "_normalization_source": "xpath"}),
+    }
+    book = SimpleNamespace(duration=10000, transcript_file="DB_MANAGED")
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "ABS"
+    assert leader_pct == config["ABS"].current["pct"]
+
+
+def test_deadband_allows_switch_when_delta_exceeds_threshold():
+    manager = SyncManager.__new__(SyncManager)
+    manager.cross_format_deadband_seconds = 2.0
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {"ABS": _Client(), "KoSync": _Client()}
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: True)
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 1000.0, "KoSync": 1002.6}
+    )
+
+    config = {
+        "ABS": _state({"pct": 0.2, "ts": 1000.0}),
+        "KoSync": _state({"pct": 0.21, "_normalization_source": "xpath"}),
+    }
+    book = SimpleNamespace(duration=10000, transcript_file="DB_MANAGED")
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "KoSync"
+    assert leader_pct == config["KoSync"].current["pct"]
+
+
+def test_alignment_locator_roundtrip_degrades_to_percent_only_when_unstable():
+    manager = SyncManager.__new__(SyncManager)
+    manager.ebook_parser = MagicMock()
+    manager.ebook_parser.locator_roundtrip_tolerance = 2
+    manager.ebook_parser.resolve_xpath_to_index.return_value = 250
+    manager.ebook_parser.get_sentence_level_ko_xpath.return_value = "/body/DocFragment[1]/body/p[1]/text().0"
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 260
+
+    locator = SimpleNamespace(
+        percentage=0.5,
+        xpath="/body/DocFragment[1]/body/p[99]/text().0",
+        perfect_ko_xpath="/body/DocFragment[1]/body/p[99]/text().0",
+        match_index=100,
+        cfi="epubcfi(/6/2!/4/2:0)",
+        href="chapter.xhtml",
+        fragment=None,
+        css_selector=None,
+        chapter_progress=0.5,
+        fragments=None,
+    )
+    book = SimpleNamespace(abs_id="abs-1", ebook_filename="book.epub")
+
+    stable = manager._validate_and_stabilize_locator(book, 100, locator)
+
+    assert stable.xpath is None
+    assert stable.perfect_ko_xpath is None
+    assert stable.cfi is None
+
+
+def test_roundtrip_prefers_sentence_xpath_before_percent_only():
+    manager = SyncManager.__new__(SyncManager)
+    manager.ebook_parser = MagicMock()
+    manager.ebook_parser.locator_roundtrip_tolerance = 2
+    manager.ebook_parser.resolve_xpath_to_index.side_effect = [130, 101]
+    manager.ebook_parser.get_sentence_level_ko_xpath.return_value = "/body/DocFragment[1]/body/p[10]/text().0"
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 100
+
+    locator = SimpleNamespace(
+        percentage=0.5,
+        xpath="/body/DocFragment[1]/body/p[99]/text().0",
+        perfect_ko_xpath="/body/DocFragment[1]/body/p[99]/text().0",
+        match_index=100,
+        cfi="epubcfi(/6/2!/4/2:0)",
+        href="chapter.xhtml",
+        fragment=None,
+        css_selector=None,
+        chapter_progress=0.5,
+        fragments=None,
+    )
+    book = SimpleNamespace(abs_id="abs-1", ebook_filename="book.epub")
+
+    stable = manager._validate_and_stabilize_locator(book, 100, locator)
+
+    assert stable.xpath == "/body/DocFragment[1]/body/p[10]/text().0"
+    assert stable.perfect_ko_xpath == "/body/DocFragment[1]/body/p[10]/text().0"
+    assert stable.cfi == "epubcfi(/6/2!/4/2:0)"
+
+
+def test_repeated_time_to_locator_roundtrip_stays_within_tolerance():
+    manager = SyncManager.__new__(SyncManager)
+    manager.ebook_parser = MagicMock()
+    manager.ebook_parser.locator_roundtrip_tolerance = 2
+    manager.ebook_parser.resolve_xpath_to_index.return_value = 101
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 99
+
+    locator = SimpleNamespace(
+        percentage=0.5,
+        xpath="/body/DocFragment[1]/body/p[3]/text().0",
+        perfect_ko_xpath="/body/DocFragment[1]/body/p[3]/text().0",
+        match_index=100,
+        cfi="epubcfi(/6/2!/4/2:0)",
+        href="chapter.xhtml",
+        fragment=None,
+        css_selector=None,
+        chapter_progress=0.5,
+        fragments=None,
+    )
+    book = SimpleNamespace(abs_id="abs-1", ebook_filename="book.epub")
+
+    for _ in range(5):
+        stable = manager._validate_and_stabilize_locator(book, 100, locator)
+        assert stable.xpath is not None
+        assert stable.cfi is not None
