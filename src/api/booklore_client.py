@@ -359,6 +359,54 @@ class BookloreClient:
 
         return filtered_batch
 
+    @staticmethod
+    def _format_authors(authors):
+        if isinstance(authors, str):
+            return authors.strip()
+
+        author_list = []
+        if isinstance(authors, list):
+            for author in authors:
+                if isinstance(author, dict):
+                    name = (author.get('name') or author.get('authorName') or '').strip()
+                    if name:
+                        author_list.append(name)
+                elif isinstance(author, str):
+                    name = author.strip()
+                    if name:
+                        author_list.append(name)
+        elif isinstance(authors, dict):
+            name = (authors.get('name') or authors.get('authorName') or '').strip()
+            if name:
+                author_list.append(name)
+
+        return ', '.join(author_list)
+
+    def _extract_book_summary_fields(self, book):
+        metadata = book.get('metadata') or {}
+        primary_file = book.get('primaryFile') or {}
+        title = (book.get('title') or metadata.get('title') or '').strip()
+        subtitle = (metadata.get('subtitle') or book.get('subtitle') or '').strip()
+        authors = self._format_authors(
+            book.get('authors')
+            or book.get('authorName')
+            or metadata.get('authors')
+            or metadata.get('authorName')
+            or metadata.get('author')
+            or []
+        )
+        file_name = (
+            primary_file.get('fileName')
+            or book.get('fileName')
+            or ''
+        )
+        return {
+            'title': title,
+            'subtitle': subtitle,
+            'authors': authors,
+            'fileName': file_name,
+        }
+
     def _upsert_lightweight_entry(self, book):
         bid = book.get('id')
         if bid is None:
@@ -369,17 +417,21 @@ class BookloreClient:
             if existing and not existing.get('_needs_detail'):
                 return
 
+            summary = self._extract_book_summary_fields(book)
             lightweight_info = dict(existing or {})
             lightweight_info.update({
                 'id': bid,
-                'title': book.get('title', ''),
-                'authors': lightweight_info.get('authors') or '',
-                'fileName': None,
+                'title': summary['title'] or lightweight_info.get('title') or '',
+                'subtitle': summary['subtitle'] or lightweight_info.get('subtitle') or '',
+                'authors': summary['authors'] or lightweight_info.get('authors') or '',
+                'fileName': summary['fileName'] or lightweight_info.get('fileName'),
                 'libraryId': book.get('libraryId'),
                 'libraryName': book.get('libraryName'),
                 '_needs_detail': True,
             })
             self._book_id_cache[bid] = lightweight_info
+            if lightweight_info.get('fileName'):
+                self._book_cache[lightweight_info['fileName'].lower()] = lightweight_info
 
     def _prune_stale_cache_entries(self, live_ids):
         live_id_strings = {str(bid) for bid in live_ids}
@@ -624,17 +676,7 @@ class BookloreClient:
             return
 
         metadata = detail.get('metadata') or {}
-        authors = metadata.get('authors') or []
-        # Handle both list of strings and list of dicts for authors
-        author_list = []
-        for a in authors:
-            if isinstance(a, dict):
-                name = a.get('name', '')
-                if name: author_list.append(name)
-            elif isinstance(a, str) and a.strip():
-                author_list.append(a.strip())
-
-        author_str = ', '.join(author_list)
+        author_str = self._format_authors(metadata.get('authors') or [])
         subtitle = metadata.get('subtitle') or ''
         title = metadata.get('title') or detail.get('title') or filename
 
@@ -822,11 +864,26 @@ class BookloreClient:
                     continue
 
                 title = (book_info.get('title') or '').lower()
+                authors = (book_info.get('authors') or '').lower()
+                filename = (book_info.get('fileName') or '').lower()
                 title_norm = self._normalize_string(title)
+                authors_norm = self._normalize_string(authors)
+                filename_norm = self._normalize_string(filename)
                 is_match = search_lower in title
+                if not is_match and (search_lower in authors or search_lower in filename):
+                    is_match = True
                 if not is_match and len(search_norm) > 3:
-                    is_match = search_norm in title_norm
+                    is_match = (
+                        search_norm in title_norm or
+                        search_norm in authors_norm or
+                        search_norm in filename_norm
+                    )
                 if not is_match:
+                    continue
+
+                if filename:
+                    matches.append(book_info)
+                    matched_ids.add(str(bid))
                     continue
 
                 if detail_fetch_count >= MAX_DETAIL_FETCHES_PER_SEARCH:

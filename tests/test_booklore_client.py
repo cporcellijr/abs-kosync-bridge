@@ -600,3 +600,50 @@ def test_refresh_book_cache_falls_back_when_server_side_library_filter_is_ignore
     assert second_endpoint == "/api/v1/books?page=0&size=200"
     assert client._server_side_filter_supported is False
     assert list(client._book_cache.keys()) == ["target-book.epub"]
+
+
+def test_upsert_lightweight_entry_preserves_nested_summary_fields(booklore_client):
+    booklore_client._upsert_lightweight_entry({
+        "id": "bl-1",
+        "libraryId": "lib-1",
+        "libraryName": "Main Library",
+        "metadata": {
+            "title": "Fever Dream",
+            "subtitle": "A Novel",
+            "authors": [{"name": "Samanta Schweblin"}],
+        },
+        "primaryFile": {
+            "fileName": "Fever Dream - Samanta Schweblin (2016).epub",
+        },
+    })
+
+    cached = booklore_client._book_id_cache["bl-1"]
+    assert cached["title"] == "Fever Dream"
+    assert cached["subtitle"] == "A Novel"
+    assert cached["authors"] == "Samanta Schweblin"
+    assert cached["fileName"] == "Fever Dream - Samanta Schweblin (2016).epub"
+    assert booklore_client._book_cache["fever dream - samanta schweblin (2016).epub"]["id"] == "bl-1"
+
+
+def test_search_books_finds_lightweight_entries_without_detail_fetch(booklore_client):
+    booklore_client._upsert_lightweight_entry({
+        "id": "bl-1",
+        "libraryId": "lib-1",
+        "libraryName": "Main Library",
+        "metadata": {
+            "title": "Fever Dream",
+            "authors": [{"name": "Samanta Schweblin"}],
+        },
+        "primaryFile": {
+            "fileName": "Fever Dream - Samanta Schweblin (2016).epub",
+        },
+    })
+    booklore_client._fetch_and_cache_detail = MagicMock()
+    booklore_client._cache_timestamp = time.time()
+
+    results = booklore_client.search_books("fever")
+
+    assert len(results) == 1
+    assert results[0]["id"] == "bl-1"
+    assert results[0]["fileName"] == "Fever Dream - Samanta Schweblin (2016).epub"
+    booklore_client._fetch_and_cache_detail.assert_not_called()
