@@ -11,6 +11,7 @@ The **Dashboard** is your command center. It shows:
 - **Recent Activity**: A log of the latest sync actions.
 - **Single Match**: Manually link an audiobook to an ebook.
 - **Batch Match**: Switch to the Batch Matcher view.
+- **Library Suggestions**: Scan your library for likely pairs and review them quickly.
 
 ---
 
@@ -178,17 +179,28 @@ If you configure your KOReader devices to sync directly to **this bridge** (usin
 
 ## Suggestions
 
-The system can also intelligently suggest mappings based on activity, but these always require manual confirmation.
+The **Library Suggestions** page helps you find books that are not linked yet.
 
-**Sources**:
+### What it does
 
-1. **Audiobookshelf (Periodic Polling)**: When the bridge sees you listening to an unmapped audiobook, it suggests a matching ebook.
-2. **Internal KOSync (Push)**: When you read an unmapped ebook that *does* have a matching audiobook.
+- Scans your library and shows likely audiobook + ebook pairs.
+- Lets you review each suggestion before anything is linked.
+- Sends approved picks into the same batch queue used by Batch Match.
 
-**Actions**:
+### How to use it
 
-- **Review**: Opens the Matcher pre-filled.
-- **Dismiss**: Removes the suggestion.
+1. Open **Suggestions** in the top navigation.
+2. Click **Scan Library** to load suggestions.
+3. Click a suggestion to review the audiobook and ebook pick.
+4. Click **Add to Queue** for the ones you want.
+5. Click **Process All** to create the mappings.
+
+### Buttons
+
+- **Scan Library**: Runs a normal scan and keeps previous scan work so repeat scans are faster.
+- **Full Refresh**: Rechecks your whole unmatched library from scratch.
+- **Dismiss**: Hides a suggestion for now.
+- **Never**: Hides a suggestion permanently so it will not come back.
 
 ---
 

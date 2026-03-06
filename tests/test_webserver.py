@@ -7,11 +7,21 @@ import unittest
 import tempfile
 import os
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import sys
 
 # Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.utils.kosync_headers import hash_kosync_key
+
+
+def _http_response(status_code, payload=None, text=""):
+    response = Mock()
+    response.status_code = status_code
+    response.text = text
+    response.json.return_value = payload or {}
+    return response
 
 
 class MockContainer:
@@ -521,6 +531,35 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         )
         self.mock_database_service.delete_book.assert_called_once_with('delete-st-2')
 
+    @patch('src.web_server.ingest_storyteller_transcripts', return_value=None)
+    def test_api_storyteller_link_preserves_storyteller_source_when_ingest_missing(self, _mock_ingest):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='story-link-1',
+            abs_title='Story Link',
+            ebook_filename='original.epub',
+            storyteller_uuid=None,
+            transcript_source=None,
+            transcript_file=None,
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_abs_client.get_item_details.return_value = {
+            'media': {'chapters': [{'start': 0.0, 'end': 10.0}]}
+        }
+
+        response = self.client.post('/api/storyteller/link/story-link-1', json={'uuid': 'uuid-123'})
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, 'uuid-123')
+        self.assertEqual(saved_book.transcript_source, 'storyteller')
+        self.assertIsNone(saved_book.transcript_file)
+        self.mock_database_service.dismiss_suggestion.assert_called_once_with('story-link-1')
+
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""
         # Setup mock book
@@ -585,6 +624,141 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         finally:
             src.web_server.render_template = original_render
+
+    @patch('src.web_server.requests.get')
+    def test_test_connection_abs_uses_post_payload_not_saved_env(self, mock_get):
+        def fake_get(url, headers=None, timeout=None):
+            self.assertEqual(url, 'http://typed-abs/api/me')
+            self.assertEqual(headers, {'Authorization': 'Bearer wrong-token'})
+            self.assertEqual(timeout, 10)
+            return _http_response(403)
+
+        mock_get.side_effect = fake_get
+
+        with patch.dict(os.environ, {'ABS_SERVER': 'http://saved-abs', 'ABS_KEY': 'saved-token'}, clear=False):
+            response = self.client.post(
+                '/api/test-connection/abs',
+                json={'ABS_SERVER': 'typed-abs', 'ABS_KEY': 'wrong-token'},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data['ok'])
+        self.assertIn('Authentication failed', data['message'])
+        mock_get.assert_called_once()
+
+    @patch('src.web_server.requests.get')
+    def test_test_connection_kosync_fails_when_auth_fails(self, mock_get):
+        def fake_get(url, headers=None, timeout=None):
+            if url == 'http://typed-kosync/healthcheck':
+                self.assertIsNone(headers)
+                self.assertEqual(timeout, 5)
+                return _http_response(200)
+            if url == 'http://typed-kosync/users/auth':
+                self.assertEqual(headers['x-auth-user'], 'reader')
+                self.assertEqual(headers['x-auth-key'], hash_kosync_key('wrong-pass'))
+                self.assertEqual(timeout, 5)
+                return _http_response(401)
+            raise AssertionError(f'Unexpected URL {url}')
+
+        mock_get.side_effect = fake_get
+
+        response = self.client.post(
+            '/api/test-connection/kosync',
+            json={
+                'KOSYNC_ENABLED': True,
+                'KOSYNC_SERVER': 'typed-kosync',
+                'KOSYNC_USER': 'reader',
+                'KOSYNC_KEY': 'wrong-pass',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data['ok'])
+        self.assertIn('Authentication failed', data['message'])
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch('src.web_server.requests.get')
+    def test_test_connection_kosync_succeeds_after_healthcheck_and_auth(self, mock_get):
+        def fake_get(url, headers=None, timeout=None):
+            if url == 'http://typed-kosync/healthcheck':
+                return _http_response(200)
+            if url == 'http://typed-kosync/users/auth':
+                self.assertEqual(headers['x-auth-user'], 'reader')
+                self.assertEqual(headers['x-auth-key'], hash_kosync_key('good-pass'))
+                return _http_response(200)
+            raise AssertionError(f'Unexpected URL {url}')
+
+        mock_get.side_effect = fake_get
+
+        response = self.client.post(
+            '/api/test-connection/kosync',
+            json={
+                'KOSYNC_ENABLED': True,
+                'KOSYNC_SERVER': 'typed-kosync',
+                'KOSYNC_USER': 'reader',
+                'KOSYNC_KEY': 'good-pass',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['ok'])
+        self.assertIn('credentials are valid', data['message'])
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch('src.web_server.requests.post')
+    def test_test_connection_storyteller_uses_post_payload_not_saved_env(self, mock_post):
+        def fake_post(url, data=None, headers=None, timeout=None):
+            self.assertEqual(url, 'http://typed-storyteller/api/token')
+            self.assertEqual(data, {'username': 'typed-user', 'password': 'wrong-pass'})
+            self.assertEqual(headers, {'Content-Type': 'application/x-www-form-urlencoded'})
+            self.assertEqual(timeout, 10)
+            return _http_response(401)
+
+        mock_post.side_effect = fake_post
+
+        with patch.dict(os.environ, {
+            'STORYTELLER_ENABLED': 'true',
+            'STORYTELLER_API_URL': 'http://saved-storyteller',
+            'STORYTELLER_USER': 'saved-user',
+            'STORYTELLER_PASSWORD': 'saved-pass',
+        }, clear=False):
+            response = self.client.post(
+                '/api/test-connection/storyteller',
+                json={
+                    'STORYTELLER_ENABLED': True,
+                    'STORYTELLER_API_URL': 'typed-storyteller',
+                    'STORYTELLER_USER': 'typed-user',
+                    'STORYTELLER_PASSWORD': 'wrong-pass',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data['ok'])
+        self.assertIn('Invalid username or password', data['message'])
+        mock_post.assert_called_once()
+
+    @patch('src.web_server.requests.post')
+    def test_test_connection_storyteller_respects_payload_disabled_flag(self, mock_post):
+        with patch.dict(os.environ, {'STORYTELLER_ENABLED': 'true'}, clear=False):
+            response = self.client.post(
+                '/api/test-connection/storyteller',
+                json={
+                    'STORYTELLER_ENABLED': False,
+                    'STORYTELLER_API_URL': 'typed-storyteller',
+                    'STORYTELLER_USER': 'typed-user',
+                    'STORYTELLER_PASSWORD': 'typed-pass',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data['ok'])
+        self.assertEqual(data['message'], 'Storyteller is disabled')
+        mock_post.assert_not_called()
 
     def test_clear_stale_suggestions_api(self):
         """Test the clear-stale-suggestions API endpoint."""

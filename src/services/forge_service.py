@@ -233,16 +233,9 @@ class ForgeService:
                 readaloud_meta = details.get("readaloud", {}) if isinstance(details, dict) else {}
                 readaloud_filepath = readaloud_meta.get("filepath") if isinstance(readaloud_meta, dict) else None
                 if readaloud_filepath:
+                    # Metadata can appear before the artifact is safely downloadable.
+                    # Track readiness for diagnostics, but do not mark completion yet.
                     api_ready_seen = True
-                    completion_method = "api_ready"
-                    return {
-                        "found_uuid": found_uuid,
-                        "processing_triggered": processing_triggered,
-                        "readaloud_path": readaloud_path,
-                        "completion_method": completion_method,
-                        "probe_download_path": probe_download_path,
-                        "api_ready_seen": api_ready_seen,
-                    }
             except Exception as details_err:
                 logger.debug(f"Auto-Forge: get_book_details poll failed for {found_uuid}: {details_err}")
 

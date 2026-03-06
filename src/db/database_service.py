@@ -671,6 +671,14 @@ class DatabaseService:
                 session.expunge(s)
             return suggestions
 
+    def get_ignored_suggestion_source_ids(self) -> List[str]:
+        """Get source IDs that should never be suggested again."""
+        with self.get_session() as session:
+            rows = session.query(PendingSuggestion.source_id).filter(
+                PendingSuggestion.status == 'ignored'
+            ).all()
+            return [row[0] for row in rows if row and row[0]]
+
     def dismiss_suggestion(self, source_id: str) -> bool:
         """Mark a suggestion as dismissed."""
         with self.get_session() as session:

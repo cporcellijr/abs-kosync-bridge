@@ -6,8 +6,18 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
 ## [6.3.4] - 2026-03-05
 
+### Enhancements
+
+- **Library Suggestions Workspace**: Added a dedicated `/suggestions` page with a split layout for suggestion review plus always-visible batch queue controls.
+- **Background Suggestions Scan**: Suggestions scanning now runs as an async background job with status polling and progress phases.
+- **Incremental Suggestions Cache**: Added persisted suggestions scan cache at `/data/suggestions_scan_cache.json` so normal scans can reuse prior results and only scan new unmatched audiobooks.
+- **Full Refresh Control**: Added explicit full refresh scanning to force a complete rescan when desired.
+
 ### Bug Fixes
 
+- **Suggestions Session Cookie Overflow**: Fixed oversized Flask session cookie failures (including 502 completion failures) by moving large scan payloads out of cookie-backed session storage into server-side state.
+- **Suggestions Provider Hammering**: Reduced ABS/Booklore scan load by switching suggestions matching to a one-time ebook candidate pool per scan with in-memory fuzzy matching, instead of per-audiobook provider searches.
+- **Booklore Scan Query Path**: `get_searchable_ebooks('')` now uses Booklore `get_all_books()` for scan workloads to avoid aggressive per-query refresh behavior.
 - **Booklore Duplicate Scan Suppression**: Added a non-blocking refresh lock around full-library scans to prevent overlapping `_refresh_book_cache()` runs under concurrent requests. Duplicate refresh attempts now skip safely, and lock release is guaranteed via `try/finally`.
 - **Booklore Search Miss Freshness**: Updated `search_books()` to use cache-first lookup with a single refresh-on-miss path. On non-empty misses, it performs one refresh only when cache age exceeds 60 seconds and cooldown is not active, then retries the in-memory search once.
 - **Booklore Search Refresh Guardrails**: Added explicit debug logs for miss-refresh trigger, fresh-cache skip, and cooldown skip to make runtime behavior and throttling decisions visible in logs.
@@ -15,6 +25,10 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 ### Tests
 
 - **Booklore Search Miss Coverage**: Added unit tests for refresh-on-miss success, fresh-cache skip, cooldown skip, and refresh-failure single-attempt behavior.
+
+### Maintenance
+
+- **Suggestions Service Layer**: Isolated suggestions scan logic in `src/services/suggestions_service.py` to keep route handlers focused on web actions and state handling.
 
 ---
 

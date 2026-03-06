@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -28,6 +29,7 @@ from src.version import APP_VERSION, get_update_status
 from src.db.models import State
 from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
 from src.utils.storyteller_transcript import StorytellerTranscript
+from src.utils.kosync_headers import hash_kosync_key
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -46,6 +48,14 @@ def _reconfigure_logging():
 container = None
 manager = None
 database_service = None
+SUGGESTIONS_SCAN_JOBS = {}
+SUGGESTIONS_SCAN_JOBS_LOCK = threading.Lock()
+SUGGESTIONS_SCAN_JOB_TTL_SECONDS = 3600
+SUGGESTIONS_STATE_STORE = {}
+SUGGESTIONS_STATE_LOCK = threading.Lock()
+SUGGESTIONS_STATE_TTL_SECONDS = 86400
+SUGGESTIONS_CACHE_FILE_NAME = "suggestions_scan_cache.json"
+SUGGESTIONS_CACHE_LOCK = threading.Lock()
 
 def setup_dependencies(app, test_container=None):
     """
@@ -464,7 +474,12 @@ def get_searchable_ebooks(search_term):
     # 1. Booklore
     if container.booklore_client().is_configured():
         try:
-            books = container.booklore_client().search_books(search_term)
+            if search_term:
+                books = container.booklore_client().search_books(search_term)
+            else:
+                # For scan workloads, use the broader cache-oriented API to avoid
+                # repeated aggressive refresh behavior from per-query search calls.
+                books = container.booklore_client().get_all_books()
             if books:
                 for b in books:
                     fname = b.get('fileName', '')
@@ -664,6 +679,10 @@ def get_abs_author(ab):
     media = ab.get('media', {})
     metadata = media.get('metadata', {})
     return metadata.get('authorName') or (metadata.get('authors') or [{}])[0].get("name", "")
+
+
+def _storyteller_transcript_source(storyteller_uuid, storyteller_manifest):
+    return "storyteller" if storyteller_uuid or storyteller_manifest else None
 
 
 def audiobook_matches_search(ab, search_term):
@@ -1347,7 +1366,7 @@ def match():
         # Create Book object and save to database service
         from src.db.models import Book
         storyteller_manifest = ingest_storyteller_transcripts(abs_id, abs_title, chapters)
-        transcript_source = "storyteller" if storyteller_manifest else None
+        transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
         book = Book(
             abs_id=abs_id,
             abs_title=abs_title,
@@ -1528,7 +1547,7 @@ def batch_match():
                     item.get('abs_title', ''),
                     chapters
                 )
-                transcript_source = "storyteller" if storyteller_manifest else None
+                transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
 
                 # Create Book object and save to database service
                 book = Book(
@@ -1594,6 +1613,576 @@ def batch_match():
 
     return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books,
                            queue=session.get('queue', []), search=search, get_title=manager.get_abs_title)
+
+
+def _get_suggestions_service():
+    from src.services.suggestions_service import SuggestionsService
+
+    return SuggestionsService(
+        database_service=database_service,
+        container=container,
+        manager=manager,
+        get_audiobooks_conditionally=get_audiobooks_conditionally,
+        get_searchable_ebooks=get_searchable_ebooks,
+        audiobook_matches_search=audiobook_matches_search,
+        get_abs_author=get_abs_author,
+        logger=logger,
+    )
+
+
+def _get_ignored_suggestion_source_ids():
+    """Return ABS source IDs that are marked as ignored."""
+    return _get_suggestions_service().get_ignored_suggestion_source_ids()
+
+
+def scan_library_suggestions(cached_suggestions_by_abs=None, cached_no_match_abs_ids=None, progress_callback=None):
+    """Scan for unmatched audiobooks and find candidate ebook matches."""
+    return _get_suggestions_service().scan_library_suggestions(
+        cached_suggestions_by_abs=cached_suggestions_by_abs,
+        cached_no_match_abs_ids=cached_no_match_abs_ids,
+        progress_callback=progress_callback,
+    )
+
+
+def _prune_suggestions_scan_jobs():
+    cutoff = time.time() - SUGGESTIONS_SCAN_JOB_TTL_SECONDS
+    with SUGGESTIONS_SCAN_JOBS_LOCK:
+        stale_ids = [
+            job_id for job_id, job in SUGGESTIONS_SCAN_JOBS.items()
+            if job.get('updated_at', job.get('started_at', 0)) < cutoff
+        ]
+        for job_id in stale_ids:
+            SUGGESTIONS_SCAN_JOBS.pop(job_id, None)
+
+
+def _start_suggestions_scan_job(cached_suggestions_by_abs=None, cached_no_match_abs_ids=None):
+    _prune_suggestions_scan_jobs()
+    job_id = uuid.uuid4().hex
+    with SUGGESTIONS_SCAN_JOBS_LOCK:
+        SUGGESTIONS_SCAN_JOBS[job_id] = {
+            "status": "running",
+            "results": {},
+            "error": None,
+            "progress": {
+                "phase": "initializing",
+                "percent": 0,
+                "message": "Preparing scan...",
+                "scanned_new_done": 0,
+                "scanned_new_total": 0,
+                "reused_cached": 0,
+                "total_unmatched": 0,
+            },
+            "started_at": time.time(),
+            "updated_at": time.time(),
+        }
+
+    threading.Thread(
+        target=_run_suggestions_scan_job,
+        args=(job_id, cached_suggestions_by_abs or {}, cached_no_match_abs_ids or []),
+        daemon=True
+    ).start()
+    return job_id
+
+
+def _run_suggestions_scan_job(job_id, cached_suggestions_by_abs=None, cached_no_match_abs_ids=None):
+    def update_progress(progress_payload):
+        with SUGGESTIONS_SCAN_JOBS_LOCK:
+            if job_id in SUGGESTIONS_SCAN_JOBS:
+                SUGGESTIONS_SCAN_JOBS[job_id]["progress"] = progress_payload or {}
+                SUGGESTIONS_SCAN_JOBS[job_id]["updated_at"] = time.time()
+
+    try:
+        results = scan_library_suggestions(
+            cached_suggestions_by_abs=cached_suggestions_by_abs,
+            cached_no_match_abs_ids=cached_no_match_abs_ids,
+            progress_callback=update_progress,
+        )
+        _save_persisted_suggestions_cache({
+            "scan_cache_by_abs": results.get('cache_by_abs', {}) if isinstance(results, dict) else {},
+            "scan_cache_no_match_abs_ids": results.get('no_match_abs_ids', []) if isinstance(results, dict) else [],
+            "scan_last_stats": results.get('stats', {}) if isinstance(results, dict) else {},
+        })
+        status = "done"
+        error = None
+    except Exception as e:
+        logger.exception(f"Suggestions scan job failed ({job_id}): {e}")
+        results = {}
+        status = "error"
+        error = str(e)
+        update_progress({
+            "phase": "error",
+            "percent": 100,
+            "message": "Scan failed",
+            "scanned_new_done": 0,
+            "scanned_new_total": 0,
+            "reused_cached": 0,
+            "total_unmatched": 0,
+        })
+
+    with SUGGESTIONS_SCAN_JOBS_LOCK:
+        if job_id in SUGGESTIONS_SCAN_JOBS:
+            SUGGESTIONS_SCAN_JOBS[job_id].update({
+                "status": status,
+                "results": results,
+                "error": error,
+                "updated_at": time.time(),
+            })
+
+
+def _get_suggestions_scan_job(job_id):
+    if not job_id:
+        return None
+    with SUGGESTIONS_SCAN_JOBS_LOCK:
+        job = SUGGESTIONS_SCAN_JOBS.get(job_id)
+        if not job:
+            return None
+        return dict(job)
+
+
+def _clear_legacy_suggestions_session_payload():
+    """Remove old large suggestions payload keys from cookie-backed session."""
+    legacy_keys = (
+        'scan_results',
+        'scan_cache_by_abs',
+        'scan_cache_no_match_abs_ids',
+        'scan_last_stats',
+    )
+    removed = False
+    for key in legacy_keys:
+        if key in session:
+            session.pop(key, None)
+            removed = True
+    if removed:
+        session.modified = True
+
+
+def _prune_suggestions_state_store():
+    cutoff = time.time() - SUGGESTIONS_STATE_TTL_SECONDS
+    with SUGGESTIONS_STATE_LOCK:
+        stale_ids = [
+            state_id for state_id, state in SUGGESTIONS_STATE_STORE.items()
+            if state.get('updated_at', state.get('created_at', 0)) < cutoff
+        ]
+        for state_id in stale_ids:
+            SUGGESTIONS_STATE_STORE.pop(state_id, None)
+
+
+def _default_suggestions_state():
+    now = time.time()
+    return {
+        "scan_results": [],
+        "scan_cache_by_abs": {},
+        "scan_cache_no_match_abs_ids": [],
+        "scan_last_stats": {},
+        "scan_has_run": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _get_suggestions_state(create=True):
+    _prune_suggestions_state_store()
+    state_id = session.get('suggestions_state_id')
+    if not state_id and create:
+        state_id = uuid.uuid4().hex
+        session['suggestions_state_id'] = state_id
+        session.modified = True
+
+    if not state_id:
+        return None, None
+
+    with SUGGESTIONS_STATE_LOCK:
+        state = SUGGESTIONS_STATE_STORE.get(state_id)
+        if not state and create:
+            state = _default_suggestions_state()
+            SUGGESTIONS_STATE_STORE[state_id] = state
+
+        if state:
+            state['updated_at'] = time.time()
+        return state_id, state
+
+
+def _suggestions_cache_file_path():
+    return DATA_DIR / SUGGESTIONS_CACHE_FILE_NAME
+
+
+def _empty_suggestions_cache_payload():
+    return {
+        "scan_cache_by_abs": {},
+        "scan_cache_no_match_abs_ids": [],
+        "scan_last_stats": {},
+        "updated_at": time.time(),
+    }
+
+
+def _load_persisted_suggestions_cache():
+    cache_file = _suggestions_cache_file_path()
+    if not cache_file.exists():
+        return _empty_suggestions_cache_payload()
+
+    with SUGGESTIONS_CACHE_LOCK:
+        try:
+            raw = json.loads(cache_file.read_text(encoding='utf-8'))
+        except Exception as e:
+            logger.warning(f"Could not read suggestions cache file '{cache_file}': {e}")
+            return _empty_suggestions_cache_payload()
+
+    payload = _empty_suggestions_cache_payload()
+    if isinstance(raw, dict):
+        cache_by_abs = raw.get('scan_cache_by_abs', {})
+        no_match = raw.get('scan_cache_no_match_abs_ids', [])
+        stats = raw.get('scan_last_stats', {})
+
+        payload['scan_cache_by_abs'] = cache_by_abs if isinstance(cache_by_abs, dict) else {}
+        payload['scan_cache_no_match_abs_ids'] = no_match if isinstance(no_match, list) else []
+        payload['scan_last_stats'] = stats if isinstance(stats, dict) else {}
+
+    return payload
+
+
+def _save_persisted_suggestions_cache(payload):
+    cache_file = _suggestions_cache_file_path()
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+
+    safe_payload = {
+        "scan_cache_by_abs": payload.get('scan_cache_by_abs', {}) if isinstance(payload.get('scan_cache_by_abs', {}), dict) else {},
+        "scan_cache_no_match_abs_ids": payload.get('scan_cache_no_match_abs_ids', []) if isinstance(payload.get('scan_cache_no_match_abs_ids', []), list) else [],
+        "scan_last_stats": payload.get('scan_last_stats', {}) if isinstance(payload.get('scan_last_stats', {}), dict) else {},
+        "updated_at": time.time(),
+    }
+
+    temp_file = cache_file.with_suffix('.tmp')
+    with SUGGESTIONS_CACHE_LOCK:
+        try:
+            temp_file.write_text(json.dumps(safe_payload, ensure_ascii=False), encoding='utf-8')
+            temp_file.replace(cache_file)
+        except Exception as e:
+            logger.warning(f"Could not persist suggestions cache file '{cache_file}': {e}")
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except Exception:
+                pass
+
+
+def suggestions_page():
+    _clear_legacy_suggestions_session_payload()
+    state_id, suggestions_state = _get_suggestions_state(create=True)
+    if suggestions_state is None:
+        suggestions_state = _default_suggestions_state()
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+
+        if action in ('scan', 'scan_full'):
+            full_refresh = (action == 'scan_full')
+            if full_refresh:
+                cached_suggestions_by_abs = {}
+                cached_no_match_abs_ids = []
+                suggestions_state['scan_cache_by_abs'] = {}
+                suggestions_state['scan_cache_no_match_abs_ids'] = []
+                suggestions_state['scan_last_stats'] = {}
+                suggestions_state['scan_results'] = []
+                suggestions_state['scan_has_run'] = False
+                suggestions_state['updated_at'] = time.time()
+                _save_persisted_suggestions_cache(_empty_suggestions_cache_payload())
+            else:
+                state_cache = suggestions_state.get('scan_cache_by_abs', {}) or {}
+                state_no_match = suggestions_state.get('scan_cache_no_match_abs_ids', []) or []
+                if state_cache or state_no_match:
+                    cached_suggestions_by_abs = state_cache
+                    cached_no_match_abs_ids = state_no_match
+                else:
+                    persisted_cache = _load_persisted_suggestions_cache()
+                    cached_suggestions_by_abs = persisted_cache.get('scan_cache_by_abs', {}) or {}
+                    cached_no_match_abs_ids = persisted_cache.get('scan_cache_no_match_abs_ids', []) or []
+
+            job_id = _start_suggestions_scan_job(
+                cached_suggestions_by_abs=cached_suggestions_by_abs,
+                cached_no_match_abs_ids=cached_no_match_abs_ids,
+            )
+            session['suggestions_scan_job_id'] = job_id
+            session.modified = True
+
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"success": True, "status": "running", "job_id": job_id, "full_refresh": full_refresh})
+            return redirect(url_for('suggestions'))
+
+        elif action == 'never':
+            abs_id = request.form.get('abs_id')
+            if abs_id:
+                from src.db.models import PendingSuggestion
+
+                current_scan_results = suggestions_state.get('scan_results', [])
+                current_entry = next((s for s in current_scan_results if s.get('abs_id') == abs_id), None)
+                abs_title = request.form.get('abs_title') or (current_entry.get('abs_title') if current_entry else '') or ''
+                abs_author = request.form.get('abs_author') or (current_entry.get('abs_author') if current_entry else '') or ''
+                cover_url = request.form.get('cover_url') or (current_entry.get('cover_url') if current_entry else '') or ''
+
+                if not database_service.ignore_suggestion(abs_id):
+                    database_service.save_pending_suggestion(PendingSuggestion(
+                        source_id=abs_id,
+                        title=abs_title,
+                        author=abs_author,
+                        cover_url=cover_url,
+                        matches_json="[]",
+                        status='ignored'
+                    ))
+
+                suggestions_state['scan_results'] = [item for item in current_scan_results if item.get('abs_id') != abs_id]
+                cache_by_abs = suggestions_state.get('scan_cache_by_abs', {}) or {}
+                if abs_id in cache_by_abs:
+                    cache_by_abs.pop(abs_id, None)
+                    suggestions_state['scan_cache_by_abs'] = cache_by_abs
+                no_match_abs_ids = [x for x in (suggestions_state.get('scan_cache_no_match_abs_ids', []) or []) if x != abs_id]
+                suggestions_state['scan_cache_no_match_abs_ids'] = no_match_abs_ids
+                suggestions_state['updated_at'] = time.time()
+
+            return redirect(url_for('suggestions'))
+
+        elif action == 'add_to_queue':
+            session.setdefault('queue', [])
+            abs_id = request.form.get('audiobook_id')
+            ebook_filename = request.form.get('ebook_filename', '')
+            ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
+            storyteller_uuid = request.form.get('storyteller_uuid', '')
+            audiobooks = container.abs_client().get_all_audiobooks()
+            selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
+            if selected_ab and (ebook_filename or storyteller_uuid):
+                if not any(item['abs_id'] == abs_id for item in session['queue']):
+                    session['queue'].append({
+                        "abs_id": abs_id,
+                        "abs_title": manager.get_abs_title(selected_ab),
+                        "ebook_filename": ebook_filename,
+                        "ebook_display_name": ebook_display_name,
+                        "storyteller_uuid": storyteller_uuid,
+                        "duration": manager.get_duration(selected_ab),
+                        "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"
+                    })
+                    session.modified = True
+            return redirect(url_for('suggestions'))
+
+        elif action == 'remove_from_queue':
+            abs_id = request.form.get('abs_id')
+            session['queue'] = [item for item in session.get('queue', []) if item['abs_id'] != abs_id]
+            session.modified = True
+            return redirect(url_for('suggestions'))
+
+        elif action == 'clear_queue':
+            session['queue'] = []
+            session.modified = True
+            return redirect(url_for('suggestions'))
+
+        elif action == 'process_queue':
+            from src.db.models import Book
+
+            for item in session.get('queue', []):
+                ebook_filename = item['ebook_filename']
+                storyteller_uuid = item.get('storyteller_uuid', '')
+                original_ebook_filename = item['ebook_filename']
+                duration = item['duration']
+                booklore_id = None
+                kosync_doc_id = None
+
+                if storyteller_uuid:
+                    # Storyteller Tri-Link Logic (mirrors match POST handler)
+                    try:
+                        epub_cache = container.epub_cache_dir()
+                        if not epub_cache.exists():
+                            epub_cache.mkdir(parents=True, exist_ok=True)
+
+                        target_filename = f"storyteller_{storyteller_uuid}.epub"
+                        target_path = epub_cache / target_filename
+
+                        logger.info(f"Batch Match: Using Storyteller Artifact '{storyteller_uuid}' for '{item['abs_title']}'")
+
+                        if container.storyteller_client().download_book(storyteller_uuid, target_path):
+                            original_ebook_filename = ebook_filename
+                            ebook_filename = target_filename
+
+                            if original_ebook_filename:
+                                logger.info(f"Batch Match Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
+                                if container.booklore_client().is_configured():
+                                    bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+                                    if bl_book:
+                                        booklore_id = bl_book.get('id')
+                                kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+                            else:
+                                logger.info("Batch Match Storyteller-Only Link: Computing hash from downloaded artifact")
+                                kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                        else:
+                            logger.warning(f"Failed to download Storyteller artifact '{storyteller_uuid}' for '{item['abs_title']}', skipping")
+                            continue
+                    except Exception as e:
+                        logger.error(f"Storyteller Tri-Link failed for '{item['abs_title']}': {e}")
+                        continue
+                else:
+                    if container.booklore_client().is_configured():
+                        book = container.booklore_client().find_book_by_filename(ebook_filename)
+                        if book:
+                            booklore_id = book.get('id')
+
+                    kosync_doc_id = get_kosync_id_for_ebook(ebook_filename, booklore_id)
+
+                if not kosync_doc_id:
+                    logger.warning(f"Could not compute KOSync ID for {sanitize_log_data(ebook_filename)}, skipping")
+                    continue
+
+                current_book_entry = database_service.get_book(item['abs_id'])
+                if current_book_entry and current_book_entry.kosync_doc_id:
+                    logger.info(f"Preserving existing hash '{current_book_entry.kosync_doc_id}' for '{item['abs_id']}' instead of new hash '{kosync_doc_id}'")
+                    kosync_doc_id = current_book_entry.kosync_doc_id
+
+                item_details = container.abs_client().get_item_details(item['abs_id'])
+                chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+                storyteller_manifest = ingest_storyteller_transcripts(
+                    item['abs_id'],
+                    item.get('abs_title', ''),
+                    chapters
+                )
+                transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
+
+                book = Book(
+                    abs_id=item['abs_id'],
+                    abs_title=item['abs_title'],
+                    ebook_filename=ebook_filename,
+                    kosync_doc_id=kosync_doc_id,
+                    transcript_file=storyteller_manifest,
+                    status="pending",
+                    duration=duration,
+                    transcript_source=transcript_source,
+                    storyteller_uuid=storyteller_uuid or None,
+                    original_ebook_filename=original_ebook_filename
+                )
+
+                database_service.save_book(book)
+
+                hardcover_sync_client = container.sync_clients().get('Hardcover')
+                if hardcover_sync_client and hardcover_sync_client.is_configured():
+                    hardcover_sync_client._automatch_hardcover(book)
+
+                container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
+                if container.booklore_client().is_configured():
+                    shelf_filename = original_ebook_filename or ebook_filename
+                    container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+                if container.storyteller_client().is_configured():
+                    if book.storyteller_uuid:
+                        container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
+
+                database_service.dismiss_suggestion(item['abs_id'])
+                database_service.dismiss_suggestion(kosync_doc_id)
+
+                try:
+                    device_doc = database_service.get_kosync_doc_by_filename(ebook_filename)
+                    if device_doc and device_doc.document_hash != kosync_doc_id:
+                        database_service.dismiss_suggestion(device_doc.document_hash)
+                except Exception:
+                    pass
+
+            session['queue'] = []
+            session.modified = True
+            return redirect(url_for('index'))
+
+    scan_in_progress = False
+    scan_error = None
+    job_id = session.get('suggestions_scan_job_id')
+    if job_id:
+        scan_job = _get_suggestions_scan_job(job_id)
+        if not scan_job:
+            session.pop('suggestions_scan_job_id', None)
+            session.modified = True
+        else:
+            status = scan_job.get('status')
+            if status == 'done':
+                scan_payload = scan_job.get('results', {}) or {}
+                suggestions_state['scan_results'] = scan_payload.get('suggestions', [])
+                suggestions_state['scan_cache_by_abs'] = scan_payload.get('cache_by_abs', {})
+                suggestions_state['scan_cache_no_match_abs_ids'] = scan_payload.get('no_match_abs_ids', [])
+                suggestions_state['scan_last_stats'] = scan_payload.get('stats', {})
+                suggestions_state['scan_has_run'] = True
+                suggestions_state['updated_at'] = time.time()
+                _save_persisted_suggestions_cache({
+                    "scan_cache_by_abs": suggestions_state.get('scan_cache_by_abs', {}),
+                    "scan_cache_no_match_abs_ids": suggestions_state.get('scan_cache_no_match_abs_ids', []),
+                    "scan_last_stats": suggestions_state.get('scan_last_stats', {}),
+                })
+                session.pop('suggestions_scan_job_id', None)
+                session.modified = True
+                with SUGGESTIONS_SCAN_JOBS_LOCK:
+                    SUGGESTIONS_SCAN_JOBS.pop(job_id, None)
+            elif status == 'error':
+                scan_error = scan_job.get('error') or 'Scan failed'
+                session.pop('suggestions_scan_job_id', None)
+                session.modified = True
+                with SUGGESTIONS_SCAN_JOBS_LOCK:
+                    SUGGESTIONS_SCAN_JOBS.pop(job_id, None)
+            else:
+                scan_in_progress = True
+
+    ignored_source_ids = _get_ignored_suggestion_source_ids()
+    scan_results = suggestions_state.get('scan_results', [])
+    cache_by_abs = suggestions_state.get('scan_cache_by_abs', {}) or {}
+    no_match_abs_ids = suggestions_state.get('scan_cache_no_match_abs_ids', []) or []
+    if ignored_source_ids:
+        filtered_results = [item for item in scan_results if item.get('abs_id') not in ignored_source_ids]
+        filtered_cache_by_abs = {
+            abs_id: suggestion for abs_id, suggestion in cache_by_abs.items()
+            if abs_id not in ignored_source_ids
+        }
+        filtered_no_match_abs_ids = [abs_id for abs_id in no_match_abs_ids if abs_id not in ignored_source_ids]
+        if len(filtered_results) != len(scan_results):
+            suggestions_state['scan_results'] = filtered_results
+            scan_results = filtered_results
+            suggestions_state['updated_at'] = time.time()
+        if len(filtered_cache_by_abs) != len(cache_by_abs):
+            suggestions_state['scan_cache_by_abs'] = filtered_cache_by_abs
+            cache_by_abs = filtered_cache_by_abs
+            suggestions_state['updated_at'] = time.time()
+        if len(filtered_no_match_abs_ids) != len(no_match_abs_ids):
+            suggestions_state['scan_cache_no_match_abs_ids'] = filtered_no_match_abs_ids
+            no_match_abs_ids = filtered_no_match_abs_ids
+            suggestions_state['updated_at'] = time.time()
+        _save_persisted_suggestions_cache({
+            "scan_cache_by_abs": suggestions_state.get('scan_cache_by_abs', {}),
+            "scan_cache_no_match_abs_ids": suggestions_state.get('scan_cache_no_match_abs_ids', []),
+            "scan_last_stats": suggestions_state.get('scan_last_stats', {}),
+        })
+
+    return render_template(
+        'suggestions.html',
+        suggestions=scan_results,
+        queue=session.get('queue', []),
+        scan_has_run=bool(suggestions_state.get('scan_has_run', False)),
+        scan_in_progress=scan_in_progress,
+        scan_error=scan_error,
+        scan_stats=suggestions_state.get('scan_last_stats', {}),
+        storyteller_enabled=bool(container.storyteller_client().is_configured()),
+    )
+
+
+def suggestions_scan_status():
+    _clear_legacy_suggestions_session_payload()
+    job_id = session.get('suggestions_scan_job_id')
+    if not job_id:
+        return jsonify({"status": "idle"})
+
+    scan_job = _get_suggestions_scan_job(job_id)
+    if not scan_job:
+        session.pop('suggestions_scan_job_id', None)
+        session.modified = True
+        return jsonify({"status": "idle"})
+
+    response = {
+        "status": scan_job.get('status', 'idle'),
+        "error": scan_job.get('error'),
+        "progress": scan_job.get('progress', {}),
+    }
+    if scan_job.get('status') == 'done':
+        result_payload = scan_job.get('results', {}) or {}
+        response["count"] = len(result_payload.get('suggestions', []))
+        response["stats"] = result_payload.get('stats', {})
+
+    return jsonify(response)
 
 
 def cleanup_mapping_resources(book):
@@ -1931,7 +2520,7 @@ def api_storyteller_link(abs_id):
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             storyteller_manifest = ingest_storyteller_transcripts(abs_id, book.abs_title or '', chapters)
             book.transcript_file = storyteller_manifest
-            book.transcript_source = "storyteller" if storyteller_manifest else None
+            book.transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
             book.status = 'pending' # Force re-process to align with new EPUB
             
             database_service.save_book(book)
@@ -2419,29 +3008,82 @@ def _test_conn_error(e: Exception) -> str:
     return msg
 
 
+def _coerce_test_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _coerce_test_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_test_url(value: str) -> str:
+    url = _coerce_test_str(value).rstrip('/')
+    if url and not url.lower().startswith(('http://', 'https://')):
+        url = f"http://{url}"
+    return url
+
+
+def _build_test_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
 def test_connection(service: str):
     """Test connectivity with diagnostic error messages."""
+    payload = request.get_json(silent=True) or {}
     testers = {
-        'abs': _test_abs,
-        'kosync': _test_kosync,
-        'storyteller': _test_storyteller,
-        'booklore': _test_booklore,
-        'cwa': _test_cwa,
-        'hardcover': _test_hardcover,
-        'telegram': _test_telegram,
+        'abs': lambda data: _test_abs(
+            _normalize_test_url(data.get('ABS_SERVER')),
+            _coerce_test_str(data.get('ABS_KEY')),
+        ),
+        'kosync': lambda data: _test_kosync(
+            _coerce_test_bool(data.get('KOSYNC_ENABLED')),
+            _normalize_test_url(data.get('KOSYNC_SERVER')),
+            _coerce_test_str(data.get('KOSYNC_USER')),
+            _coerce_test_str(data.get('KOSYNC_KEY')),
+        ),
+        'storyteller': lambda data: _test_storyteller(
+            _coerce_test_bool(data.get('STORYTELLER_ENABLED')),
+            _normalize_test_url(data.get('STORYTELLER_API_URL')),
+            _coerce_test_str(data.get('STORYTELLER_USER')),
+            _coerce_test_str(data.get('STORYTELLER_PASSWORD')),
+        ),
+        'booklore': lambda data: _test_booklore(
+            _coerce_test_bool(data.get('BOOKLORE_ENABLED')),
+            _normalize_test_url(data.get('BOOKLORE_SERVER')),
+            _coerce_test_str(data.get('BOOKLORE_USER')),
+            _coerce_test_str(data.get('BOOKLORE_PASSWORD')),
+        ),
+        'cwa': lambda data: _test_cwa(
+            _coerce_test_bool(data.get('CWA_ENABLED')),
+            _normalize_test_url(data.get('CWA_SERVER')),
+            _coerce_test_str(data.get('CWA_USERNAME')),
+            _coerce_test_str(data.get('CWA_PASSWORD')),
+        ),
+        'hardcover': lambda data: _test_hardcover(
+            _coerce_test_bool(data.get('HARDCOVER_ENABLED')),
+            _coerce_test_str(data.get('HARDCOVER_TOKEN')),
+        ),
+        'telegram': lambda data: _test_telegram(
+            _coerce_test_bool(data.get('TELEGRAM_ENABLED')),
+            _coerce_test_str(data.get('TELEGRAM_BOT_TOKEN')),
+        ),
     }
     tester = testers.get(service)
     if not tester:
         return jsonify({"ok": False, "message": f"Unknown service: {service}"}), 400
     try:
-        return jsonify(tester())
+        return jsonify(tester(payload))
     except Exception as e:
         return jsonify({"ok": False, "message": _test_conn_error(e)})
 
 
-def _test_abs() -> dict:
-    url = os.environ.get('ABS_SERVER', '').rstrip('/')
-    token = os.environ.get('ABS_KEY', '')
+def _test_abs(url: str, token: str) -> dict:
     if not url or not token:
         return {"ok": False, "message": "Missing server URL or API token"}
     r = requests.get(f"{url}/api/me", headers={"Authorization": f"Bearer {token}"}, timeout=10)
@@ -2453,21 +3095,32 @@ def _test_abs() -> dict:
     return {"ok": False, "message": f"Server returned {r.status_code}"}
 
 
-def _test_kosync() -> dict:
-    url = os.environ.get('KOSYNC_SERVER', '').rstrip('/')
-    if os.environ.get('KOSYNC_ENABLED', '').lower() == 'false' or not url:
+def _test_kosync(enabled: bool, url: str, user: str, key: str) -> dict:
+    if not enabled or not url:
         return {"ok": False, "message": "KOSync not configured or disabled"}
-    r = requests.get(f"{url}/healthcheck", timeout=5)
-    if r.status_code == 200:
-        return {"ok": True, "message": "Server is reachable"}
-    return {"ok": False, "message": f"Healthcheck returned {r.status_code}"}
+    if not user or not key:
+        return {"ok": False, "message": "Missing username or password"}
+
+    healthcheck = requests.get(_build_test_url(url, "healthcheck"), timeout=5)
+    if healthcheck.status_code != 200:
+        return {"ok": False, "message": f"Healthcheck returned {healthcheck.status_code}"}
+
+    headers = {
+        "x-auth-user": user,
+        "x-auth-key": hash_kosync_key(key),
+    }
+    auth = requests.get(_build_test_url(url, "users/auth"), headers=headers, timeout=5)
+    if auth.status_code == 200:
+        return {"ok": True, "message": "Server is reachable and credentials are valid"}
+    if auth.status_code in (401, 403):
+        return {"ok": False, "message": f"Authentication failed ({auth.status_code}) — check username or password"}
+    if auth.status_code == 500:
+        return {"ok": False, "message": "Remote KOSync server is not configured"}
+    return {"ok": False, "message": f"Auth check returned {auth.status_code}"}
 
 
-def _test_storyteller() -> dict:
-    url = os.environ.get('STORYTELLER_API_URL', '').rstrip('/')
-    user = os.environ.get('STORYTELLER_USER', '')
-    pwd = os.environ.get('STORYTELLER_PASSWORD', '')
-    if os.environ.get('STORYTELLER_ENABLED', '').lower() == 'false':
+def _test_storyteller(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled:
         return {"ok": False, "message": "Storyteller is disabled"}
     if not url or not user or not pwd:
         return {"ok": False, "message": "Missing URL, username, or password"}
@@ -2484,16 +3137,11 @@ def _test_storyteller() -> dict:
     return {"ok": False, "message": f"Login returned {r.status_code}"}
 
 
-def _test_booklore() -> dict:
-    url = os.environ.get('BOOKLORE_SERVER', '').rstrip('/')
-    user = os.environ.get('BOOKLORE_USER', '')
-    pwd = os.environ.get('BOOKLORE_PASSWORD', '')
-    if os.environ.get('BOOKLORE_ENABLED', '').lower() == 'false':
+def _test_booklore(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled:
         return {"ok": False, "message": "Booklore is disabled"}
     if not url or not user or not pwd:
         return {"ok": False, "message": "Missing URL, username, or password"}
-    if not url.lower().startswith(('http://', 'https://')):
-        url = f"http://{url}"
     r = requests.post(
         f"{url}/api/v1/auth/login",
         json={"username": user, "password": pwd},
@@ -2506,14 +3154,9 @@ def _test_booklore() -> dict:
     return {"ok": False, "message": f"Login returned {r.status_code}"}
 
 
-def _test_cwa() -> dict:
-    url = os.environ.get('CWA_SERVER', '').rstrip('/')
-    user = os.environ.get('CWA_USERNAME', '').strip()
-    pwd = os.environ.get('CWA_PASSWORD', '').strip()
-    if os.environ.get('CWA_ENABLED', '').lower() != 'true' or not url:
+def _test_cwa(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled or not url:
         return {"ok": False, "message": "CWA not configured or disabled"}
-    if not url.lower().startswith(('http://', 'https://')):
-        url = f"http://{url}"
     r = requests.get(f"{url}/opds", auth=(user, pwd) if user else None, timeout=5)
     if r.status_code == 200:
         if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
@@ -2524,9 +3167,9 @@ def _test_cwa() -> dict:
     return {"ok": False, "message": f"Server returned {r.status_code}"}
 
 
-def _test_hardcover() -> dict:
-    token = os.environ.get('HARDCOVER_TOKEN', '').strip()
-    if os.environ.get('HARDCOVER_ENABLED', '').lower() == 'false':
+def _test_hardcover(enabled: bool, token: str) -> dict:
+    token = token.strip()
+    if not enabled:
         return {"ok": False, "message": "Hardcover is disabled"}
     if not token:
         return {"ok": False, "message": "Missing API token"}
@@ -2552,9 +3195,8 @@ def _test_hardcover() -> dict:
     return {"ok": False, "message": f"API returned {r.status_code}"}
 
 
-def _test_telegram() -> dict:
-    token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    if os.environ.get('TELEGRAM_ENABLED', '').lower() == 'false' or not token:
+def _test_telegram(enabled: bool, token: str) -> dict:
+    if not enabled or not token:
         return {"ok": False, "message": "Telegram not configured or disabled"}
     r = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
     if r.status_code == 200 and r.json().get('ok'):
@@ -2598,6 +3240,7 @@ def create_app(test_container=None):
     app.add_url_rule('/book-linker/<path:dummy>', 'book_linker_legacy_path', _legacy_book_linker_redirect)
     app.add_url_rule('/match', 'match', match, methods=['GET', 'POST'])
     app.add_url_rule('/batch-match', 'batch_match', batch_match, methods=['GET', 'POST'])
+    app.add_url_rule('/suggestions', 'suggestions', suggestions_page, methods=['GET', 'POST'])
     app.add_url_rule('/delete/<abs_id>', 'delete_mapping', delete_mapping, methods=['POST'])
     app.add_url_rule('/clear-progress/<abs_id>', 'clear_progress', clear_progress, methods=['POST'])
     app.add_url_rule('/api/sync-now/<abs_id>', 'sync_now', sync_now, methods=['POST'])
@@ -2613,13 +3256,14 @@ def create_app(test_container=None):
 
     # Suggestion routes
     app.add_url_rule('/api/suggestions', 'get_suggestions', get_suggestions, methods=['GET'])
+    app.add_url_rule('/api/suggestions/scan-status', 'suggestions_scan_status', suggestions_scan_status, methods=['GET'])
     app.add_url_rule('/api/suggestions/<source_id>/dismiss', 'dismiss_suggestion', dismiss_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/<source_id>/ignore', 'ignore_suggestion', ignore_suggestion, methods=['POST'])
     app.add_url_rule('/api/suggestions/clear_stale', 'clear_stale_suggestions', clear_stale_suggestions, methods=['POST'])
     app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
-    app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['GET'])
+    app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['POST'])
 
     # Storyteller API routes
     app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])

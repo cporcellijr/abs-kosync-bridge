@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 class _MatchFlowContainer:
@@ -151,3 +151,25 @@ class TestStorytellerMatchFlow(unittest.TestCase):
         self.assertEqual(manifest["format"], "storyteller_manifest")
         self.assertEqual(manifest["chapter_count"], 1)
         self.assertTrue((manifest_path.parent / "00000-00001.json").exists())
+
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-story-uuid-1")
+    def test_match_route_preserves_storyteller_source_when_ingest_missing(self, _mock_kosync, _mock_ingest):
+        self.container._storyteller_client.download_book.return_value = True
+
+        response = self.client.post(
+            "/match",
+            data={
+                "audiobook_id": "abs-1",
+                "ebook_filename": "delta-v.epub",
+                "storyteller_uuid": "story-uuid-1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.container._database_service.save_book.assert_called_once()
+
+        saved_book = self.container._database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, "story-uuid-1")
+        self.assertEqual(saved_book.transcript_source, "storyteller")
+        self.assertIsNone(saved_book.transcript_file)

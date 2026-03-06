@@ -265,6 +265,19 @@ class TestForgeService(unittest.TestCase):
         self.mock_transcriber.process_audio.assert_called_once()
         self.mock_alignment.align_and_store.assert_called_once()
 
+    def test_auto_forge_uses_smil_and_skips_whisper_when_smil_available(self):
+        """Auto-forge should not call Whisper when SMIL transcript is valid."""
+        self._run_auto_forge_pipeline(
+            text_item={"source": "Local File"},
+            ingest_manifest=None,
+            storyteller_alignment_ok=False,
+            smil_transcript=[{"start": 0.0, "end": 1.0, "text": "from smil"}],
+            whisper_transcript=[{"start": 0.0, "end": 1.0, "text": "from whisper"}],
+        )
+
+        self.mock_transcriber.process_audio.assert_not_called()
+        self.mock_alignment.align_and_store.assert_called_once()
+
     def test_auto_forge_runs_final_cleanup_on_pipeline_failure(self):
         """Auto-forge should still try source cleanup after post-download pipeline failures."""
         with patch.object(self.service, "_cleanup_staged_sources", return_value=0) as mock_cleanup:
@@ -278,6 +291,37 @@ class TestForgeService(unittest.TestCase):
 
         mock_cleanup.assert_called_once()
         self.assertEqual(db_book.status, "error")
+
+    def test_poll_auto_forge_completion_api_metadata_does_not_mark_complete(self):
+        """Metadata readiness alone should not mark auto-forge complete."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            course_dir = tmp_path / "course"
+            course_dir.mkdir(parents=True, exist_ok=True)
+            epub_cache = tmp_path / "epub_cache"
+            epub_cache.mkdir(parents=True, exist_ok=True)
+
+            st_client = MagicMock()
+            st_client.get_book_details.return_value = {
+                "readaloud": {"filepath": "/storyteller/output/readaloud.epub"}
+            }
+            st_client.download_book.return_value = False
+
+            with patch.object(self.service, "_find_processed_epub", return_value=None):
+                result = self.service._poll_auto_forge_completion(
+                    st_client=st_client,
+                    safe_title="Auto Book",
+                    epub_filename="Auto Book.epub",
+                    title="Auto Book",
+                    course_dir=course_dir,
+                    epub_cache=epub_cache,
+                    found_uuid="uuid-1",
+                    processing_triggered=True,
+                    poll_count=1,
+                )
+
+            self.assertTrue(result["api_ready_seen"])
+            self.assertIsNone(result["completion_method"])
 
 
 if __name__ == '__main__':
