@@ -549,7 +549,7 @@ class TestKosyncEndpoints(unittest.TestCase):
 
         self.assertEqual(result, 'target-book.epub')
         booklore_client.get_all_books.assert_called()
-        booklore_client._fetch_and_cache_detail.assert_called_once_with('bl-1')
+        booklore_client._fetch_and_cache_detail.assert_called_with('bl-1')
         booklore_client.download_book.assert_called_once_with('bl-1')
         db.save_kosync_document.assert_called_once()
         saved_doc = db.save_kosync_document.call_args[0][0]

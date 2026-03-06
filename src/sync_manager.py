@@ -124,6 +124,47 @@ class SyncManager:
         context_window = full_text[max(0, idx - 120):min(text_len, idx + 120)]
         return prefix_anchor, suffix_anchor, context_window
 
+    def _resolve_href_to_char_offset(self, ebook_filename: str, href: str, chapter_progress: float | None = None):
+        """Map an href (and optional chapter progression) to a global character offset."""
+        if not ebook_filename or not href:
+            return None, None
+
+        try:
+            book_path = self.ebook_parser.resolve_book_path(ebook_filename)
+            _full_text, spine_map = self.ebook_parser.extract_text_and_map(book_path)
+            if not spine_map:
+                return None, None
+
+            href_norm = str(href).lower().strip()
+            target_item = None
+            for item in spine_map:
+                item_href = str(item.get("href", "")).lower().strip()
+                if not item_href:
+                    continue
+                if href_norm in item_href or item_href in href_norm:
+                    target_item = item
+                    break
+
+            if not target_item:
+                return None, None
+
+            start = int(target_item.get("start", 0))
+            end = int(target_item.get("end", start))
+            if end <= start:
+                return max(0, start), "href_only"
+
+            if chapter_progress is not None:
+                try:
+                    progress = max(0.0, min(float(chapter_progress), 1.0))
+                except (TypeError, ValueError):
+                    progress = None
+                if progress is not None:
+                    return start + int((end - start) * progress), "href_progression"
+
+            return start, "href_only"
+        except Exception:
+            return None, None
+
     def _validate_and_stabilize_locator(self, book: Book, target_offset: int, locator: LocatorResult):
         """Round-trip validate locator fields and deterministically degrade to safer fields."""
         if not locator or not getattr(book, "ebook_filename", None):
@@ -363,6 +404,7 @@ class SyncManager:
             client_cfi = client_state.current.get('cfi')
             client_href = client_state.current.get('href')
             client_frag = client_state.current.get('frag')
+            client_chapter_progress = client_state.current.get("chapter_progress")
             normalization_source = "percent_fallback"
 
             try:
@@ -384,13 +426,25 @@ class SyncManager:
                         if idx >= 0:
                             char_offset = idx
                             normalization_source = "href_frag"
+                    else:
+                        logger.debug(
+                            f"'{book.abs_id}' Could not resolve href+fragment for '{client_name}' "
+                            f"(href='{sanitize_log_data(client_href)}', frag='{sanitize_log_data(client_frag)}')"
+                        )
+
+                if char_offset is None and client_href:
+                    char_offset, href_source = self._resolve_href_to_char_offset(
+                        book.ebook_filename, client_href, client_chapter_progress
+                    )
+                    if char_offset is not None:
+                        normalization_source = href_source
 
                 if char_offset is None:
                     char_offset = int(client_pct * total_text_len)
 
                 char_offset = max(0, min(int(char_offset), total_text_len - 1))
                 client_state.current["_normalization_source"] = normalization_source
-                if normalization_source in ("xpath", "cfi", "href_frag"):
+                if normalization_source in ("xpath", "cfi", "href_frag", "href_progression"):
                     client_state.current["_locator_pct"] = char_offset / float(total_text_len)
                 else:
                     client_state.current.pop("_locator_pct", None)
@@ -412,7 +466,10 @@ class SyncManager:
                     continue
 
                 normalized[client_name] = ts_for_text
-                client_state.current["_normalization_confidence"] = "high" if normalization_source != "percent_fallback" else "low"
+                high_conf_sources = {"xpath", "cfi", "href_frag", "href_progression"}
+                client_state.current["_normalization_confidence"] = (
+                    "high" if normalization_source in high_conf_sources else "low"
+                )
                 logger.debug(
                     f"'{book.abs_id}' ebook->time normalized client={client_name} source={normalization_source} "
                     f"offset={char_offset} prefix_len={len(prefix_anchor)} suffix_len={len(suffix_anchor)} "

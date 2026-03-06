@@ -111,7 +111,7 @@ class BookloreClient:
                                 'authors': db_book.authors
                             }
 
-                        self._book_cache[db_book.filename] = book_info
+                        self._book_cache[db_book.filename.lower()] = book_info
 
                         # Update ID cache
                         bid = book_info.get('id')
@@ -462,12 +462,41 @@ class BookloreClient:
             or book.get('fileName')
             or ''
         )
+        book_type = (
+            primary_file.get('bookType')
+            or book.get('bookType')
+            or ''
+        )
         return {
             'title': title,
             'subtitle': subtitle,
             'authors': authors,
             'fileName': file_name,
+            'bookType': book_type,
         }
+
+    @staticmethod
+    def _infer_book_type_from_name(name):
+        suffix = Path(name or '').suffix.lower()
+        if suffix == '.epub':
+            return 'EPUB'
+        if suffix == '.pdf':
+            return 'PDF'
+        if suffix in {'.cbz', '.cbr', '.cbt', '.cb7'}:
+            return 'CBX'
+        return ''
+
+    def _get_book_type(self, book):
+        if not isinstance(book, dict):
+            return ''
+
+        raw_book_type = (
+            book.get('bookType')
+            or book.get('primaryFile', {}).get('bookType')
+            or self._infer_book_type_from_name(book.get('fileName'))
+            or self._infer_book_type_from_name(book.get('filePath'))
+        )
+        return str(raw_book_type or '').upper()
 
     def _upsert_lightweight_entry(self, book):
         bid = book.get('id')
@@ -487,6 +516,7 @@ class BookloreClient:
                 'subtitle': summary['subtitle'] or lightweight_info.get('subtitle') or '',
                 'authors': summary['authors'] or lightweight_info.get('authors') or '',
                 'fileName': summary['fileName'] or lightweight_info.get('fileName'),
+                'bookType': summary['bookType'] or lightweight_info.get('bookType') or '',
                 'libraryId': book.get('libraryId'),
                 'libraryName': book.get('libraryName'),
                 '_needs_detail': True,
@@ -1089,7 +1119,13 @@ class BookloreClient:
             return False
 
         book_id = book['id']
-        book_type = (book.get('bookType') or '').upper()
+        if book.get('_needs_detail') or not self._get_book_type(book):
+            hydrated = self._fetch_and_cache_detail(book_id)
+            if hydrated:
+                book = hydrated
+            elif book.get('_needs_detail'):
+                logger.debug(f"Booklore: Could not hydrate lightweight entry for {sanitize_log_data(ebook_filename)}")
+        book_type = self._get_book_type(book)
         pct_display = percentage * 100
 
         clear_reset = book_type == 'EPUB' and percentage <= 0
@@ -1127,6 +1163,14 @@ class BookloreClient:
                 logger.debug(f"Booklore: Clearing CFI for 0% reset (variant={variant_name})")
 
             response = self._make_request("POST", "/api/v1/books/progress", payload)
+            if response and response.status_code == 404:
+                self._evict_cached_book(
+                    book_id=book_id,
+                    filename=ebook_filename,
+                    reason="progress update returned 404",
+                )
+                last_status = 404
+                break
             if not response or response.status_code not in [200, 201, 204]:
                 last_status = response.status_code if response else "No response"
                 continue

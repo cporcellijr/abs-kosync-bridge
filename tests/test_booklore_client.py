@@ -317,6 +317,80 @@ def test_update_progress_retries_without_cfi_if_verified_pct_mismatch(booklore_c
     assert "cfi" not in second_post[2]["epubProgress"]
 
 
+def test_update_progress_hydrates_lightweight_entry_when_book_type_missing(booklore_client):
+    lightweight = {
+        "id": 6043,
+        "fileName": "test-book.epub",
+        "_needs_detail": True,
+    }
+    hydrated = {
+        "id": 6043,
+        "bookType": "EPUB",
+        "fileName": "test-book.epub",
+        "epubProgress": {"percentage": 12.0, "cfi": ""},
+    }
+    booklore_client.find_book_by_filename = MagicMock(return_value=lightweight)
+    booklore_client._fetch_and_cache_detail = MagicMock(return_value=hydrated)
+
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "primaryFile": {"bookType": "EPUB"},
+        "epubProgress": {"percentage": 50.0, "cfi": ""},
+    }
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_progress("test-book.epub", 0.5, LocatorResult(percentage=0.5))
+
+    assert ok is True
+    booklore_client._fetch_and_cache_detail.assert_called_once_with(6043)
+    _, _, payload = booklore_client._make_request.call_args_list[0][0]
+    assert payload["epubProgress"]["percentage"] == 50.0
+
+
+def test_update_progress_infers_book_type_from_filename_when_missing(booklore_client):
+    booklore_client.find_book_by_filename = MagicMock(return_value={
+        "id": 6043,
+        "fileName": "test-book.epub",
+    })
+    booklore_client._fetch_and_cache_detail = MagicMock()
+
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "primaryFile": {"bookType": "EPUB"},
+        "epubProgress": {"percentage": 40.0, "cfi": ""},
+    }
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_progress("test-book.epub", 0.4, LocatorResult(percentage=0.4))
+
+    assert ok is True
+    booklore_client._fetch_and_cache_detail.assert_not_called()
+    _, _, payload = booklore_client._make_request.call_args_list[0][0]
+    assert "epubProgress" in payload
+
+
+def test_update_progress_404_evicts_stale_hydrated_entry(booklore_client):
+    booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
+    booklore_client.db.delete_booklore_book.reset_mock()
+
+    response = MagicMock()
+    response.status_code = 404
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    ok = booklore_client.update_progress("gone.epub", 0.5, LocatorResult(percentage=0.5))
+
+    assert ok is False
+    assert "gone" not in booklore_client._book_id_cache
+    assert "gone.epub" not in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
+
+
 def test_search_books_miss_triggers_single_refresh_and_returns_new_match(booklore_client):
     booklore_client._book_cache = {
         "old.epub": {"fileName": "old.epub", "title": "Old Book", "authors": "Old Author"}

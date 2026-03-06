@@ -149,9 +149,11 @@ class StorytellerAPIClient:
                 return book_info
         return None
 
-    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+    def get_position_details_rich(
+        self, book_uuid: str
+    ) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str], Optional[float]]:
         """
-        Returns: (percentage, timestamp, href, fragment_id)
+        Returns: (percentage, timestamp, href, fragment_id, chapter_progression)
         """
         response = self._make_request("GET", f"/api/v2/books/{book_uuid}/positions")
         if response and response.status_code == 200:
@@ -167,13 +169,26 @@ class StorytellerAPIClient:
             fragment = None
             if locations.get('fragments') and len(locations['fragments']) > 0:
                 fragment = locations['fragments'][0] # e.g. "id628-sentence94"
+            chapter_progression = locations.get("progression")
+            if chapter_progression is not None:
+                try:
+                    chapter_progression = float(chapter_progression)
+                except (TypeError, ValueError):
+                    chapter_progression = None
 
-            return pct, ts, href, fragment
+            return pct, ts, href, fragment, chapter_progression
 
-        return None, None, None, None
+        return None, None, None, None, None
+
+    def get_position_details(self, book_uuid: str) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[str]]:
+        """
+        Returns: (percentage, timestamp, href, fragment_id)
+        """
+        pct, ts, href, fragment, _chapter_progress = self.get_position_details_rich(book_uuid)
+        return pct, ts, href, fragment
 
     def get_all_positions_bulk(self) -> dict:
-        """Fetch all book positions in one pass. Returns {title_lower: {pct, ts, href, frag, uuid}}"""
+        """Fetch all book positions in one pass. Returns {title_lower: {pct, ts, href, frag, chapter_progress, uuid}}"""
         if not self._book_cache:
             self._refresh_book_cache()
         
@@ -182,10 +197,10 @@ class StorytellerAPIClient:
             uuid = book.get('uuid')
             if not uuid:
                 continue
-            pct, ts, href, frag = self.get_position_details(uuid)
+            pct, ts, href, frag, chapter_progress = self.get_position_details_rich(uuid)
             if pct is not None:
                 positions[title.lower()] = {
-                    'pct': pct, 'ts': ts, 'href': href, 'frag': frag, 'uuid': uuid
+                    'pct': pct, 'ts': ts, 'href': href, 'frag': frag, 'chapter_progress': chapter_progress, 'uuid': uuid
                 }
         return positions
 

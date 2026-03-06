@@ -178,6 +178,41 @@ def test_normalization_sets_high_low_confidence_by_source():
     assert cfg_pct["BookLore"].current["_normalization_confidence"] == "low"
 
 
+def test_normalization_uses_href_progression_when_fragment_lookup_fails():
+    manager = _manager_with_mocks()
+    full_text = "a" * 1000
+    manager.ebook_parser.resolve_book_path.return_value = "book.epub"
+    manager.ebook_parser.extract_text_and_map.return_value = (
+        full_text,
+        [{"href": "OEBPS/Text/part0083.xhtml", "start": 200, "end": 600}],
+    )
+    manager.ebook_parser.resolve_xpath_to_index.return_value = None
+    manager.ebook_parser.resolve_cfi_to_index.return_value = None
+    manager.ebook_parser.resolve_locator_id.return_value = None
+    manager.alignment_service.get_time_for_text.return_value = 111.0
+
+    book = SimpleNamespace(abs_id="abs-1", transcript_file="DB_MANAGED", ebook_filename="book.epub")
+    config = {
+        "ABS": _state({"ts": 10.0}),
+        "BookLore": _state(
+            {
+                "pct": 0.1,
+                "href": "OEBPS/Text/part0083.xhtml",
+                "frag": "x_c079-sentence123",
+                "chapter_progress": 0.5,
+            }
+        ),
+    }
+
+    normalized = manager._normalize_for_cross_format_comparison(book, config)
+
+    assert normalized["BookLore"] == 111.0
+    assert config["BookLore"].current["_normalization_source"] == "href_progression"
+    assert config["BookLore"].current["_normalization_confidence"] == "high"
+    _, kwargs = manager.alignment_service.get_time_for_text.call_args
+    assert kwargs["char_offset_hint"] == 400
+
+
 def test_normalization_uses_cached_extract_once_per_book_per_cycle():
     manager = _manager_with_mocks()
     manager.ebook_parser.resolve_book_path.return_value = "book.epub"
@@ -304,6 +339,35 @@ def test_single_non_abs_delta_must_be_ahead_on_normalized_timeline():
 
     assert leader == "ABS"
     assert leader_pct == config["ABS"].current["pct"]
+
+
+def test_single_storyteller_delta_with_href_progression_is_not_demoted():
+    manager = SyncManager.__new__(SyncManager)
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {
+        "ABS": _Client(),
+        "Storyteller": _Client(),
+    }
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: name == "Storyteller")
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 31162.8, "Storyteller": 32417.8}
+    )
+
+    book = SimpleNamespace(duration=84898, transcript_file="DB_MANAGED")
+    config = {
+        "ABS": _state({"pct": 0.3672900422, "ts": 31162.8}),
+        "Storyteller": _state({"pct": 0.3819, "_normalization_source": "href_progression"}),
+    }
+    config["Storyteller"].previous_pct = 0.372752
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "Storyteller"
+    assert leader_pct == config["Storyteller"].current["pct"]
 
 
 def test_parse_cfi_components_supports_minimal_cfi():
