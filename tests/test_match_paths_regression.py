@@ -206,6 +206,28 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertIsNotNone(saved_book.transcript_file)
         self.assertTrue(Path(saved_book.transcript_file).exists())
 
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-match-story-fallback"])
+    def test_match_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
+
+        response = self.client.post(
+            "/match",
+            data={
+                "audiobook_id": "ab-1",
+                "ebook_filename": "book.epub",
+                "storyteller_uuid": "story-uuid-match-fallback",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.kosync_doc_id, "hash-match-story-fallback")
+        call_args = [call.args for call in _mock_kosync.call_args_list]
+        self.assertEqual(call_args[0], ("book.epub", None))
+        self.assertEqual(call_args[1], ("storyteller_story-uuid-match-fallback.epub",))
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-forge-1")
     def test_match_forge_action_only_stages(self, _mock_kosync):
         response = self.client.post(
@@ -332,6 +354,33 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertEqual(saved_book.transcript_source, "storyteller")
         self.assertIsNotNone(saved_book.transcript_file)
         self.assertTrue(Path(saved_book.transcript_file).exists())
+
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-batch-story-fallback"])
+    def test_batch_match_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
+
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "batch-original.epub",
+                "ebook_display_name": "Batch Story Fallback",
+                "storyteller_uuid": "story-uuid-batch-fallback",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post("/batch-match", data={"action": "process_queue"})
+        self.assertEqual(process_response.status_code, 302)
+
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.kosync_doc_id, "hash-batch-story-fallback")
+        call_args = [call.args for call in _mock_kosync.call_args_list]
+        self.assertEqual(call_args[0], ("batch-original.epub", None))
+        self.assertEqual(call_args[1], ("storyteller_story-uuid-batch-fallback.epub",))
 
     def test_batch_match_remove_from_queue(self):
         with self.client.session_transaction() as session_data:
@@ -488,6 +537,33 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertEqual(saved_book.transcript_source, "storyteller")
         self.assertIsNotNone(saved_book.transcript_file)
         self.assertTrue(Path(saved_book.transcript_file).exists())
+
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-suggestions-story-fallback"])
+    def test_suggestions_queue_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
+
+        add_response = self.client.post(
+            "/suggestions",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "suggested-original.epub",
+                "ebook_display_name": "Suggested Story Fallback",
+                "storyteller_uuid": "story-uuid-suggestions-fallback",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post("/suggestions", data={"action": "process_queue"})
+        self.assertEqual(process_response.status_code, 302)
+
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.kosync_doc_id, "hash-suggestions-story-fallback")
+        call_args = [call.args for call in _mock_kosync.call_args_list]
+        self.assertEqual(call_args[0], ("suggested-original.epub", None))
+        self.assertEqual(call_args[1], ("storyteller_story-uuid-suggestions-fallback.epub",))
 
 
 if __name__ == "__main__":

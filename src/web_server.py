@@ -580,6 +580,31 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
     return None
 
 
+def _compute_storyteller_trilink_kosync_id(original_ebook_filename, storyteller_filename, log_prefix):
+    """Prefer the original EPUB hash for Tri-Link, but fall back to the Storyteller artifact."""
+    booklore_id = None
+    if original_ebook_filename:
+        logger.info(f"⚡ {log_prefix}: Computing hash from original EPUB '{original_ebook_filename}'")
+        if container.booklore_client().is_configured():
+            bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
+            if bl_book:
+                booklore_id = bl_book.get('id')
+
+        kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
+        if kosync_doc_id:
+            return kosync_doc_id
+
+        logger.warning(
+            f"⚠️ {log_prefix}: Could not compute hash from original EPUB "
+            f"'{sanitize_log_data(original_ebook_filename)}'; falling back to Storyteller artifact"
+        )
+    else:
+        logger.info(f"⚡ {log_prefix}: No original EPUB available; using Storyteller artifact")
+
+    logger.info(f"⚡ {log_prefix}: Computing hash from downloaded Storyteller artifact '{storyteller_filename}'")
+    return get_kosync_id_for_ebook(storyteller_filename)
+
+
 class EbookResult:
     """Wrapper to provide consistent interface for ebooks from Booklore, CWA, ABS, or filesystem."""
 
@@ -1514,20 +1539,11 @@ def match():
                 ebook_filename = target_filename # Override filename
                 original_ebook_filename = selected_filename # Preserve original
 
-                # [FIX] Conditionally compute KOSync ID
-                if original_ebook_filename:
-                    # Tri-Link: Compute hash from the normal EPUB so it matches the user's device
-                    logger.info(f"⚡ Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
-                    booklore_id = None
-                    if container.booklore_client().is_configured():
-                        bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
-                        if bl_book:
-                            booklore_id = bl_book.get('id')
-                    kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
-                else:
-                    # Storyteller-Only Link: Compute hash from the downloaded artifact
-                    logger.info("⚡ Storyteller-Only Link: Computing hash from downloaded artifact")
-                    kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                kosync_doc_id = _compute_storyteller_trilink_kosync_id(
+                    original_ebook_filename,
+                    target_filename,
+                    "Tri-Link",
+                )
                     
             except Exception as e:
                 logger.error(f"❌ Storyteller Link failed: {e}")
@@ -1716,18 +1732,11 @@ def batch_match():
                             original_ebook_filename = ebook_filename  # Preserve original (may be empty for storyteller-only)
                             ebook_filename = target_filename  # Override filename to cached artifact
 
-                            if original_ebook_filename:
-                                # Tri-Link: Compute hash from the original EPUB so it matches the user's device
-                                logger.info(f"⚡ Batch Match Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
-                                if container.booklore_client().is_configured():
-                                    bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
-                                    if bl_book:
-                                        booklore_id = bl_book.get('id')
-                                kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
-                            else:
-                                # Storyteller-Only Link: Compute hash from the downloaded artifact
-                                logger.info("⚡ Batch Match Storyteller-Only Link: Computing hash from downloaded artifact")
-                                kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                            kosync_doc_id = _compute_storyteller_trilink_kosync_id(
+                                original_ebook_filename,
+                                target_filename,
+                                "Batch Match Tri-Link",
+                            )
                         else:
                             logger.warning(f"⚠️ Failed to download Storyteller artifact '{storyteller_uuid}' for '{item['abs_title']}', skipping")
                             continue
@@ -2215,16 +2224,11 @@ def suggestions_page():
                             original_ebook_filename = ebook_filename
                             ebook_filename = target_filename
 
-                            if original_ebook_filename:
-                                logger.info(f"Batch Match Tri-Link: Computing hash from original EPUB '{original_ebook_filename}'")
-                                if container.booklore_client().is_configured():
-                                    bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename)
-                                    if bl_book:
-                                        booklore_id = bl_book.get('id')
-                                kosync_doc_id = get_kosync_id_for_ebook(original_ebook_filename, booklore_id)
-                            else:
-                                logger.info("Batch Match Storyteller-Only Link: Computing hash from downloaded artifact")
-                                kosync_doc_id = container.ebook_parser().get_kosync_id(target_path)
+                            kosync_doc_id = _compute_storyteller_trilink_kosync_id(
+                                original_ebook_filename,
+                                target_filename,
+                                "Batch Match Tri-Link",
+                            )
                         else:
                             logger.warning(f"Failed to download Storyteller artifact '{storyteller_uuid}' for '{item['abs_title']}', skipping")
                             continue
