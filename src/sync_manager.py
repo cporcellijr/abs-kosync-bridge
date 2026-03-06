@@ -20,7 +20,7 @@ from src.utils.storyteller_transcript import StorytellerTranscript
 from src.utils.logging_utils import sanitize_log_data
 
 # [NEW] Service Imports
-from src.services.alignment_service import AlignmentService
+from src.services.alignment_service import AlignmentService, ingest_storyteller_transcripts
 from src.services.library_service import LibraryService
 from src.services.migration_service import MigrationService
 
@@ -986,8 +986,22 @@ class SyncManager:
             # We need this for Validating SMIL OR for Aligning Whisper
             book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
 
-            if getattr(book, 'transcript_source', None) == 'storyteller' and self.alignment_service:
+            if (
+                self.alignment_service
+                and (
+                    getattr(book, 'transcript_source', None) == 'storyteller'
+                    or getattr(book, 'storyteller_uuid', None)
+                )
+            ):
                 storyteller_manifest = self._get_storyteller_manifest_path(book)
+                if not storyteller_manifest:
+                    try:
+                        ingested_manifest = ingest_storyteller_transcripts(abs_id, abs_title, chapters)
+                        if ingested_manifest:
+                            storyteller_manifest = self._get_storyteller_manifest_path(book) or Path(ingested_manifest)
+                    except Exception as storyteller_ingest_err:
+                        logger.warning(f"Storyteller ingest retry failed for '{abs_id}': {storyteller_ingest_err}")
+
                 if storyteller_manifest:
                     try:
                         storyteller_transcript = StorytellerTranscript(storyteller_manifest)
@@ -1000,6 +1014,8 @@ class SyncManager:
                             logger.info(f"Storyteller alignment map generated for '{sanitize_log_data(abs_title)}'")
                     except Exception as storyteller_err:
                         logger.warning(f"Storyteller alignment failed for '{abs_id}': {storyteller_err}")
+                else:
+                    logger.info(f"Storyteller manifest unavailable for '{abs_id}', falling back to SMIL/Whisper")
 
             # Attempt SMIL extraction
             if not storyteller_aligned and hasattr(self.transcriber, 'transcribe_from_smil'):

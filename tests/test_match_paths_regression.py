@@ -229,6 +229,38 @@ class TestMatchPathsRegression(unittest.TestCase):
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
 
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-story-1")
+    def test_batch_match_storyteller_uuid_preserves_storyteller_source(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "batch-original.epub",
+                "ebook_display_name": "Batch Story",
+                "storyteller_uuid": "story-uuid-1",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post(
+            "/batch-match",
+            data={"action": "process_queue"},
+        )
+        self.assertEqual(process_response.status_code, 302)
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        processed_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(processed_book.storyteller_uuid, "story-uuid-1")
+        self.assertEqual(processed_book.transcript_source, "storyteller")
+        self.assertIsNone(processed_book.transcript_file)
+
+        with self.client.session_transaction() as session_data:
+            self.assertEqual(session_data.get("queue", []), [])
+
     def test_batch_match_remove_from_queue(self):
         with self.client.session_transaction() as session_data:
             session_data["queue"] = [
@@ -321,6 +353,39 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertTrue(process_response.location.endswith("/"))
 
         self.mock_container.mock_database_service.save_book.assert_called_once()
+        with self.client.session_transaction() as session_data:
+            self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-suggestions-story-1")
+    def test_suggestions_queue_storyteller_uuid_preserves_storyteller_source(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        add_response = self.client.post(
+            "/suggestions",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "suggested-original.epub",
+                "ebook_display_name": "Suggested Story",
+                "storyteller_uuid": "story-uuid-2",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post(
+            "/suggestions",
+            data={"action": "process_queue"},
+        )
+        self.assertEqual(process_response.status_code, 302)
+        self.assertTrue(process_response.location.endswith("/"))
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        processed_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(processed_book.storyteller_uuid, "story-uuid-2")
+        self.assertEqual(processed_book.transcript_source, "storyteller")
+        self.assertIsNone(processed_book.transcript_file)
+
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
 

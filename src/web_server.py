@@ -29,6 +29,7 @@ from src.version import APP_VERSION, get_update_status
 from src.db.models import State
 from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
 from src.utils.storyteller_transcript import StorytellerTranscript
+from src.utils.kosync_headers import hash_kosync_key
 
 def _reconfigure_logging():
     """Force update of root logger level based on env var."""
@@ -678,6 +679,10 @@ def get_abs_author(ab):
     media = ab.get('media', {})
     metadata = media.get('metadata', {})
     return metadata.get('authorName') or (metadata.get('authors') or [{}])[0].get("name", "")
+
+
+def _storyteller_transcript_source(storyteller_uuid, storyteller_manifest):
+    return "storyteller" if storyteller_uuid or storyteller_manifest else None
 
 
 def audiobook_matches_search(ab, search_term):
@@ -1361,7 +1366,7 @@ def match():
         # Create Book object and save to database service
         from src.db.models import Book
         storyteller_manifest = ingest_storyteller_transcripts(abs_id, abs_title, chapters)
-        transcript_source = "storyteller" if storyteller_manifest else None
+        transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
         book = Book(
             abs_id=abs_id,
             abs_title=abs_title,
@@ -1542,7 +1547,7 @@ def batch_match():
                     item.get('abs_title', ''),
                     chapters
                 )
-                transcript_source = "storyteller" if storyteller_manifest else None
+                transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
 
                 # Create Book object and save to database service
                 book = Book(
@@ -2035,7 +2040,7 @@ def suggestions_page():
                     item.get('abs_title', ''),
                     chapters
                 )
-                transcript_source = "storyteller" if storyteller_manifest else None
+                transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
 
                 book = Book(
                     abs_id=item['abs_id'],
@@ -2515,7 +2520,7 @@ def api_storyteller_link(abs_id):
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             storyteller_manifest = ingest_storyteller_transcripts(abs_id, book.abs_title or '', chapters)
             book.transcript_file = storyteller_manifest
-            book.transcript_source = "storyteller" if storyteller_manifest else None
+            book.transcript_source = _storyteller_transcript_source(storyteller_uuid, storyteller_manifest)
             book.status = 'pending' # Force re-process to align with new EPUB
             
             database_service.save_book(book)
@@ -3003,29 +3008,82 @@ def _test_conn_error(e: Exception) -> str:
     return msg
 
 
+def _coerce_test_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _coerce_test_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_test_url(value: str) -> str:
+    url = _coerce_test_str(value).rstrip('/')
+    if url and not url.lower().startswith(('http://', 'https://')):
+        url = f"http://{url}"
+    return url
+
+
+def _build_test_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
 def test_connection(service: str):
     """Test connectivity with diagnostic error messages."""
+    payload = request.get_json(silent=True) or {}
     testers = {
-        'abs': _test_abs,
-        'kosync': _test_kosync,
-        'storyteller': _test_storyteller,
-        'booklore': _test_booklore,
-        'cwa': _test_cwa,
-        'hardcover': _test_hardcover,
-        'telegram': _test_telegram,
+        'abs': lambda data: _test_abs(
+            _normalize_test_url(data.get('ABS_SERVER')),
+            _coerce_test_str(data.get('ABS_KEY')),
+        ),
+        'kosync': lambda data: _test_kosync(
+            _coerce_test_bool(data.get('KOSYNC_ENABLED')),
+            _normalize_test_url(data.get('KOSYNC_SERVER')),
+            _coerce_test_str(data.get('KOSYNC_USER')),
+            _coerce_test_str(data.get('KOSYNC_KEY')),
+        ),
+        'storyteller': lambda data: _test_storyteller(
+            _coerce_test_bool(data.get('STORYTELLER_ENABLED')),
+            _normalize_test_url(data.get('STORYTELLER_API_URL')),
+            _coerce_test_str(data.get('STORYTELLER_USER')),
+            _coerce_test_str(data.get('STORYTELLER_PASSWORD')),
+        ),
+        'booklore': lambda data: _test_booklore(
+            _coerce_test_bool(data.get('BOOKLORE_ENABLED')),
+            _normalize_test_url(data.get('BOOKLORE_SERVER')),
+            _coerce_test_str(data.get('BOOKLORE_USER')),
+            _coerce_test_str(data.get('BOOKLORE_PASSWORD')),
+        ),
+        'cwa': lambda data: _test_cwa(
+            _coerce_test_bool(data.get('CWA_ENABLED')),
+            _normalize_test_url(data.get('CWA_SERVER')),
+            _coerce_test_str(data.get('CWA_USERNAME')),
+            _coerce_test_str(data.get('CWA_PASSWORD')),
+        ),
+        'hardcover': lambda data: _test_hardcover(
+            _coerce_test_bool(data.get('HARDCOVER_ENABLED')),
+            _coerce_test_str(data.get('HARDCOVER_TOKEN')),
+        ),
+        'telegram': lambda data: _test_telegram(
+            _coerce_test_bool(data.get('TELEGRAM_ENABLED')),
+            _coerce_test_str(data.get('TELEGRAM_BOT_TOKEN')),
+        ),
     }
     tester = testers.get(service)
     if not tester:
         return jsonify({"ok": False, "message": f"Unknown service: {service}"}), 400
     try:
-        return jsonify(tester())
+        return jsonify(tester(payload))
     except Exception as e:
         return jsonify({"ok": False, "message": _test_conn_error(e)})
 
 
-def _test_abs() -> dict:
-    url = os.environ.get('ABS_SERVER', '').rstrip('/')
-    token = os.environ.get('ABS_KEY', '')
+def _test_abs(url: str, token: str) -> dict:
     if not url or not token:
         return {"ok": False, "message": "Missing server URL or API token"}
     r = requests.get(f"{url}/api/me", headers={"Authorization": f"Bearer {token}"}, timeout=10)
@@ -3037,21 +3095,32 @@ def _test_abs() -> dict:
     return {"ok": False, "message": f"Server returned {r.status_code}"}
 
 
-def _test_kosync() -> dict:
-    url = os.environ.get('KOSYNC_SERVER', '').rstrip('/')
-    if os.environ.get('KOSYNC_ENABLED', '').lower() == 'false' or not url:
+def _test_kosync(enabled: bool, url: str, user: str, key: str) -> dict:
+    if not enabled or not url:
         return {"ok": False, "message": "KOSync not configured or disabled"}
-    r = requests.get(f"{url}/healthcheck", timeout=5)
-    if r.status_code == 200:
-        return {"ok": True, "message": "Server is reachable"}
-    return {"ok": False, "message": f"Healthcheck returned {r.status_code}"}
+    if not user or not key:
+        return {"ok": False, "message": "Missing username or password"}
+
+    healthcheck = requests.get(_build_test_url(url, "healthcheck"), timeout=5)
+    if healthcheck.status_code != 200:
+        return {"ok": False, "message": f"Healthcheck returned {healthcheck.status_code}"}
+
+    headers = {
+        "x-auth-user": user,
+        "x-auth-key": hash_kosync_key(key),
+    }
+    auth = requests.get(_build_test_url(url, "users/auth"), headers=headers, timeout=5)
+    if auth.status_code == 200:
+        return {"ok": True, "message": "Server is reachable and credentials are valid"}
+    if auth.status_code in (401, 403):
+        return {"ok": False, "message": f"Authentication failed ({auth.status_code}) — check username or password"}
+    if auth.status_code == 500:
+        return {"ok": False, "message": "Remote KOSync server is not configured"}
+    return {"ok": False, "message": f"Auth check returned {auth.status_code}"}
 
 
-def _test_storyteller() -> dict:
-    url = os.environ.get('STORYTELLER_API_URL', '').rstrip('/')
-    user = os.environ.get('STORYTELLER_USER', '')
-    pwd = os.environ.get('STORYTELLER_PASSWORD', '')
-    if os.environ.get('STORYTELLER_ENABLED', '').lower() == 'false':
+def _test_storyteller(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled:
         return {"ok": False, "message": "Storyteller is disabled"}
     if not url or not user or not pwd:
         return {"ok": False, "message": "Missing URL, username, or password"}
@@ -3068,16 +3137,11 @@ def _test_storyteller() -> dict:
     return {"ok": False, "message": f"Login returned {r.status_code}"}
 
 
-def _test_booklore() -> dict:
-    url = os.environ.get('BOOKLORE_SERVER', '').rstrip('/')
-    user = os.environ.get('BOOKLORE_USER', '')
-    pwd = os.environ.get('BOOKLORE_PASSWORD', '')
-    if os.environ.get('BOOKLORE_ENABLED', '').lower() == 'false':
+def _test_booklore(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled:
         return {"ok": False, "message": "Booklore is disabled"}
     if not url or not user or not pwd:
         return {"ok": False, "message": "Missing URL, username, or password"}
-    if not url.lower().startswith(('http://', 'https://')):
-        url = f"http://{url}"
     r = requests.post(
         f"{url}/api/v1/auth/login",
         json={"username": user, "password": pwd},
@@ -3090,14 +3154,9 @@ def _test_booklore() -> dict:
     return {"ok": False, "message": f"Login returned {r.status_code}"}
 
 
-def _test_cwa() -> dict:
-    url = os.environ.get('CWA_SERVER', '').rstrip('/')
-    user = os.environ.get('CWA_USERNAME', '').strip()
-    pwd = os.environ.get('CWA_PASSWORD', '').strip()
-    if os.environ.get('CWA_ENABLED', '').lower() != 'true' or not url:
+def _test_cwa(enabled: bool, url: str, user: str, pwd: str) -> dict:
+    if not enabled or not url:
         return {"ok": False, "message": "CWA not configured or disabled"}
-    if not url.lower().startswith(('http://', 'https://')):
-        url = f"http://{url}"
     r = requests.get(f"{url}/opds", auth=(user, pwd) if user else None, timeout=5)
     if r.status_code == 200:
         if r.text.lstrip().lower().startswith(('<!doctype html', '<html')):
@@ -3108,9 +3167,9 @@ def _test_cwa() -> dict:
     return {"ok": False, "message": f"Server returned {r.status_code}"}
 
 
-def _test_hardcover() -> dict:
-    token = os.environ.get('HARDCOVER_TOKEN', '').strip()
-    if os.environ.get('HARDCOVER_ENABLED', '').lower() == 'false':
+def _test_hardcover(enabled: bool, token: str) -> dict:
+    token = token.strip()
+    if not enabled:
         return {"ok": False, "message": "Hardcover is disabled"}
     if not token:
         return {"ok": False, "message": "Missing API token"}
@@ -3136,9 +3195,8 @@ def _test_hardcover() -> dict:
     return {"ok": False, "message": f"API returned {r.status_code}"}
 
 
-def _test_telegram() -> dict:
-    token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    if os.environ.get('TELEGRAM_ENABLED', '').lower() == 'false' or not token:
+def _test_telegram(enabled: bool, token: str) -> dict:
+    if not enabled or not token:
         return {"ok": False, "message": "Telegram not configured or disabled"}
     r = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
     if r.status_code == 200 and r.json().get('ok'):
@@ -3205,7 +3263,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
-    app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['GET'])
+    app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['POST'])
 
     # Storyteller API routes
     app.add_url_rule('/api/storyteller/search', 'api_storyteller_search', api_storyteller_search, methods=['GET'])

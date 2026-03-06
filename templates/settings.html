@@ -1244,11 +1244,47 @@
                 });
         }
 
+        const TEST_CONNECTION_FIELDS = {
+            abs: ['ABS_SERVER', 'ABS_KEY'],
+            kosync: ['KOSYNC_ENABLED', 'KOSYNC_SERVER', 'KOSYNC_USER', 'KOSYNC_KEY'],
+            storyteller: ['STORYTELLER_ENABLED', 'STORYTELLER_API_URL', 'STORYTELLER_USER', 'STORYTELLER_PASSWORD'],
+            booklore: ['BOOKLORE_ENABLED', 'BOOKLORE_SERVER', 'BOOKLORE_USER', 'BOOKLORE_PASSWORD'],
+            cwa: ['CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD'],
+            hardcover: ['HARDCOVER_ENABLED', 'HARDCOVER_TOKEN'],
+            telegram: ['TELEGRAM_ENABLED', 'TELEGRAM_BOT_TOKEN'],
+        };
+
+        function getTestConnectionPayload(service) {
+            const payload = {};
+            const fieldNames = TEST_CONNECTION_FIELDS[service] || [];
+
+            fieldNames.forEach((fieldName) => {
+                const field = document.querySelector(`[name="${fieldName}"]`);
+                if (!field) {
+                    return;
+                }
+
+                if (field.type === 'checkbox') {
+                    payload[fieldName] = field.checked;
+                } else {
+                    payload[fieldName] = field.value;
+                }
+            });
+
+            return payload;
+        }
+
         function testConnection(service, btn) {
             const originalText = btn.innerHTML;
             btn.innerHTML = '⌛ Testing...';
             btn.disabled = true;
-            fetch('/api/test-connection/' + service)
+            fetch('/api/test-connection/' + service, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(getTestConnectionPayload(service))
+            })
                 .then(r => r.json())
                 .then(data => {
                     if (data.ok) {
