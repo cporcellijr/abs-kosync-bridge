@@ -191,9 +191,6 @@ class ABSClient:
                     # For books: data.get('book', [])
                     # For audiobooks in mixed mode: data might have 'libraryItem' or similar
                     
-                    # Log the response keys to understand structure
-                    logger.debug(f"   Response keys: {list(data.keys())}")
-                    
                     # Try different possible keys
                     items = data.get('book', []) or data.get('libraryItem', []) or data.get('results', [])
                     
