@@ -384,6 +384,48 @@ def test_search_books_miss_refresh_failure_returns_empty_without_retry_loop(book
     booklore_client._refresh_book_cache.assert_called_once()
 
 
+def test_search_books_hit_triggers_single_refresh_and_prunes_deleted_result_when_cache_old(booklore_client):
+    booklore_client._book_cache = {
+        "deleted.epub": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
+    }
+    booklore_client._book_id_cache = {
+        "deleted": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+
+    def refresh_side_effect():
+        booklore_client._book_cache.clear()
+        booklore_client._book_id_cache.clear()
+        booklore_client._cache_timestamp = time.time()
+        return True
+
+    booklore_client._refresh_book_cache = MagicMock(side_effect=refresh_side_effect)
+
+    results = booklore_client.search_books("deleted")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_called_once()
+
+
+def test_search_books_hit_skips_refresh_when_cache_is_fresh(booklore_client):
+    booklore_client._book_cache = {
+        "deleted.epub": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
+    }
+    booklore_client._book_id_cache = {
+        "deleted": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
+    }
+    booklore_client._cache_timestamp = time.time() - 10
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+
+    results = booklore_client.search_books("deleted")
+
+    assert len(results) == 1
+    assert results[0]["fileName"] == "deleted.epub"
+    booklore_client._refresh_book_cache.assert_not_called()
+
+
 def test_refresh_book_cache_hydrates_small_library(booklore_client):
     books = [make_list_book(f"book-{idx}", title=f"Small Book {idx}") for idx in range(3)]
     booklore_client._make_request = MagicMock(side_effect=paginated_responses(books))
@@ -546,6 +588,78 @@ def test_refresh_book_cache_prunes_stale_entries_from_both_caches(booklore_clien
     assert set(booklore_client._book_id_cache.keys()) == {"keep"}
     assert set(booklore_client._book_cache.keys()) == {"keep.epub"}
     booklore_client.db.delete_booklore_book.assert_called_once_with("stale-full.epub")
+
+
+def test_fetch_book_detail_404_evicts_lightweight_cache_entry(booklore_client):
+    booklore_client._book_id_cache["stale-light"] = {
+        "id": "stale-light",
+        "title": "Stale Lightweight",
+        "authors": "",
+        "fileName": None,
+        "_needs_detail": True,
+    }
+
+    response = MagicMock()
+    response.status_code = 404
+
+    with patch("src.api.booklore_client.requests.get", return_value=response):
+        detail = booklore_client._fetch_book_detail("stale-light", "token")
+
+    assert detail is None
+    assert "stale-light" not in booklore_client._book_id_cache
+
+
+def test_download_book_404_evicts_stale_hydrated_entry(booklore_client):
+    booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
+    booklore_client.db.delete_booklore_book.reset_mock()
+    booklore_client._get_fresh_token = MagicMock(return_value="token")
+
+    first_response = MagicMock()
+    first_response.status_code = 404
+    second_response = MagicMock()
+    second_response.status_code = 404
+    booklore_client.session.get = MagicMock(side_effect=[first_response, second_response])
+
+    content = booklore_client.download_book("gone")
+
+    assert content is None
+    assert "gone" not in booklore_client._book_id_cache
+    assert "gone.epub" not in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
+
+
+def test_get_progress_404_evicts_stale_hydrated_entry(booklore_client):
+    booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
+    booklore_client.db.delete_booklore_book.reset_mock()
+    response = MagicMock()
+    response.status_code = 404
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    progress = booklore_client._get_progress_by_book_id("gone")
+
+    assert progress == (None, None)
+    assert "gone" not in booklore_client._book_id_cache
+    assert "gone.epub" not in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
+
+
+def test_add_to_shelf_404_evicts_stale_hydrated_entry(booklore_client):
+    booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
+    booklore_client.db.delete_booklore_book.reset_mock()
+
+    shelves_response = MagicMock()
+    shelves_response.status_code = 200
+    shelves_response.json.return_value = [{"id": "shelf-1", "name": "Kobo"}]
+    assign_response = MagicMock()
+    assign_response.status_code = 404
+    booklore_client._make_request = MagicMock(side_effect=[shelves_response, assign_response])
+
+    ok = booklore_client.add_to_shelf("gone.epub", shelf_name="Kobo")
+
+    assert ok is False
+    assert "gone" not in booklore_client._book_id_cache
+    assert "gone.epub" not in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
 
 
 def test_refresh_book_cache_uses_server_side_library_filter_when_supported(mock_db):

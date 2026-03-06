@@ -35,6 +35,7 @@ class BookloreClient:
         self._last_refresh_attempt = 0
         self._refresh_cooldown = 300  # 5 min cooldown after failed refresh
         self._search_miss_refresh_min_age = 60  # Avoid repeated refreshes on rapid search misses
+        self._search_hit_refresh_min_age = 60  # Periodically validate positive hits to evict deleted remote books
         self._refresh_lock = threading.Lock()
         self._cache_lock = threading.RLock()
 
@@ -305,6 +306,8 @@ class BookloreClient:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 return self._parse_json_response(response, f"Booklore book detail {book_id}")
+            if response.status_code == 404:
+                self._evict_cached_book(book_id=book_id, reason="detail returned 404")
             return None
         except Exception as e:
             logger.debug(f"Booklore: Error fetching book {book_id}: {e}")
@@ -335,6 +338,65 @@ class BookloreClient:
     def _snapshot_book_id_items(self):
         with self._cache_lock:
             return list(self._book_id_cache.items())
+
+    def _evict_cached_book(self, book_id=None, filename=None, reason=None):
+        """Remove a stale Booklore entry from memory and persistent cache."""
+        target_id = str(book_id) if book_id is not None else None
+        target_filename = Path(filename).name.lower() if filename else None
+        removed_filenames = set()
+        removed_ids = set()
+
+        with self._cache_lock:
+            for cache_key, book_info in list(self._book_id_cache.items()):
+                cache_id = book_info.get('id')
+                cache_filename = (book_info.get('fileName') or '').lower()
+                id_match = target_id is not None and (
+                    str(cache_key) == target_id or
+                    (cache_id is not None and str(cache_id) == target_id)
+                )
+                filename_match = bool(target_filename and cache_filename == target_filename)
+                if not id_match and not filename_match:
+                    continue
+                removed = self._book_id_cache.pop(cache_key)
+                if removed.get('id') is not None:
+                    removed_ids.add(str(removed.get('id')))
+                if removed.get('fileName'):
+                    removed_filenames.add(removed['fileName'].lower())
+
+            for cache_filename, book_info in list(self._book_cache.items()):
+                cache_id = book_info.get('id')
+                id_match = target_id is not None and cache_id is not None and str(cache_id) == target_id
+                filename_match = bool(target_filename and cache_filename == target_filename)
+                removed_filename_match = cache_filename in removed_filenames
+                if not id_match and not filename_match and not removed_filename_match:
+                    continue
+                removed = self._book_cache.pop(cache_filename)
+                if removed.get('id') is not None:
+                    removed_ids.add(str(removed.get('id')))
+                if removed.get('fileName'):
+                    removed_filenames.add(removed['fileName'].lower())
+
+        if target_filename:
+            removed_filenames.add(target_filename)
+        removed_filenames.discard("")
+        removed_ids.discard("None")
+
+        for cached_filename in removed_filenames:
+            if self.db:
+                try:
+                    self.db.delete_booklore_book(cached_filename)
+                except Exception as e:
+                    logger.error(f"❌ Failed to evict stale Booklore book {cached_filename}: {e}")
+
+        removed_any = bool(removed_filenames or removed_ids)
+        if removed_any:
+            self._cache_timestamp = 0
+            reason_msg = f" ({reason})" if reason else ""
+            logger.info(
+                f"📚 Booklore: Evicted stale cached book"
+                f"{reason_msg}: ids={sorted(removed_ids) or ['?']} files={sorted(removed_filenames) or ['?']}"
+            )
+        return removed_any
 
     def _build_books_endpoint(self, page, batch_size, use_server_side_filter):
         if use_server_side_filter and self.target_library_id:
@@ -907,11 +969,18 @@ class BookloreClient:
             return self.get_all_books()
 
         results = search_in_cache(search_term)
-        if results:
-            return results
-
         cache_age = time.time() - self._cache_timestamp
         safe_term = sanitize_log_data(search_term)
+        if results:
+            if cache_age > self._search_hit_refresh_min_age and not self._is_refresh_on_cooldown():
+                logger.debug(
+                    f"Booklore search hit: validating cache once "
+                    f"(term='{safe_term}', cache_age={cache_age:.0f}s, hits={len(results)})"
+                )
+                if self._refresh_book_cache():
+                    return search_in_cache(search_term)
+            return results
+
         if self._is_refresh_on_cooldown():
             logger.debug(
                 f"Booklore search miss: refresh skipped due to cooldown "
@@ -954,6 +1023,8 @@ class BookloreClient:
                 response = self.session.get(file_url, headers=headers, timeout=60)
 
             if response.status_code != 200:
+                if response.status_code == 404:
+                    self._evict_cached_book(book_id=book_id, reason="download returned 404")
                 logger.error(f"❌ Failed to download book: {response.status_code}")
                 return None
 
@@ -978,7 +1049,12 @@ class BookloreClient:
         Returns: (pct_fraction, cfi) or (None, None) on failure.
         """
         response = self._make_request("GET", f"/api/v1/books/{book_id}")
-        if not response or response.status_code != 200:
+        if not response:
+            return None, None
+        if response.status_code == 404:
+            self._evict_cached_book(book_id=book_id, reason="progress lookup returned 404")
+            return None, None
+        if response.status_code != 200:
             return None, None
 
         data = self._parse_json_response(response, f"Booklore progress for book {book_id}")
@@ -1178,6 +1254,12 @@ class BookloreClient:
                 logger.info(f"🏷️ Added '{sanitize_log_data(ebook_filename)}' to Booklore Shelf: {shelf_name}")
                 return True
             else:
+                if assign_response and assign_response.status_code == 404:
+                    self._evict_cached_book(
+                        book_id=book.get('id'),
+                        filename=ebook_filename,
+                        reason="shelf assignment returned 404",
+                    )
                 logger.error(f"❌ Failed to assign book to shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
                 return False
 
@@ -1227,6 +1309,12 @@ class BookloreClient:
                 logger.info(f"🗑️ Removed '{sanitize_log_data(ebook_filename)}' from Booklore Shelf: {shelf_name}")
                 return True
             else:
+                if assign_response and assign_response.status_code == 404:
+                    self._evict_cached_book(
+                        book_id=book.get('id'),
+                        filename=ebook_filename,
+                        reason="shelf removal returned 404",
+                    )
                 logger.error(f"❌ Failed to remove book from shelf. Status: {assign_response.status_code if assign_response else 'No response'}")
                 return False
 
