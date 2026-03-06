@@ -32,6 +32,12 @@ def _build_storyteller_json() -> dict:
     }
 
 
+def _write_chapter_first_storyteller_set(transcriptions_dir, count):
+    for idx in range(count):
+        filename = f"{idx + 1:05d}-00001.json"
+        (transcriptions_dir / filename).write_text(json.dumps(_build_storyteller_json()), encoding="utf-8")
+
+
 def test_storyteller_backfill_requires_assets_dir(monkeypatch):
     monkeypatch.delenv("STORYTELLER_ASSETS_DIR", raising=False)
     summary, status_code = web_server._run_storyteller_backfill()
@@ -73,7 +79,7 @@ def test_storyteller_backfill_ingests_and_flips_source(tmp_path, monkeypatch):
 
     title_dir = assets_root / "assets" / "Book One" / "transcriptions"
     title_dir.mkdir(parents=True, exist_ok=True)
-    (title_dir / "00001-00001.json").write_text(json.dumps(_build_storyteller_json()), encoding="utf-8")
+    _write_chapter_first_storyteller_set(title_dir, 2)
 
     monkeypatch.setenv("STORYTELLER_ASSETS_DIR", str(assets_root))
     web_server.DATA_DIR = data_dir
@@ -85,7 +91,14 @@ def test_storyteller_backfill_ingests_and_flips_source(tmp_path, monkeypatch):
     web_server.database_service = db
 
     abs_client = MagicMock()
-    abs_client.get_item_details.return_value = {"media": {"chapters": [{"start": 0.0, "end": 10.0}]}}
+    abs_client.get_item_details.return_value = {
+        "media": {
+            "chapters": [
+                {"start": 0.0, "end": 10.0},
+                {"start": 10.0, "end": 20.0},
+            ]
+        }
+    }
     alignment_service = MagicMock()
     alignment_service.align_storyteller_and_store.return_value = True
 
@@ -103,6 +116,7 @@ def test_storyteller_backfill_ingests_and_flips_source(tmp_path, monkeypatch):
     saved_book = db.save_book.call_args[0][0]
     assert saved_book.transcript_source == "storyteller"
     assert saved_book.transcript_file == "DB_MANAGED"
+    alignment_service.align_storyteller_and_store.assert_called_once()
 
 
 def test_storyteller_backfill_skips_invalid_chapter_format(tmp_path, monkeypatch):

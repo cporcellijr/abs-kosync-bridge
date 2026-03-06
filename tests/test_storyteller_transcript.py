@@ -4,7 +4,11 @@ from unittest.mock import MagicMock
 
 from src.utils.storyteller_transcript import StorytellerTranscript
 from src.utils.transcriber import AudioTranscriber
-from src.services.alignment_service import _storyteller_filename_for_abs_chapter, _validate_storyteller_chapters
+from src.services.alignment_service import (
+    _storyteller_filename_for_abs_chapter,
+    _validate_storyteller_chapters,
+    ingest_storyteller_transcripts,
+)
 
 
 def _chapter_payload(transcript_text, words):
@@ -23,6 +27,13 @@ def _chapter_payload(transcript_text, words):
             for word in words
         ],
     }
+
+
+def _write_wordtimeline_file(transcriptions_dir: Path, filename: str, text: str = "hello world"):
+    (transcriptions_dir / filename).write_text(
+        json.dumps({"transcript": text, "wordTimeline": []}),
+        encoding="utf-8",
+    )
 
 
 def _write_storyteller_fixture(base_dir: Path):
@@ -69,21 +80,66 @@ def test_storyteller_filename_mapping():
     assert _storyteller_filename_for_abs_chapter(9) == "00000-00010.json"
 
 
+def test_storyteller_validation_accepts_00000_prefix(tmp_path):
+    transcriptions_dir = tmp_path / "transcriptions_00000"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00000-00001.json")
+    _write_wordtimeline_file(transcriptions_dir, "00000-00002.json")
+
+    is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
+    assert is_valid is True
+    assert source_files == ["00000-00001.json", "00000-00002.json"]
+    assert destination_files == ["00000-00001.json", "00000-00002.json"]
+
+
 def test_storyteller_validation_accepts_00001_prefix(tmp_path):
     transcriptions_dir = tmp_path / "transcriptions"
     transcriptions_dir.mkdir(parents=True, exist_ok=True)
 
     for idx in range(2):
-        filename = f"00001-{idx + 1:05d}.json"
-        (transcriptions_dir / filename).write_text(
-            json.dumps({"transcript": "hello", "wordTimeline": []}),
-            encoding="utf-8",
-        )
+        _write_wordtimeline_file(transcriptions_dir, f"00001-{idx + 1:05d}.json")
 
     is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
     assert is_valid is True
     assert source_files == ["00001-00001.json", "00001-00002.json"]
     assert destination_files == ["00000-00001.json", "00000-00002.json"]
+
+
+def test_storyteller_validation_accepts_chapter_first_zero_based(tmp_path):
+    transcriptions_dir = tmp_path / "transcriptions_chapter_first_zero_based"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00000-00001.json")
+    _write_wordtimeline_file(transcriptions_dir, "00001-00001.json")
+
+    is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
+    assert is_valid is True
+    assert source_files == ["00000-00001.json", "00001-00001.json"]
+    assert destination_files == ["00000-00001.json", "00000-00002.json"]
+
+
+def test_storyteller_validation_accepts_chapter_first_one_based(tmp_path):
+    transcriptions_dir = tmp_path / "transcriptions_chapter_first_one_based"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00001-00001.json")
+    _write_wordtimeline_file(transcriptions_dir, "00002-00001.json")
+
+    is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
+    assert is_valid is True
+    assert source_files == ["00001-00001.json", "00002-00001.json"]
+    assert destination_files == ["00000-00001.json", "00000-00002.json"]
+
+
+def test_storyteller_validation_rejects_count_mismatch(tmp_path):
+    transcriptions_dir = tmp_path / "transcriptions_count_mismatch"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00001-00001.json")
+    _write_wordtimeline_file(transcriptions_dir, "00002-00001.json")
+    _write_wordtimeline_file(transcriptions_dir, "00003-00001.json")
+
+    is_valid, source_files, destination_files = _validate_storyteller_chapters(transcriptions_dir, 2)
+    assert is_valid is False
+    assert source_files == []
+    assert destination_files == []
 
 
 def test_storyteller_validation_rejects_non_wordtimeline_format(tmp_path):
@@ -97,6 +153,70 @@ def test_storyteller_validation_rejects_non_wordtimeline_format(tmp_path):
     assert is_valid is False
     assert source_files == []
     assert destination_files == []
+
+
+def test_storyteller_ingest_rewrites_chapter_first_layout_to_canonical(tmp_path, monkeypatch):
+    assets_root = tmp_path / "storyteller_assets"
+    data_dir = tmp_path / "data"
+    transcriptions_dir = assets_root / "assets" / "Book One" / "transcriptions"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00001-00001.json", text="chapter one")
+    _write_wordtimeline_file(transcriptions_dir, "00002-00001.json", text="chapter two")
+
+    monkeypatch.setenv("STORYTELLER_ASSETS_DIR", str(assets_root))
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+
+    manifest_path = ingest_storyteller_transcripts(
+        "abs-ingest-1",
+        "Book One",
+        [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0}],
+    )
+
+    assert manifest_path is not None
+    manifest_file = Path(manifest_path)
+    assert manifest_file.exists()
+    target_dir = data_dir / "transcripts" / "storyteller" / "abs-ingest-1"
+    assert (target_dir / "00000-00001.json").exists()
+    assert (target_dir / "00000-00002.json").exists()
+    assert not (target_dir / "00001-00001.json").exists()
+    assert not (target_dir / "00002-00001.json").exists()
+
+    manifest_payload = json.loads(manifest_file.read_text(encoding="utf-8"))
+    chapter_files = [chapter["file"] for chapter in manifest_payload.get("chapters", [])]
+    assert chapter_files == ["00000-00001.json", "00000-00002.json"]
+
+
+def test_storyteller_ingest_removes_stale_canonical_files(tmp_path, monkeypatch):
+    assets_root = tmp_path / "storyteller_assets"
+    data_dir = tmp_path / "data"
+    transcriptions_dir = assets_root / "assets" / "Book Two" / "transcriptions"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+    _write_wordtimeline_file(transcriptions_dir, "00001-00001.json", text="chapter one")
+    _write_wordtimeline_file(transcriptions_dir, "00002-00001.json", text="chapter two")
+    _write_wordtimeline_file(transcriptions_dir, "00003-00001.json", text="chapter three")
+
+    monkeypatch.setenv("STORYTELLER_ASSETS_DIR", str(assets_root))
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+
+    first_manifest = ingest_storyteller_transcripts(
+        "abs-ingest-2",
+        "Book Two",
+        [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0}, {"start": 20.0, "end": 30.0}],
+    )
+    assert first_manifest is not None
+
+    (transcriptions_dir / "00003-00001.json").unlink()
+    second_manifest = ingest_storyteller_transcripts(
+        "abs-ingest-2",
+        "Book Two",
+        [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0}],
+    )
+    assert second_manifest is not None
+
+    target_dir = data_dir / "transcripts" / "storyteller" / "abs-ingest-2"
+    assert (target_dir / "00000-00001.json").exists()
+    assert (target_dir / "00000-00002.json").exists()
+    assert not (target_dir / "00000-00003.json").exists()
 
 
 def test_transcriber_format_dispatch(tmp_path):

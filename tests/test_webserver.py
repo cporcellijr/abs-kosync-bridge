@@ -6,6 +6,7 @@ No patches needed - clean dependency injection pattern.
 import unittest
 import tempfile
 import os
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 import sys
@@ -136,6 +137,17 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         # Clean up temp directory
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _prepare_storyteller_assets(self, title: str, chapter_count: int = 2):
+        assets_root = Path(self.temp_dir) / "storyteller_assets"
+        transcriptions_dir = assets_root / "assets" / title / "transcriptions"
+        transcriptions_dir.mkdir(parents=True, exist_ok=True)
+        for idx in range(chapter_count):
+            filename = f"{idx + 1:05d}-00001.json"
+            payload = {"transcript": f"chapter {idx + 1}", "wordTimeline": []}
+            (transcriptions_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
+        os.environ["STORYTELLER_ASSETS_DIR"] = str(assets_root)
+        self.addCleanup(lambda: os.environ.pop("STORYTELLER_ASSETS_DIR", None))
 
     def test_dependency_injection_works(self):
         """Verify that dependency injection is working properly."""
@@ -559,6 +571,41 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertEqual(saved_book.transcript_source, 'storyteller')
         self.assertIsNone(saved_book.transcript_file)
         self.mock_database_service.dismiss_suggestion.assert_called_once_with('story-link-1')
+
+    def test_api_storyteller_link_real_ingest_persists_manifest(self):
+        from src.db.models import Book
+
+        self._prepare_storyteller_assets("Story Link", chapter_count=2)
+
+        test_book = Book(
+            abs_id='story-link-real',
+            abs_title='Story Link',
+            ebook_filename='original.epub',
+            storyteller_uuid=None,
+            transcript_source=None,
+            transcript_file=None,
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_abs_client.get_item_details.return_value = {
+            'media': {
+                'chapters': [
+                    {'start': 0.0, 'end': 10.0},
+                    {'start': 10.0, 'end': 20.0},
+                ]
+            }
+        }
+
+        response = self.client.post('/api/storyteller/link/story-link-real', json={'uuid': 'uuid-real'})
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, 'uuid-real')
+        self.assertEqual(saved_book.transcript_source, 'storyteller')
+        self.assertIsNotNone(saved_book.transcript_file)
+        self.assertTrue(Path(saved_book.transcript_file).exists())
 
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""

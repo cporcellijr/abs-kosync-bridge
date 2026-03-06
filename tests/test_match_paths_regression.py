@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -137,6 +138,26 @@ class TestMatchPathsRegression(unittest.TestCase):
         src.db.migration_utils.initialize_database = self.original_init_db
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def _prepare_storyteller_assets(self, title: str, chapter_count: int = 2):
+        assets_root = Path(self.temp_dir) / "storyteller_assets"
+        transcriptions_dir = assets_root / "assets" / title / "transcriptions"
+        transcriptions_dir.mkdir(parents=True, exist_ok=True)
+        for idx in range(chapter_count):
+            chapter_name = f"{idx + 1:05d}-00001.json"
+            payload = {"transcript": f"chapter {idx + 1}", "wordTimeline": []}
+            (transcriptions_dir / chapter_name).write_text(json.dumps(payload), encoding="utf-8")
+        os.environ["STORYTELLER_ASSETS_DIR"] = str(assets_root)
+        self.addCleanup(lambda: os.environ.pop("STORYTELLER_ASSETS_DIR", None))
+
+    def _set_abs_chapters(self, chapter_count: int = 2):
+        chapters = [{"start": idx * 10.0, "end": (idx + 1) * 10.0} for idx in range(chapter_count)]
+        self.mock_container.mock_abs_client.get_item_details.return_value = {
+            "media": {
+                "chapters": chapters,
+                "metadata": {"title": "Regression Book", "authorName": "Test Author"},
+            }
+        }
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-match-1")
     def test_match_route_creates_mapping(self, _mock_kosync):
         response = self.client.post(
@@ -161,6 +182,29 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_database_service.dismiss_suggestion.assert_any_call("hash-match-1")
         self.mock_container.mock_abs_client.add_to_collection.assert_called_once_with("ab-1", "Synced with KOReader")
         self.mock_container.mock_booklore_client.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-match-story-real")
+    def test_match_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
+        self._prepare_storyteller_assets("Regression Book", chapter_count=2)
+        self._set_abs_chapters(chapter_count=2)
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        response = self.client.post(
+            "/match",
+            data={
+                "audiobook_id": "ab-1",
+                "ebook_filename": "book.epub",
+                "storyteller_uuid": "story-uuid-match-real",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, "story-uuid-match-real")
+        self.assertEqual(saved_book.transcript_source, "storyteller")
+        self.assertIsNotNone(saved_book.transcript_file)
+        self.assertTrue(Path(saved_book.transcript_file).exists())
 
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-forge-1")
     def test_match_forge_action_only_stages(self, _mock_kosync):
@@ -260,6 +304,34 @@ class TestMatchPathsRegression(unittest.TestCase):
 
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-story-real")
+    def test_batch_match_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
+        self._prepare_storyteller_assets("Regression Book", chapter_count=2)
+        self._set_abs_chapters(chapter_count=2)
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "batch-original.epub",
+                "ebook_display_name": "Batch Story Real",
+                "storyteller_uuid": "story-uuid-batch-real",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post("/batch-match", data={"action": "process_queue"})
+        self.assertEqual(process_response.status_code, 302)
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, "story-uuid-batch-real")
+        self.assertEqual(saved_book.transcript_source, "storyteller")
+        self.assertIsNotNone(saved_book.transcript_file)
+        self.assertTrue(Path(saved_book.transcript_file).exists())
 
     def test_batch_match_remove_from_queue(self):
         with self.client.session_transaction() as session_data:
@@ -388,6 +460,34 @@ class TestMatchPathsRegression(unittest.TestCase):
 
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-suggestions-story-real")
+    def test_suggestions_queue_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
+        self._prepare_storyteller_assets("Regression Book", chapter_count=2)
+        self._set_abs_chapters(chapter_count=2)
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        add_response = self.client.post(
+            "/suggestions",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "suggested-original.epub",
+                "ebook_display_name": "Suggested Story Real",
+                "storyteller_uuid": "story-uuid-suggestions-real",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post("/suggestions", data={"action": "process_queue"})
+        self.assertEqual(process_response.status_code, 302)
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.storyteller_uuid, "story-uuid-suggestions-real")
+        self.assertEqual(saved_book.transcript_source, "storyteller")
+        self.assertIsNotNone(saved_book.transcript_file)
+        self.assertTrue(Path(saved_book.transcript_file).exists())
 
 
 if __name__ == "__main__":
