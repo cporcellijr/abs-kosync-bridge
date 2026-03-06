@@ -83,7 +83,9 @@ class TestSettingsComprehensive(unittest.TestCase):
         # Add a required non-bool field so validation passes if any
         data_on['SYNC_PERIOD_MINS'] = '5'
         
-        self.client.post('/settings', data=data_on)
+        response = self.client.post('/settings', data=data_on)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Restarting the application', response.data)
         
         # Verify calls to set_setting with 'true'
         for key in self.bool_keys:
@@ -99,7 +101,9 @@ class TestSettingsComprehensive(unittest.TestCase):
             'SYNC_PERIOD_MINS': '5'
         }
         
-        self.client.post('/settings', data=data_off)
+        response = self.client.post('/settings', data=data_off)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Restarting the application', response.data)
         
         # Verify calls to set_setting with 'false'
         for key in self.bool_keys:
@@ -115,7 +119,9 @@ class TestSettingsComprehensive(unittest.TestCase):
             'ABS_SERVER': 'http://test.com'
         }
         
-        self.client.post('/settings', data=test_data)
+        response = self.client.post('/settings', data=test_data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Restarting the application', response.data)
         
         for key, val in test_data.items():
             self.mock_container.mock_database_service.set_setting.assert_any_call(key, val)

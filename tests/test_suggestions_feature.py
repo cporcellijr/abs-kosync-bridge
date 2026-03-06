@@ -86,7 +86,8 @@ class TestSuggestionsFeature(unittest.TestCase):
              # No SUGGESTIONS_ENABLED sent means checkbox unchecked = False
              'SYNC_PERIOD_MINS': '5'
         })
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Restarting the application', response.data)
         
         # Verify DB set (should be 'false' because it's missing from form)
         self.mock_container.mock_database_service.set_setting.assert_any_call('SUGGESTIONS_ENABLED', 'false')
@@ -97,6 +98,8 @@ class TestSuggestionsFeature(unittest.TestCase):
             'SUGGESTIONS_ENABLED': 'on',
             'SYNC_PERIOD_MINS': '5'
         })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Restarting the application', response.data)
         self.mock_container.mock_database_service.set_setting.assert_any_call('SUGGESTIONS_ENABLED', 'true')
         self.assertEqual(os.environ.get('SUGGESTIONS_ENABLED'), 'true')
 

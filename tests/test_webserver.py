@@ -625,6 +625,22 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         finally:
             src.web_server.render_template = original_render
 
+    def test_api_health_endpoint(self):
+        response = self.client.get('/api/health')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['ok'], True)
+        self.assertIn('no-store', response.headers.get('Cache-Control', ''))
+
+    @patch('src.web_server.start_restart_async')
+    def test_api_restart_endpoint(self, mock_start_restart_async):
+        response = self.client.post('/api/restart')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['ok'], True)
+        self.assertIn('no-store', response.headers.get('Cache-Control', ''))
+        mock_start_restart_async.assert_called_once()
+
     @patch('src.web_server.requests.get')
     def test_test_connection_abs_uses_post_payload_not_saved_env(self, mock_get):
         def fake_get(url, headers=None, timeout=None):

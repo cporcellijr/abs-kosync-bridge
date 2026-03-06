@@ -18,7 +18,7 @@ from urllib.parse import urljoin
 import requests
 import schedule
 from dependency_injector import providers
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_from_directory
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, jsonify, session, send_from_directory
 
 from src.utils.config_loader import ConfigLoader
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
@@ -56,6 +56,158 @@ SUGGESTIONS_STATE_LOCK = threading.Lock()
 SUGGESTIONS_STATE_TTL_SECONDS = 86400
 SUGGESTIONS_CACHE_FILE_NAME = "suggestions_scan_cache.json"
 SUGGESTIONS_CACHE_LOCK = threading.Lock()
+RESTARTING_PAGE_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, max-age=0">
+    <title>Restarting</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0e1623;
+            --panel: rgba(12, 23, 38, 0.88);
+            --border: rgba(125, 211, 252, 0.2);
+            --accent: #7dd3fc;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top, rgba(14, 165, 233, 0.18), transparent 38%),
+                linear-gradient(180deg, #08101a 0%, var(--bg) 100%);
+        }
+
+        .panel {
+            width: min(520px, 100%);
+            padding: 32px 28px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: var(--panel);
+            box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+            color: var(--accent);
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(125, 211, 252, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 999px;
+            animation: spin 0.9s linear infinite;
+        }
+
+        h1 {
+            margin: 0 0 12px;
+            font-size: clamp(1.6rem, 3vw, 2.1rem);
+            line-height: 1.15;
+        }
+
+        p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        #restart-message {
+            margin-top: 18px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="panel">
+        <div class="status">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Saving settings</span>
+        </div>
+        <h1>Restarting the application</h1>
+        <p>Your settings were saved. This page will send you back to the dashboard as soon as the app is responding again.</p>
+        <p id="restart-message">Waiting for the service to come back up...</p>
+    </main>
+
+    <script>
+        const nextUrl = {{ next_url|tojson }};
+        const healthUrl = {{ health_url|tojson }};
+        const restartUrl = {{ restart_url|tojson }};
+        const statusEl = document.getElementById('restart-message');
+
+        async function beginRestart() {
+            statusEl.textContent = 'Requesting restart...';
+
+            try {
+                await fetch(restartUrl, {
+                    method: 'POST',
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-store'
+                    }
+                });
+            } catch (error) {
+                // The app may already be stopping. Continue polling for readiness.
+            }
+
+            statusEl.textContent = 'Restarting application...';
+            window.setTimeout(pollUntilReady, 1200);
+        }
+
+        async function pollUntilReady() {
+            try {
+                const response = await fetch(`${healthUrl}?t=${Date.now()}`, {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-store'
+                    }
+                });
+
+                if (response.ok) {
+                    statusEl.textContent = 'Application is back. Redirecting...';
+                    window.location.replace(nextUrl);
+                    return;
+                }
+
+                statusEl.textContent = `Still restarting... (${response.status})`;
+            } catch (error) {
+                statusEl.textContent = 'Still restarting...';
+            }
+
+            window.setTimeout(pollUntilReady, 1500);
+        }
+
+        window.setTimeout(beginRestart, 100);
+    </script>
+</body>
+</html>
+"""
 
 def setup_dependencies(app, test_container=None):
     """
@@ -594,6 +746,33 @@ def restart_server():
     import signal
     os.kill(os.getpid(), signal.SIGTERM)
 
+def start_restart_async():
+    threading.Thread(target=restart_server, daemon=True).start()
+
+def render_restarting_page(next_url, health_url, restart_url):
+    return render_template_string(
+        RESTARTING_PAGE_TEMPLATE,
+        next_url=next_url,
+        health_url=health_url,
+        restart_url=restart_url,
+    )
+
+def api_health():
+    """Lightweight readiness endpoint for restart polling."""
+    response = jsonify({
+        "ok": True,
+        "version": APP_VERSION,
+    })
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
+def api_restart():
+    """Trigger an asynchronous app restart after the restart page has loaded."""
+    start_restart_async()
+    response = jsonify({"ok": True})
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
 def settings():
     # Application Defaults
     # Note: These are also defined in inject_global_vars for context processor usage
@@ -653,11 +832,11 @@ def settings():
                 os.environ[key] = "" # Immediate update for current process
 
         try:
-            # Trigger Auto-Restart in a separate thread so this request finishes
-            threading.Thread(target=restart_server).start()
-
-            session['message'] = "Settings saved. Application is restarting..."
-            session['is_error'] = False
+            return render_restarting_page(
+                next_url=url_for('index'),
+                health_url=url_for('api_health'),
+                restart_url=url_for('api_restart'),
+            )
         except Exception as e:
             session['message'] = f"Error saving settings: {e}"
             session['is_error'] = True
@@ -3247,6 +3426,8 @@ def create_app(test_container=None):
     app.add_url_rule('/api/mark-complete/<abs_id>', 'mark_complete', mark_complete, methods=['POST'])
     app.add_url_rule('/update-hash/<abs_id>', 'update_hash', update_hash, methods=['POST'])
     app.add_url_rule('/covers/<path:filename>', 'serve_cover', serve_cover)
+    app.add_url_rule('/api/health', 'api_health', api_health)
+    app.add_url_rule('/api/restart', 'api_restart', api_restart, methods=['POST'])
     app.add_url_rule('/api/status', 'api_status', api_status)
     app.add_url_rule('/logs', 'logs_view', logs_view)
     app.add_url_rule('/api/logs', 'api_logs', api_logs)
