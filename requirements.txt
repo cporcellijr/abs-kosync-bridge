@@ -1,7 +1,5 @@
 requests
 schedule
-faster-whisper
-deepgram-sdk
 ebooklib
 epubcfi
 beautifulsoup4

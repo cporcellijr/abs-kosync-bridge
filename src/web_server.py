@@ -216,7 +216,14 @@ def inject_global_vars():
             'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
             'SYNC_DELTA_KOSYNC_WORDS': '400',
             'FUZZY_MATCH_THRESHOLD': '80',
-            'WHISPER_MODEL': 'tiny',
+            'STALIGN_PATH': '/usr/local/bin/stalign',
+            'STALIGN_ENGINE': 'whisper.cpp',
+            'STALIGN_WHISPER_MODEL': 'tiny.en',
+            'STALIGN_GRANULARITY': 'sentence',
+            'STALIGN_TIMEOUT_MINS': '60',
+            'STALIGN_OPENAI_BASE_URL': '',
+            'STALIGN_DEEPGRAM_MODEL': 'nova-3',
+            'STALIGN_WHISPER_SERVER_API_KEY': '',
             'JOB_MAX_RETRIES': '5',
             'JOB_RETRY_DELAY_MINS': '15',
             'MONITOR_INTERVAL': '3600',
@@ -2196,7 +2203,7 @@ def cleanup_mapping_resources(book):
         except Exception:
             pass
 
-    # Clean up audio cache directory (WAV files from whisper transcription)
+    # Clean up audio cache directory (files from legacy transcription fallbacks)
     audio_cache_dir = DATA_DIR / "audio_cache" / book.abs_id
     if audio_cache_dir.exists():
         try:

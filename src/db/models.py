@@ -76,7 +76,7 @@ class Book(Base):
     status = Column(String(50), default='active')
     duration = Column(Float)  # Duration in seconds from AudioBookShelf
     sync_mode = Column(String(20), default='audiobook')  # 'audiobook' or 'ebook_only'
-    transcript_source = Column(String(32), nullable=True)  # 'storyteller', 'smil', 'whisper'
+    transcript_source = Column(String(32), nullable=True)  # 'storyteller', 'smil', 'stalign'
     storyteller_uuid = Column(String(36), index=True, nullable=True)
     abs_ebook_item_id = Column(String(255), nullable=True)  # New ID to track ebook item separately
 

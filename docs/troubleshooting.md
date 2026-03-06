@@ -23,7 +23,7 @@
 
 ### Transcription taking too long?
 
-- **Model Size**: Try setting `WHISPER_MODEL=tiny` in the Settings page.
+- **Model Size**: Try setting `STALIGN_STALIGN_WHISPER_MODEL=tiny.en` in the Settings page.
 - **Hardware**: Transcription is CPU-intensive. If possible, enable [GPU Acceleration](#gpu-acceleration-optional).
 
 ### KOSync Port Not Working
@@ -36,7 +36,7 @@
 
 - **Issue**: WhisperCpp seems to use 'large-v3' even if I select 'small' in the UI.
 - **Solution**: Previous versions had a bug where the model parameter wasn't sent. This is fixed in the latest release.
-  - Ensure `WHISPER_MODEL` is set in your environment variables (e.g., `WHISPER_MODEL=small`).
+  - Ensure `STALIGN_WHISPER_MODEL` is set in your environment variables (e.g., `STALIGN_WHISPER_MODEL=small`).
   - Check the logs to see the request URL and data being sent.
 
 ### Syncing backwards?

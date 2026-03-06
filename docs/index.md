@@ -73,7 +73,7 @@ The sync engine operates on a sophisticated event-driven architecture (V2):
 5. **Translation**: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system resolves position via the best available transcript source:
    - Storyteller forced-alignment transcript (direct mapping),
    - then SMIL,
-   - then Whisper fallback.
+   - then stalign fallback.
 6. **Propagation**: The new position is sent to all other configured clients.
 
 ```mermaid
