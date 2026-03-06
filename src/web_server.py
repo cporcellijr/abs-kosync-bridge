@@ -797,6 +797,33 @@ def settings():
 
         # Current settings in DB
         current_settings = database_service.get_all_settings()
+        booklore_setting_keys = [
+            'BOOKLORE_LIBRARY_ID',
+            'BOOKLORE_SERVER',
+            'BOOKLORE_USER',
+            'BOOKLORE_PASSWORD',
+        ]
+        old_booklore_settings = {
+            key: (current_settings.get(key) or '').strip()
+            for key in booklore_setting_keys
+        }
+        url_keys = [
+            'SHELFMARK_URL', 'ABS_SERVER', 'BOOKLORE_SERVER',
+            'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER'
+        ]
+
+        def _normalized_form_value(key):
+            if key in request.form:
+                raw_value = request.form.get(key, '')
+            else:
+                raw_value = current_settings.get(key, '')
+
+            clean_value = (raw_value or '').strip()
+            if key in url_keys and clean_value:
+                lower_val = clean_value.lower()
+                if not (lower_val.startswith("http://") or lower_val.startswith("https://")):
+                    clean_value = f"http://{clean_value}"
+            return clean_value
 
         # 1. Handle Boolean Toggles (Checkbox logic)
         # Checkboxes are NOT sent if unchecked, so we must check every known bool key
@@ -815,10 +842,6 @@ def settings():
             clean_value = value.strip()
 
             # Sanitize URLs
-            url_keys = [
-                'SHELFMARK_URL', 'ABS_SERVER', 'BOOKLORE_SERVER', 
-                'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER'
-            ]
             if key in url_keys and clean_value:
                 lower_val = clean_value.lower()
                 if not (lower_val.startswith("http://") or lower_val.startswith("https://")):
@@ -830,6 +853,19 @@ def settings():
             elif key in current_settings:
                 database_service.set_setting(key, "")
                 os.environ[key] = "" # Immediate update for current process
+
+        new_booklore_settings = {
+            key: _normalized_form_value(key)
+            for key in booklore_setting_keys
+        }
+        if any(old_booklore_settings[key] != new_booklore_settings[key] for key in booklore_setting_keys):
+            logger.info("Booklore settings changed; clearing Booklore cache before restart")
+            database_service.clear_all_booklore_books()
+            client = container.booklore_client()
+            with client._cache_lock:
+                client._book_cache.clear()
+                client._book_id_cache.clear()
+                client._cache_timestamp = 0
 
         try:
             return render_restarting_page(

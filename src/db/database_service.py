@@ -785,6 +785,21 @@ class DatabaseService:
             return False
 
 
+    def clear_all_booklore_books(self) -> bool:
+        """Delete all cached Booklore books."""
+        session = self.db_manager.get_session()
+        try:
+            session.query(BookloreBook).delete(synchronize_session=False)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            logger.error(f"âŒ Failed to clear Booklore cache table: {e}")
+            return False
+        finally:
+            session.close()
+
+
 class DatabaseMigrator:
     """Handles migration from JSON files to SQLAlchemy database."""
 

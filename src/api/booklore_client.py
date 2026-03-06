@@ -146,7 +146,9 @@ class BookloreClient:
                 timeout=10
             )
             if response.status_code == 200:
-                data = response.json()
+                data = self._parse_json_response(response, "Booklore login")
+                if not isinstance(data, dict):
+                    return None
                 # Booklore v1.17+ uses accessToken instead of token
                 self._token = data.get("accessToken") or data.get("token")
                 self._token_timestamp = time.time()
@@ -181,6 +183,24 @@ class BookloreClient:
             return response
         except Exception as e:
             logger.error(f"❌ Booklore API request failed: {e}")
+            return None
+
+    @staticmethod
+    def _response_text_preview(response, limit=200):
+        try:
+            return (response.text or "")[:limit]
+        except Exception:
+            return "<unavailable>"
+
+    def _parse_json_response(self, response, context):
+        try:
+            return response.json()
+        except Exception as e:
+            logger.error(
+                f"âŒ Booklore: Failed to parse JSON from {context} "
+                f"(status={getattr(response, 'status_code', 'unknown')}, "
+                f"body={self._response_text_preview(response)!r}): {e}"
+            )
             return None
 
     def is_configured(self):
@@ -225,9 +245,17 @@ class BookloreClient:
         try:
             response = self._make_request("GET", "/api/v1/libraries")
             if response and response.status_code == 200:
-                libs = response.json()
-                # Return standardized list
-                return [{'id': l.get('id'), 'name': l.get('name'), 'path': l.get('root', {}).get('path') or l.get('path')} for l in libs]
+                libs = self._parse_json_response(response, "Booklore libraries list")
+                if isinstance(libs, list):
+                    # Return standardized list
+                    return [
+                        {
+                            'id': l.get('id'),
+                            'name': l.get('name'),
+                            'path': l.get('root', {}).get('path') or l.get('path')
+                        }
+                        for l in libs if isinstance(l, dict)
+                    ]
         except Exception as e:
             logger.debug(f"Booklore: Failed to fetch /api/v1/libraries: {e}")
 
@@ -236,11 +264,18 @@ class BookloreClient:
             logger.info("Booklore: Scanning books to discover libraries...")
             response = self._make_request("GET", "/api/v1/books?page=0&size=50")
             if response and response.status_code == 200:
-                data = response.json()
-                books = data if isinstance(data, list) else data.get('content', [])
+                data = self._parse_json_response(response, "Booklore library discovery scan")
+                if isinstance(data, list):
+                    books = data
+                elif isinstance(data, dict):
+                    books = data.get('content', [])
+                else:
+                    books = []
                 
                 unique_libs = {}
                 for b in books:
+                    if not isinstance(b, dict):
+                        continue
                     lid = b.get('libraryId')
                     if lid and lid not in unique_libs:
                         unique_libs[lid] = {
@@ -269,7 +304,7 @@ class BookloreClient:
             # Use requests directly (not self.session) for thread safety
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
-                return response.json()
+                return self._parse_json_response(response, f"Booklore book detail {book_id}")
             return None
         except Exception as e:
             logger.debug(f"Booklore: Error fetching book {book_id}: {e}")
@@ -302,10 +337,9 @@ class BookloreClient:
             return list(self._book_id_cache.items())
 
     def _build_books_endpoint(self, page, batch_size, use_server_side_filter):
-        endpoint = f"/api/v1/books?page={page}&size={batch_size}"
         if use_server_side_filter and self.target_library_id:
-            endpoint = f"{endpoint}&libraryId={self.target_library_id}"
-        return endpoint
+            return f"/api/v1/libraries/{self.target_library_id}/book"
+        return f"/api/v1/books?page={page}&size={batch_size}"
 
     def _filter_books_by_library(self, books):
         if not self.target_library_id:
@@ -403,7 +437,10 @@ class BookloreClient:
                     self._last_refresh_failed = True
                     return False
 
-                data = response.json()
+                data = self._parse_json_response(response, f"Booklore books page {page}")
+                if data is None:
+                    self._last_refresh_failed = True
+                    return False
 
                 current_batch = []
                 if isinstance(data, list):
@@ -440,6 +477,11 @@ class BookloreClient:
 
                 all_books_list.extend(current_batch)
                 logger.debug(f"Booklore: Fetched page {page} ({len(current_batch)} items)")
+
+                # Booklore's library-scoped endpoint returns the full library as a plain list.
+                # It is not pageable, so stop after the first successful fetch.
+                if use_server_side_filter and self.target_library_id:
+                    break
 
                 if raw_batch_size != batch_size:
                     break
@@ -882,7 +924,9 @@ class BookloreClient:
         if not response or response.status_code != 200:
             return None, None
 
-        data = response.json()
+        data = self._parse_json_response(response, f"Booklore progress for book {book_id}")
+        if not isinstance(data, dict):
+            return None, None
         book_type = str(
             data.get('primaryFile', {}).get('bookType')
             or data.get('bookType')
@@ -1043,8 +1087,10 @@ class BookloreClient:
                 logger.error("❌ Failed to get Booklore shelves")
                 return False
 
-            shelves = shelves_response.json()
-            target_shelf = next((s for s in shelves if s.get('name') == shelf_name), None)
+            shelves = self._parse_json_response(shelves_response, "Booklore shelves list")
+            if not isinstance(shelves, list):
+                return False
+            target_shelf = next((s for s in shelves if isinstance(s, dict) and s.get('name') == shelf_name), None)
 
             if not target_shelf:
                 # Create shelf
@@ -1056,12 +1102,18 @@ class BookloreClient:
                 if not create_response or create_response.status_code != 201:
                     logger.error(f"❌ Failed to create Booklore shelf: {shelf_name}")
                     return False
-                target_shelf = create_response.json()
+                target_shelf = self._parse_json_response(create_response, f"Booklore create shelf {shelf_name}")
+                if not isinstance(target_shelf, dict):
+                    return False
+            shelf_id = target_shelf.get('id') if isinstance(target_shelf, dict) else None
+            if not shelf_id:
+                logger.error(f"âŒ Failed to resolve Booklore shelf id for '{shelf_name}'")
+                return False
 
             # Assign book to shelf
             assign_response = self._make_request("POST", "/api/v1/books/shelves", {
                 "bookIds": [book['id']],
-                "shelvesToAssign": [target_shelf['id']],
+                "shelvesToAssign": [shelf_id],
                 "shelvesToUnassign": []
             })
 
@@ -1094,18 +1146,24 @@ class BookloreClient:
                 logger.error("❌ Failed to get Booklore shelves")
                 return False
 
-            shelves = shelves_response.json()
-            target_shelf = next((s for s in shelves if s.get('name') == shelf_name), None)
+            shelves = self._parse_json_response(shelves_response, "Booklore shelves list")
+            if not isinstance(shelves, list):
+                return False
+            target_shelf = next((s for s in shelves if isinstance(s, dict) and s.get('name') == shelf_name), None)
 
             if not target_shelf:
                 logger.warning(f"⚠️ Shelf '{shelf_name}' not found")
+                return False
+            shelf_id = target_shelf.get('id') if isinstance(target_shelf, dict) else None
+            if not shelf_id:
+                logger.error(f"âŒ Failed to resolve Booklore shelf id for '{shelf_name}'")
                 return False
 
             # Remove from shelf
             assign_response = self._make_request("POST", "/api/v1/books/shelves", {
                 "bookIds": [book['id']],
                 "shelvesToAssign": [],
-                "shelvesToUnassign": [target_shelf['id']]
+                "shelvesToUnassign": [shelf_id]
             })
 
             if assign_response and assign_response.status_code in [200, 201, 204]:

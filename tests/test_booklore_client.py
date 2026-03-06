@@ -559,7 +559,7 @@ def test_refresh_book_cache_uses_server_side_library_filter_when_supported(mock_
         client = BookloreClient(database_service=mock_db)
 
     books = [make_list_book("filtered-1", title="Filtered Book", library_id="target-lib")]
-    client._make_request = MagicMock(side_effect=paginated_responses(books))
+    client._make_request = MagicMock(side_effect=[MockResponse(books)])
     client._get_fresh_token = MagicMock(return_value="token")
     client._fetch_book_detail = MagicMock(
         return_value=make_detail("filtered-1", title="Filtered Book", filename="filtered-book.epub", library_id="target-lib")
@@ -567,7 +567,8 @@ def test_refresh_book_cache_uses_server_side_library_filter_when_supported(mock_
 
     assert client._refresh_book_cache() is True
     first_endpoint = client._make_request.call_args_list[0][0][1]
-    assert "libraryId=target-lib" in first_endpoint
+    assert first_endpoint == "/api/v1/libraries/target-lib/book"
+    assert client._make_request.call_count == 1
     assert client._server_side_filter_supported is True
     assert list(client._book_cache.keys()) == ["filtered-book.epub"]
 
@@ -586,7 +587,7 @@ def test_refresh_book_cache_falls_back_when_server_side_library_filter_is_ignore
         make_list_book("target-1", title="Target Book", library_id="target-lib"),
         make_list_book("other-1", title="Other Book", library_id="other-lib"),
     ]
-    client._make_request = MagicMock(side_effect=[MockResponse({"content": mixed_page}), MockResponse({"content": mixed_page})])
+    client._make_request = MagicMock(side_effect=[MockResponse(mixed_page), MockResponse({"content": mixed_page})])
     client._get_fresh_token = MagicMock(return_value="token")
     client._fetch_book_detail = MagicMock(
         return_value=make_detail("target-1", title="Target Book", filename="target-book.epub", library_id="target-lib")
@@ -595,7 +596,7 @@ def test_refresh_book_cache_falls_back_when_server_side_library_filter_is_ignore
     assert client._refresh_book_cache() is True
     first_endpoint = client._make_request.call_args_list[0][0][1]
     second_endpoint = client._make_request.call_args_list[1][0][1]
-    assert "libraryId=target-lib" in first_endpoint
-    assert "libraryId=target-lib" not in second_endpoint
+    assert first_endpoint == "/api/v1/libraries/target-lib/book"
+    assert second_endpoint == "/api/v1/books?page=0&size=200"
     assert client._server_side_filter_supported is False
     assert list(client._book_cache.keys()) == ["target-book.epub"]
