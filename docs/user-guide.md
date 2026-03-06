@@ -109,7 +109,7 @@ Select the standard EPUB file you want to use for regular sync. The system searc
 
 Once you've made your selections, click **Create Mapping**. The system will download any necessary files (from CWA/ABS) and begin the alignment process.
 
-If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/Whisper for that book.
+If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/stalign for that book.
 
 ### Batch Match
 

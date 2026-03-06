@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 ARG APP_VERSION=dev
+ARG STALIGN_VERSION=latest
 ENV APP_VERSION=${APP_VERSION}
 
 # 1. Install System Dependencies
@@ -22,15 +23,14 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -L -o /usr/local/bin/stalign "https://gitlab.com/storyteller-platform/storyteller/-/packages/generic/stalign/${STALIGN_VERSION}/stalign-linux-x64" \
+    && chmod +x /usr/local/bin/stalign
+
 COPY requirements.txt /app/requirements.txt
 
 # 2. Install Python Dependencies
-ARG INSTALL_GPU=false
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.txt && \
-    if [ "$INSTALL_GPU" = "true" ]; then \
-    pip install --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12; \
-    fi
+    pip install --no-cache-dir -r /app/requirements.txt
 
 # 3. Create directories
 RUN mkdir -p /app/src /app/templates /app/static /data/audio_cache /data/logs /data/transcripts

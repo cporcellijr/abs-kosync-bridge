@@ -9,6 +9,7 @@ from pathlib import Path
 import schedule
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+import shutil
 
 import json
 from src.api.storyteller_api import StorytellerAPIClient
@@ -23,9 +24,10 @@ from src.utils.logging_utils import sanitize_log_data
 from src.services.alignment_service import AlignmentService, ingest_storyteller_transcripts
 from src.services.library_service import LibraryService
 from src.services.migration_service import MigrationService
+from src.utils.storyteller_staging import stage_readaloud_to_storyteller
 
 # Silence noisy third-party loggers
-for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
+for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart'):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # Only call basicConfig if logging hasn't been configured already (by memory_logger)
@@ -499,6 +501,10 @@ class SyncManager:
                 logger.error(f"❌ EPUB not found on filesystem and Booklore not configured")
 
         return None
+
+    def _get_audiobook_dir(self, abs_id: str) -> Path:
+        audio_root = Path(os.environ.get("AUDIOBOOKS_DIR", "/audiobooks"))
+        return audio_root / abs_id
 
     def _get_storyteller_manifest_path(self, book: Book) -> Path | None:
         if not book:
@@ -983,7 +989,7 @@ class SyncManager:
             chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             
             # [NEW] Pre-fetch book text for validation/alignment
-            # We need this for Validating SMIL OR for Aligning Whisper
+            # We need this for validating SMIL and transcript alignment
             book_text, _ = self.ebook_parser.extract_text_and_map(epub_path)
 
             if (
@@ -1015,7 +1021,7 @@ class SyncManager:
                     except Exception as storyteller_err:
                         logger.warning(f"Storyteller alignment failed for '{abs_id}': {storyteller_err}")
                 else:
-                    logger.info(f"Storyteller manifest unavailable for '{abs_id}', falling back to SMIL/Whisper")
+                    logger.info(f"Storyteller manifest unavailable for '{abs_id}', falling back to SMIL/stalign")
 
             # Attempt SMIL extraction
             if not storyteller_aligned and hasattr(self.transcriber, 'transcribe_from_smil'):
@@ -1027,24 +1033,51 @@ class SyncManager:
                   if raw_transcript:
                       transcript_source = "smil"
 
-            # Step 3: Fallback to Whisper (Slow Path) - Only runs if SMIL failed
+            # Step 3: Fallback to stalign (Slow Path) - Only runs if SMIL failed
             if not storyteller_aligned and not raw_transcript:
-                logger.info("🔄 SMIL extraction skipped/failed, falling back to Whisper transcription")
-                
-                audio_files = self.abs_client.get_audio_files(abs_id)
-                raw_transcript = self.transcriber.process_audio(
-                    abs_id, audio_files,
-                    full_book_text=book_text, # Passed for context/alignment inside transcriber if old logic used
-                    progress_callback=lambda p: update_progress(p, 2)
+                logger.info("🔄 SMIL extraction failed, falling back to stalign readaloud generation")
+                audiobook_dir = self._get_audiobook_dir(abs_id)
+                readaloud_path = self.transcriber.transcribe_with_stalign(
+                    abs_id=abs_id,
+                    epub_path=epub_path,
+                    audiobook_dir=audiobook_dir,
                 )
-                if raw_transcript:
-                    transcript_source = "whisper"
+
+                if readaloud_path:
+                    cache_dest = Path(self.epub_cache_dir) / f"{abs_id}_readaloud.epub"
+                    cache_dest.parent.mkdir(parents=True, exist_ok=True)
+                    if Path(readaloud_path) != cache_dest:
+                        shutil.copy2(readaloud_path, cache_dest)
+                        readaloud_path = cache_dest
+
+                    storyteller_lib = os.environ.get("STORYTELLER_LIBRARY_DIR", "").strip()
+                    if storyteller_lib:
+                        try:
+                            stage_readaloud_to_storyteller(
+                                readaloud_path=Path(readaloud_path),
+                                title=abs_title,
+                                abs_id=abs_id,
+                                storyteller_lib_dir=Path(storyteller_lib),
+                            )
+                        except Exception as stage_err:
+                            logger.warning(f"Storyteller stage failed for '{abs_id}': {stage_err}")
+
+                    raw_transcript = self.transcriber.transcribe_from_smil(
+                        abs_id,
+                        Path(readaloud_path),
+                        chapters,
+                        full_book_text=book_text,
+                        progress_callback=lambda p: update_progress(p, 2),
+                    )
+                    if raw_transcript:
+                        transcript_source = "stalign"
+
             elif not storyteller_aligned:
                 # If SMIL worked, it's already done with transcribing phase
                 update_progress(1.0, 2)
 
             if not storyteller_aligned and not raw_transcript:
-                raise Exception("Failed to generate transcript from both SMIL and Whisper.")
+                raise Exception("Failed to generate transcript from Storyteller, SMIL, or stalign output.")
 
             # Step 4: Parse EPUB - ebook_parser caches result, so repeating is cheap.
 

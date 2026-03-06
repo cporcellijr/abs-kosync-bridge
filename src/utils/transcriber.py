@@ -3,7 +3,7 @@
 Audio Transcriber for abs-kosync-enhanced
 
 UPDATED VERSION with:
-- WAV normalization fix for ctranslate2/faster-whisper codec compatibility
+- stalign readaloud EPUB generation fallback
 - LRU transcript cache
 - Long file splitting
 - Configurable fuzzy match threshold
@@ -12,21 +12,18 @@ UPDATED VERSION with:
 """
 
 import json
-import requests
 import logging
 import os
-import shutil
 import subprocess
-import gc
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Optional
-import math
 import re
 from bisect import bisect_right
 from collections import OrderedDict
 
 from src.utils.logging_utils import sanitize_log_data, time_execution
-from src.utils.transcription_providers import get_transcription_provider
 from src.utils.polisher import Polisher
 from src.utils.storyteller_transcript import StorytellerTranscript
 # We keep the import for type hinting, but we don't instantiate it directly anymore
@@ -37,14 +34,12 @@ class AudioTranscriber:
     # [UPDATED] Accepted smil_extractor and polisher as arguments
     def __init__(self, data_dir, smil_extractor, polisher: Polisher):
         self.data_dir = data_dir
-        self.cache_root = data_dir / "audio_cache"
-        self.cache_root.mkdir(parents=True, exist_ok=True)
 
-        self.model_size = os.environ.get("WHISPER_MODEL", "base")
-        
-        # GPU/Device configuration
-        self.whisper_device = os.environ.get("WHISPER_DEVICE", "auto").lower()
-        self.whisper_compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "auto").lower()
+        self.stalign_path = os.environ.get("STALIGN_PATH", "/usr/local/bin/stalign")
+        self.stalign_engine = os.environ.get("STALIGN_ENGINE", "whisper.cpp")
+        self.stalign_whisper_model = os.environ.get("STALIGN_WHISPER_MODEL", "tiny.en")
+        self.stalign_granularity = os.environ.get("STALIGN_GRANULARITY", "sentence")
+        self.stalign_timeout_mins = int(os.environ.get("STALIGN_TIMEOUT_MINS", "60"))
 
         self._transcript_cache = OrderedDict()
         self._cache_capacity = 3
@@ -56,41 +51,8 @@ class AudioTranscriber:
         self.smil_extractor = smil_extractor
         self.polisher = polisher
 
-    def _get_whisper_config(self) -> tuple[str, str]:
-        """
-        Determine the Whisper device and compute type based on configuration.
-        
-        Returns:
-            (device, compute_type) tuple
-        
-        Configuration options:
-            WHISPER_DEVICE: 'auto', 'cpu', 'cuda'
-            WHISPER_COMPUTE_TYPE: 'auto', 'int8', 'float16', 'float32'
-        
-        When 'auto', attempts CUDA detection with graceful fallback to CPU.
-        """
-        device = self.whisper_device
-        compute_type = self.whisper_compute_type
-        
-        if device == 'auto':
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    device = 'cuda'
-                    logger.info(f"🎮 CUDA available: {torch.cuda.get_device_name(0)}")
-                else:
-                    device = 'cpu'
-                    logger.info("💻 CUDA not available, using CPU")
-            except ImportError:
-                device = 'cpu'
-                logger.info("💻 PyTorch not installed, using CPU")
-        
-        if compute_type == 'auto':
-            # float16 for GPU, int8 for CPU (optimal defaults)
-            compute_type = 'float16' if device == 'cuda' else 'int8'
-        
-        logger.info(f"⚙️ Whisper config: device={device}, compute_type={compute_type}, model={self.model_size}")
-        return device, compute_type
+        logger.info(f"🛠️ stalign configured: path={self.stalign_path}, engine={self.stalign_engine}, timeout={self.stalign_timeout_mins}m")
+
 
     def validate_smil(self, smil_segments: list, ebook_text: str) -> tuple[bool, float]:
         """
@@ -300,290 +262,140 @@ class AudioTranscriber:
             return ""
         return re.sub(r'\s+', ' ', text).strip()
 
-    def get_audio_duration(self, file_path):
-        """Get duration of audio file using ffprobe."""
-        cmd = [
-            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1', str(file_path)
-        ]
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            return float(result.stdout.strip())
-        except (ValueError, subprocess.CalledProcessError) as e:
-            logger.error(f"❌ Could not determine duration for '{file_path}': {e}")
-            return 0.0
+    @staticmethod
+    def _add_engine_arg(cmd: list[str], flag: str, env_name: str, env: dict[str, str]):
+        value = env.get(env_name)
+        if value:
+            cmd.extend([flag, value])
 
-    def normalize_audio_to_wav(self, input_path: Path) -> Optional[Path]:
-        """
-        Convert any audio file to a standardized WAV format that faster-whisper can reliably decode.
+    def _build_stalign_command(self, epub_path: Path, audiobook_dir: Path, output_dir: Path, engine_config: Optional[dict] = None) -> list[str]:
+        env = dict(os.environ)
+        if engine_config:
+            env.update({k: str(v) for k, v in engine_config.items() if v is not None})
 
-        This fixes codec compatibility issues with ctranslate2/faster-whisper by ensuring
-        we always feed it a known-good format: 16kHz mono 16-bit PCM WAV.
-
-        Args:
-            input_path: Path to the input audio file (any format FFmpeg supports)
-
-        Returns:
-            Path to the normalized WAV file, or None on failure
-        """
-        output_path = input_path.with_suffix('.wav')
-
-        # If input is already a WAV, still convert to ensure proper format
-        if input_path.suffix.lower() == '.wav':
-            output_path = input_path.with_name(f"{input_path.stem}_normalized.wav")
-
-        logger.info(f"   🔄 Normalizing: {input_path.name} → WAV")
+        engine = env.get("STALIGN_ENGINE", self.stalign_engine)
+        model = env.get("STALIGN_WHISPER_MODEL", self.stalign_whisper_model)
 
         cmd = [
-            'ffmpeg', '-y',
-            '-i', str(input_path),
-            '-ar', '16000',      # 16kHz sample rate (optimal for Whisper)
-            '-ac', '1',          # Mono
-            '-c:a', 'pcm_s16le', # 16-bit PCM (most compatible)
-            '-f', 'wav',         # Force WAV container
-            '-loglevel', 'error',
-            str(output_path)
+            self.stalign_path,
+            "--audiobook", str(audiobook_dir),
+            "--epub", str(epub_path),
+            "--output", str(output_dir),
+            "--engine", engine,
+            "--log-level", "info",
+            "--no-progress",
+            "--granularity", "sentence",
         ]
 
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        if engine == "whisper.cpp":
+            cmd.extend(["--model", model or "tiny.en"])
+        elif engine == "openai-cloud":
+            self._add_engine_arg(cmd, "--openai-api-key", "STALIGN_OPENAI_API_KEY", env)
+            self._add_engine_arg(cmd, "--openai-base-url", "STALIGN_OPENAI_BASE_URL", env)
+            self._add_engine_arg(cmd, "--openai-model", "STALIGN_OPENAI_MODEL", env)
+        elif engine == "deepgram":
+            self._add_engine_arg(cmd, "--deepgram-api-key", "STALIGN_DEEPGRAM_API_KEY", env)
+            self._add_engine_arg(cmd, "--deepgram-model", "STALIGN_DEEPGRAM_MODEL", env)
+        elif engine == "whisper-server":
+            self._add_engine_arg(cmd, "--whisper-server-url", "STALIGN_WHISPER_SERVER_URL", env)
+            self._add_engine_arg(cmd, "--whisper-server-api-key", "STALIGN_WHISPER_SERVER_API_KEY", env)
+        elif engine == "google-cloud":
+            self._add_engine_arg(cmd, "--google-cloud-project", "STALIGN_GOOGLE_CLOUD_PROJECT", env)
+            self._add_engine_arg(cmd, "--google-cloud-location", "STALIGN_GOOGLE_CLOUD_LOCATION", env)
+            self._add_engine_arg(cmd, "--google-cloud-language", "STALIGN_GOOGLE_CLOUD_LANGUAGE", env)
+        elif engine == "microsoft-azure":
+            self._add_engine_arg(cmd, "--azure-speech-key", "STALIGN_AZURE_SPEECH_KEY", env)
+            self._add_engine_arg(cmd, "--azure-speech-region", "STALIGN_AZURE_SPEECH_REGION", env)
+            self._add_engine_arg(cmd, "--azure-language", "STALIGN_AZURE_LANGUAGE", env)
+        elif engine == "amazon-transcribe":
+            self._add_engine_arg(cmd, "--aws-access-key-id", "STALIGN_AWS_ACCESS_KEY_ID", env)
+            self._add_engine_arg(cmd, "--aws-secret-access-key", "STALIGN_AWS_SECRET_ACCESS_KEY", env)
+            self._add_engine_arg(cmd, "--aws-region", "STALIGN_AWS_REGION", env)
+            self._add_engine_arg(cmd, "--aws-language", "STALIGN_AWS_LANGUAGE", env)
 
-            # Remove original if different from output to save space
-            if input_path != output_path and input_path.exists():
-                input_path.unlink()
+        return cmd
 
-            logger.debug(f"   ✓ Normalized: {output_path.name}")
-            return output_path
+    @staticmethod
+    def _sanitize_stalign_command(cmd: list[str]) -> list[str]:
+        sensitive_flags = {
+            "--openai-api-key",
+            "--deepgram-api-key",
+            "--whisper-server-api-key",
+            "--azure-speech-key",
+            "--aws-secret-access-key",
+            "--aws-access-key-id",
+        }
+        redacted = []
+        skip_next = False
+        for i, token in enumerate(cmd):
+            if skip_next:
+                redacted.append("***")
+                skip_next = False
+                continue
+            redacted.append(token)
+            if token in sensitive_flags and i + 1 < len(cmd):
+                skip_next = True
+        return redacted
 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"❌ FFmpeg conversion failed for '{input_path}': {e.stderr}")
+    def _find_readaloud_epub(self, output_dir: Path) -> Optional[Path]:
+        candidates = sorted(output_dir.rglob("*.epub"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not candidates:
+            return None
+        return candidates[0]
+
+    def transcribe_with_stalign(self, abs_id: str, epub_path: Path, audiobook_dir: Path, engine_config: Optional[dict] = None) -> Optional[Path]:
+        stalign_bin = Path(self.stalign_path)
+        if not stalign_bin.exists():
+            logger.error(f"❌ stalign binary not found at {self.stalign_path}")
             return None
 
-    def split_audio_file(self, file_path, target_max_duration_sec=2700):
-        """Split long audio files into smaller chunks, outputting as WAV."""
-        duration = self.get_audio_duration(file_path)
-        if duration <= target_max_duration_sec:
-            return [file_path]
+        if not Path(audiobook_dir).exists():
+            logger.error(f"❌ stalign audiobook dir does not exist: {audiobook_dir}")
+            return None
 
-        logger.warning(f"⚠️ File '{file_path.name}' is {duration/60:.1f}m — Splitting")
-        num_parts = math.ceil(duration / target_max_duration_sec)
-        segment_duration = duration / num_parts
-        new_files = []
-        base_name = file_path.stem.replace('_normalized', '')  # Clean up name
+        output_root = Path(self.data_dir) / "tmp"
+        output_root.mkdir(parents=True, exist_ok=True)
 
-        for i in range(num_parts):
-            start_time = i * segment_duration
-            # Output as WAV for consistency
-            new_filename = f"{base_name}_split_{i+1:03d}.wav"
-            new_path = file_path.parent / new_filename
-            cmd = [
-                'ffmpeg', '-y',
-                '-i', str(file_path),
-                '-ss', str(start_time),
-                '-t', str(segment_duration),
-                '-ar', '16000',      # 16kHz
-                '-ac', '1',          # Mono
-                '-c:a', 'pcm_s16le', # PCM WAV
-                '-f', 'wav',
-                '-loglevel', 'error',
-                str(new_path)
-            ]
+        timeout_seconds = max(1, self.stalign_timeout_mins) * 60
+
+        with tempfile.TemporaryDirectory(prefix=f"stalign_{abs_id}_", dir=str(output_root)) as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            cmd = self._build_stalign_command(Path(epub_path), Path(audiobook_dir), output_dir, engine_config)
+            safe_cmd = self._sanitize_stalign_command(cmd)
+            logger.info(f"⚙️ Running stalign command: {' '.join(safe_cmd)}")
+
             try:
-                subprocess.run(cmd, check=True)
-                new_files.append(new_path)
-                logger.info(f"      Created chunk {i+1}/{num_parts}: {new_filename}")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"❌ Failed to create chunk {i+1}: {e}")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                logger.error(f"❌ stalign timed out for '{sanitize_log_data(abs_id)}' after {self.stalign_timeout_mins} minutes")
+                return None
+            except Exception as run_err:
+                logger.error(f"❌ stalign invocation failed: {run_err}")
+                return None
 
-        # Remove original file after splitting
-        if new_files:
-            try:
-                file_path.unlink()
-            except OSError as e:
-                logger.debug(f"Failed to remove original file after splitting: {e}")
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
 
-        return new_files if new_files else [file_path]
+            if result.returncode != 0:
+                if stdout:
+                    logger.error(f"stalign stdout: {stdout}")
+                if stderr:
+                    logger.error(f"stalign stderr: {stderr}")
+                logger.error(f"❌ stalign failed for '{sanitize_log_data(abs_id)}' (exit={result.returncode})")
+                return None
 
-    @time_execution
-    def process_audio(self, abs_id, audio_urls, full_book_text=None, progress_callback=None) -> Optional[list]:
-        """
-        Main transcription pipeline.
-        Returns: List of segment dicts [{'start': 0.0, 'end': 1.0, 'text': 'foo'}, ...]
-        """
-        # Note: We no longer check for 'output_file.exists()' here as the primary cache check.
-        # The Orchestrator (SyncManager) should check the DB (AlignmentService) before calling this.
-        # However, we CAN check our local cache to resume/skip work if we crashed mid-transcription.
-        
-        # Check LRU Cache (in-memory) (Optional, mostly for dev speed)
-        # if abs_id in self._transcript_cache: ...
+            readaloud_path = self._find_readaloud_epub(output_dir)
+            if not readaloud_path:
+                logger.error("❌ stalign completed but no output EPUB was found")
+                return None
 
-        book_cache_dir = self.cache_root / str(abs_id)
-        # Clean up if not resuming? For now, we assume if we are called, we need to run.
-        book_cache_dir.mkdir(parents=True, exist_ok=True)
-
-        progress_file = book_cache_dir / "_progress.json"
-        
-        # If we have a fully completed progress file, we can just return the result!
-        if progress_file.exists():
-             try:
-                with open(progress_file, 'r') as f:
-                    progress = json.load(f)
-                # If it looks like a complete run?
-                if progress.get('chunks_completed', 0) > 0 and progress.get('done', False):
-                    logger.info(f"⚡ Resuming from completed local cache for {abs_id}")
-                    return progress.get('transcript', [])
-             except (json.JSONDecodeError, OSError) as e:
-                 logger.debug(f"Failed to read progress cache file: {e}")
-
-        MAX_DURATION_SECONDS = 45 * 60
-
-        downloaded_files = []
-        full_transcript = []
-        chunks_completed = 0
-        cumulative_duration = 0.0
-        resuming = False
-
-        try:
-            # Check for partial resumption
-            if progress_file.exists():
-                try:
-                    with open(progress_file, 'r') as f:
-                        progress = json.load(f)
-                    chunks_completed = progress.get('chunks_completed', 0)
-                    cumulative_duration = progress.get('cumulative_duration', 0.0)
-                    full_transcript = progress.get('transcript', [])
-
-                    # Find existing split files
-                    cached_files = sorted(book_cache_dir.glob("part_*_split_*.wav"))
-
-                    if cached_files and chunks_completed > 0:
-                        downloaded_files = list(cached_files)
-                        resuming = True
-                        logger.info(f"♻️ Resuming transcription: {chunks_completed} chunks previously done")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not resume (will start fresh): {e}")
-                    if book_cache_dir.exists(): shutil.rmtree(book_cache_dir)
-                    book_cache_dir.mkdir(parents=True, exist_ok=True)
-                    resuming = False
-
-            # Phase 1: Download and Normalize (if not resuming)
-            if not resuming:
-                # FIX: Check if files exist for ALL parts before skipping
-                existing_files = sorted(book_cache_dir.glob("part_*_split_*.wav"))
-                
-                # Check coverage: Do we have at least one file for every index in audio_urls?
-                missing_parts = False
-                for idx in range(len(audio_urls)):
-                    # Look for any file starting with part_{idx:03d}
-                    part_exists = any(f.name.startswith(f"part_{idx:03d}_") for f in existing_files)
-                    if not part_exists:
-                        missing_parts = True
-                        break
-                
-                if existing_files and not missing_parts:
-                    logger.info(f"♻️ Found valid cache ({len(existing_files)} files covering all {len(audio_urls)} parts). Skipping download.")
-                    downloaded_files = list(existing_files)
-                else:
-                    if existing_files:
-                        logger.warning(f"⚠️ Found {len(existing_files)} cached files but some parts are missing. Wiping cache to start fresh")
-                        shutil.rmtree(book_cache_dir)
-                    
-                    # Original logic: Wipe and Start Fresh
-                    book_cache_dir.mkdir(parents=True, exist_ok=True)
-                    downloaded_files = []
-
-                    logger.info(f"📥 Phase 1: Downloading {len(audio_urls)} audio files...")
-                    for idx, audio_data in enumerate(audio_urls):
-                        stream_url = audio_data['stream_url']
-                        extension = audio_data.get('ext', '.mp3')
-                        if not extension.startswith('.'): extension = f".{extension}"
-                        local_path = book_cache_dir / f"part_{idx:03d}{extension}"
-
-                        logger.info(f"   Downloading Part {idx + 1}/{len(audio_urls)}...")
-                        with requests.get(stream_url, stream=True, timeout=300) as r:
-                            r.raise_for_status()
-                            with open(local_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=8192):
-                                    f.write(chunk)
-
-                        if not local_path.exists() or local_path.stat().st_size == 0:
-                            raise ValueError(f"File {local_path} is empty or missing.")
-
-                        # Normalize to WAV
-                        normalized_path = self.normalize_audio_to_wav(local_path)
-                        if not normalized_path:
-                            raise ValueError(f"Normalization failed for part {idx+1}")
-
-                        # Split if needed
-                        downloaded_files.extend(self.split_audio_file(normalized_path, MAX_DURATION_SECONDS))
-
-                    if not downloaded_files:
-                        raise ValueError("No audio files were successfully downloaded and normalized")
-
-                if not downloaded_files:
-                    raise ValueError("No audio files were successfully downloaded and normalized")
-
-            # Phase 2: Transcribe
-            logger.info(f"✅ All parts cached. Starting transcription ({len(downloaded_files)} chunks)...")
-            provider = get_transcription_provider()
-            logger.info(f"🧠 Phase 2: Transcribing using {provider.get_name()}...")
-
-            total_chunks = len(downloaded_files)
-            # Calculate total audio duration for progress reporting
-            total_audio_duration = sum(self.get_audio_duration(f) for f in downloaded_files)
-
-            for idx, local_path in enumerate(downloaded_files):
-                # Skip already-completed chunks when resuming
-                if idx < chunks_completed:
-                    continue
-
-                duration = self.get_audio_duration(local_path)
-                pct = (cumulative_duration / total_audio_duration * 100) if total_audio_duration > 0 else 0
-                logger.info(f"   [{pct:.0f}%] Transcribing chunk {idx + 1}/{total_chunks} ({duration/60:.1f} min)...")
-
-                try:
-                    # Use the transcription provider
-                    segments = provider.transcribe(local_path)
-                    
-                    for segment in segments:
-                        full_transcript.append({
-                            "start": segment["start"] + cumulative_duration,
-                            "end": segment["end"] + cumulative_duration,
-                            "text": segment["text"]
-                        })
-
-                except Exception as e:
-                    logger.error(f"   ❌ Transcription failed for {local_path.name}: {e}")
-                    raise
-
-                cumulative_duration += duration
-                chunks_completed = idx + 1
-
-                # Save progress after each chunk for resumption
-                with open(progress_file, 'w') as f:
-                    json.dump({
-                        'chunks_completed': chunks_completed,
-                        'cumulative_duration': cumulative_duration,
-                        'transcript': full_transcript,
-                        'done': (chunks_completed == total_chunks)
-                    }, f)
-
-                if progress_callback:
-                    # Report progress for this phase (handled by SyncManager logic)
-                    progress_callback(chunks_completed / total_chunks)
-
-                gc.collect()
-
-            # Clean up cache only on success
-            if book_cache_dir.exists():
-                shutil.rmtree(book_cache_dir)
-
-            return full_transcript
-
-        except Exception as e:
-            logger.error(f"❌ Transcription failed: {e}")
-            # Don't delete cache dir - allows resume on retry
-            raise e
+            final_output = Path(self.data_dir) / "epub_cache" / f"{abs_id}_readaloud.epub"
+            final_output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(readaloud_path, final_output)
+            logger.info(f"✅ stalign readaloud EPUB generated for '{sanitize_log_data(abs_id)}': {final_output}")
+            return final_output
 
     def _is_low_quality_text(self, text: str, min_word_count: int = 3) -> bool:
         """
@@ -1014,4 +826,3 @@ class AudioTranscriber:
             logger.error(f"❌ {title_prefix}Error searching transcript '{transcript_path}': {e}")
         return None
 # [END FILE]
-

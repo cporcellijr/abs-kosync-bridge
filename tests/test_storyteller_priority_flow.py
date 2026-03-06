@@ -63,7 +63,7 @@ def _build_manager(tmp_path):
 
     transcriber = MagicMock()
     transcriber.transcribe_from_smil = MagicMock(return_value=[{"start": 0.0, "end": 1.0, "text": "unused"}])
-    transcriber.process_audio = MagicMock(return_value=[{"start": 0.0, "end": 1.0, "text": "unused"}])
+    transcriber.transcribe_with_stalign = MagicMock(return_value=tmp_path / "readaloud.epub")
 
     ebook_parser = MagicMock()
     ebook_parser.extract_text_and_map.return_value = ("ebook text", [])
@@ -95,7 +95,7 @@ def _build_manager(tmp_path):
     return manager, db, abs_client, transcriber, alignment_service
 
 
-def test_storyteller_branch_skips_smil_and_whisper(tmp_path):
+def test_storyteller_branch_skips_smil_and_stalign(tmp_path):
     abs_id = "abs-story-1"
     manifest_path = _write_storyteller_manifest(tmp_path, abs_id)
 
@@ -111,7 +111,7 @@ def test_storyteller_branch_skips_smil_and_whisper(tmp_path):
 
     transcriber = MagicMock()
     transcriber.transcribe_from_smil = MagicMock(return_value=[{"start": 0.0, "end": 1.0, "text": "unused"}])
-    transcriber.process_audio = MagicMock(return_value=[{"start": 0.0, "end": 1.0, "text": "unused"}])
+    transcriber.transcribe_with_stalign = MagicMock(return_value=tmp_path / "readaloud.epub")
 
     ebook_parser = MagicMock()
     ebook_parser.extract_text_and_map.return_value = ("ebook text", [])
@@ -156,7 +156,7 @@ def test_storyteller_branch_skips_smil_and_whisper(tmp_path):
 
     alignment_service.align_storyteller_and_store.assert_called_once()
     transcriber.transcribe_from_smil.assert_not_called()
-    transcriber.process_audio.assert_not_called()
+    transcriber.transcribe_with_stalign.assert_not_called()
     abs_client.get_audio_files.assert_not_called()
 
 
@@ -185,7 +185,7 @@ def test_storyteller_branch_retries_ingest_before_fallback(tmp_path):
     mock_ingest.assert_called_once_with(abs_id, "Storyteller Retry", [{"start": 0.0, "end": 12.0}])
     alignment_service.align_storyteller_and_store.assert_called_once()
     transcriber.transcribe_from_smil.assert_not_called()
-    transcriber.process_audio.assert_not_called()
+    transcriber.transcribe_with_stalign.assert_not_called()
     abs_client.get_audio_files.assert_not_called()
 
 
@@ -210,7 +210,7 @@ def test_storyteller_branch_falls_back_when_ingest_still_missing(tmp_path):
 
     alignment_service.align_storyteller_and_store.assert_not_called()
     transcriber.transcribe_from_smil.assert_called_once()
-    transcriber.process_audio.assert_not_called()
+    transcriber.transcribe_with_stalign.assert_not_called()
     assert book.storyteller_uuid == "story-uuid-3"
     assert book.transcript_source == "smil"
     saved_book = db.save_book.call_args_list[-1][0][0]
@@ -239,7 +239,7 @@ def test_storyteller_branch_falls_back_when_alignment_fails(tmp_path):
 
     alignment_service.align_storyteller_and_store.assert_called_once()
     transcriber.transcribe_from_smil.assert_called_once()
-    transcriber.process_audio.assert_not_called()
+    transcriber.transcribe_with_stalign.assert_not_called()
     assert book.storyteller_uuid == "story-uuid-4"
     assert book.transcript_source == "smil"
     saved_book = db.save_book.call_args_list[-1][0][0]

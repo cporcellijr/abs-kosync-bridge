@@ -3,13 +3,13 @@ import threading
 import shutil
 import time
 import os
-import html
 from pathlib import Path
 from urllib.parse import urljoin
 import requests
 
 from src.services.alignment_service import ingest_storyteller_transcripts
 from src.utils.storyteller_transcript import StorytellerTranscript
+from src.utils.storyteller_staging import atomic_stage_folder, safe_folder_name
 
 logger = logging.getLogger(__name__)
 AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
@@ -39,11 +39,7 @@ class ForgeService:
 
     @staticmethod
     def safe_folder_name(name: str) -> str:
-        invalid = '<>:"/\\|?*'
-        name = html.escape(str(name).strip())[:150]
-        for c in invalid:
-            name = name.replace(c, '_')
-        return name.strip() or "Unknown"
+        return safe_folder_name(name)
 
     @staticmethod
     def _safe_int_env(name: str, default: int) -> int:
@@ -359,7 +355,6 @@ class ForgeService:
             dest_base = Path(os.environ.get("PROCESSING_DIR", "/tmp"))
 
             final_course_dir = st_lib_path / safe_title
-            hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
             processing_dir = dest_base / f"forge_staging_{safe_title}"
 
             if final_course_dir.exists():
@@ -454,25 +449,12 @@ class ForgeService:
 
             # TWO-STEP ATOMIC TRANSFER
             if course_dir != final_course_dir:
-                try:
-                    logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
-                    if hidden_staging_dir.exists():
-                        shutil.rmtree(hidden_staging_dir)
-                    if final_course_dir.exists():
-                        shutil.rmtree(final_course_dir)
-
-                    # Step 1: Cross-device move to hidden folder inside Storyteller library
-                    shutil.move(str(course_dir), str(hidden_staging_dir))
-                    logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
-                    hidden_staging_dir.rename(final_course_dir)
-                    course_dir = final_course_dir
-                except Exception as e:
-                    logger.error(f"❌ Forge: Atomic transfer failed: {e}")
-                    try: shutil.rmtree(course_dir)
-                    except: pass
-                    try: shutil.rmtree(hidden_staging_dir)
-                    except: pass
-                    raise Exception(f"Atomic move failed: {e}")
+                logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
+                staged_dir = atomic_stage_folder(course_dir, final_course_dir)
+                if not staged_dir:
+                    raise Exception("Atomic move failed")
+                logger.info(f"⚡ Forge: Atomically revealed folder to Storyteller scanner")
+                course_dir = staged_dir
 
             logger.info(f"⚡ Forge: Files staged. Waiting for Storyteller to detect '{title}'...")
 
@@ -630,7 +612,6 @@ class ForgeService:
             dest_base = Path(os.environ.get("PROCESSING_DIR", "/tmp"))
 
             final_course_dir = st_lib_path / safe_title
-            hidden_staging_dir = st_lib_path / f".staging_{safe_title}"
             processing_dir = dest_base / f"forge_staging_{safe_title}"
 
             if final_course_dir.exists():
@@ -674,27 +655,28 @@ class ForgeService:
             if not epub_dest.exists():
                 raise Exception("Failed to acquire text source")
 
+            # Build readaloud EPUB with stalign before Storyteller staging when SMIL is unavailable.
+            pre_item_details = self.abs_client.get_item_details(abs_id)
+            pre_chapters = pre_item_details.get('media', {}).get('chapters', []) if pre_item_details else []
+            pre_smil = self.transcriber.transcribe_from_smil(abs_id, epub_dest, pre_chapters)
+            if not pre_smil:
+                logger.info("Auto-Forge: Source EPUB has no usable SMIL; generating readaloud EPUB with stalign before staging")
+                staged_readaloud = self.transcriber.transcribe_with_stalign(
+                    abs_id=abs_id,
+                    epub_path=epub_dest,
+                    audiobook_dir=course_dir,
+                )
+                if staged_readaloud:
+                    shutil.copy2(staged_readaloud, epub_dest)
+
             # TWO-STEP ATOMIC TRANSFER
             if course_dir != final_course_dir:
-                try:
-                    logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
-                    if hidden_staging_dir.exists():
-                        shutil.rmtree(hidden_staging_dir)
-                    if final_course_dir.exists():
-                        shutil.rmtree(final_course_dir)
-
-                    # Step 1: Cross-device move to hidden folder inside Storyteller library
-                    shutil.move(str(course_dir), str(hidden_staging_dir))
-                    logger.info(f"⚡ Forge: Atomically revealing folder to Storyteller scanner...")
-                    hidden_staging_dir.rename(final_course_dir)
-                    course_dir = final_course_dir
-                except Exception as e:
-                    logger.error(f"❌ Forge: Atomic transfer failed: {e}")
-                    try: shutil.rmtree(course_dir)
-                    except: pass
-                    try: shutil.rmtree(hidden_staging_dir)
-                    except: pass
-                    raise Exception(f"Atomic move failed: {e}")
+                logger.info(f"⚡ Forge: Transferring to Storyteller volume as hidden folder...")
+                staged_dir = atomic_stage_folder(course_dir, final_course_dir)
+                if not staged_dir:
+                    raise Exception("Atomic move failed")
+                logger.info(f"⚡ Forge: Atomically revealed folder to Storyteller scanner")
+                course_dir = staged_dir
 
             logger.info("⚡ Auto-Forge: Files staged. Waiting for Storyteller detection...")
 
@@ -920,18 +902,29 @@ class ForgeService:
                 )
                 if raw_transcript:
                     transcript_source = "smil"
+
                 if not raw_transcript:
-                    logger.info("Auto-Forge: SMIL unavailable/rejected. Falling back to Whisper transcription...")
-                    audio_files = self.abs_client.get_audio_files(abs_id)
-                    if not audio_files:
-                        raise Exception("Auto-Forge: ABS returned no audio files for Whisper fallback.")
-                    raw_transcript = self.transcriber.process_audio(
-                        abs_id, audio_files, full_book_text=book_text
+                    logger.info("Auto-Forge: SMIL unavailable/rejected. Falling back to stalign readaloud generation...")
+                    readaloud_epub = self.transcriber.transcribe_with_stalign(
+                        abs_id=abs_id,
+                        epub_path=epub_dest if epub_dest and epub_dest.exists() else target_path,
+                        audiobook_dir=course_dir,
                     )
+                    if readaloud_epub and epub_dest:
+                        try:
+                            shutil.copy2(readaloud_epub, epub_dest)
+                            raw_transcript = self.transcriber.transcribe_from_smil(
+                                abs_id, epub_dest, chapters, full_book_text=book_text
+                            )
+                        except Exception as stalign_smil_err:
+                            logger.warning(f"Auto-Forge: Failed to extract SMIL from stalign output for '{abs_id}': {stalign_smil_err}")
+
                     if raw_transcript:
-                        transcript_source = "whisper"
+                        transcript_source = "stalign"
+
                 if not raw_transcript:
-                    raise Exception("Auto-Forge: Failed to generate transcript from both SMIL and Whisper.")
+                    raise Exception("Auto-Forge: Failed to generate transcript from SMIL and stalign readaloud output.")
+
                 success = self.alignment_service.align_and_store(abs_id, raw_transcript, book_text, chapters)
                 if not success:
                     raise Exception('Auto-Forge: align_and_store failed to generate a valid alignment map.')

@@ -49,9 +49,14 @@ ALL_SETTINGS = [
     'TZ', 'LOG_LEVEL', 'DATA_DIR', 'BOOKS_DIR', 
     'AUDIOBOOKS_DIR', 'STORYTELLER_LIBRARY_DIR', 'STORYTELLER_ASSETS_DIR',
     'EBOOK_CACHE_SIZE',
-    'JOB_MAX_RETRIES', 'JOB_RETRY_DELAY_MINS', 'WHISPER_MODEL',
-    'WHISPER_DEVICE', 'WHISPER_COMPUTE_TYPE',
-    'TRANSCRIPTION_PROVIDER', 'DEEPGRAM_API_KEY', 'DEEPGRAM_MODEL', 'WHISPER_CPP_URL'
+    'JOB_MAX_RETRIES', 'JOB_RETRY_DELAY_MINS',
+    'STALIGN_PATH', 'STALIGN_ENGINE', 'STALIGN_WHISPER_MODEL', 'STALIGN_GRANULARITY', 'STALIGN_TIMEOUT_MINS',
+    'STALIGN_OPENAI_API_KEY', 'STALIGN_OPENAI_BASE_URL', 'STALIGN_OPENAI_MODEL',
+    'STALIGN_DEEPGRAM_API_KEY', 'STALIGN_DEEPGRAM_MODEL',
+    'STALIGN_WHISPER_SERVER_URL', 'STALIGN_WHISPER_SERVER_API_KEY',
+    'STALIGN_GOOGLE_CLOUD_PROJECT', 'STALIGN_GOOGLE_CLOUD_LOCATION', 'STALIGN_GOOGLE_CLOUD_LANGUAGE',
+    'STALIGN_AZURE_SPEECH_KEY', 'STALIGN_AZURE_SPEECH_REGION', 'STALIGN_AZURE_LANGUAGE',
+    'STALIGN_AWS_ACCESS_KEY_ID', 'STALIGN_AWS_SECRET_ACCESS_KEY', 'STALIGN_AWS_REGION', 'STALIGN_AWS_LANGUAGE'
 ]
 
 # Default values
@@ -68,13 +73,28 @@ DEFAULT_CONFIG = {
     'SYNC_DELTA_BETWEEN_CLIENTS_PERCENT': '0.5',
     'SYNC_DELTA_KOSYNC_WORDS': '400',
     'FUZZY_MATCH_THRESHOLD': '80',
-    'WHISPER_MODEL': 'tiny',
-    'WHISPER_DEVICE': 'auto',
-    'WHISPER_COMPUTE_TYPE': 'auto',
-    'TRANSCRIPTION_PROVIDER': 'local',
-    'WHISPER_CPP_URL': '',
-    'DEEPGRAM_API_KEY': '',
-    'DEEPGRAM_MODEL': 'nova-2',
+    'STALIGN_PATH': '/usr/local/bin/stalign',
+    'STALIGN_ENGINE': 'whisper.cpp',
+    'STALIGN_WHISPER_MODEL': 'tiny.en',
+    'STALIGN_GRANULARITY': 'sentence',
+    'STALIGN_TIMEOUT_MINS': '60',
+    'STALIGN_OPENAI_API_KEY': '',
+    'STALIGN_OPENAI_BASE_URL': '',
+    'STALIGN_OPENAI_MODEL': '',
+    'STALIGN_DEEPGRAM_API_KEY': '',
+    'STALIGN_DEEPGRAM_MODEL': 'nova-3',
+    'STALIGN_WHISPER_SERVER_URL': '',
+    'STALIGN_WHISPER_SERVER_API_KEY': '',
+    'STALIGN_GOOGLE_CLOUD_PROJECT': '',
+    'STALIGN_GOOGLE_CLOUD_LOCATION': '',
+    'STALIGN_GOOGLE_CLOUD_LANGUAGE': '',
+    'STALIGN_AZURE_SPEECH_KEY': '',
+    'STALIGN_AZURE_SPEECH_REGION': '',
+    'STALIGN_AZURE_LANGUAGE': '',
+    'STALIGN_AWS_ACCESS_KEY_ID': '',
+    'STALIGN_AWS_SECRET_ACCESS_KEY': '',
+    'STALIGN_AWS_REGION': '',
+    'STALIGN_AWS_LANGUAGE': '',
     'JOB_MAX_RETRIES': '5',
     'JOB_RETRY_DELAY_MINS': '15',
     'AUDIOBOOKS_DIR': '/audiobooks',
@@ -117,6 +137,36 @@ class ConfigLoader:
     """
 
     @staticmethod
+    def _legacy_to_stalign(env: dict) -> dict:
+        provider = (env.get("TRANSCRIPTION_PROVIDER", "") or "").strip().lower()
+        mapped_engine = {
+            "local": "whisper.cpp",
+            "deepgram": "deepgram",
+            "whispercpp": "whisper-server",
+        }.get(provider, "")
+
+        if mapped_engine and not env.get("STALIGN_ENGINE"):
+            env["STALIGN_ENGINE"] = mapped_engine
+            logger.info(f"🔁 Migrated TRANSCRIPTION_PROVIDER='{provider}' to STALIGN_ENGINE='{mapped_engine}'")
+
+        if not env.get("STALIGN_WHISPER_MODEL") and env.get("WHISPER_MODEL"):
+            env["STALIGN_WHISPER_MODEL"] = env["WHISPER_MODEL"]
+
+        if not env.get("STALIGN_DEEPGRAM_API_KEY") and env.get("DEEPGRAM_API_KEY"):
+            env["STALIGN_DEEPGRAM_API_KEY"] = env["DEEPGRAM_API_KEY"]
+            logger.info("🔁 Migrated DEEPGRAM_API_KEY to STALIGN_DEEPGRAM_API_KEY")
+
+        if not env.get("STALIGN_DEEPGRAM_MODEL") and env.get("DEEPGRAM_MODEL"):
+            env["STALIGN_DEEPGRAM_MODEL"] = env["DEEPGRAM_MODEL"]
+
+        if not env.get("STALIGN_WHISPER_SERVER_URL") and env.get("WHISPER_CPP_URL"):
+            env["STALIGN_WHISPER_SERVER_URL"] = env["WHISPER_CPP_URL"]
+            logger.info("🔁 Migrated WHISPER_CPP_URL to STALIGN_WHISPER_SERVER_URL")
+
+        return env
+
+
+    @staticmethod
     def bootstrap_config(db_service: DatabaseService):
         """
         If settings table is empty, populate it from os.environ or defaults.
@@ -132,14 +182,16 @@ class ConfigLoader:
             logger.info("🚀 Bootstrapping configuration from environment variables...")
             
             count = 0
+            bootstrap_env = ConfigLoader._legacy_to_stalign(dict(os.environ))
+
             for key in ALL_SETTINGS:
                 # Priority: 1. Env Var, 2. Default, 3. Empty string
-                val = os.environ.get(key, DEFAULT_CONFIG.get(key, ""))
-                
+                val = bootstrap_env.get(key, DEFAULT_CONFIG.get(key, ""))
+
                 # Check for None explicitly
                 if val is None:
                     val = ""
-                
+
                 db_service.set_setting(key, str(val))
                 count += 1
             
@@ -160,6 +212,8 @@ class ConfigLoader:
             settings = db_service.get_all_settings()
             count = 0
             
+            settings = ConfigLoader._legacy_to_stalign(settings)
+
             for key, value in settings.items():
                 # Apply validation or type conversion if needed (mostly string for env vars)
                 val_str = str(value) if value is not None else ""

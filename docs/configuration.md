@@ -86,27 +86,38 @@ ports:
 
 ### Transcription Settings
 
-Configure the engine used for audio-to-text alignment.
+Configure the stalign fallback used when Storyteller JSON and SMIL are unavailable.
 
 > [!TIP]
-> For books with Storyteller forced-alignment transcript files, that source is prioritized over SMIL and Whisper.
+> Transcript waterfall order is: Storyteller JSON → SMIL extraction → stalign fallback.
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
-| **Provider** | `local` | `local` (faster-whisper), `deepgram`, or `whisper_cpp` (via server). |
-| **Whisper Model** | `tiny` | Model size (`tiny`, `base`, `small`, `medium`, `large`). |
-| **Whisper Device** | `auto` | `auto`, `cpu`, or `cuda`. See [GPU Support](#gpu-support-optional) below. |
-| **Compute Type** | `auto` | Precision (`int8`, `float16`, `float32`). Use `float16` for GPU. |
+| **STALIGN_PATH** | `/usr/local/bin/stalign` | Path to the stalign binary. |
+| **STALIGN_ENGINE** | `whisper.cpp` | Engine: `whisper.cpp`, `openai-cloud`, `deepgram`, `whisper-server`, `google-cloud`, `microsoft-azure`, `amazon-transcribe`. |
+| **STALIGN_WHISPER_MODEL** | `tiny.en` | Model used by the `whisper.cpp` engine. |
+| **STALIGN_GRANULARITY** | `sentence` | stalign granularity. `sentence` is recommended. |
+| **STALIGN_TIMEOUT_MINS** | `60` | Max stalign runtime per book. |
 
-#### Deepgram
+#### Engine-specific settings
 
-- **API Key**: Your Deepgram API Key.
-- **Model**: Specific Deepgram model tier (e.g., `nova-2`).
+- **openai-cloud**: `STALIGN_OPENAI_API_KEY`, `STALIGN_OPENAI_BASE_URL`, `STALIGN_OPENAI_MODEL`
+- **deepgram**: `STALIGN_DEEPGRAM_API_KEY`, `STALIGN_DEEPGRAM_MODEL`
+- **whisper-server**: `STALIGN_WHISPER_SERVER_URL`, `STALIGN_WHISPER_SERVER_API_KEY`
+- **google-cloud**: `STALIGN_GOOGLE_CLOUD_PROJECT`, `STALIGN_GOOGLE_CLOUD_LOCATION`, `STALIGN_GOOGLE_CLOUD_LANGUAGE`
+- **microsoft-azure**: `STALIGN_AZURE_SPEECH_KEY`, `STALIGN_AZURE_SPEECH_REGION`, `STALIGN_AZURE_LANGUAGE`
+- **amazon-transcribe**: `STALIGN_AWS_ACCESS_KEY_ID`, `STALIGN_AWS_SECRET_ACCESS_KEY`, `STALIGN_AWS_REGION`, `STALIGN_AWS_LANGUAGE`
 
-#### WhisperCPP
+#### Legacy setting migration
 
-- **Server URL**: URL to your running `whisper.cpp` server (e.g. `http://my-whisper-server:8080/inference`).
-- **Model**: Now controls the `model` parameter sent to the server (e.g. `small`, `medium`).
+On first boot with an empty settings table, legacy provider values are mapped automatically:
+
+- `TRANSCRIPTION_PROVIDER=local` → `STALIGN_ENGINE=whisper.cpp`
+- `TRANSCRIPTION_PROVIDER=deepgram` → `STALIGN_ENGINE=deepgram`
+- `TRANSCRIPTION_PROVIDER=whispercpp` → `STALIGN_ENGINE=whisper-server`
+- `WHISPER_MODEL` → `STALIGN_WHISPER_MODEL`
+- `DEEPGRAM_API_KEY` / `DEEPGRAM_MODEL` → `STALIGN_DEEPGRAM_*`
+- `WHISPER_CPP_URL` → `STALIGN_WHISPER_SERVER_URL`
 
 ### Sync Tuning
 

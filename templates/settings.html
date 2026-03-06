@@ -1082,124 +1082,125 @@
 
                     <!-- Transcription Settings -->
                     <div class="form-group">
-                        <label>Transcription Provider</label>
-                        <select name="TRANSCRIPTION_PROVIDER">
-                            <option value="local" {% if get_val('TRANSCRIPTION_PROVIDER')=='local' %}selected{% endif
-                                %}>
-                                Local Whisper
-                            </option>
-
-                            <option value="deepgram" {% if get_val('TRANSCRIPTION_PROVIDER')=='deepgram' %}selected{%
-                                endif %}>
-                                Deepgram (Cloud)
-                            </option>
-
-                            <option value="whispercpp" {% if get_val('TRANSCRIPTION_PROVIDER')=='whispercpp'
-                                %}selected{% endif %}>
-                                Whisper.cpp (Server)
-                            </option>
+                        <label>stalign Engine</label>
+                        <select name="STALIGN_ENGINE" id="stalign_engine">
+                            {% for engine in ['whisper.cpp', 'openai-cloud', 'deepgram', 'whisper-server', 'google-cloud', 'microsoft-azure', 'amazon-transcribe'] %}
+                            <option value="{{ engine }}" {% if get_val('STALIGN_ENGINE', 'whisper.cpp')==engine %}selected{% endif %}>{{ engine }}</option>
+                            {% endfor %}
                         </select>
-
-                        <div class="help-text">
-                            Local = faster‑whisper. Deepgram = cloud. Whisper.cpp = external HTTP server.
-                        </div>
+                        <div class="help-text">Transcript waterfall: Storyteller JSON → SMIL → stalign readaloud fallback.</div>
                     </div>
-                    <!-- Wrapper: Whisper.cpp -->
-                    <div id="group_whispercpp" class="dynamic-group full-width" style="display:contents;">
+                    <div class="form-group">
+                        <label>stalign Binary Path</label>
+                        <input type="text" name="STALIGN_PATH" value="{{ get_val('STALIGN_PATH', '/usr/local/bin/stalign') }}" placeholder="/usr/local/bin/stalign" />
+                    </div>
+
+                    <div class="form-group">
+                        <label>stalign Timeout (minutes)</label>
+                        <input type="number" min="1" step="1" name="STALIGN_TIMEOUT_MINS" value="{{ get_val('STALIGN_TIMEOUT_MINS', '60') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>stalign Granularity</label>
+                        <select name="STALIGN_GRANULARITY">
+                            <option value="sentence" {% if get_val('STALIGN_GRANULARITY', 'sentence')=='sentence' %}selected{% endif %}>sentence</option>
+                        </select>
+                        <div class="help-text">stalign word-level granularity is not yet stable; sentence is enforced.</div>
+                    </div>
+
+                    <div id="group_stalign_whispercpp" class="dynamic-group full-width" style="display:contents;">
                         <div class="form-group full-width">
-                            <label>Whisper.cpp Server URL</label>
-                            <input type="text" name="WHISPER_CPP_URL" value="{{ get_val('WHISPER_CPP_URL', '') }}"
-                                placeholder="http://192.168.178.132:11080/audio/transcriptions" />
-                            <div class="help-text">Example: http://HOST:11080/audio/transcriptions</div>
-                        </div>
-                    </div>
-
-                    <!-- Wrapper: Deepgram -->
-                    <div id="group_deepgram" class="dynamic-group full-width" style="display:contents;">
-                        <div class="form-group">
-                            <label>Deepgram API Key</label>
-                            <input type="password" name="DEEPGRAM_API_KEY" value="{{ get_val('DEEPGRAM_API_KEY') }}"
-                                placeholder="dg_...">
-                            <div class="help-text">Get your key at <a href="https://console.deepgram.com"
-                                    target="_blank" rel="noopener noreferrer">console.deepgram.com</a></div>
-                        </div>
-                        <div class="form-group">
-                            <label for="deepgram_model">Deepgram Model</label>
-                            <select name="DEEPGRAM_MODEL" id="deepgram_model">
-                                <option value="nova-2" {% if get_val('DEEPGRAM_MODEL')=='nova-2' %}selected{% endif %}>
-                                    Nova-2 (Best accuracy)</option>
-                                <option value="nova-3" {% if get_val('DEEPGRAM_MODEL')=='nova-3' %}selected{% endif %}>
-                                    Nova-3 (Latest)</option>
-                                <option value="base" {% if get_val('DEEPGRAM_MODEL')=='base' %}selected{% endif %}>Base
-                                    (Fastest)</option>
-                                <option value="enhanced" {% if get_val('DEEPGRAM_MODEL')=='enhanced' %}selected{% endif
-                                    %}>
-                                    Enhanced</option>
-                            </select>
-                            <div class="help-text">Nova-2 recommended. See <a
-                                    href="https://developers.deepgram.com/docs/models" target="_blank"
-                                    rel="noopener noreferrer">Deepgram
-                                    Models</a>
-                            </div>
-                            <div class="alert alert-warning" id="gpu_warning" style="display:none; margin-top:10px;">
-                                <strong>⚠️ NVIDIA GPU Selected:</strong>
-                                <ul style="margin: 5px 0 0 20px; font-size: 0.9em;">
-                                    <li>Ensure <code>INSTALL_GPU: "true"</code> is set in docker-compose.yml (this
-                                        builds the container with CUDA libraries).</li>
-                                    <li>Ensure the <strong>NVIDIA Container Toolkit</strong> is installed on your host
-                                        system (this allows Docker to access your GPU).</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-
-
-                    <!-- Wrapper: Whisper Model (shared by Local + Whisper.cpp Server) -->
-                    <div id="group_whisper_model" class="dynamic-group full-width" style="display:contents;">
-                        <div class="form-group">
                             <label>Whisper Model</label>
-                            <select name="WHISPER_MODEL">
-                                {% for model in ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'] %}
-                                <option value="{{ model }}" {% if get_val('WHISPER_MODEL')==model %}selected{% endif %}>
-                                    {{ model }}</option>
+                            <select name="STALIGN_WHISPER_MODEL">
+                                {% for model in ['tiny', 'tiny.en', 'base', 'base.en', 'small', 'medium', 'large'] %}
+                                <option value="{{ model }}" {% if get_val('STALIGN_WHISPER_MODEL', 'tiny.en')==model %}selected{% endif %}>{{ model }}</option>
                                 {% endfor %}
                             </select>
-                            <div class="help-text">Model size for Local Whisper and Whisper.cpp Server. Larger =
-                                better accuracy but slower.
-                            </div>
                         </div>
                     </div>
 
-                    <!-- Wrapper: Local Whisper (device + compute only) -->
-                    <div id="group_local" class="dynamic-group full-width" style="display:contents;">
+                    <div id="group_stalign_openai" class="dynamic-group full-width" style="display:contents;">
                         <div class="form-group">
-                            <label>Whisper Device</label>
-                            <select name="WHISPER_DEVICE">
-                                <option value="cpu" {% if get_val('WHISPER_DEVICE')=='cpu' %}selected{% endif %}>CPU
-                                </option>
-                                <option value="cuda" {% if get_val('WHISPER_DEVICE')=='cuda' %}selected{% endif %}>GPU
-                                    (NVIDIA)
-                                </option>
-                            </select>
-                            <div class="help-text">Use CUDA for NVIDIA GPU. Default is CPU.</div>
+                            <label>OpenAI API Key</label>
+                            <input type="password" name="STALIGN_OPENAI_API_KEY" value="{{ get_val('STALIGN_OPENAI_API_KEY') }}">
                         </div>
                         <div class="form-group">
-                            <label>Whisper Compute Type</label>
-                            <select name="WHISPER_COMPUTE_TYPE">
-                                <option value="auto" {% if get_val('WHISPER_COMPUTE_TYPE')=='auto' %}selected{% endif
-                                    %}>
-                                    Auto (int8 CPU / float16 GPU)</option>
-                                <option value="int8" {% if get_val('WHISPER_COMPUTE_TYPE')=='int8' %}selected{% endif
-                                    %}>
-                                    int8 (Fast, CPU-optimized)</option>
-                                <option value="float16" {% if get_val('WHISPER_COMPUTE_TYPE')=='float16' %}selected{%
-                                    endif %}>
-                                    float16 (Fast, GPU-optimized)</option>
-                                <option value="float32" {% if get_val('WHISPER_COMPUTE_TYPE')=='float32' %}selected{%
-                                    endif %}>
-                                    float32 (Highest accuracy)</option>
-                            </select>
-                            <div class="help-text">Use int8 for CPU, float16 for GPU.</div>
+                            <label>OpenAI Base URL</label>
+                            <input type="text" name="STALIGN_OPENAI_BASE_URL" value="{{ get_val('STALIGN_OPENAI_BASE_URL') }}" placeholder="https://api.openai.com/v1">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>OpenAI Model</label>
+                            <input type="text" name="STALIGN_OPENAI_MODEL" value="{{ get_val('STALIGN_OPENAI_MODEL') }}" placeholder="gpt-4o-mini-transcribe">
+                        </div>
+                    </div>
+
+                    <div id="group_stalign_deepgram" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Deepgram API Key</label>
+                            <input type="password" name="STALIGN_DEEPGRAM_API_KEY" value="{{ get_val('STALIGN_DEEPGRAM_API_KEY') }}" placeholder="dg_...">
+                        </div>
+                        <div class="form-group">
+                            <label>Deepgram Model</label>
+                            <input type="text" name="STALIGN_DEEPGRAM_MODEL" value="{{ get_val('STALIGN_DEEPGRAM_MODEL', 'nova-3') }}" placeholder="nova-3">
+                        </div>
+                    </div>
+
+                    <div id="group_stalign_whisper_server" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Whisper Server URL</label>
+                            <input type="text" name="STALIGN_WHISPER_SERVER_URL" value="{{ get_val('STALIGN_WHISPER_SERVER_URL') }}" placeholder="http://host:11080/audio/transcriptions" />
+                        </div>
+                        <div class="form-group">
+                            <label>Whisper Server API Key</label>
+                            <input type="password" name="STALIGN_WHISPER_SERVER_API_KEY" value="{{ get_val('STALIGN_WHISPER_SERVER_API_KEY') }}" />
+                        </div>
+                    </div>
+
+                    <div id="group_stalign_google" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Google Cloud Project</label>
+                            <input type="text" name="STALIGN_GOOGLE_CLOUD_PROJECT" value="{{ get_val('STALIGN_GOOGLE_CLOUD_PROJECT') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Google Cloud Location</label>
+                            <input type="text" name="STALIGN_GOOGLE_CLOUD_LOCATION" value="{{ get_val('STALIGN_GOOGLE_CLOUD_LOCATION') }}">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Google Cloud Language</label>
+                            <input type="text" name="STALIGN_GOOGLE_CLOUD_LANGUAGE" value="{{ get_val('STALIGN_GOOGLE_CLOUD_LANGUAGE') }}" placeholder="en-US">
+                        </div>
+                    </div>
+
+                    <div id="group_stalign_azure" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>Azure Speech Key</label>
+                            <input type="password" name="STALIGN_AZURE_SPEECH_KEY" value="{{ get_val('STALIGN_AZURE_SPEECH_KEY') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Azure Speech Region</label>
+                            <input type="text" name="STALIGN_AZURE_SPEECH_REGION" value="{{ get_val('STALIGN_AZURE_SPEECH_REGION') }}">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Azure Language</label>
+                            <input type="text" name="STALIGN_AZURE_LANGUAGE" value="{{ get_val('STALIGN_AZURE_LANGUAGE') }}" placeholder="en-US">
+                        </div>
+                    </div>
+
+                    <div id="group_stalign_aws" class="dynamic-group full-width" style="display:contents;">
+                        <div class="form-group">
+                            <label>AWS Access Key ID</label>
+                            <input type="password" name="STALIGN_AWS_ACCESS_KEY_ID" value="{{ get_val('STALIGN_AWS_ACCESS_KEY_ID') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>AWS Secret Access Key</label>
+                            <input type="password" name="STALIGN_AWS_SECRET_ACCESS_KEY" value="{{ get_val('STALIGN_AWS_SECRET_ACCESS_KEY') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>AWS Region</label>
+                            <input type="text" name="STALIGN_AWS_REGION" value="{{ get_val('STALIGN_AWS_REGION') }}" placeholder="us-east-1">
+                        </div>
+                        <div class="form-group">
+                            <label>AWS Language</label>
+                            <input type="text" name="STALIGN_AWS_LANGUAGE" value="{{ get_val('STALIGN_AWS_LANGUAGE') }}" placeholder="en-US">
                         </div>
                     </div>
                 </div>
@@ -1488,21 +1489,11 @@
                 toggleAbsLibraryId(); // Initial state
             }
 
-            // 2. Transcription Provider Toggle
-            const providerSelect = document.querySelector('select[name="TRANSCRIPTION_PROVIDER"]');
-            if (providerSelect) {
-                providerSelect.addEventListener('change', toggleProviderSettings);
-                toggleProviderSettings(); // Initial state
-            }
-
-            // 3. GPU Warning
-            const deviceSelect = document.querySelector('select[name="WHISPER_DEVICE"]');
-            if (deviceSelect) {
-                deviceSelect.addEventListener('change', function () {
-                    if (this.value === 'cuda') {
-                        alert("To use an NVIDIA GPU, you must modify your docker-compose.yml to include the 'deploy' block with 'capabilities: [gpu]' and ensure the NVIDIA Container Toolkit is installed on your host.");
-                    }
-                });
+            // 2. stalign Engine Toggle
+            const engineSelect = document.querySelector('select[name="STALIGN_ENGINE"]');
+            if (engineSelect) {
+                engineSelect.addEventListener('change', toggleStalignSettings);
+                toggleStalignSettings(); // Initial state
             }
         }
 
@@ -1522,31 +1513,30 @@
             }
         }
 
-        function toggleProviderSettings() {
-            const provider = document.querySelector('select[name="TRANSCRIPTION_PROVIDER"]').value;
+        function toggleStalignSettings() {
+            const engine = document.querySelector('select[name="STALIGN_ENGINE"]').value;
 
-            // Groups
-            const groupLocal = document.getElementById('group_local');
-            const groupDeepgram = document.getElementById('group_deepgram');
-            const groupWhisperCpp = document.getElementById('group_whispercpp');
-            const groupWhisperModel = document.getElementById('group_whisper_model');
+            const groups = {
+                whispercpp: document.getElementById('group_stalign_whispercpp'),
+                openai: document.getElementById('group_stalign_openai'),
+                deepgram: document.getElementById('group_stalign_deepgram'),
+                whisperServer: document.getElementById('group_stalign_whisper_server'),
+                google: document.getElementById('group_stalign_google'),
+                azure: document.getElementById('group_stalign_azure'),
+                aws: document.getElementById('group_stalign_aws'),
+            };
 
-            // Hide all first
-            if (groupLocal) groupLocal.classList.add('hidden');
-            if (groupDeepgram) groupDeepgram.classList.add('hidden');
-            if (groupWhisperCpp) groupWhisperCpp.classList.add('hidden');
-            if (groupWhisperModel) groupWhisperModel.classList.add('hidden');
+            Object.values(groups).forEach(group => {
+                if (group) group.classList.add('hidden');
+            });
 
-            // Show selected
-            if (provider === 'local') {
-                if (groupLocal) groupLocal.classList.remove('hidden');
-                if (groupWhisperModel) groupWhisperModel.classList.remove('hidden');
-            } else if (provider === 'deepgram' && groupDeepgram) {
-                groupDeepgram.classList.remove('hidden');
-            } else if (provider === 'whispercpp') {
-                if (groupWhisperCpp) groupWhisperCpp.classList.remove('hidden');
-                if (groupWhisperModel) groupWhisperModel.classList.remove('hidden');
-            }
+            if (engine === 'whisper.cpp' && groups.whispercpp) groups.whispercpp.classList.remove('hidden');
+            if (engine === 'openai-cloud' && groups.openai) groups.openai.classList.remove('hidden');
+            if (engine === 'deepgram' && groups.deepgram) groups.deepgram.classList.remove('hidden');
+            if (engine === 'whisper-server' && groups.whisperServer) groups.whisperServer.classList.remove('hidden');
+            if (engine === 'google-cloud' && groups.google) groups.google.classList.remove('hidden');
+            if (engine === 'microsoft-azure' && groups.azure) groups.azure.classList.remove('hidden');
+            if (engine === 'amazon-transcribe' && groups.aws) groups.aws.classList.remove('hidden');
         }
     </script>
     <script>
