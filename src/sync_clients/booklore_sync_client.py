@@ -25,9 +25,28 @@ class BookloreSyncClient(SyncClient):
         """Booklore participates in both audiobook and ebook sync modes."""
         return {'audiobook', 'ebook'}
 
+    @staticmethod
+    def _resolve_epub_filename(book: Book) -> Optional[str]:
+        return getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
+
+    def supports_book(self, book: Book) -> bool:
+        epub = self._resolve_epub_filename(book)
+        if not epub:
+            return False
+
+        # If the selected ebook source is explicitly BookLore, always include
+        # the BookLore ebook client even when the audio source is also BookLore.
+        if getattr(book, "ebook_source", None) == "BookLore":
+            return True
+
+        # Otherwise only participate when the ebook can actually be resolved
+        # against the BookLore library cache.
+        target = self.booklore_client.find_book_by_filename(epub, allow_refresh=False)
+        return bool(target)
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         # FIX: Use original filename if available (Tri-Link), otherwise standard filename
-        epub = book.original_ebook_filename or book.ebook_filename
+        epub = self._resolve_epub_filename(book)
         bl_pct, bl_cfi = self.booklore_client.get_progress(epub)
 
         if bl_pct is None:
@@ -52,7 +71,7 @@ class BookloreSyncClient(SyncClient):
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         bl_pct = state.current.get('pct')
         bl_cfi = state.current.get('cfi')
-        epub = getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
+        epub = self._resolve_epub_filename(book)
         if bl_cfi and epub and self.ebook_parser:
             txt = self.ebook_parser.get_text_around_cfi(epub, bl_cfi)
             if txt:
@@ -63,7 +82,7 @@ class BookloreSyncClient(SyncClient):
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         # FIX: Use original filename for updates too
-        epub = book.original_ebook_filename or book.ebook_filename
+        epub = self._resolve_epub_filename(book)
         pct = request.locator_result.percentage
         success = self.booklore_client.update_progress(epub, pct, request.locator_result)
         if success:

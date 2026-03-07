@@ -90,7 +90,7 @@ class SmilExtractor:
                 
                 logger.info(f"📖 Found {len(smil_files)} SMIL files in EPUB")
                 if abs_chapters:
-                    logger.info(f"📖 ABS has {len(abs_chapters)} chapters")
+                    logger.info(f"📖 Audio source has {len(abs_chapters)} chapters")
                 
                 # Detect timestamp mode
                 timestamp_mode = self._detect_timestamp_mode(zf, smil_files)
@@ -111,7 +111,7 @@ class SmilExtractor:
                         logger.info(f"   Using Smart Duration Mapping (Files: {len(smil_files)}, Chapters: {len(abs_chapters)})")
                         transcript = self._process_relative_with_chapters(zf, smil_files, abs_chapters)
                     else:
-                        logger.info(f"   Using Sequential Stacking (No ABS chapters provided)")
+                        logger.info(f"   Using Sequential Stacking (No audio chapters provided)")
                         transcript = self._process_relative_sequential(zf, smil_files, audio_offset)
                 else:
                     # Auto/Smart mode
@@ -339,7 +339,7 @@ class SmilExtractor:
                 if last_matched_abs_idx != -1 and best_match_idx > last_matched_abs_idx + 1:
                     logger.info(f"   ⏭️ Skipped {best_match_idx - last_matched_abs_idx - 1} ABS tracks to find match.")
                 
-                logger.debug(f"   🔗 Matched SMIL {Path(smil_path).name} ({smil_duration:.1f}s) to ABS Ch {best_match_idx} ({abs_chapters[best_match_idx].get('start', 0):.1f}s) - diff: {smallest_diff:.1f}s")
+                logger.debug(f"   🔗 Matched SMIL {Path(smil_path).name} ({smil_duration:.1f}s) to Audio Ch {best_match_idx} ({abs_chapters[best_match_idx].get('start', 0):.1f}s) - diff: {smallest_diff:.1f}s")
                 last_matched_abs_idx = best_match_idx
                 offset = best_offset
                 current_sequential_offset = float(abs_chapters[best_match_idx].get('end', 0))

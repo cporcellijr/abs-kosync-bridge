@@ -17,6 +17,9 @@
     {% if mapping.states.booklore is defined and mapping.states.booklore.percentage %}
     {% set _ = progress_values.append(mapping.states.booklore.percentage) %}
     {% endif %}
+    {% if mapping.states.bookloreaudio is defined and mapping.states.bookloreaudio.percentage %}
+    {% set _ = progress_values.append(mapping.states.bookloreaudio.percentage) %}
+    {% endif %}
     {% if mapping.states.kosync is defined and mapping.states.kosync.percentage %}
     {% set _ = progress_values.append(mapping.states.kosync.percentage) %}
     {% endif %}
@@ -58,6 +61,14 @@
             </div>
 
             <div class="book-author">{{ mapping.abs_author or mapping.ebook_filename }}</div>
+            {% if mapping.audio_source %}
+            <div class="mapping-meta">
+                <span class="mapping-badge">{{ mapping.audio_source }} Audio</span>
+                {% if mapping.audio_url %}
+                <a href="{{ mapping.audio_url }}" target="_blank" rel="noopener noreferrer" class="mapping-link">Open Audio</a>
+                {% endif %}
+            </div>
+            {% endif %}
 
             {# Unified progress bar #}
             <div class="unified-progress">
@@ -75,6 +86,19 @@
             {# Service progress - always visible #}
             {# [START REPLACEMENT BLOCK for service-progress] #}
             <div class="service-progress">
+                {% if integrations.bookloreaudio and mapping.audio_source == 'BookLore' and mapping.audio_url %}
+                <a href="{{ mapping.audio_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
+                    title="Open BookLore audiobook">
+                    <img src="/static/booklore.png" alt="BLA" class="service-icon">
+                    <span class="service-name">BL Audio</span>
+                    {% if mapping.states.bookloreaudio is defined %}
+                    <span class="service-value">{{ '%.1f' | format(mapping.states.bookloreaudio.percentage|default(0)) }}%</span>
+                    {% else %}
+                    <span class="service-value">0.0%</span>
+                    {% endif %}
+                </a>
+                {% endif %}
+
                 {% if integrations.abs and mapping.sync_mode != 'ebook_only' and mapping.abs_url %}
                 <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
                     title="Open in Audiobookshelf">
@@ -547,6 +571,35 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        .mapping-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .mapping-badge {
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            background: rgba(79, 195, 247, 0.18);
+            color: #81d4fa;
+        }
+
+        .mapping-link {
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 11px;
+            text-decoration: none;
+        }
+
+        .mapping-link:hover {
+            color: #ffffff;
         }
 
         /* Status Badge */

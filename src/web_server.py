@@ -28,6 +28,7 @@ from src.api.hardcover_routes import hardcover_bp, init_hardcover_routes
 from src.version import APP_VERSION, get_update_status
 from src.db.models import State
 from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
+from src.services.audio_source_adapters import AudioResult
 from src.utils.storyteller_transcript import StorytellerTranscript
 from src.utils.kosync_headers import hash_kosync_key
 
@@ -341,10 +342,18 @@ STORYTELLER_LIBRARY_DIR = Path(os.environ.get("STORYTELLER_LIBRARY_DIR", "/story
 # ---------------- HELPER FUNCTIONS ----------------
 def get_audiobooks_conditionally():
     """Get audiobooks either from specific library or all libraries based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting."""
-    abs_only_search_in_library = os.environ.get("ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID", "false").lower() == "true"
-    abs_library_id = os.environ.get("ABS_LIBRARY_ID")
+    raw_scope = (os.environ.get("ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID") or "").strip()
+    abs_library_id = None
+    lowered = raw_scope.lower()
+    if lowered in {"true", "1", "yes", "on"}:
+        abs_library_id = (os.environ.get("ABS_LIBRARY_ID") or "").strip() or None
+    elif lowered in {"false", "0", "no", "off", "none", ""}:
+        abs_library_id = None
+    else:
+        # Backward-compatible mode where this env var directly contains the library id.
+        abs_library_id = raw_scope
 
-    if abs_only_search_in_library and abs_library_id:
+    if abs_library_id:
         # Fetch audiobooks only from the specified library
         return container.abs_client().get_audiobooks_for_lib(abs_library_id)
     else:
@@ -884,6 +893,32 @@ class EbookResult:
         return self.name
 
 
+def get_searchable_audiobooks(search_term):
+    """Get audiobook results from all configured audio providers."""
+    adapters = container.audio_source_adapters() if hasattr(container, "audio_source_adapters") else {}
+    results = []
+    seen = set()
+
+    for source_name, adapter in adapters.items():
+        try:
+            provider_results = adapter.search(search_term)
+        except Exception as e:
+            logger.warning(f"⚠️ Audiobook search failed for {source_name}: {e}")
+            continue
+
+        for result in provider_results or []:
+            if not isinstance(result, AudioResult):
+                continue
+            key = (result.source, result.source_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(result)
+
+    results.sort(key=lambda item: (item.title or item.display_name or "").lower())
+    return results
+
+
 def get_searchable_ebooks(search_term):
     """Get ebooks from Booklore API, filesystem, ABS, and CWA.
     Returns list of EbookResult objects for consistent interface."""
@@ -997,6 +1032,139 @@ def get_searchable_ebooks(search_term):
         )
 
     return results
+
+
+def _build_bridge_key(audio_source, audio_source_id):
+    if audio_source == "BookLore":
+        return f"booklore:{audio_source_id}"
+    return audio_source_id
+
+
+def _parse_audio_duration(raw_value):
+    try:
+        if raw_value is None or raw_value == "":
+            return None
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _create_or_update_booklore_audio_mapping(
+    *,
+    audio_source_id,
+    audio_title,
+    audio_cover_url,
+    audio_duration,
+    audio_provider_book_id,
+    audio_provider_file_id,
+    ebook_filename,
+    ebook_source,
+    ebook_source_id,
+    storyteller_uuid,
+):
+    bridge_key = _build_bridge_key("BookLore", audio_source_id)
+    existing_book = (
+        database_service.get_book(bridge_key)
+        or database_service.get_book_by_audio_source("BookLore", audio_source_id)
+    )
+
+    resolved_ebook_filename = (ebook_filename or "").strip() or None
+    original_ebook_filename = resolved_ebook_filename
+    if existing_book and not original_ebook_filename:
+        original_ebook_filename = existing_book.original_ebook_filename
+
+    if storyteller_uuid:
+        artifact_filename, _artifact_path = _download_storyteller_artifact(storyteller_uuid, audio_title)
+        if not artifact_filename:
+            return None, "Failed to download Storyteller artifact", 500
+        resolved_ebook_filename = artifact_filename
+
+    if not resolved_ebook_filename:
+        return None, "Please select a text source (Storyteller or Standard Ebook)", 400
+
+    booklore_ebook_id = None
+    if ebook_source == "BookLore":
+        booklore_ebook_id = ebook_source_id
+    elif container.booklore_client().is_configured():
+        bl_book = container.booklore_client().find_book_by_filename(original_ebook_filename or resolved_ebook_filename)
+        if bl_book:
+            booklore_ebook_id = bl_book.get("id")
+
+    if storyteller_uuid:
+        kosync_doc_id = _compute_storyteller_trilink_kosync_id(
+            original_ebook_filename,
+            resolved_ebook_filename,
+            "BookLore audiobook match",
+        )
+    else:
+        kosync_doc_id = get_kosync_id_for_ebook(resolved_ebook_filename, booklore_ebook_id)
+
+    if existing_book and existing_book.kosync_doc_id:
+        kosync_doc_id = existing_book.kosync_doc_id
+
+    if not kosync_doc_id:
+        return None, "Could not compute KOSync ID for ebook", 404
+
+    from src.db.models import Book
+
+    target_book = existing_book or Book(abs_id=bridge_key, sync_mode="audiobook")
+    target_book.abs_id = bridge_key
+    target_book.abs_title = audio_title or target_book.abs_title or bridge_key
+    target_book.audio_source = "BookLore"
+    target_book.audio_source_id = str(audio_source_id)
+    target_book.audio_title = audio_title or target_book.audio_title or target_book.abs_title
+    target_book.audio_cover_url = audio_cover_url or target_book.audio_cover_url or f"/api/booklore/audiobook-cover/{audio_source_id}"
+    target_book.audio_duration = audio_duration if audio_duration is not None else target_book.audio_duration
+    target_book.audio_provider_book_id = str(audio_provider_book_id or audio_source_id)
+    target_book.audio_provider_file_id = str(audio_provider_file_id) if audio_provider_file_id else target_book.audio_provider_file_id
+    target_book.ebook_filename = resolved_ebook_filename
+    target_book.original_ebook_filename = original_ebook_filename or target_book.original_ebook_filename
+    target_book.ebook_source = ebook_source or target_book.ebook_source
+    target_book.ebook_source_id = ebook_source_id or target_book.ebook_source_id
+    target_book.kosync_doc_id = kosync_doc_id
+    target_book.status = "pending"
+    target_book.sync_mode = "audiobook"
+    target_book.duration = audio_duration if audio_duration is not None else target_book.duration
+    target_book.storyteller_uuid = storyteller_uuid or target_book.storyteller_uuid
+    target_book.transcript_file = existing_book.transcript_file if existing_book else None
+    target_book.transcript_source = existing_book.transcript_source if existing_book else None
+
+    if storyteller_uuid:
+        storyteller_manifest = ingest_storyteller_transcripts(
+            target_book.abs_id,
+            target_book.abs_title or "",
+            [],
+        )
+        target_book.transcript_file = storyteller_manifest
+        target_book.transcript_source = _storyteller_transcript_source(
+            storyteller_uuid,
+            storyteller_manifest,
+        )
+
+    saved_book = database_service.save_book(target_book)
+
+    if container.storyteller_client().is_configured() and saved_book.storyteller_uuid:
+        try:
+            container.storyteller_client().add_to_collection_by_uuid(saved_book.storyteller_uuid)
+        except Exception as st_err:
+            logger.warning(f"Failed to add Storyteller UUID to collection: {st_err}")
+
+    shelf_filename = saved_book.original_ebook_filename or saved_book.ebook_filename
+    if (
+        shelf_filename
+        and not _is_storyteller_artifact_filename(shelf_filename)
+        and container.booklore_client().is_configured()
+    ):
+        try:
+            container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+        except Exception as bl_err:
+            logger.warning(f"Failed to add Booklore shelf entry for '{shelf_filename}': {bl_err}")
+
+    database_service.dismiss_suggestion(saved_book.abs_id)
+    if isinstance(saved_book.kosync_doc_id, str) and saved_book.kosync_doc_id.strip():
+        database_service.dismiss_suggestion(saved_book.kosync_doc_id)
+
+    return saved_book, None, None
 
 
 
@@ -1272,6 +1440,11 @@ def index():
             'abs_title': book.abs_title,
             'abs_subtitle': abs_subtitle,
             'abs_author': abs_author,
+            'audio_source': getattr(book, 'audio_source', None) or ('ABS' if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only' else None),
+            'audio_source_id': getattr(book, 'audio_source_id', None) or book.abs_id,
+            'audio_title': getattr(book, 'audio_title', None) or book.abs_title,
+            'audio_duration': getattr(book, 'audio_duration', None) or book.duration or 0,
+            'audio_cover_url': getattr(book, 'audio_cover_url', None),
             'ebook_filename': book.ebook_filename,
             'kosync_doc_id': book.kosync_doc_id,
             'transcript_file': book.transcript_file,
@@ -1347,8 +1520,14 @@ def index():
         # Platform deep links for dashboard
         if mapping.get('sync_mode') == 'ebook_only':
             mapping['abs_url'] = None
+            mapping['audio_url'] = None
         else:
-            mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
+            if mapping['audio_source'] == 'BookLore':
+                mapping['abs_url'] = None
+                mapping['audio_url'] = f"{manager.booklore_client.base_url}/book/{mapping['audio_source_id']}?tab=view"
+            else:
+                mapping['abs_url'] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
+                mapping['audio_url'] = mapping['abs_url']
 
         # Booklore deep link (if configured and book found)
         if manager.booklore_client.is_configured():
@@ -1390,7 +1569,11 @@ def index():
             mapping['last_sync'] = "Never"
 
         # Set cover URL
-        if book.abs_id:
+        if mapping.get('audio_cover_url'):
+            mapping['cover_url'] = mapping['audio_cover_url']
+        elif mapping.get('audio_source') == 'BookLore' and mapping.get('audio_source_id'):
+            mapping['cover_url'] = f"/api/booklore/audiobook-cover/{mapping['audio_source_id']}"
+        elif book.abs_id and mapping.get('audio_source') != 'BookLore':
             mapping['cover_url'] = f"{manager.abs_client.base_url}/api/items/{book.abs_id}/cover?token={manager.abs_client.token}"
 
         # Add to totals for overall progress calculation
@@ -1640,15 +1823,44 @@ def forge_process():
 def match():
     if request.method == 'POST':
         abs_id = (request.form.get('audiobook_id') or '').strip()
+        audio_source = (request.form.get('audio_source') or ('ABS' if abs_id else '')).strip() or None
+        audio_source_id = (request.form.get('audio_source_id') or abs_id).strip() or None
+        audio_title = (request.form.get('audio_title') or '').strip() or None
+        audio_cover_url = (request.form.get('audio_cover_url') or '').strip() or None
+        audio_provider_book_id = (request.form.get('audio_provider_book_id') or audio_source_id or '').strip() or None
+        audio_provider_file_id = (request.form.get('audio_provider_file_id') or '').strip() or None
+        audio_duration = _parse_audio_duration(request.form.get('audio_duration'))
         selected_filename = (request.form.get('ebook_filename') or '').strip() or None
+        ebook_source = (request.form.get('ebook_source') or request.form.get('source_type') or '').strip() or None
+        ebook_source_id = (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None
         storyteller_uuid = (request.form.get('storyteller_uuid') or '').strip() or None
         ebook_filename = selected_filename
         original_ebook_filename = selected_filename
         audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None) if abs_id else None
 
+        if request.form.get('action') == 'forge_match' and audio_source != 'ABS':
+            return "Forge match currently supports ABS audiobooks only", 400
+
         if request.form.get('action') == 'forge_match' and not selected_ab:
             return "Audiobook not found", 404
+
+        if audio_source == 'BookLore' and audio_source_id:
+            saved_book, err_msg, err_code = _create_or_update_booklore_audio_mapping(
+                audio_source_id=audio_source_id,
+                audio_title=audio_title or Path(selected_filename or f"booklore_{audio_source_id}").stem,
+                audio_cover_url=audio_cover_url,
+                audio_duration=audio_duration,
+                audio_provider_book_id=audio_provider_book_id,
+                audio_provider_file_id=audio_provider_file_id,
+                ebook_filename=selected_filename,
+                ebook_source=ebook_source,
+                ebook_source_id=ebook_source_id,
+                storyteller_uuid=storyteller_uuid,
+            )
+            if err_msg:
+                return err_msg, err_code
+            return redirect(url_for('index'))
 
         if not selected_ab and request.form.get('action') != 'forge_match':
             if not (storyteller_uuid or selected_filename):
@@ -1868,6 +2080,12 @@ def match():
         book = Book(
             abs_id=abs_id,
             abs_title=abs_title,
+            audio_source="ABS",
+            audio_source_id=abs_id,
+            audio_title=abs_title,
+            audio_cover_url=f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}",
+            audio_duration=manager.get_duration(selected_ab),
+            audio_provider_book_id=abs_id,
             ebook_filename=ebook_filename,
             kosync_doc_id=kosync_doc_id,
             transcript_file=transcript_file,
@@ -1876,7 +2094,9 @@ def match():
             transcript_source=transcript_source,
             storyteller_uuid=effective_storyteller_uuid,
             original_ebook_filename=original_ebook_filename,
-            abs_ebook_item_id=abs_ebook_item_id
+            abs_ebook_item_id=abs_ebook_item_id,
+            ebook_source=ebook_source,
+            ebook_source_id=ebook_source_id,
         )
 
         database_service.save_book(book)
@@ -1924,10 +2144,7 @@ def match():
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks, storyteller_books = [], [], []
     if search:
-        # Fetch audiobooks conditionally based on ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID setting
-        audiobooks = get_audiobooks_conditionally()
-        audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
-        for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
+        audiobooks = get_searchable_audiobooks(search)
 
         # Use new search method
         ebooks = get_searchable_ebooks(search)
@@ -1939,7 +2156,7 @@ def match():
             except Exception as e:
                 logger.warning(f"⚠️ Storyteller search failed in match route: {e}")
 
-    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books, search=search, get_title=manager.get_abs_title)
+    return render_template('match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books, search=search)
 
 
 def batch_match():
@@ -1948,21 +2165,58 @@ def batch_match():
         if action == 'add_to_queue':
             session.setdefault('queue', [])
             abs_id = request.form.get('audiobook_id')
+            audio_source = (request.form.get('audio_source') or ('ABS' if abs_id else '')).strip() or None
+            audio_source_id = (request.form.get('audio_source_id') or abs_id or '').strip() or None
+            audio_title = (request.form.get('audio_title') or '').strip() or None
+            audio_cover_url = (request.form.get('audio_cover_url') or '').strip() or None
+            audio_provider_book_id = (request.form.get('audio_provider_book_id') or audio_source_id or '').strip() or None
+            audio_provider_file_id = (request.form.get('audio_provider_file_id') or '').strip() or None
+            audio_duration = _parse_audio_duration(request.form.get('audio_duration'))
             ebook_filename = request.form.get('ebook_filename', '')
             ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
+            ebook_source = (request.form.get('ebook_source') or request.form.get('source_type') or '').strip() or None
+            ebook_source_id = (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None
             storyteller_uuid = request.form.get('storyteller_uuid', '')
             audiobooks = container.abs_client().get_all_audiobooks()
             selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
-            # Allow queue entry if audiobook selected and either an ebook or a storyteller UUID is provided
-            if selected_ab and (ebook_filename or storyteller_uuid):
-                if not any(item['abs_id'] == abs_id for item in session['queue']):
-                    session['queue'].append({"abs_id": abs_id,
-                                             "abs_title": manager.get_abs_title(selected_ab),
-                                             "ebook_filename": ebook_filename,
-                                             "ebook_display_name": ebook_display_name,
-                                             "storyteller_uuid": storyteller_uuid,
-                                             "duration": manager.get_duration(selected_ab),
-                                             "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"})
+            selected_audio = None
+            if audio_source == 'ABS' and selected_ab:
+                selected_audio = {
+                    'bridge_key': abs_id,
+                    'audio_source': 'ABS',
+                    'audio_source_id': abs_id,
+                    'audio_title': manager.get_abs_title(selected_ab),
+                    'audio_duration': manager.get_duration(selected_ab),
+                    'audio_cover_url': f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}",
+                    'audio_provider_book_id': abs_id,
+                    'audio_provider_file_id': None,
+                }
+            elif audio_source == 'BookLore' and audio_source_id:
+                selected_audio = {
+                    'bridge_key': _build_bridge_key('BookLore', audio_source_id),
+                    'audio_source': 'BookLore',
+                    'audio_source_id': audio_source_id,
+                    'audio_title': audio_title or f"BookLore {audio_source_id}",
+                    'audio_duration': audio_duration,
+                    'audio_cover_url': audio_cover_url,
+                    'audio_provider_book_id': audio_provider_book_id,
+                    'audio_provider_file_id': audio_provider_file_id,
+                }
+
+            if selected_audio and (ebook_filename or storyteller_uuid):
+                if not any(item['bridge_key'] == selected_audio['bridge_key'] for item in session['queue']):
+                    session['queue'].append({
+                        **selected_audio,
+                        "abs_id": selected_audio['bridge_key'],
+                        "abs_title": selected_audio['audio_title'],
+                        "ebook_filename": ebook_filename,
+                        "ebook_display_name": ebook_display_name,
+                        "ebook_source": ebook_source,
+                        "ebook_source_id": ebook_source_id,
+                        "storyteller_uuid": storyteller_uuid,
+                        "duration": selected_audio['audio_duration'],
+                        "cover_url": selected_audio['audio_cover_url'],
+                    })
                     session.modified = True
             return redirect(url_for('batch_match', search=request.form.get('search', '')))
         elif action == 'remove_from_queue':
@@ -1978,6 +2232,28 @@ def batch_match():
             from src.db.models import Book
 
             for item in session.get('queue', []):
+                audio_source = item.get('audio_source') or 'ABS'
+                if audio_source == 'BookLore':
+                    saved_book, err_msg, _err_code = _create_or_update_booklore_audio_mapping(
+                        audio_source_id=item.get('audio_source_id'),
+                        audio_title=item.get('audio_title'),
+                        audio_cover_url=item.get('audio_cover_url'),
+                        audio_duration=_parse_audio_duration(item.get('audio_duration')),
+                        audio_provider_book_id=item.get('audio_provider_book_id'),
+                        audio_provider_file_id=item.get('audio_provider_file_id'),
+                        ebook_filename=item.get('ebook_filename'),
+                        ebook_source=item.get('ebook_source'),
+                        ebook_source_id=item.get('ebook_source_id'),
+                        storyteller_uuid=item.get('storyteller_uuid'),
+                    )
+                    if err_msg:
+                        logger.warning(
+                            "⚠️ Batch Match skipped BookLore audiobook '%s': %s",
+                            sanitize_log_data(item.get('audio_title') or item.get('audio_source_id')),
+                            err_msg,
+                        )
+                    continue
+
                 ebook_filename = item['ebook_filename']
                 storyteller_uuid = item.get('storyteller_uuid', '')
                 original_ebook_filename = item['ebook_filename']
@@ -2045,6 +2321,12 @@ def batch_match():
                 book = Book(
                     abs_id=item['abs_id'],
                     abs_title=item['abs_title'],
+                    audio_source="ABS",
+                    audio_source_id=item['abs_id'],
+                    audio_title=item['abs_title'],
+                    audio_cover_url=item.get('cover_url'),
+                    audio_duration=duration,
+                    audio_provider_book_id=item['abs_id'],
                     ebook_filename=ebook_filename,
                     kosync_doc_id=kosync_doc_id,
                     transcript_file=storyteller_manifest,
@@ -2052,7 +2334,9 @@ def batch_match():
                     duration=duration,
                     transcript_source=transcript_source,
                     storyteller_uuid=storyteller_uuid or None,
-                    original_ebook_filename=original_ebook_filename
+                    original_ebook_filename=original_ebook_filename,
+                    ebook_source=item.get('ebook_source'),
+                    ebook_source_id=item.get('ebook_source_id'),
                 )
 
                 database_service.save_book(book)
@@ -2088,9 +2372,7 @@ def batch_match():
     search = request.args.get('search', '').strip().lower()
     audiobooks, ebooks, storyteller_books = [], [], []
     if search:
-        audiobooks = get_audiobooks_conditionally()
-        audiobooks = [ab for ab in audiobooks if audiobook_matches_search(ab, search)]
-        for ab in audiobooks: ab['cover_url'] = f"{container.abs_client().base_url}/api/items/{ab['id']}/cover?token={container.abs_client().token}"
+        audiobooks = get_searchable_audiobooks(search)
 
         # Use new search method
         ebooks = get_searchable_ebooks(search)
@@ -2104,7 +2386,7 @@ def batch_match():
                 logger.warning(f"⚠️ Storyteller search failed in batch_match route: {e}")
 
     return render_template('batch_match.html', audiobooks=audiobooks, ebooks=ebooks, storyteller_books=storyteller_books,
-                           queue=session.get('queue', []), search=search, get_title=manager.get_abs_title)
+                           queue=session.get('queue', []), search=search)
 
 
 def _get_suggestions_service():
@@ -3473,6 +3755,24 @@ def get_booklore_libraries():
     return jsonify(libraries)
 
 
+def proxy_booklore_audiobook_cover(book_id):
+    """Stream a BookLore audiobook cover through the backend."""
+    client = container.booklore_client()
+    if not client.is_configured():
+        return "Booklore not configured", 400
+
+    try:
+        content, content_type = client.get_audiobook_cover_bytes(book_id)
+        if not content:
+            return "Cover not found", 404
+        from flask import Response
+
+        return Response(content, content_type=content_type or "image/jpeg")
+    except Exception as e:
+        logger.error(f"❌ Error proxying BookLore audiobook cover for '{book_id}': {e}")
+        return "Error loading cover", 500
+
+
 def api_booklore_refresh():
     """Clear Booklore cache and trigger a full refresh."""
     client = container.booklore_client()
@@ -3764,6 +4064,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/suggestions/clear_stale', 'clear_stale_suggestions', clear_stale_suggestions, methods=['POST'])
     app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
+    app.add_url_rule('/api/booklore/audiobook-cover/<book_id>', 'proxy_booklore_audiobook_cover', proxy_booklore_audiobook_cover, methods=['GET'])
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
     app.add_url_rule('/api/booklore/refresh', 'api_booklore_refresh', api_booklore_refresh, methods=['POST'])
     app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['POST'])

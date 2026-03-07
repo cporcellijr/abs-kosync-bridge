@@ -90,6 +90,10 @@ class SyncClient:
         """
         return {'audiobook', 'ebook'}  # Default: supports both
 
+    def supports_book(self, book: Book) -> bool:
+        """Return True when this client is applicable to the provided book."""
+        return True
+
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         """
         Args:

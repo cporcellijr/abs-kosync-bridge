@@ -681,6 +681,15 @@
             <input type="hidden" name="source_type" id="input_source_type">
             <input type="hidden" name="source_path" id="input_source_path">
             <input type="hidden" name="source_id" id="input_source_id">
+            <input type="hidden" name="audio_source" id="input_audio_source">
+            <input type="hidden" name="audio_source_id" id="input_audio_source_id">
+            <input type="hidden" name="audio_title" id="input_audio_title">
+            <input type="hidden" name="audio_duration" id="input_audio_duration">
+            <input type="hidden" name="audio_provider_book_id" id="input_audio_provider_book_id">
+            <input type="hidden" name="audio_provider_file_id" id="input_audio_provider_file_id">
+            <input type="hidden" name="audio_cover_url" id="input_audio_cover_url">
+            <input type="hidden" name="ebook_source" id="input_ebook_source">
+            <input type="hidden" name="ebook_source_id" id="input_ebook_source_id">
 
             <div class="selection-container">
 
@@ -705,8 +714,15 @@
 
                             {% for ab in audiobooks %}
                             <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
+                                data-audio-source="{{ ab.source }}"
+                                data-audio-source-id="{{ ab.source_id }}"
+                                data-audio-title="{{ ab.title }}"
+                                data-audio-duration="{{ ab.duration or '' }}"
+                                data-audio-provider-book-id="{{ ab.provider_book_id or ab.source_id }}"
+                                data-audio-provider-file-id="{{ ab.provider_file_id or '' }}"
+                                data-audio-cover-url="{{ ab.cover_url or '' }}"
                                 onclick="selectItem(this, 'audiobook_id')">
-                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" {% if single_match
+                                <input type="radio" name="audiobook_id" value="{% if ab.source == 'ABS' %}{{ ab.source_id }}{% endif %}" {% if single_match
                                     %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if ab.cover_url %}
@@ -718,7 +734,8 @@
                                     {% endif %}
                                 </div>
                                 <div class="audiobook-info">
-                                    <div class="audiobook-title">{{ get_title(ab) }}</div>
+                                    <div class="audiobook-title">{{ ab.title }}</div>
+                                    <span class="source-badge {{ ab.source.lower().replace(' ', '') }}">{{ ab.source }}</span>
                                 </div>
                             </label>
                             {% endfor %}
@@ -854,11 +871,23 @@
             const radio = element.querySelector('input[type="radio"]');
             if (radio) radio.checked = true;
 
+            if (groupName === 'audiobook_id') {
+                document.getElementById('input_audio_source').value = element.dataset.audioSource || '';
+                document.getElementById('input_audio_source_id').value = element.dataset.audioSourceId || '';
+                document.getElementById('input_audio_title').value = element.dataset.audioTitle || '';
+                document.getElementById('input_audio_duration').value = element.dataset.audioDuration || '';
+                document.getElementById('input_audio_provider_book_id').value = element.dataset.audioProviderBookId || '';
+                document.getElementById('input_audio_provider_file_id').value = element.dataset.audioProviderFileId || '';
+                document.getElementById('input_audio_cover_url').value = element.dataset.audioCoverUrl || '';
+            }
+
             // If ebook option, populate hidden inputs for Forge
             if (groupName === 'ebook_filename') {
                 document.getElementById('input_source_type').value = element.dataset.sourceType || '';
                 document.getElementById('input_source_path').value = element.dataset.sourcePath || '';
                 document.getElementById('input_source_id').value = element.dataset.sourceId || '';
+                document.getElementById('input_ebook_source').value = element.dataset.sourceType || '';
+                document.getElementById('input_ebook_source_id').value = element.dataset.sourceId || '';
             }
 
             validateForm();
@@ -868,11 +897,12 @@
             const ab = document.querySelector('input[name="audiobook_id"]:checked');
             const st = document.querySelector('input[name="storyteller_uuid"]:checked');
             const eb = document.querySelector('input[name="ebook_filename"]:checked');
+            const audioSource = document.getElementById('input_audio_source').value;
 
             const btn = document.getElementById('submitBtn');
             const msg = document.getElementById('validationMsg');
 
-            let hasAudio = !!ab;
+            let hasAudio = !!audioSource;
             // Valid text source if: 
             // 1. Storyteller UUID is selected AND NOT EMPTY
             // 2. OR Ebook Filename is selected
@@ -895,7 +925,7 @@
             // Forge Validation
             const forgeBtn = document.getElementById('forgeBtn');
             // Forge requires Audio + Standard Ebook (NOT Storyteller)
-            if (hasAudio && (ebVal !== "")) {
+            if (hasAudio && audioSource === 'ABS' && (ebVal !== "")) {
                 forgeBtn.disabled = false;
                 forgeBtn.style.opacity = "1";
             } else {
@@ -906,6 +936,13 @@
 
         // Initial check and setup
         document.addEventListener('DOMContentLoaded', () => {
+            const initialAb = document.querySelector('input[name="audiobook_id"]:checked');
+            if (initialAb) {
+                const label = initialAb.closest('.ab-option');
+                if (label) {
+                    selectItem(label, 'audiobook_id');
+                }
+            }
             const initialEb = document.querySelector('input[name="ebook_filename"]:checked');
             if (initialEb) {
                 const label = initialEb.closest('.eb-option');

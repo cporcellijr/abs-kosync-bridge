@@ -69,7 +69,16 @@ class Book(Base):
 
     abs_id = Column(String(255), primary_key=True)
     abs_title = Column(String(500))
+    audio_source = Column(String(32), nullable=True, index=True)
+    audio_source_id = Column(String(255), nullable=True, index=True)
+    audio_title = Column(String(500), nullable=True)
+    audio_cover_url = Column(String(1000), nullable=True)
+    audio_duration = Column(Float, nullable=True)
+    audio_provider_book_id = Column(String(255), nullable=True)
+    audio_provider_file_id = Column(String(255), nullable=True)
     ebook_filename = Column(String(500))
+    ebook_source = Column(String(32), nullable=True)
+    ebook_source_id = Column(String(255), nullable=True)
     original_ebook_filename = Column(String(500))  # NEW COLUMN
     kosync_doc_id = Column(String(255), index=True)
     transcript_file = Column(String(500))
@@ -87,6 +96,11 @@ class Book(Base):
     alignment = relationship("BookAlignment", back_populates="book", uselist=False, cascade="all, delete-orphan")
 
     def __init__(self, abs_id: str, abs_title: str = None, ebook_filename: str = None,
+                 audio_source: str = None, audio_source_id: str = None,
+                 audio_title: str = None, audio_cover_url: str = None,
+                 audio_duration: float = None, audio_provider_book_id: str = None,
+                 audio_provider_file_id: str = None,
+                 ebook_source: str = None, ebook_source_id: str = None,
                  original_ebook_filename: str = None,  # NEW ARGUMENT
                  kosync_doc_id: str = None, transcript_file: str = None,
                  status: str = 'active', duration: float = None, sync_mode: str = 'audiobook',
@@ -94,7 +108,16 @@ class Book(Base):
                  storyteller_uuid: str = None, abs_ebook_item_id: str = None):
         self.abs_id = abs_id
         self.abs_title = abs_title
+        self.audio_source = audio_source
+        self.audio_source_id = audio_source_id
+        self.audio_title = audio_title
+        self.audio_cover_url = audio_cover_url
+        self.audio_duration = audio_duration
+        self.audio_provider_book_id = audio_provider_book_id
+        self.audio_provider_file_id = audio_provider_file_id
         self.ebook_filename = ebook_filename
+        self.ebook_source = ebook_source
+        self.ebook_source_id = ebook_source_id
         self.original_ebook_filename = original_ebook_filename  # NEW FIELD
         self.kosync_doc_id = kosync_doc_id
         self.transcript_file = transcript_file

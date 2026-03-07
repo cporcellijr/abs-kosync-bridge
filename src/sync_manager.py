@@ -51,6 +51,7 @@ class SyncManager:
                  alignment_service: AlignmentService = None,
                  library_service: LibraryService = None,
                  migration_service: MigrationService = None,
+                 audio_source_adapters: dict | None = None,
                  epub_cache_dir=None,
                  data_dir=None,
                  books_dir=None):
@@ -69,6 +70,7 @@ class SyncManager:
         self.alignment_service = alignment_service
         self.library_service = library_service
         self.migration_service = migration_service
+        self.audio_source_adapters = audio_source_adapters or {}
         
         self.data_dir = data_dir
         self.books_dir = books_dir
@@ -154,6 +156,30 @@ class SyncManager:
         but fall back to Storyteller artifact when that's all we have.
         """
         return self._get_non_story_ebook_filename(book) or self._get_storyteller_ebook_filename(book)
+
+    def _get_audio_source_name(self, book: Book | None) -> str | None:
+        if not book:
+            return None
+        source = getattr(book, "audio_source", None)
+        if source:
+            return source
+        if getattr(book, "sync_mode", "audiobook") == "ebook_only":
+            return None
+        return "ABS"
+
+    def _get_primary_audio_client_name(self, book: Book | None) -> str | None:
+        source = self._get_audio_source_name(book)
+        if source == "BookLore":
+            return "BookLoreAudio"
+        if source == "ABS":
+            return "ABS"
+        return None
+
+    def _get_audio_source_adapter(self, book: Book | None):
+        source = self._get_audio_source_name(book)
+        if not source:
+            return None
+        return self.audio_source_adapters.get(source)
 
     def _build_text_anchors(self, full_text: str, char_offset: int):
         if not full_text:
@@ -447,10 +473,15 @@ class SyncManager:
 
     def _normalize_for_cross_format_comparison(self, book, config):
         """Normalize ebook locators to audiobook timeline with deterministic anchors."""
-        has_abs = 'ABS' in config
-        ebook_clients = [k for k in config.keys() if k != 'ABS']
+        primary_audio_client = self._get_primary_audio_client_name(book)
+        has_primary_audio = bool(primary_audio_client and primary_audio_client in config)
+        ebook_clients = [
+            k for k in config.keys()
+            if k != primary_audio_client
+            and 'ebook' in self.sync_clients.get(k).get_supported_sync_types()
+        ]
 
-        if not has_abs or not ebook_clients:
+        if not has_primary_audio or not ebook_clients:
             return None
 
         if not book.transcript_file:
@@ -458,8 +489,8 @@ class SyncManager:
             return None
 
         normalized = {}
-        abs_ts = config['ABS'].current.get('ts', 0)
-        normalized['ABS'] = abs_ts
+        abs_ts = config[primary_audio_client].current.get('ts', 0)
+        normalized[primary_audio_client] = abs_ts
 
         for client_name in ebook_clients:
             if client_name not in self.sync_clients:
@@ -575,6 +606,9 @@ class SyncManager:
         clients_to_use = clients_to_use or self.sync_clients
         config = {}
         bulk_states_per_client = bulk_states_per_client or {}
+
+        if not clients_to_use:
+            return config
 
         with ThreadPoolExecutor(max_workers=len(clients_to_use)) as executor:
             futures = {}
@@ -1065,6 +1099,9 @@ class SyncManager:
             ebook_only_mode = bool(
                 hasattr(book, "sync_mode") and getattr(book, "sync_mode", "audiobook") == "ebook_only"
             )
+            audio_adapter = self._get_audio_source_adapter(book)
+            audio_source = self._get_audio_source_name(book)
+            audio_source_id = getattr(book, "audio_source_id", None) or abs_id
 
             def update_progress(local_pct, phase):
                 """
@@ -1090,8 +1127,12 @@ class SyncManager:
 
             # Fetch item details for acquisition context
             item_details = None
-            if not ebook_only_mode:
+            if not ebook_only_mode and audio_source == "ABS":
                 item_details = self.abs_client.get_item_details(abs_id)
+            elif not ebook_only_mode:
+                logger.info(
+                    f"Background prep: skipping ABS item lookup for non-ABS audio source '{sanitize_log_data(audio_source or 'unknown')}'"
+                )
             else:
                 logger.info(
                     f"Ebook-only background prep: skipping ABS item lookup for '{sanitize_log_data(abs_title)}'"
@@ -1161,7 +1202,10 @@ class SyncManager:
 
             # [MOVED UP] Fetch item details to get chapters (for time alignment) and for Ebook Acquisition
             # item_details = self.abs_client.get_item_details(abs_id) # Already fetched above
-            chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+            if audio_adapter and not ebook_only_mode:
+                chapters = audio_adapter.get_chapters(audio_source_id)
+            else:
+                chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
             
             # [NEW] Pre-fetch book text for validation/alignment
             # We need this for Validating SMIL OR for Aligning Whisper
@@ -1212,7 +1256,9 @@ class SyncManager:
             if not storyteller_aligned and not raw_transcript:
                 logger.info("🔄 SMIL extraction skipped/failed, falling back to Whisper transcription")
                 
-                audio_files = self.abs_client.get_audio_files(abs_id)
+                if not audio_adapter:
+                    raise RuntimeError(f"No audio source adapter configured for '{audio_source}'")
+                audio_files = audio_adapter.get_audio_files(audio_source_id, bridge_key=abs_id)
                 raw_transcript = self.transcriber.process_audio(
                     abs_id, audio_files,
                     full_book_text=book_text, # Passed for context/alignment inside transcriber if old logic used
@@ -1391,6 +1437,7 @@ class SyncManager:
         # "Most recent change wins" - if only one client changed, it becomes the leader
         # Use hybrid time/percentage logic to filter out phantom API noise
         normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+        primary_audio_client = self._get_primary_audio_client_name(book)
         clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
 
         # Suppress raw pct delta when locator-derived position shows no movement from previous state.
@@ -1416,13 +1463,15 @@ class SyncManager:
         leader_pct = None
 
         single_delta_low_conf = False
+        low_conf_single_delta_client = None
         if len(clients_with_delta) == 1:
             changed_client = list(clients_with_delta.keys())[0]
             changed_source = config[changed_client].current.get("_normalization_source")
+
             if (
                 normalized_positions
                 and len(normalized_positions) > 1
-                and changed_client != "ABS"
+                and changed_client != primary_audio_client
             ):
                 changed_ts = normalized_positions.get(changed_client)
                 other_ts = [
@@ -1430,8 +1479,9 @@ class SyncManager:
                     if name != changed_client and name in vals
                 ]
 
-                if changed_source == "percent_fallback" and "ABS" in vals:
+                if changed_source == "percent_fallback" and primary_audio_client in vals:
                     single_delta_low_conf = True
+                    low_conf_single_delta_client = changed_client
                     logger.info(
                         f"🔄 '{abs_id}' '{title_snip}' Ignoring single-client delta from "
                         f"'{changed_client}' (low-confidence source=percent_fallback); evaluating all candidates"
@@ -1474,7 +1524,7 @@ class SyncManager:
                     high_conf_normalized_candidates = {}
                     for candidate_name, candidate_ts in normalized_candidates.items():
                         candidate_source = config[candidate_name].current.get("_normalization_source")
-                        if candidate_name == "ABS" or candidate_source != "percent_fallback":
+                        if candidate_name == primary_audio_client or candidate_source != "percent_fallback":
                             high_conf_normalized_candidates[candidate_name] = candidate_ts
                     selected_normalized_candidates = (
                         high_conf_normalized_candidates
@@ -1491,16 +1541,39 @@ class SyncManager:
 
                     leader = max(selected_normalized_candidates, key=selected_normalized_candidates.get)
                     leader_ts = selected_normalized_candidates[leader]
-                    if leader != "ABS" and "ABS" in selected_normalized_candidates:
-                        abs_ts = selected_normalized_candidates["ABS"]
+                    if leader != primary_audio_client and primary_audio_client in selected_normalized_candidates:
+                        abs_ts = selected_normalized_candidates[primary_audio_client]
                         ts_delta = leader_ts - abs_ts
                         if ts_delta <= getattr(self, "cross_format_deadband_seconds", 2.0):
                             logger.debug(
                                 f"'{abs_id}' '{title_snip}' Deadband prevents cross-format switch: "
                                 f"candidate={leader} ts={leader_ts:.1f}s abs_ts={abs_ts:.1f}s delta={ts_delta:.2f}s"
                             )
-                            leader = "ABS"
+                            leader = primary_audio_client
                             leader_ts = abs_ts
+
+                    # Guardrail: avoid destructive 0% resets on first-progress bootstrap.
+                    # If primary audio is still at/near 0 but we have a non-zero single-client
+                    # low-confidence update, prefer that non-zero candidate over forcing a reset.
+                    if (
+                        low_conf_single_delta_client
+                        and leader == primary_audio_client
+                        and primary_audio_client in vals
+                    ):
+                        primary_pct = float(vals.get(primary_audio_client) or 0.0)
+                        candidate_pct = float(vals.get(low_conf_single_delta_client) or 0.0)
+                        candidate_ts = normalized_positions.get(low_conf_single_delta_client)
+                        if primary_pct <= 0.001 and candidate_pct >= 0.005:
+                            deadband_s = getattr(self, "cross_format_deadband_seconds", 2.0)
+                            if candidate_ts is None or candidate_ts > deadband_s:
+                                leader = low_conf_single_delta_client
+                                leader_ts = normalized_positions.get(leader, leader_ts)
+                                logger.warning(
+                                    f"⚠️ '{abs_id}' '{title_snip}' Guardrail: promoting "
+                                    f"'{low_conf_single_delta_client}' ({candidate_pct:.2%}, source=percent_fallback) "
+                                    f"over primary audio 0% to prevent destructive reset"
+                                )
+
                     leader_pct = vals[leader]
                     locator_pct = config[leader].current.get("_locator_pct")
                     if locator_pct is not None and abs(locator_pct - leader_pct) > 0.01:
@@ -1510,7 +1583,10 @@ class SyncManager:
                         )
                         leader_pct = locator_pct
                         config[leader].current['pct'] = leader_pct
-                    leader_source = config[leader].current.get("_normalization_source", "abs")
+                    leader_source = config[leader].current.get(
+                        "_normalization_source",
+                        primary_audio_client.lower() if primary_audio_client else "audio",
+                    )
                     logger.info(
                         f"🔄 '{abs_id}' '{title_snip}' {leader} leads at "
                         f"{config[leader].value_formatter(leader_pct)} "
@@ -1640,7 +1716,7 @@ class SyncManager:
                 sync_type = 'ebook' if (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only') else 'audiobook'
                 active_clients = {
                     name: client for name, client in self.sync_clients.items()
-                    if sync_type in client.get_supported_sync_types()
+                    if sync_type in client.get_supported_sync_types() and client.supports_book(book)
                 }
                 if sync_type == 'ebook':
                     logger.debug(f"'{abs_id}' '{title_snip}' Ebook-only mode - using clients: {list(active_clients.keys())}")
@@ -1655,15 +1731,16 @@ class SyncManager:
                 # Check for ABS offline condition (only for audiobook mode)
                 # Check for ABS offline condition (only for audiobook mode)
                 if not (hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only'):
-                    abs_state = config.get('ABS')
-                    if abs_state is None:
+                    primary_audio_client = self._get_primary_audio_client_name(book)
+                    audio_state = config.get(primary_audio_client) if primary_audio_client else None
+                    if audio_state is None:
                         # Fallback logic: If ABS is missing but we have ebook clients, try to sync them as ebook-only
-                        ebook_clients_active = [k for k in config.keys() if k != 'ABS']
+                        ebook_clients_active = [k for k in config.keys() if k != primary_audio_client]
                         if ebook_clients_active:
-                             logger.info(f"'{abs_id}' '{title_snip}' ABS audiobook not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
+                             logger.info(f"'{abs_id}' '{title_snip}' Primary audio source not found/offline, falling back to ebook-only sync between {ebook_clients_active}")
                         else:
-                             logger.debug(f"'{abs_id}' '{title_snip}' ABS audiobook offline and no other clients, skipping")
-                             continue  # ABS offline and no fallback possible
+                             logger.debug(f"'{abs_id}' '{title_snip}' Primary audio source offline and no other clients, skipping")
+                             continue
 
 
 
@@ -1806,7 +1883,8 @@ class SyncManager:
                 locator = None
                 locator_source = None
 
-                if leader == 'ABS':
+                primary_audio_client = self._get_primary_audio_client_name(book)
+                if leader == primary_audio_client:
                     abs_timestamp = leader_state.current.get('ts')
                     locator, txt = self._resolve_alignment_locator_from_abs_timestamp(book, abs_timestamp)
                     if locator:
@@ -1870,13 +1948,10 @@ class SyncManager:
 
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}
-                for client_name, client in self.sync_clients.items():
+                for client_name, client in active_clients.items():
                     if client_name == leader:
                         continue
 
-                    # Skip ABS update if in ebook-only mode
-                    if client_name == 'ABS' and hasattr(book, 'sync_mode') and book.sync_mode == 'ebook_only':
-                        continue
                     try:
                         request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
                         result = client.update_progress(book, request)
@@ -1971,7 +2046,15 @@ class SyncManager:
                 locator = LocatorResult(percentage=0.0)
                 request = UpdateProgressRequest(locator_result=locator, txt="", previous_location=None)
 
-                for client_name, client in self.sync_clients.items():
+                applicable_clients = {
+                    name: client for name, client in self.sync_clients.items()
+                    if (
+                        ('ebook' if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' else 'audiobook') in client.get_supported_sync_types()
+                        and client.supports_book(book)
+                    )
+                }
+
+                for client_name, client in applicable_clients.items():
                     if client_name == 'ABS' and book.sync_mode == 'ebook_only':
                         logger.debug(f"'{book.abs_title}' Ebook-only mode - skipping ABS progress reset")
                         continue
