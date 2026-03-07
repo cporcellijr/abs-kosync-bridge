@@ -14,7 +14,11 @@ from src.sync_clients.sync_client_interface import LocatorResult
 
 logger = logging.getLogger(__name__)
 
-BULK_DETAIL_FETCH_LIMIT = 500
+BULK_DETAIL_FETCH_LIMIT = 5000
+STALE_REFRESH_BATCH_SIZE = 1000
+MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE = int(
+    os.getenv("BOOKLORE_MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE", "1200")
+)
 MAX_DETAIL_FETCHES_PER_SEARCH = 20
 
 class BookloreClient:
@@ -715,6 +719,7 @@ class BookloreClient:
                 if str(book.get('id')) in existing_lightweight_ids:
                     self._upsert_lightweight_entry(book)
 
+            new_detail_fetch_count = 0
             if new_book_ids:
                 if len(new_book_ids) > BULK_DETAIL_FETCH_LIMIT:
                     for book in all_books_list:
@@ -727,6 +732,7 @@ class BookloreClient:
                         f"Consider setting BOOKLORE_LIBRARY_ID to reduce scan scope."
                     )
                 else:
+                    new_detail_fetch_count = len(new_book_ids)
                     logger.debug(f"Booklore: Fetching details for {len(new_book_ids)} new books...")
                     token = self._get_fresh_token()
                     if not token:
@@ -745,6 +751,66 @@ class BookloreClient:
                                     self._process_book_detail(detail)
                             except Exception as e:
                                 logger.debug(f"Booklore: Error fetching details: {e}")
+
+            id_snapshot = self._snapshot_book_id_items()
+            if id_snapshot:
+                stale_refresh_budget = max(
+                    0,
+                    MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE - new_detail_fetch_count
+                )
+                if stale_refresh_budget <= 0:
+                    logger.debug(
+                        "Booklore: Skipping stale details refresh this cycle "
+                        f"(new_details={new_detail_fetch_count}, "
+                        f"max_per_cycle={MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE})"
+                    )
+                    stale_ids = []
+                else:
+                    stale_batch_size = min(STALE_REFRESH_BATCH_SIZE, stale_refresh_budget)
+                    logger.debug(
+                        "Booklore: Stale details refresh budget "
+                        f"(new_details={new_detail_fetch_count}, "
+                        f"stale_batch={stale_batch_size}, "
+                        f"max_per_cycle={MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE})"
+                    )
+                stale_candidates = []
+                for bid, book_info in id_snapshot:
+                    if bid is None:
+                        continue
+                    detail_fetched_at = 0
+                    if isinstance(book_info, dict):
+                        raw_detail_fetched_at = book_info.get('_detail_fetched_at', 0)
+                        try:
+                            detail_fetched_at = float(raw_detail_fetched_at or 0)
+                        except (TypeError, ValueError):
+                            detail_fetched_at = 0
+                    stale_candidates.append((detail_fetched_at, bid))
+
+                stale_candidates.sort(key=lambda item: item[0])
+                if stale_refresh_budget > 0:
+                    stale_ids = [bid for _, bid in stale_candidates[:stale_batch_size]]
+                if stale_ids:
+                    logger.debug(
+                        f"Booklore: Refreshing stale details for {len(stale_ids)} books "
+                        f"(batch_size={len(stale_ids)})"
+                    )
+                    token = self._get_fresh_token()
+                    if not token:
+                        self._last_refresh_failed = True
+                        return False
+
+                    def fetch_stale_one(book_id):
+                        return book_id, self._fetch_book_detail(book_id, token)
+
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        futures = {executor.submit(fetch_stale_one, bid): bid for bid in stale_ids}
+                        for future in as_completed(futures):
+                            try:
+                                _, detail = future.result()
+                                if detail and isinstance(detail, dict):
+                                    self._process_book_detail(detail)
+                            except Exception as e:
+                                logger.debug(f"Booklore: Error refreshing stale detail: {e}")
 
             self._cache_timestamp = time.time()
             self._last_refresh_failed = False
@@ -780,10 +846,14 @@ class BookloreClient:
             'subtitle': subtitle,
             'authors': author_str,
             'bookType': book_type,
+            'primaryFile': detail.get('primaryFile'),
+            'bookFiles': detail.get('bookFiles'),
+            'audiobookProgress': detail.get('audiobookProgress'),
             'epubProgress': detail.get('epubProgress'),
             'pdfProgress': detail.get('pdfProgress'),
             'cbxProgress': detail.get('cbxProgress'),
             'koreaderProgress': detail.get('koreaderProgress'),
+            '_detail_fetched_at': time.time(),
         }
 
         # Let's keep it consistent with what we see in database migration
@@ -911,6 +981,37 @@ class BookloreClient:
                 if str(bid) not in fully_cached_ids and book_info.get('_needs_detail'):
                     all_books.append(book_info)
         return all_books
+
+    def clear_and_refresh(self):
+        """Clear all Booklore cache state (memory + DB) and run a full refresh."""
+        acquired = self._refresh_lock.acquire(timeout=30)
+        if not acquired:
+            logger.warning("⚠️ Booklore: Cache refresh already in progress, cannot clear cache right now")
+            return False
+
+        try:
+            with self._cache_lock:
+                self._book_cache = {}
+                self._book_id_cache = {}
+                self._cache_timestamp = 0
+
+            self._last_refresh_failed = False
+            self._last_refresh_attempt = 0
+            self._server_side_filter_supported = None
+
+            if self.db:
+                if not self.db.clear_all_booklore_books():
+                    logger.error("❌ Booklore: Failed to clear DB cache table")
+                    return False
+
+            logger.info("📚 Booklore: Cache cleared (memory + DB), starting full refresh...")
+        except Exception as e:
+            logger.error(f"❌ Booklore: Failed to clear cache before refresh: {e}")
+            return False
+        finally:
+            self._refresh_lock.release()
+
+        return self._refresh_book_cache()
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""

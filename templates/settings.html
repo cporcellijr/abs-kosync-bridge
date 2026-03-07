@@ -1078,6 +1078,19 @@
                         </div>
                     </div>
 
+                    <div class="form-group full-width">
+                        <label>Booklore Cache</label>
+                        <div class="cleanup-group">
+                            <button type="button" id="booklore_refresh_btn" class="btn btn-primary" onclick="refreshBookloreCache(this)">
+                                Refresh Booklore Cache
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Rebuilds Booklore cache immediately, including stale metadata refresh.
+                                <span id="booklore_refresh_status"></span>
+                            </p>
+                        </div>
+                    </div>
+
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 
                     <!-- Transcription Settings -->
@@ -1413,6 +1426,50 @@
             } catch (err) {
                 console.error('Error cleaning cache:', err);
                 alert('An error occurred while cleaning cache. Check console for details.');
+            }
+        }
+
+        async function refreshBookloreCache(btn) {
+            const statusEl = document.getElementById('booklore_refresh_status');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Refreshing...';
+            if (statusEl) {
+                statusEl.textContent = ' Refresh in progress...';
+                statusEl.style.color = 'rgba(255, 255, 255, 0.55)';
+            }
+
+            try {
+                const response = await fetch('/api/booklore/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    const message = data.error || 'Unknown error';
+                    if (statusEl) {
+                        statusEl.textContent = ` Refresh failed: ${message}`;
+                        statusEl.style.color = '#e57373';
+                    }
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = ' Refresh complete.';
+                    statusEl.style.color = '#81c784';
+                }
+            } catch (err) {
+                console.error('Error refreshing Booklore cache:', err);
+                if (statusEl) {
+                    statusEl.textContent = ` Refresh failed: ${err}`;
+                    statusEl.style.color = '#e57373';
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
             }
         }
 

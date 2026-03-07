@@ -3473,6 +3473,24 @@ def get_booklore_libraries():
     return jsonify(libraries)
 
 
+def api_booklore_refresh():
+    """Clear Booklore cache and trigger a full refresh."""
+    client = container.booklore_client()
+    if not client.is_configured():
+        return jsonify({"success": False, "error": "Booklore not configured"}), 400
+
+    try:
+        refreshed = client.clear_and_refresh()
+    except Exception as e:
+        logger.error(f"❌ Booklore cache refresh failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    if not refreshed:
+        return jsonify({"success": False, "error": "Booklore refresh failed"}), 500
+
+    return jsonify({"success": True, "message": "Booklore cache refreshed successfully"})
+
+
 def _test_conn_error(e: Exception) -> str:
     """Extract a user-friendly message from a requests exception."""
     msg = str(e)
@@ -3747,6 +3765,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/cache/clean', 'clean_cache', clean_inactive_cache, methods=['POST'])
     app.add_url_rule('/api/cover-proxy/<abs_id>', 'proxy_cover', proxy_cover)
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
+    app.add_url_rule('/api/booklore/refresh', 'api_booklore_refresh', api_booklore_refresh, methods=['POST'])
     app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['POST'])
 
     # Storyteller API routes
