@@ -1610,16 +1610,16 @@ def index():
 
 
 def shelfmark():
-    """Shelfmark view - renders an iframe with SHELFMARK_URL"""
+    """Shelfmark handoff - redirects to the configured SHELFMARK_URL."""
     url = os.environ.get("SHELFMARK_URL")
     if not url:
         return redirect(url_for('index'))
     
-    # Case-insensitive sanitization for the iframe source
+    # Case-insensitive sanitization for the external destination.
     if not url.lower().startswith(('http://', 'https://')):
         url = f"http://{url}"
         
-    return render_template('shelfmark.html', shelfmark_url=url)
+    return redirect(url)
 
 
 def forge():

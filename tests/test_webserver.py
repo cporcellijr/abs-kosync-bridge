@@ -698,6 +698,20 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         finally:
             src.web_server.render_template = original_render
 
+    def test_shelfmark_redirects_to_configured_external_url(self):
+        with patch.dict(os.environ, {'SHELFMARK_URL': 'shelfmark.blackcatmedia.xyz'}, clear=False):
+            response = self.client.get('/shelfmark')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://shelfmark.blackcatmedia.xyz')
+
+    def test_shelfmark_redirects_to_index_when_not_configured(self):
+        with patch.dict(os.environ, {'SHELFMARK_URL': ''}, clear=False):
+            response = self.client.get('/shelfmark')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers['Location'].endswith('/'))
+
     def test_api_health_endpoint(self):
         response = self.client.get('/api/health')
 
