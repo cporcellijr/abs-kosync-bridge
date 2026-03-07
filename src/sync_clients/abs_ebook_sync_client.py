@@ -59,7 +59,7 @@ class ABSEbookSyncClient(SyncClient):
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         cfi = state.current.get('cfi')
         pct = state.current.get('pct')
-        epub = book.ebook_filename
+        epub = getattr(book, "original_ebook_filename", None) or book.ebook_filename
         if cfi and epub:
             txt = self.ebook_parser.get_text_around_cfi(epub, cfi)
             if txt:

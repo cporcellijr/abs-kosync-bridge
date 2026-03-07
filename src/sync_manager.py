@@ -113,6 +113,48 @@ class SyncManager:
         self._sync_cycle_ebook_cache[ebook_filename] = result
         return result
 
+    def _get_non_story_ebook_filename(self, book: Book | None) -> str | None:
+        """Preferred EPUB for KoSync/Booklore/ABS ebook operations."""
+        if not book:
+            return None
+        original = getattr(book, "original_ebook_filename", None)
+        current = getattr(book, "ebook_filename", None)
+        return original or current
+
+    def _get_storyteller_ebook_filename(self, book: Book | None) -> str | None:
+        """Preferred EPUB for Storyteller href/fragment operations."""
+        if not book:
+            return None
+
+        current = getattr(book, "ebook_filename", None)
+        if current and str(current).startswith("storyteller_"):
+            return current
+
+        storyteller_uuid = getattr(book, "storyteller_uuid", None)
+        if storyteller_uuid:
+            candidate = f"storyteller_{storyteller_uuid}.epub"
+            try:
+                candidate_path = self.ebook_parser.resolve_book_path(candidate)
+                if candidate_path and Path(candidate_path).exists():
+                    return candidate
+            except Exception:
+                pass
+
+        return current
+
+    def _get_epub_for_client(self, book: Book | None, client_name: str | None) -> str | None:
+        if client_name == "Storyteller":
+            return self._get_storyteller_ebook_filename(book)
+        return self._get_non_story_ebook_filename(book)
+
+    def _get_locator_target_epub(self, book: Book | None, leader_name: str | None) -> str | None:
+        """
+        Locator generation target EPUB used for cross-client updates.
+        Prefer non-Storyteller EPUB so KoSync/Booklore/ABS locators stay stable,
+        but fall back to Storyteller artifact when that's all we have.
+        """
+        return self._get_non_story_ebook_filename(book) or self._get_storyteller_ebook_filename(book)
+
     def _build_text_anchors(self, full_text: str, char_offset: int):
         if not full_text:
             return "", "", ""
@@ -165,9 +207,16 @@ class SyncManager:
         except Exception:
             return None, None
 
-    def _validate_and_stabilize_locator(self, book: Book, target_offset: int, locator: LocatorResult):
+    def _validate_and_stabilize_locator(
+        self,
+        book: Book,
+        target_offset: int,
+        locator: LocatorResult,
+        ebook_filename: str | None = None,
+    ):
         """Round-trip validate locator fields and deterministically degrade to safer fields."""
-        if not locator or not getattr(book, "ebook_filename", None):
+        target_epub = ebook_filename or self._get_non_story_ebook_filename(book) or getattr(book, "ebook_filename", None)
+        if not locator or not target_epub:
             return locator
 
         tolerance = int(os.getenv("CROSSFORMAT_ROUNDTRIP_TOLERANCE_CHARS", self.ebook_parser.locator_roundtrip_tolerance))
@@ -176,16 +225,16 @@ class SyncManager:
 
         ko_offset = None
         if safe_locator.perfect_ko_xpath:
-            ko_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, safe_locator.perfect_ko_xpath)
+            ko_offset = self.ebook_parser.resolve_xpath_to_index(target_epub, safe_locator.perfect_ko_xpath)
         if ko_offset is None and safe_locator.xpath:
-            ko_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, safe_locator.xpath)
+            ko_offset = self.ebook_parser.resolve_xpath_to_index(target_epub, safe_locator.xpath)
         if ko_offset is None:
             ko_offset = target_offset
 
         ko_error = abs(int(ko_offset) - int(target_offset))
         if ko_error > tolerance:
-            sentence_xpath = self.ebook_parser.get_sentence_level_ko_xpath(book.ebook_filename, safe_locator.percentage)
-            sentence_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, sentence_xpath) if sentence_xpath else None
+            sentence_xpath = self.ebook_parser.get_sentence_level_ko_xpath(target_epub, safe_locator.percentage)
+            sentence_offset = self.ebook_parser.resolve_xpath_to_index(target_epub, sentence_xpath) if sentence_xpath else None
             sentence_error = abs(int(sentence_offset) - int(target_offset)) if sentence_offset is not None else None
             if sentence_xpath and sentence_offset is not None and sentence_error <= tolerance:
                 safe_locator.xpath = sentence_xpath
@@ -196,7 +245,7 @@ class SyncManager:
                 safe_locator.perfect_ko_xpath = None
                 fallback.append("ko=percent_only")
 
-        cfi_offset = self.ebook_parser.resolve_cfi_to_index(book.ebook_filename, safe_locator.cfi) if safe_locator.cfi else None
+        cfi_offset = self.ebook_parser.resolve_cfi_to_index(target_epub, safe_locator.cfi) if safe_locator.cfi else None
         cfi_error = abs(int(cfi_offset) - int(target_offset)) if cfi_offset is not None else None
         if cfi_offset is None or cfi_error > tolerance:
             safe_locator.cfi = None
@@ -385,17 +434,28 @@ class SyncManager:
         abs_ts = config['ABS'].current.get('ts', 0)
         normalized['ABS'] = abs_ts
 
-        try:
-            full_text, total_text_len = self._get_cached_ebook_text(book.ebook_filename)
-            if total_text_len <= 0:
-                logger.debug(f"'{book.abs_id}' Empty ebook text during cross-format normalization")
-                return None
-        except Exception as e:
-            logger.warning(f"⚠️ '{book.abs_id}' Failed to load ebook text for normalization: {e}")
-            return None
-
         for client_name in ebook_clients:
             if client_name not in self.sync_clients:
+                continue
+
+            client_epub = self._get_epub_for_client(book, client_name)
+            if not client_epub:
+                logger.debug(f"'{book.abs_id}' Missing epub filename for normalization client '{client_name}'")
+                continue
+
+            try:
+                full_text, total_text_len = self._get_cached_ebook_text(client_epub)
+                if total_text_len <= 0:
+                    logger.debug(
+                        f"'{book.abs_id}' Empty ebook text during normalization "
+                        f"for '{client_name}' epub='{sanitize_log_data(client_epub)}'"
+                    )
+                    continue
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ '{book.abs_id}' Failed to load ebook text for normalization "
+                    f"client '{client_name}' epub='{sanitize_log_data(client_epub)}': {e}"
+                )
                 continue
 
             client_state = config[client_name]
@@ -410,17 +470,17 @@ class SyncManager:
             try:
                 char_offset = None
                 if client_xpath:
-                    char_offset = self.ebook_parser.resolve_xpath_to_index(book.ebook_filename, client_xpath)
+                    char_offset = self.ebook_parser.resolve_xpath_to_index(client_epub, client_xpath)
                     if char_offset is not None:
                         normalization_source = "xpath"
 
                 if char_offset is None and client_cfi:
-                    char_offset = self.ebook_parser.resolve_cfi_to_index(book.ebook_filename, client_cfi)
+                    char_offset = self.ebook_parser.resolve_cfi_to_index(client_epub, client_cfi)
                     if char_offset is not None:
                         normalization_source = "cfi"
 
                 if char_offset is None and client_href and client_frag:
-                    txt_at_loc = self.ebook_parser.resolve_locator_id(book.ebook_filename, client_href, client_frag)
+                    txt_at_loc = self.ebook_parser.resolve_locator_id(client_epub, client_href, client_frag)
                     if txt_at_loc:
                         idx = full_text.find(txt_at_loc[:120])
                         if idx >= 0:
@@ -434,7 +494,7 @@ class SyncManager:
 
                 if char_offset is None and client_href:
                     char_offset, href_source = self._resolve_href_to_char_offset(
-                        book.ebook_filename, client_href, client_chapter_progress
+                        client_epub, client_href, client_chapter_progress
                     )
                     if char_offset is not None:
                         normalization_source = href_source
@@ -466,6 +526,7 @@ class SyncManager:
                     continue
 
                 normalized[client_name] = ts_for_text
+                client_state.current["_normalized_ts"] = ts_for_text
                 high_conf_sources = {"xpath", "cfi", "href_frag", "href_progression"}
                 client_state.current["_normalization_confidence"] = (
                     "high" if normalization_source in high_conf_sources else "low"
@@ -580,8 +641,11 @@ class SyncManager:
             not book
             or getattr(book, "transcript_source", None) != "storyteller"
             or abs_timestamp is None
-            or not getattr(book, "ebook_filename", None)
         ):
+            return None, None
+
+        story_epub = self._get_storyteller_ebook_filename(book)
+        if not story_epub:
             return None, None
 
         manifest_path = self._get_storyteller_manifest_path(book)
@@ -595,7 +659,7 @@ class SyncManager:
                 return None, None
 
             global_offset_py = int(story_pos["global_offset_py"])
-            locator = self.ebook_parser.get_locator_from_char_offset(book.ebook_filename, global_offset_py)
+            locator = self.ebook_parser.get_locator_from_char_offset(story_epub, global_offset_py)
             if not locator:
                 return None, None
 
@@ -604,7 +668,7 @@ class SyncManager:
             ) or ""
             logger.debug(
                 f"'{book.abs_id}' Storyteller direct locator resolved via chapter={story_pos['chapter']} "
-                f"offset_utf16={story_pos['offset_utf16']} epub='{sanitize_log_data(book.ebook_filename)}'"
+                f"offset_utf16={story_pos['offset_utf16']} epub='{sanitize_log_data(story_epub)}'"
             )
             return locator, context_txt
         except Exception as e:
@@ -616,10 +680,13 @@ class SyncManager:
         if (
             not book
             or abs_timestamp is None
-            or not getattr(book, "ebook_filename", None)
             or not self.alignment_service
             or getattr(book, "transcript_file", None) != "DB_MANAGED"
         ):
+            return None, None
+
+        target_epub = self._get_non_story_ebook_filename(book) or self._get_storyteller_ebook_filename(book)
+        if not target_epub:
             return None, None
 
         try:
@@ -627,12 +694,12 @@ class SyncManager:
             if char_offset is None:
                 return None, None
 
-            locator = self.ebook_parser.get_locator_from_char_offset(book.ebook_filename, int(char_offset))
+            locator = self.ebook_parser.get_locator_from_char_offset(target_epub, int(char_offset))
             if not locator:
                 return None, None
-            locator = self._validate_and_stabilize_locator(book, int(char_offset), locator)
+            locator = self._validate_and_stabilize_locator(book, int(char_offset), locator, ebook_filename=target_epub)
 
-            full_text, _ = self._get_cached_ebook_text(book.ebook_filename)
+            full_text, _ = self._get_cached_ebook_text(target_epub)
             context_txt = ""
             if full_text:
                 start = max(0, int(char_offset) - 400)
@@ -642,7 +709,7 @@ class SyncManager:
             logger.debug(
                 f"'{book.abs_id}' time->ebook mapping ts={float(abs_timestamp):.2f}s offset0={int(char_offset)} "
                 f"locator_xpath={'yes' if locator.xpath else 'no'} locator_cfi={'yes' if locator.cfi else 'no'} "
-                f"epub='{sanitize_log_data(book.ebook_filename)}'"
+                f"epub='{sanitize_log_data(target_epub)}'"
             )
             return locator, context_txt
         except Exception as e:
@@ -968,6 +1035,10 @@ class SyncManager:
         logger.info(f"⚡ [{job_idx}/{job_total}] Processing '{sanitize_log_data(abs_title)}'")
 
         try:
+            ebook_only_mode = bool(
+                hasattr(book, "sync_mode") and getattr(book, "sync_mode", "audiobook") == "ebook_only"
+            )
+
             def update_progress(local_pct, phase):
                 """
                 Map local phase progress to global 0-100% progress.
@@ -991,7 +1062,13 @@ class SyncManager:
             update_progress(0.0, 1)
 
             # Fetch item details for acquisition context
-            item_details = self.abs_client.get_item_details(abs_id)
+            item_details = None
+            if not ebook_only_mode:
+                item_details = self.abs_client.get_item_details(abs_id)
+            else:
+                logger.info(
+                    f"Ebook-only background prep: skipping ABS item lookup for '{sanitize_log_data(abs_title)}'"
+                )
             
             epub_path = None
             if self.library_service and item_details:
@@ -1030,6 +1107,26 @@ class SyncManager:
                             logger.info(f"✅ Locked KOSync ID: {computed_hash}")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to eager-lock KOSync ID: {e}")
+
+            if ebook_only_mode:
+                logger.info(
+                    f"Ebook-only background prep: skipping Storyteller/SMIL/Whisper transcript generation for '{sanitize_log_data(abs_title)}'"
+                )
+                # Warm parser caches for subsequent locator-based sync cycles.
+                self.ebook_parser.extract_text_and_map(epub_path)
+                update_progress(1.0, 3)
+                book.status = 'active'
+                self.database_service.save_book(book)
+
+                job = self.database_service.get_latest_job(abs_id)
+                if job:
+                    job.retry_count = 0
+                    job.last_error = None
+                    job.progress = 1.0
+                    self.database_service.save_job(job)
+
+                logger.info(f"✅ Completed (ebook-only): {sanitize_log_data(abs_title)}")
+                return
 
             raw_transcript = None
             transcript_source = None
@@ -1677,7 +1774,7 @@ class SyncManager:
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]
 
-                epub = book.ebook_filename
+                epub = self._get_locator_target_epub(book, leader)
                 txt = None
                 locator = None
                 locator_source = None
@@ -1696,8 +1793,23 @@ class SyncManager:
                         if locator:
                             locator_source = "storyteller_direct"
                             logger.debug(f"'{abs_id}' '{title_snip}' Using storyteller direct timestamp->locator path")
+                else:
+                    normalized_ts = leader_state.current.get("_normalized_ts")
+                    if normalized_ts is not None:
+                        locator, txt = self._resolve_alignment_locator_from_abs_timestamp(book, normalized_ts)
+                        if locator:
+                            locator_source = "alignment_from_normalized_ts"
+                            logger.debug(
+                                f"'{abs_id}' '{title_snip}' Using normalized timestamp->locator path "
+                                f"for leader '{leader}' (ts={float(normalized_ts):.2f}s)"
+                            )
 
                 if not locator:
+                    if not epub:
+                        logger.warning(
+                            f"⚠️ '{abs_id}' '{title_snip}' Missing locator target EPUB; cannot derive cross-client locator"
+                        )
+                        continue
                     txt = leader_client.get_text_from_current_state(book, leader_state)
                     if not txt:
                         logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
@@ -1725,7 +1837,7 @@ class SyncManager:
 
                 logger.debug(
                     f"'{abs_id}' '{title_snip}' Locator resolved via source={locator_source or 'unknown'} "
-                    f"epub='{sanitize_log_data(book.ebook_filename)}' "
+                    f"epub='{sanitize_log_data(epub)}' "
                     f"original_epub='{sanitize_log_data(getattr(book, 'original_ebook_filename', None))}'"
                 )
 

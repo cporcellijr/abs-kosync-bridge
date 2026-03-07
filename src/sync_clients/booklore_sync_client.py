@@ -52,7 +52,7 @@ class BookloreSyncClient(SyncClient):
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         bl_pct = state.current.get('pct')
         bl_cfi = state.current.get('cfi')
-        epub = getattr(book, "ebook_filename", None)
+        epub = getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
         if bl_cfi and epub and self.ebook_parser:
             txt = self.ebook_parser.get_text_around_cfi(epub, bl_cfi)
             if txt:

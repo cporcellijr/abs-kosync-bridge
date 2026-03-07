@@ -75,6 +75,7 @@ def test_normalization_prefers_cfi_before_percent():
     normalized = manager._normalize_for_cross_format_comparison(book, config)
 
     assert normalized["BookLore"] == 777.0
+    assert config["BookLore"].current["_normalized_ts"] == 777.0
     _, kwargs = manager.alignment_service.get_time_for_text.call_args
     assert kwargs["char_offset_hint"] == 321
     manager.ebook_parser.resolve_cfi_to_index.assert_called_once()
@@ -232,6 +233,50 @@ def test_normalization_uses_cached_extract_once_per_book_per_cycle():
     manager._normalize_for_cross_format_comparison(book, config)
 
     assert manager.ebook_parser.extract_text_and_map.call_count == 1
+
+
+def test_normalization_uses_client_specific_epub_contexts():
+    manager = _manager_with_mocks()
+    manager.sync_clients = {
+        "ABS": object(),
+        "Storyteller": object(),
+        "BookLore": object(),
+    }
+    full_text = "abcdefghijklmnopqrstuvwxyz " * 100
+    manager.ebook_parser.resolve_book_path.side_effect = lambda filename: filename
+    manager.ebook_parser.extract_text_and_map.return_value = (
+        full_text,
+        [{"href": "chapter.xhtml", "start": 300, "end": 700}],
+    )
+    manager.ebook_parser.resolve_locator_id.return_value = full_text[340:460]
+    manager.ebook_parser.resolve_cfi_to_index.return_value = 420
+    manager.alignment_service.get_time_for_text.return_value = 123.0
+
+    book = SimpleNamespace(
+        abs_id="abs-ctx",
+        transcript_file="DB_MANAGED",
+        ebook_filename="storyteller_uuid.epub",
+        original_ebook_filename="original.epub",
+    )
+    config = {
+        "ABS": _state({"ts": 10.0}),
+        "Storyteller": _state({"pct": 0.2, "href": "chapter.xhtml", "frag": "x_c001-sentence001"}),
+        "BookLore": _state({"pct": 0.2, "cfi": "epubcfi(/6/10!/4:0)"}),
+    }
+
+    normalized = manager._normalize_for_cross_format_comparison(book, config)
+
+    assert normalized["Storyteller"] == 123.0
+    assert normalized["BookLore"] == 123.0
+    manager.ebook_parser.resolve_locator_id.assert_any_call(
+        "storyteller_uuid.epub",
+        "chapter.xhtml",
+        "x_c001-sentence001",
+    )
+    manager.ebook_parser.resolve_cfi_to_index.assert_called_once_with(
+        "original.epub",
+        "epubcfi(/6/10!/4:0)",
+    )
 
 
 def test_determine_leader_uses_locator_pct_when_raw_pct_is_inconsistent():
