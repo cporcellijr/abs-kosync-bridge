@@ -1097,13 +1097,29 @@ class BookloreClient:
         ).upper()
         if book_type == 'EPUB':
             progress = data.get('epubProgress') or {}
-            return self._to_progress_fraction(progress.get('percentage', 0)), progress.get('cfi')
+            raw_pct = progress.get('percentage', 0)
+            parsed_pct = self._to_progress_fraction(raw_pct)
+            logger.debug(
+                f"Booklore verify read: book_id={book_id} type=EPUB "
+                f"raw_pct={raw_pct!r} parsed_pct={parsed_pct if parsed_pct is not None else 'None'} "
+                f"has_cfi={bool(progress.get('cfi'))}"
+            )
+            return parsed_pct, progress.get('cfi')
         if book_type == 'PDF':
             progress = data.get('pdfProgress') or {}
+            logger.debug(
+                f"Booklore verify read: book_id={book_id} type=PDF "
+                f"raw_pct={progress.get('percentage', 0)!r}"
+            )
             return self._to_progress_fraction(progress.get('percentage', 0)), None
         if book_type == 'CBX':
             progress = data.get('cbxProgress') or {}
+            logger.debug(
+                f"Booklore verify read: book_id={book_id} type=CBX "
+                f"raw_pct={progress.get('percentage', 0)!r}"
+            )
             return self._to_progress_fraction(progress.get('percentage', 0)), None
+        logger.debug(f"Booklore verify read: book_id={book_id} unknown book_type={book_type!r}")
         return None, None
 
     def get_progress(self, ebook_filename):
@@ -1118,13 +1134,14 @@ class BookloreClient:
             logger.debug(f"Booklore: Book not found: {ebook_filename}")
             return False
 
+        safe_filename = sanitize_log_data(ebook_filename)
         book_id = book['id']
         if book.get('_needs_detail') or not self._get_book_type(book):
             hydrated = self._fetch_and_cache_detail(book_id)
             if hydrated:
                 book = hydrated
             elif book.get('_needs_detail'):
-                logger.debug(f"Booklore: Could not hydrate lightweight entry for {sanitize_log_data(ebook_filename)}")
+                logger.debug(f"Booklore: Could not hydrate lightweight entry for {safe_filename}")
         book_type = self._get_book_type(book)
         pct_display = percentage * 100
 
@@ -1154,15 +1171,35 @@ class BookloreClient:
         elif book_type == 'CBX':
             payload_variants = [("standard", {"bookId": book_id, "cbxProgress": {"page": 1, "percentage": pct_display}})]
         else:
-            logger.warning(f"Booklore: Unknown book type {book_type} for {sanitize_log_data(ebook_filename)}")
+            logger.warning(f"Booklore: Unknown book type {book_type} for {safe_filename}")
             return False
 
+        logger.debug(
+            f"Booklore progress write start: file={safe_filename} book_id={book_id} type={book_type} "
+            f"target_pct={pct_display:.2f}% clear_reset={clear_reset} has_locator={bool(rich_locator)} "
+            f"has_cfi={cfi is not None} variants={[name for name, _ in payload_variants]}"
+        )
+
         last_status = "No response"
-        for variant_name, payload in payload_variants:
+        for variant_idx, (variant_name, payload) in enumerate(payload_variants, start=1):
             if clear_reset:
                 logger.debug(f"Booklore: Clearing CFI for 0% reset (variant={variant_name})")
 
+            progress_payload = payload.get('epubProgress') or payload.get('pdfProgress') or payload.get('cbxProgress') or {}
+            has_payload_cfi = isinstance(payload.get('epubProgress'), dict) and ('cfi' in payload.get('epubProgress', {}))
+            payload_cfi_value = payload.get('epubProgress', {}).get('cfi') if has_payload_cfi else None
+            logger.debug(
+                f"Booklore progress write attempt {variant_idx}/{len(payload_variants)}: "
+                f"file={safe_filename} book_id={book_id} variant={variant_name} "
+                f"payload_pct={progress_payload.get('percentage', 'n/a')} has_cfi={has_payload_cfi} "
+                f"cfi_len={len(str(payload_cfi_value)) if payload_cfi_value is not None else 0}"
+            )
+
             response = self._make_request("POST", "/api/v1/books/progress", payload)
+            logger.debug(
+                f"Booklore progress write response: file={safe_filename} book_id={book_id} "
+                f"variant={variant_name} status={response.status_code if response else 'no_response'}"
+            )
             if response and response.status_code == 404:
                 self._evict_cached_book(
                     book_id=book_id,
@@ -1172,16 +1209,33 @@ class BookloreClient:
                 last_status = 404
                 break
             if not response or response.status_code not in [200, 201, 204]:
+                logger.debug(
+                    f"Booklore progress write non-success: file={safe_filename} book_id={book_id} "
+                    f"variant={variant_name} status={response.status_code if response else 'no_response'} "
+                    f"body_preview={self._response_text_preview(response)!r}"
+                )
                 last_status = response.status_code if response else "No response"
                 continue
 
             # Verify EPUB writes to ensure the server actually persisted the target.
             if book_type == 'EPUB':
-                verified_pct, _ = self._get_progress_by_book_id(book_id)
+                verified_pct, verified_cfi = self._get_progress_by_book_id(book_id)
+                if verified_pct is not None:
+                    logger.debug(
+                        f"Booklore progress verify comparison: file={safe_filename} book_id={book_id} "
+                        f"variant={variant_name} expected={pct_display:.2f}% observed={verified_pct * 100:.2f}% "
+                        f"delta={abs(verified_pct - percentage) * 100:.2f}% clear_reset={clear_reset} "
+                        f"verified_has_cfi={bool(verified_cfi)}"
+                    )
+                else:
+                    logger.debug(
+                        f"Booklore progress verify unavailable: file={safe_filename} book_id={book_id} "
+                        f"variant={variant_name} expected={pct_display:.2f}%"
+                    )
                 if clear_reset:
                     if verified_pct is not None and verified_pct > 0.001:
                         logger.warning(
-                            f"Booklore clear did not persist for {sanitize_log_data(ebook_filename)} "
+                            f"Booklore clear did not persist for {safe_filename} "
                             f"(variant={variant_name}, observed={verified_pct * 100:.2f}%). Retrying..."
                         )
                         last_status = f"verify_failed:{verified_pct * 100:.2f}%"
@@ -1189,13 +1243,13 @@ class BookloreClient:
                 elif verified_pct is not None:
                     if abs(verified_pct - percentage) > 0.005:
                         logger.warning(
-                            f"Booklore progress write mismatch for {sanitize_log_data(ebook_filename)} "
+                            f"Booklore progress write mismatch for {safe_filename} "
                             f"(variant={variant_name}, expected={pct_display:.2f}%, observed={verified_pct * 100:.2f}%). Retrying..."
                         )
                         last_status = f"verify_mismatch:{verified_pct * 100:.2f}%"
                         continue
 
-            logger.info(f"Booklore: {sanitize_log_data(ebook_filename)} -> {pct_display:.1f}%")
+            logger.info(f"Booklore: {safe_filename} -> {pct_display:.1f}%")
 
             # Update cache in-place instead of full library refresh
             try:
@@ -1223,6 +1277,10 @@ class BookloreClient:
                 logger.debug("Booklore: In-place cache update failed, will refresh on next read")
             return True
 
+        logger.debug(
+            f"Booklore progress write exhausted variants: file={safe_filename} book_id={book_id} "
+            f"type={book_type} target_pct={pct_display:.2f}% last_status={last_status}"
+        )
         logger.error(f"Booklore update failed: {last_status}")
         return False
 

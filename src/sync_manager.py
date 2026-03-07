@@ -248,8 +248,35 @@ class SyncManager:
         cfi_offset = self.ebook_parser.resolve_cfi_to_index(target_epub, safe_locator.cfi) if safe_locator.cfi else None
         cfi_error = abs(int(cfi_offset) - int(target_offset)) if cfi_offset is not None else None
         if cfi_offset is None or cfi_error > tolerance:
-            safe_locator.cfi = None
-            fallback.append("booklore=percent_only")
+            regenerated_cfi = None
+            regenerated_offset = None
+            regenerated_error = None
+
+            # Prefer a fresh CFI derived from the canonical target offset instead of
+            # dropping to percent-only BookLore writes.
+            try:
+                regenerated_locator = self.ebook_parser.get_locator_from_char_offset(target_epub, int(target_offset))
+                candidate_cfi = getattr(regenerated_locator, "cfi", None)
+                if isinstance(candidate_cfi, str) and candidate_cfi:
+                    regenerated_cfi = candidate_cfi
+                    regenerated_offset = self.ebook_parser.resolve_cfi_to_index(target_epub, regenerated_cfi)
+                    if regenerated_offset is not None:
+                        regenerated_error = abs(int(regenerated_offset) - int(target_offset))
+            except Exception as regen_err:
+                logger.debug(f"'{book.abs_id}' Failed to regenerate CFI for BookLore fallback: {regen_err}")
+
+            if regenerated_cfi:
+                safe_locator.cfi = regenerated_cfi
+                cfi_offset = regenerated_offset
+                cfi_error = regenerated_error
+                if regenerated_error is not None and regenerated_error <= tolerance:
+                    fallback.append("booklore=regenerated_cfi")
+                else:
+                    fallback.append("booklore=regenerated_cfi_unverified")
+            elif safe_locator.cfi:
+                fallback.append("booklore=keep_unstable_cfi")
+            else:
+                fallback.append("booklore=no_cfi_available")
 
         logger.debug(
             f"'{book.abs_id}' time->ebook locator roundtrip: ts_target_offset={int(target_offset)} "

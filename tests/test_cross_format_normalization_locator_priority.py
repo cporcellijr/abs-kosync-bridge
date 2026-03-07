@@ -506,13 +506,16 @@ def test_deadband_allows_switch_when_delta_exceeds_threshold():
     assert leader_pct == config["KoSync"].current["pct"]
 
 
-def test_alignment_locator_roundtrip_degrades_to_percent_only_when_unstable():
+def test_alignment_locator_roundtrip_regenerates_cfi_when_unstable():
     manager = SyncManager.__new__(SyncManager)
     manager.ebook_parser = MagicMock()
     manager.ebook_parser.locator_roundtrip_tolerance = 2
     manager.ebook_parser.resolve_xpath_to_index.return_value = 250
     manager.ebook_parser.get_sentence_level_ko_xpath.return_value = "/body/DocFragment[1]/body/p[1]/text().0"
-    manager.ebook_parser.resolve_cfi_to_index.return_value = 260
+    manager.ebook_parser.resolve_cfi_to_index.side_effect = [260, 100]
+    manager.ebook_parser.get_locator_from_char_offset.return_value = SimpleNamespace(
+        cfi="epubcfi(/6/16!/4/2:0)"
+    )
 
     locator = SimpleNamespace(
         percentage=0.5,
@@ -532,7 +535,7 @@ def test_alignment_locator_roundtrip_degrades_to_percent_only_when_unstable():
 
     assert stable.xpath is None
     assert stable.perfect_ko_xpath is None
-    assert stable.cfi is None
+    assert stable.cfi == "epubcfi(/6/16!/4/2:0)"
 
 
 def test_roundtrip_prefers_sentence_xpath_before_percent_only():
