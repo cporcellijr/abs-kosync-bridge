@@ -607,6 +607,32 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(saved_book.transcript_file)
         self.assertTrue(Path(saved_book.transcript_file).exists())
 
+    @patch('src.web_server.ingest_storyteller_transcripts', return_value='/tmp/storyteller-manifest.json')
+    @patch('src.web_server.get_kosync_id_for_ebook', return_value='hash-ebook-only-link-1')
+    def test_api_storyteller_link_ebook_only_skips_abs_chapter_lookup(self, _mock_kosync, _mock_ingest):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='ebook-link-1',
+            abs_title='Ebook Link',
+            ebook_filename='ebook-link.epub',
+            kosync_doc_id='hash-existing',
+            sync_mode='ebook_only',
+            status='active',
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.download_book.return_value = True
+
+        response = self.client.post('/api/storyteller/link/ebook-link-1', json={'uuid': 'uuid-ebook-only'})
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_abs_client.get_item_details.assert_not_called()
+        self.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.sync_mode, 'ebook_only')
+        self.assertEqual(saved_book.storyteller_uuid, 'uuid-ebook-only')
+        self.assertEqual(saved_book.transcript_source, 'storyteller')
+
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""
         # Setup mock book

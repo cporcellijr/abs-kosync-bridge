@@ -686,15 +686,27 @@
 
                 <!-- GRID COL 1: Audiobook -->
                 <div class="section">
-                    <h3><span class="section-number">1</span>Audiobook (Required)</h3>
+                    <h3><span class="section-number">1</span>Audiobook (Optional)</h3>
                     <div class="scrollable-content">
                         {% if audiobooks %}
                         <div class="media-grid">
                             {% set single_match = audiobooks|length == 1 %}
+                            <!-- None / Skip Option -->
+                            <label class="audiobook-option ab-option ghost-card {% if not single_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="" {% if not single_match %}checked{% endif %}>
+                                <div class="audiobook-cover-container">
+                                    <div class="audiobook-cover-placeholder">⊘</div>
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">None / Skip</div>
+                                </div>
+                            </label>
+
                             {% for ab in audiobooks %}
                             <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
                                 onclick="selectItem(this, 'audiobook_id')">
-                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match
+                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" {% if single_match
                                     %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if ab.cover_url %}
@@ -816,7 +828,7 @@
                     🔨 Forge & Match
                 </button>
                 <div id="validationMsg" style="margin-top: 10px; color: #ff6b6b; display: none;">
-                    Please select an Audiobook and a Text Source (Storyteller or Ebook)
+                    Please select a Text Source (Storyteller or Ebook)
                 </div>
             </div>
         </form>
@@ -869,20 +881,15 @@
 
             let hasText = (stVal !== "") || (ebVal !== "");
 
-            if (hasAudio && hasText) {
+            if (hasText) {
                 btn.disabled = false;
                 btn.style.opacity = "1";
                 msg.style.display = "none";
             } else {
                 btn.disabled = true;
                 btn.style.opacity = "0.5";
-                if (hasAudio && !hasText) {
-                    msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
-                    msg.style.display = "block";
-                } else if (!hasAudio) {
-                    msg.textContent = "Please select an Audiobook";
-                    msg.style.display = "block";
-                }
+                msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
+                msg.style.display = "block";
             }
 
             // Forge Validation

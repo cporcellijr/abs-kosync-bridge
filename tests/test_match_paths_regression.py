@@ -183,6 +183,52 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_abs_client.add_to_collection.assert_called_once_with("ab-1", "Synced with KOReader")
         self.mock_container.mock_booklore_client.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
 
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="1234567890abcdef1234567890abcdef")
+    def test_match_route_creates_ebook_only_mapping_from_storyteller_without_audiobook(self, _mock_kosync):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        response = self.client.post(
+            "/match",
+            data={
+                "storyteller_uuid": "story-uuid-ebook-only",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.abs_id, "ebook-1234567890abcdef")
+        self.assertEqual(saved_book.sync_mode, "ebook_only")
+        self.assertEqual(saved_book.storyteller_uuid, "story-uuid-ebook-only")
+        self.assertEqual(saved_book.transcript_source, "storyteller")
+        self.mock_container.mock_abs_client.add_to_collection.assert_not_called()
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="abcdef1234567890abcdef1234567890")
+    def test_match_route_ebook_only_storyteller_preserves_original_filename_for_hash(self, _mock_kosync):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
+
+        response = self.client.post(
+            "/match",
+            data={
+                "ebook_filename": "ebook-source.epub",
+                "storyteller_uuid": "story-uuid-with-original",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.sync_mode, "ebook_only")
+        self.assertEqual(saved_book.original_ebook_filename, "ebook-source.epub")
+        self.assertEqual(saved_book.ebook_filename, "storyteller_story-uuid-with-original.epub")
+        self.assertEqual(saved_book.kosync_doc_id, "abcdef1234567890abcdef1234567890")
+
+    def test_match_route_rejects_ebook_only_without_text_source(self):
+        response = self.client.post("/match", data={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Please select a text source", response.get_data(as_text=True))
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-match-story-real")
     def test_match_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
         self._prepare_storyteller_assets("Regression Book", chapter_count=2)

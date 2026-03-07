@@ -75,7 +75,7 @@
             {# Service progress - always visible #}
             {# [START REPLACEMENT BLOCK for service-progress] #}
             <div class="service-progress">
-                {% if integrations.abs %}
+                {% if integrations.abs and mapping.sync_mode != 'ebook_only' and mapping.abs_url %}
                 <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
                     title="Open in Audiobookshelf">
                     <img src="/static/audiobookshelf.png" alt="ABS" class="service-icon">
@@ -107,9 +107,9 @@
                 </div>
                 {% endif %}
 
-                {# [CHANGED] Only show Storyteller if state exists, UUID link exists, or legacy link needs fix #}
+                {# [CHANGED] Show Storyteller for active links, legacy fixes, and ebook-only rows (link affordance). #}
                 {% if integrations.storyteller and (mapping.states.storyteller is defined or
-                mapping.storyteller_legacy_link or mapping.storyteller_uuid) %}
+                mapping.storyteller_legacy_link or mapping.storyteller_uuid or mapping.sync_mode == 'ebook_only') %}
                 <div class="service-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
@@ -124,6 +124,12 @@
                         }}%</span>
                     {% elif mapping.storyteller_uuid %}
                     <span class="service-value" title="Linked via UUID">0.0%</span>
+                    {% elif mapping.sync_mode == 'ebook_only' %}
+                    <span class="service-value cursor-pointer" style="color: #4FC3F7;"
+                        onclick='openStorytellerModal({{ mapping.abs_id|tojson }}, {{ mapping.abs_title|tojson }})'
+                        title="Link Storyteller">
+                        Link
+                    </span>
                     {% endif %}
                 </div>
                 {% endif %}
