@@ -88,6 +88,41 @@ class TestForgeService(unittest.TestCase):
             )
             mock_thread_instance.start.assert_called_once()
 
+    def test_discover_storyteller_uuid_ignores_fuzzy_non_exact_title_match(self):
+        """Forge UUID discovery should not accept unrelated fuzzy Storyteller search hits."""
+        st_client = MagicMock()
+        st_client.find_book_by_staged_path.return_value = None
+        st_client.search_books.return_value = [
+            {"uuid": "wrong-uuid", "title": "The Last Murder at the End of the World"}
+        ]
+
+        result = self.service._discover_storyteller_uuid(
+            st_client=st_client,
+            safe_title="Last Days",
+            epub_filename="Last Days.epub",
+            title="Last Days",
+        )
+
+        self.assertIsNone(result)
+
+    def test_discover_storyteller_uuid_accepts_normalized_exact_title_match(self):
+        """Forge UUID discovery should allow normalized exact matches without fuzzy fallback."""
+        st_client = MagicMock()
+        st_client.find_book_by_staged_path.return_value = None
+        st_client.search_books.return_value = [
+            {"uuid": "uuid-1", "title": "Last Days"},
+            {"uuid": "wrong-uuid", "title": "The Last Murder at the End of the World"},
+        ]
+
+        result = self.service._discover_storyteller_uuid(
+            st_client=st_client,
+            safe_title="Last Days",
+            epub_filename="Last Days.epub",
+            title="Last Days",
+        )
+
+        self.assertEqual(result, "uuid-1")
+
     def _write_storyteller_manifest(self, base_dir: Path) -> str:
         manifest_dir = base_dir / "storyteller_manifest"
         manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -170,6 +205,10 @@ class TestForgeService(unittest.TestCase):
             self.mock_storyteller.find_book_by_staged_path.return_value = "uuid-1"
             self.mock_storyteller.search_books.return_value = []
             self.mock_storyteller.trigger_processing.return_value = True
+            self.mock_storyteller.get_book_details.return_value = {
+                "ebook": {"filepath": "/storyteller/library/Auto Book/Auto Book.epub", "missing": 0},
+                "audiobook": {"filepath": "/storyteller/library/Auto Book", "missing": 0},
+            }
             self.mock_storyteller.add_to_collection_by_uuid.return_value = True
             self.mock_storyteller.add_to_collection.return_value = True
 
@@ -322,6 +361,98 @@ class TestForgeService(unittest.TestCase):
 
             self.assertTrue(result["api_ready_seen"])
             self.assertIsNone(result["completion_method"])
+
+    def test_poll_auto_forge_completion_does_not_trigger_before_processing_ready(self):
+        """Auto-forge should delay /process until Storyteller exposes linked ebook and audiobook."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            course_dir = tmp_path / "course"
+            course_dir.mkdir(parents=True, exist_ok=True)
+            epub_cache = tmp_path / "epub_cache"
+            epub_cache.mkdir(parents=True, exist_ok=True)
+
+            st_client = MagicMock()
+            st_client.get_book_details.return_value = {
+                "ebook": {"filepath": "/storyteller/library/Auto Book/Auto Book.epub", "missing": 0}
+            }
+            st_client.download_book.return_value = False
+
+            with patch.object(self.service, "_find_processed_epub", return_value=None):
+                result = self.service._poll_auto_forge_completion(
+                    st_client=st_client,
+                    safe_title="Auto Book",
+                    epub_filename="Auto Book.epub",
+                    title="Auto Book",
+                    course_dir=course_dir,
+                    epub_cache=epub_cache,
+                    found_uuid="uuid-1",
+                    processing_triggered=False,
+                    poll_count=4,
+                )
+
+            st_client.trigger_processing.assert_not_called()
+            self.assertFalse(result["processing_triggered"])
+
+    def test_poll_auto_forge_completion_triggers_when_processing_ready(self):
+        """Auto-forge should trigger processing once Storyteller reports both links ready."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            course_dir = tmp_path / "course"
+            course_dir.mkdir(parents=True, exist_ok=True)
+            epub_cache = tmp_path / "epub_cache"
+            epub_cache.mkdir(parents=True, exist_ok=True)
+
+            st_client = MagicMock()
+            st_client.get_book_details.return_value = {
+                "ebook": {"filepath": "/storyteller/library/Auto Book/Auto Book.epub", "missing": 0},
+                "audiobook": {"filepath": "/storyteller/library/Auto Book", "missing": 0},
+            }
+            st_client.download_book.return_value = False
+
+            with patch.object(self.service, "_find_processed_epub", return_value=None):
+                result = self.service._poll_auto_forge_completion(
+                    st_client=st_client,
+                    safe_title="Auto Book",
+                    epub_filename="Auto Book.epub",
+                    title="Auto Book",
+                    course_dir=course_dir,
+                    epub_cache=epub_cache,
+                    found_uuid="uuid-1",
+                    processing_triggered=False,
+                    poll_count=4,
+                )
+
+            st_client.trigger_processing.assert_called_once_with("uuid-1")
+            self.assertTrue(result["processing_triggered"])
+
+    def test_auto_forge_waits_for_storyteller_processing_readiness_before_trigger(self):
+        """Auto-forge should poll readiness instead of triggering immediately on UUID discovery."""
+        responses = [
+            None,
+            {
+                "ebook": {"filepath": "/storyteller/library/Auto Book/Auto Book.epub", "missing": 0}
+            },
+            {
+                "ebook": {"filepath": "/storyteller/library/Auto Book/Auto Book.epub", "missing": 0},
+                "audiobook": {"filepath": "/storyteller/library/Auto Book", "missing": 0},
+            },
+        ]
+
+        def _next_details(*_args, **_kwargs):
+            if len(responses) > 1:
+                return responses.pop(0)
+            return responses[0]
+
+        self.mock_storyteller.get_book_details.side_effect = _next_details
+
+        self._run_auto_forge_pipeline(
+            text_item={"source": "Local File"},
+            ingest_manifest=None,
+            storyteller_alignment_ok=False,
+        )
+
+        self.assertGreaterEqual(self.mock_storyteller.get_book_details.call_count, 3)
+        self.mock_storyteller.trigger_processing.assert_called_once_with("uuid-1")
 
 
 if __name__ == '__main__':

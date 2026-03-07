@@ -4,6 +4,7 @@ import shutil
 import time
 import os
 import html
+import re
 from pathlib import Path
 from urllib.parse import urljoin
 import requests
@@ -130,6 +131,15 @@ class ForgeService:
         )
         return original_name or fallback_filename
 
+    @staticmethod
+    def _normalize_storyteller_title(value: str) -> str:
+        """Normalize titles for exact identity matching without fuzzy fallback."""
+        text = str(value or "").strip().lower()
+        text = re.sub(r"[^\w\s]", " ", text)
+        text = re.sub(r"_+", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
     def _find_processed_epub(self, course_dir: Path):
         """
         Find Storyteller-produced EPUB artifacts in the staged course directory.
@@ -170,17 +180,57 @@ class ForgeService:
 
         try:
             results = st_client.search_books(title) or []
-            title_norm = (title or "").strip().lower()
+            title_norm = self._normalize_storyteller_title(title)
             for book in results:
-                book_title = str(book.get('title', '')).strip().lower()
+                book_title = self._normalize_storyteller_title(book.get('title', ''))
                 if title_norm and book_title == title_norm:
                     return book.get('uuid') or book.get('id')
-            if results:
-                return results[0].get('uuid') or results[0].get('id')
         except Exception as e:
             logger.debug(f"Forge: title-search UUID discovery failed: {e}")
 
         return None
+
+    @staticmethod
+    def _storyteller_link_ready(link_info) -> bool:
+        """Return True when Storyteller reports a linked asset with a usable filepath."""
+        if not isinstance(link_info, dict):
+            return False
+
+        filepath = str(link_info.get("filepath") or "").strip()
+        missing = link_info.get("missing", 0)
+        try:
+            missing_flag = int(missing or 0) != 0
+        except Exception:
+            missing_flag = bool(missing)
+
+        return bool(filepath) and not missing_flag
+
+    def _get_storyteller_processing_state(self, st_client, book_uuid: str):
+        """
+        Return (details, ready, reason) for processing trigger readiness.
+
+        A book is considered ready only when Storyteller exposes it via
+        /api/v2/books/{uuid} and both the ebook and audiobook links are present.
+        """
+        if not book_uuid or not hasattr(st_client, "get_book_details"):
+            return None, False, "details_unavailable"
+
+        try:
+            details = st_client.get_book_details(book_uuid)
+        except Exception as details_err:
+            logger.debug(f"Forge: get_book_details failed for {book_uuid}: {details_err}")
+            return None, False, "details_error"
+
+        if not isinstance(details, dict):
+            return None, False, "not_visible"
+
+        if not self._storyteller_link_ready(details.get("ebook")):
+            return details, False, "ebook_unlinked"
+
+        if not self._storyteller_link_ready(details.get("audiobook")):
+            return details, False, "audiobook_unlinked"
+
+        return details, True, "ready"
 
     def _poll_auto_forge_completion(
         self,
@@ -201,6 +251,9 @@ class ForgeService:
         readaloud_path = None
         probe_download_path = None
         api_ready_seen = False
+        details = None
+        processing_ready = False
+        processing_state = "not_checked"
 
         if not found_uuid:
             recovered_uuid = self._discover_storyteller_uuid(st_client, safe_title, epub_filename, title)
@@ -208,12 +261,22 @@ class ForgeService:
                 found_uuid = recovered_uuid
                 logger.info(f"Auto-Forge: Recovered Storyteller UUID during wait loop: {found_uuid}")
 
-        if found_uuid and not processing_triggered:
+        if found_uuid:
+            details, processing_ready, processing_state = self._get_storyteller_processing_state(
+                st_client, found_uuid
+            )
+
+        if found_uuid and not processing_triggered and processing_ready:
             try:
                 st_client.trigger_processing(found_uuid)
                 processing_triggered = True
             except Exception as trigger_err:
                 logger.debug(f"Auto-Forge: trigger retry failed for {found_uuid}: {trigger_err}")
+        elif found_uuid and not processing_triggered and poll_count % 4 == 0:
+            logger.debug(
+                f"Auto-Forge: delaying processing trigger for {found_uuid} "
+                f"(Storyteller state={processing_state})"
+            )
 
         readaloud_path = self._find_processed_epub(course_dir)
         if readaloud_path:
@@ -228,16 +291,12 @@ class ForgeService:
             }
 
         if found_uuid:
-            try:
-                details = st_client.get_book_details(found_uuid) if hasattr(st_client, "get_book_details") else None
-                readaloud_meta = details.get("readaloud", {}) if isinstance(details, dict) else {}
-                readaloud_filepath = readaloud_meta.get("filepath") if isinstance(readaloud_meta, dict) else None
-                if readaloud_filepath:
-                    # Metadata can appear before the artifact is safely downloadable.
-                    # Track readiness for diagnostics, but do not mark completion yet.
-                    api_ready_seen = True
-            except Exception as details_err:
-                logger.debug(f"Auto-Forge: get_book_details poll failed for {found_uuid}: {details_err}")
+            readaloud_meta = details.get("readaloud", {}) if isinstance(details, dict) else {}
+            readaloud_filepath = readaloud_meta.get("filepath") if isinstance(readaloud_meta, dict) else None
+            if readaloud_filepath:
+                # Metadata can appear before the artifact is safely downloadable.
+                # Track readiness for diagnostics, but do not mark completion yet.
+                api_ready_seen = True
 
             if poll_count % 4 == 0:
                 probe_path = epub_cache / f".storyteller_probe_{found_uuid}.epub"
@@ -480,6 +539,7 @@ class ForgeService:
             st_client = self.storyteller_client
             found_uuid = None
             epub_filename = f"{safe_title}.epub"
+            ready = False
 
             for _ in range(240):
                 time.sleep(5)
@@ -496,13 +556,38 @@ class ForgeService:
                                 break
 
                     if found_uuid:
-                        logger.info(f"⚡ Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
-                        time.sleep(60)
+                        logger.info(
+                            f"⚡ Forge: Book detected ({found_uuid}). Waiting for Storyteller API readiness..."
+                        )
+                        ready_details = None
+                        ready_state = "not_visible"
+                        for ready_poll in range(120):
+                            ready_details, ready, ready_state = self._get_storyteller_processing_state(
+                                st_client, found_uuid
+                            )
+                            if ready:
+                                break
+                            if ready_poll and ready_poll % 12 == 0:
+                                logger.debug(
+                                    f"Forge: Storyteller book {found_uuid} not ready yet "
+                                    f"(state={ready_state})"
+                                )
+                            time.sleep(5)
+                        else:
+                            ready = False
+
+                        if ready:
+                            logger.info(f"⚡ Forge: Storyteller book ready for processing ({found_uuid})")
+                        else:
+                            logger.warning(
+                                f"⚠️ Forge: Storyteller book detected ({found_uuid}) but never became "
+                                f"API-ready for processing (state={ready_state})"
+                            )
                         break
                 except Exception as e:
                     logger.debug(f"Forge: Storyteller detection error (retrying): {e}")
 
-            if found_uuid:
+            if found_uuid and ready:
                 logger.info(f"⚡ Forge: Book detected ({found_uuid}). Triggering processing...")
                 try:
                     if hasattr(st_client, 'trigger_processing'):
@@ -511,6 +596,11 @@ class ForgeService:
                         logger.warning("⚠️ Storyteller client missing trigger_processing method")
                 except Exception as e:
                      logger.error(f"❌ Forge: Failed to trigger processing: {e}")
+            elif found_uuid:
+                logger.warning(
+                    f"⚠️ Forge: Storyteller book detected ({found_uuid}) before API readiness; "
+                    "skipping explicit trigger and waiting for recovery polling"
+                )
             else:
                 logger.warning(f"⚠️ Forge: Storyteller scan timed out — Processing might happen automatically later")
 
@@ -704,21 +794,51 @@ class ForgeService:
             epub_filename = f"{safe_title}.epub"
 
             processing_triggered = False
+            ready = False
+            ready_state = "not_detected"
             for _ in range(240):  # Wait up to 20 mins for initial detection
                 time.sleep(5)
                 found_uuid = self._discover_storyteller_uuid(st_client, safe_title, epub_filename, title)
                 if found_uuid:
-                    logger.info(f"Forge: Book detected ({found_uuid}). Waiting 60s for internal EPUB linking...")
-                    time.sleep(60)
+                    logger.info(
+                        f"Forge: Book detected ({found_uuid}). Waiting for Storyteller API readiness..."
+                    )
+                    for ready_poll in range(120):
+                        _ready_details, ready, ready_state = self._get_storyteller_processing_state(
+                            st_client, found_uuid
+                        )
+                        if ready:
+                            break
+                        if ready_poll and ready_poll % 12 == 0:
+                            logger.debug(
+                                f"Auto-Forge: Storyteller book {found_uuid} not ready yet "
+                                f"(state={ready_state})"
+                            )
+                        time.sleep(5)
+                    else:
+                        ready = False
+
+                    if ready:
+                        logger.info(f"Auto-Forge: Storyteller book ready for processing ({found_uuid})")
+                    else:
+                        logger.warning(
+                            f"Auto-Forge: Storyteller book detected ({found_uuid}) but never became "
+                            f"API-ready for processing (state={ready_state})"
+                        )
                     break
 
-            if found_uuid:
+            if found_uuid and ready:
                 logger.info(f"Auto-Forge: Triggering processing for {found_uuid}")
                 try:
                     st_client.trigger_processing(found_uuid)
                     processing_triggered = True
                 except Exception as trigger_err:
                     logger.warning(f"Auto-Forge: Failed to trigger processing for {found_uuid}: {trigger_err}")
+            elif found_uuid:
+                logger.warning(
+                    f"Auto-Forge: Storyteller book detected ({found_uuid}) before API readiness; "
+                    "skipping explicit trigger and continuing with recovery polling"
+                )
             else:
                 logger.warning("Auto-Forge: Storyteller scan timed out - continuing with recovery polling")
 
