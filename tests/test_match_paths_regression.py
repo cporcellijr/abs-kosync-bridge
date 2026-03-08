@@ -316,6 +316,37 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_abs_client.add_to_collection.assert_not_called()
         self.mock_container.mock_booklore_client.add_to_shelf.assert_not_called()
 
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-forge-booklore")
+    def test_match_forge_booklore_uses_bridge_key_identity(self, _mock_kosync):
+        response = self.client.post(
+            "/match",
+            data={
+                "action": "forge_match",
+                "audio_source": "BookLore",
+                "audio_source_id": "42",
+                "audio_title": "BookLore Forge",
+                "ebook_filename": "source.epub",
+                "source_type": "Booklore",
+                "source_id": "42",
+                "source_path": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/"))
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        staged_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(staged_book.abs_id, "booklore:42")
+        self.assertEqual(staged_book.audio_source, "BookLore")
+        self.assertEqual(staged_book.status, "forging")
+
+        self.mock_container.mock_forge_service.start_auto_forge_match.assert_called_once()
+        kwargs = self.mock_container.mock_forge_service.start_auto_forge_match.call_args.kwargs
+        self.assertEqual(kwargs["abs_id"], "booklore:42")
+        self.assertEqual(kwargs["audio_source"], "BookLore")
+        self.assertEqual(kwargs["audio_source_id"], "42")
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-1")
     def test_batch_match_add_and_process_queue(self, _mock_kosync):
         add_response = self.client.post(
@@ -348,6 +379,120 @@ class TestMatchPathsRegression(unittest.TestCase):
 
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-forge-1")
+    def test_batch_match_add_and_forge_queue_stages_without_storyteller(self, _mock_kosync):
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "batch-forge.epub",
+                "ebook_display_name": "Batch Forge",
+                "ebook_source": "Booklore",
+                "ebook_source_id": "42",
+                "ebook_source_path": "",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        with self.client.session_transaction() as session_data:
+            queue = session_data.get("queue", [])
+            self.assertEqual(len(queue), 1)
+            self.assertIsNone(queue[0]["ebook_source_path"])
+
+        process_response = self.client.post(
+            "/batch-match",
+            data={"action": "forge_and_match_queue"},
+        )
+        self.assertEqual(process_response.status_code, 302)
+        self.assertTrue(process_response.location.endswith("/"))
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        staged_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(staged_book.abs_id, "ab-1")
+        self.assertEqual(staged_book.status, "forging")
+        self.assertEqual(staged_book.ebook_filename, "batch-forge.epub")
+
+        self.mock_container.mock_forge_service.start_auto_forge_match.assert_called_once()
+        forge_kwargs = self.mock_container.mock_forge_service.start_auto_forge_match.call_args.kwargs
+        self.assertEqual(forge_kwargs["abs_id"], "ab-1")
+        self.assertEqual(forge_kwargs["text_item"]["source"], "Booklore")
+        self.assertEqual(forge_kwargs["text_item"]["booklore_id"], "42")
+
+        self.mock_container.mock_abs_client.add_to_collection.assert_not_called()
+
+        with self.client.session_transaction() as session_data:
+            self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-forge-story")
+    def test_batch_match_forge_queue_storyteller_items_use_direct_match(self, _mock_kosync, _mock_ingest):
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "batch-story.epub",
+                "ebook_display_name": "Batch Story",
+                "storyteller_uuid": "story-uuid-batch-forge",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post(
+            "/batch-match",
+            data={"action": "forge_and_match_queue"},
+        )
+        self.assertEqual(process_response.status_code, 302)
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        processed_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(processed_book.status, "pending")
+        self.assertEqual(processed_book.storyteller_uuid, "story-uuid-batch-forge")
+        self.mock_container.mock_forge_service.start_auto_forge_match.assert_not_called()
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-forge-booklore")
+    def test_batch_match_forge_queue_booklore_uses_bridge_key_identity(self, _mock_kosync):
+        add_response = self.client.post(
+            "/batch-match",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "",
+                "audio_source": "BookLore",
+                "audio_source_id": "42",
+                "audio_title": "BookLore Batch Forge",
+                "audio_cover_url": "/api/booklore/audiobook-cover/42",
+                "audio_duration": "5123",
+                "audio_provider_book_id": "42",
+                "audio_provider_file_id": "991",
+                "ebook_filename": "booklore-source.epub",
+                "ebook_display_name": "BookLore Source",
+                "ebook_source": "Booklore",
+                "ebook_source_id": "6798",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        process_response = self.client.post(
+            "/batch-match",
+            data={"action": "forge_and_match_queue"},
+        )
+        self.assertEqual(process_response.status_code, 302)
+
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        staged_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(staged_book.abs_id, "booklore:42")
+        self.assertEqual(staged_book.audio_source, "BookLore")
+        self.assertEqual(staged_book.status, "forging")
+
+        self.mock_container.mock_forge_service.start_auto_forge_match.assert_called_once()
+        kwargs = self.mock_container.mock_forge_service.start_auto_forge_match.call_args.kwargs
+        self.assertEqual(kwargs["abs_id"], "booklore:42")
+        self.assertEqual(kwargs["audio_source"], "BookLore")
+        self.assertEqual(kwargs["audio_source_id"], "42")
 
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-story-1")

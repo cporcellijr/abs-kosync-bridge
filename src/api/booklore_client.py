@@ -46,6 +46,10 @@ class BookloreClient:
             os.getenv("BOOKLORE_SEARCH_HIT_REFRESH_COOLDOWN", "600")
         )
         self._last_search_hit_refresh_attempt = 0
+        self._audiobook_search_miss_refresh_cooldown = int(
+            os.getenv("BOOKLORE_AUDIOBOOK_SEARCH_MISS_REFRESH_COOLDOWN", "30")
+        )
+        self._last_audiobook_search_miss_refresh_attempt = 0
         self._refresh_lock = threading.Lock()
         self._cache_lock = threading.RLock()
 
@@ -1171,35 +1175,71 @@ class BookloreClient:
 
     def search_audiobooks(self, search_term, include_info=True):
         """Search Booklore for audiobook-capable books."""
-        results = []
-        seen_ids = set()
-        books = self.search_books(search_term) if search_term else self.get_all_books()
-        for book in books or []:
-            if not isinstance(book, dict):
-                continue
-            bid = book.get('id')
-            if bid in seen_ids:
-                continue
-            hydrated = book
-            requires_audio_refresh = (
-                not book.get('_needs_detail')
-                and not self._book_supports_audiobook(book)
-                and not self._has_audio_shape_fields(book)
+        safe_term = str(search_term or "").strip()
+
+        def collect_results(books):
+            collected = []
+            seen_ids = set()
+            for book in books or []:
+                if not isinstance(book, dict):
+                    continue
+                bid = book.get('id')
+                if bid in seen_ids:
+                    continue
+                hydrated = book
+                requires_audio_refresh = (
+                    not book.get('_needs_detail')
+                    and not self._book_supports_audiobook(book)
+                    and not self._has_audio_shape_fields(book)
+                )
+                if book.get('_needs_detail') or not self._book_supports_audiobook(book):
+                    hydrated = self._fetch_and_cache_detail(
+                        bid,
+                        force_refresh=requires_audio_refresh,
+                    ) or book
+                if not self._book_supports_audiobook(hydrated):
+                    continue
+                if include_info:
+                    info = self.get_audiobook_info(bid)
+                    if info:
+                        hydrated = dict(hydrated)
+                        hydrated['audiobookInfo'] = info
+                collected.append(hydrated)
+                seen_ids.add(bid)
+            return collected
+
+        books = self.search_books(safe_term) if safe_term else self.get_all_books()
+        results = collect_results(books)
+        if results or not safe_term:
+            return results
+
+        if self._is_refresh_on_cooldown():
+            logger.debug(
+                "Booklore audiobook search miss: refresh skipped due to cooldown "
+                f"(term='{sanitize_log_data(safe_term)}')"
             )
-            if book.get('_needs_detail') or not self._book_supports_audiobook(book):
-                hydrated = self._fetch_and_cache_detail(
-                    bid,
-                    force_refresh=requires_audio_refresh,
-                ) or book
-            if not self._book_supports_audiobook(hydrated):
-                continue
-            if include_info:
-                info = self.get_audiobook_info(bid)
-                if info:
-                    hydrated = dict(hydrated)
-                    hydrated['audiobookInfo'] = info
-            results.append(hydrated)
-            seen_ids.add(bid)
+            return results
+
+        now = time.time()
+        if (
+            now - self._last_audiobook_search_miss_refresh_attempt
+            < self._audiobook_search_miss_refresh_cooldown
+        ):
+            logger.debug(
+                "Booklore audiobook search miss: refresh throttled "
+                f"(term='{sanitize_log_data(safe_term)}', cooldown={self._audiobook_search_miss_refresh_cooldown}s)"
+            )
+            return results
+
+        self._last_audiobook_search_miss_refresh_attempt = now
+        logger.debug(
+            "Booklore audiobook search miss: forcing cache refresh once "
+            f"(term='{sanitize_log_data(safe_term)}')"
+        )
+        if self._refresh_book_cache(refresh_stale_details=False):
+            refreshed_books = self.search_books(safe_term)
+            return collect_results(refreshed_books)
+
         return results
 
     def clear_and_refresh(self):

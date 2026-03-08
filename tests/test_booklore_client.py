@@ -987,6 +987,43 @@ def test_search_audiobooks_can_skip_per_book_info_fetch(booklore_client):
     booklore_client.get_audiobook_info.assert_not_called()
 
 
+def test_search_audiobooks_miss_forces_single_refresh_and_returns_new_match(booklore_client):
+    new_audio = {
+        "id": 7101,
+        "title": "New Audio Arrival",
+        "authors": "Test Author",
+        "fileName": "New Audio Arrival.m4b",
+        "bookType": "AUDIOBOOK",
+    }
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.search_books = MagicMock(side_effect=[[], [new_audio]])
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+    booklore_client.get_audiobook_info = MagicMock(return_value=None)
+
+    results = booklore_client.search_audiobooks("New Audio Arrival")
+
+    assert len(results) == 1
+    assert results[0]["id"] == 7101
+    booklore_client._refresh_book_cache.assert_called_once_with(refresh_stale_details=False)
+    assert booklore_client.search_books.call_count == 2
+
+
+def test_search_audiobooks_miss_refresh_is_throttled(booklore_client):
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.search_books = MagicMock(return_value=[])
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+    booklore_client._audiobook_search_miss_refresh_cooldown = 60
+    booklore_client._last_audiobook_search_miss_refresh_attempt = time.time()
+
+    results = booklore_client.search_audiobooks("Still Missing")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_not_called()
+    booklore_client.search_books.assert_called_once_with("Still Missing")
+
+
 def test_search_books_dedupes_stale_filename_aliases_by_book_id(booklore_client):
     stale = {
         "id": 6798,

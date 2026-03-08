@@ -765,6 +765,7 @@
                     <input type="hidden" name="ebook_display_name" id="selected_ebook_display_name" value="">
                     <input type="hidden" name="ebook_source" id="selected_ebook_source" value="">
                     <input type="hidden" name="ebook_source_id" id="selected_ebook_source_id" value="">
+                    <input type="hidden" name="ebook_source_path" id="selected_ebook_source_path" value="">
                     <input type="hidden" name="storyteller_uuid" id="selected_storyteller_uuid" value="">
 
                     {% set single_ab_match = audiobooks|length == 1 %}
@@ -835,6 +836,7 @@
                             data-display-name="{{ eb.display_name | replace("'", "\\'") }}"
                             data-source-type="{{ eb.source }}"
                             data-source-id="{{ eb.source_id }}"
+                            data-source-path="{{ eb.path if eb.path else '' }}"
                             onclick="selectEbookCard(this, '{{ eb.name }}', '{{ eb.display_name | replace("'", "\\'") }}')">
                             <div class="resource-icon">📖</div>
                             <div class="resource-title" title="{{ eb.display_name }}">
@@ -905,6 +907,13 @@
                     </form>
 
                     <form method="POST" action="/batch-match">
+                        <input type="hidden" name="action" value="forge_and_match_queue">
+                        <button type="submit" class="btn btn-primary w-100">
+                            Forge + Match ({{ queue|length }})
+                        </button>
+                    </form>
+
+                    <form method="POST" action="/batch-match">
                         <input type="hidden" name="action" value="clear_queue">
                         <button type="submit" class="btn btn-danger w-100"
                             onclick="return confirm('Clear entire queue?')">
@@ -939,6 +948,9 @@
                 selectedEbookFilename = preSelectedEb.dataset.value;
                 document.getElementById('selected_ebook_filename').value = selectedEbookFilename;
                 document.getElementById('selected_ebook_display_name').value = preSelectedEb.dataset.displayName || selectedEbookFilename;
+                document.getElementById('selected_ebook_source').value = preSelectedEb.dataset.sourceType || '';
+                document.getElementById('selected_ebook_source_id').value = preSelectedEb.dataset.sourceId || '';
+                document.getElementById('selected_ebook_source_path').value = preSelectedEb.dataset.sourcePath || '';
             }
             const preSelectedSt = document.querySelector('.st-card.selected');
             if (preSelectedSt) {
@@ -976,6 +988,7 @@
             document.getElementById('selected_ebook_display_name').value = display_name || filename;
             document.getElementById('selected_ebook_source').value = element.dataset.sourceType || '';
             document.getElementById('selected_ebook_source_id').value = element.dataset.sourceId || '';
+            document.getElementById('selected_ebook_source_path').value = element.dataset.sourcePath || '';
             updateAddButton();
         }
 
