@@ -1,59 +1,50 @@
 # Getting Started
 
-## 🎯 Goal
+## Goal
 
-Get your audiobooks and ebooks syncing in 10 minutes!
+Get your library syncing in about 10 minutes.
 
 ---
 
 ## Prerequisites
 
-Before you begin, ensure you have the following:
+Before you begin, you should have:
 
-- **Docker** and **Docker Compose** installed.
-- An **Audiobookshelf** server running.
-- (Optional) A **Booklore** instance (for syncing ebooks).
-- (Optional) A **KOReader** sync server (either the official one, a self-hosted instance, or none if just syncing ABS <-> Storyteller).
-- Your ebook and audiobook files accessible to the host machine.
+- Docker and Docker Compose
+- A working Audiobookshelf server
+- An ebook folder on the Docker host
+- Optional: KOSync, Booklore, Storyteller, or Hardcover if you want those integrations
 
 ---
 
-## Step 1: Get Your API Keys
+## Step 1: Gather your ABS details
 
-### Audiobookshelf API Key
+### Audiobookshelf API token
 
-1. Log into your ABS server.
-2. Go to **Settings** → **Users** → Your user.
-3. Click **"Generate API Token"**.
+1. Log into Audiobookshelf.
+2. Go to **Settings -> Users -> Your user**.
+3. Click **Generate API Token**.
 4. Copy the token.
 
-### (Optional) Find Your ABS Library ID
+### ABS library ID
 
-If you want to limit the sync mapping search to a specific library (recommended for performance):
+If you want searches scoped to one ABS library:
 
-1. In ABS, go to your audiobook library.
-2. Look at the URL: `https://your-server.com/library/LIBRARY_ID_HERE`
-3. Copy that ID.
+1. Open the audiobook library in Audiobookshelf.
+2. Look at the URL.
+3. Copy the part after `/library/`.
 
-### (Optional) KOSync Credentials
+### Optional service credentials
 
-If using KOReader sync:
+If you plan to use them, also keep these handy:
 
-- Your Calibre/KOSync username and password.
-- KOSync server URL (usually `https://your-calibre.com/api/koreader`).
-
-### (Optional) Booklore Credentials
-
-If using Booklore:
-
-- Your Booklore server URL.
-- Username and password.
+- KOSync URL, username, and password
+- Booklore URL, username, and password
+- Storyteller URL, username, and password
 
 ---
 
-## Step 2: Prepare Your Work Directory
-
-Create a directory for the application on your server:
+## Step 2: Prepare a working directory
 
 ```bash
 mkdir ~/abs-kosync
@@ -63,60 +54,56 @@ mkdir data
 
 ---
 
-## Step 3: Create docker-compose.yml
-
-Copy this template and fill in YOUR values:
+## Step 3: Create `docker-compose.yml`
 
 ```yaml title="docker-compose.yml"
 services:
   abs-kosync:
-    image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
     container_name: abs_kosync
+    image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
     restart: unless-stopped
     ports:
-      - "8080:5757" # Admin Panel (Keep Private)
-      # - "5758:5758" # Sync Protocol (Safe to Expose)
+      - "8080:5757"
+      # - "5758:5758"  # Optional: expose the sync-only port when using KOSYNC_PORT=5758
     environment:
       - TZ=America/New_York
       - LOG_LEVEL=INFO
-      
-      # NOTE: All configuration (ABS, etc.) is managed in the Web UI.
-      
+      # - KOSYNC_PORT=5758  # Optional: enable split-port mode
+      # Configure ABS, KOSync, Booklore, Storyteller, and other services in the Web UI.
     volumes:
-      # === REQUIRED ===
-      - ./data:/data                    # App data
-      - /path/to/ebooks:/books          # Your EPUB library
-      
-      # === OPTIONAL: Forge ===
-      - /path/to/storyteller/library:/storyteller_library
-      # === OPTIONAL: Storyteller transcript ingestion ===
-      - /path/to/storyteller/assets:/storyteller/assets
+      - ./data:/data
+      - /path/to/ebooks:/books
+      # - /path/to/storyteller/library:/storyteller_library  # Optional: Forge output
+      # - /path/to/storyteller/assets:/storyteller/assets    # Optional: Storyteller transcript ingest
 ```
 
-### Security Note: Split-Port Mode
+### Split-port mode
 
-By default, the container listens on port **8080** (mapped to 5757 int). This port exposes **everything**: the Admin Dashboard, Settings, and API.
+By default, port `8080` exposes the full web UI and API.
 
-If you want to expose the KOSync endpoint to the internet (for syncing on the go) but keep the Dashboard private, you can use **Split-Port Mode**:
+If you want to expose only the KOSync endpoint to the internet:
 
-1. Set `KOSYNC_PORT=5758` (or any other port) in your environment variables.
-2. Map that port in `docker-compose.yml` (as shown in the commented example).
+1. Uncomment `KOSYNC_PORT=5758`.
+2. Uncomment the `5758:5758` port mapping.
+3. Keep `8080` private to your LAN or reverse proxy.
 
 !!! tip "Optional Integrations"
-    You can configure KOSync, Storyteller, and other integrations via enviroment variables during bootstrap, but it is easier to do it later in the Web UI!
-    
+    It is usually easiest to start with the minimal compose file above and finish configuration in the Web UI.
+
+    If you enable Booklore, the bridge can use it for both ebook matching and Booklore audiobook sources.
+
     If you mount Storyteller assets at `/storyteller/assets`, set **Storyteller Assets Path** in Settings to `/storyteller`.
-    The assets path can be configured fully in the UI; `STORYTELLER_ASSETS_DIR` env is optional.
+    The assets path can be configured entirely in the UI; `STORYTELLER_ASSETS_DIR` is optional.
 
 ---
 
-## Step 4: Start the Service
+## Step 4: Start the service
 
 ```bash
 docker compose up -d
 ```
 
-Check the logs to ensure everything is running smoothly:
+Check the logs:
 
 ```bash
 docker compose logs -f
@@ -124,23 +111,38 @@ docker compose logs -f
 
 ---
 
-## Step 5: Initial Configuration
+## Step 5: Finish configuration in the Web UI
 
-1. Open your browser and go to `http://localhost:8080/settings` (or your server IP).
-2. Enter your **Audiobookshelf Server URL** and **API Key** (from Step 1).
-3. (Optional) Enter your **KOSync**, **Booklore**, or **Storyteller** credentials.
-4. (Optional) If Storyteller assets are mounted, set **Storyteller Assets Path** to `/storyteller`.
-5. Click **Save Settings**. The application will restart automatically to apply changes.
+1. Open `http://localhost:8080/settings`.
+2. Enter your **Audiobookshelf Server URL**, **API Token**, and **Library ID**.
+3. Add any optional services you want to use:
+   - KOSync
+   - Booklore
+   - Storyteller
+   - Hardcover
+4. If you mounted Storyteller assets, set **Storyteller Assets Path** to `/storyteller`.
+5. Click **Save Settings** and wait for the app to restart.
 
 ---
 
-## Step 6: Create Your First Mapping
+## Step 6: Create your first mapping
 
-1. Go to the **Match** page (or click "Single Match" on the dashboard).
-2. **Search** for an audiobook (e.g., "The Martian").
-3. **Select** the audiobook from the first column.
-4. (Optional) Select a **Storyteller** artifact if one was found. If not, choose "None".
-5. **Select** the standard EPUB file from the third column.
-6. Click **Create Mapping**.
+You can start in either of these ways:
 
-That's it! The system will now automatically sync progress between your audiobook and ebook every 5 minutes (default).
+### Suggestions
+
+1. Open **Suggestions**.
+2. Click **Scan Library**.
+3. Review the likely pairs.
+4. Add the good ones to the queue.
+5. Click **Process All**.
+
+### Add Book
+
+1. Open **Add Book**.
+2. Pick an ABS audiobook, a Booklore audiobook, or leave audio on **None / Skip** for an ebook-only link.
+3. Optionally pick a Storyteller title.
+4. Pick the standard ebook.
+5. Click **Create Mapping**.
+
+That is enough to get syncing started. The normal background cycle runs every 5 minutes by default, and instant sync can react faster when supported by the source.

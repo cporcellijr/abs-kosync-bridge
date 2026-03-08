@@ -4,23 +4,25 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
-## [6.3.4] - 2026-03-05
+## [6.3.3] - 2026-03-08
 
-### Enhancements
+### Added
 
-- **Library Suggestions Workspace**: Added a dedicated `/suggestions` page with a split layout for suggestion review plus always-visible batch queue controls.
-- **Background Suggestions Scan**: Suggestions scanning now runs as an async background job with status polling and progress phases.
-- **Incremental Suggestions Cache**: Added persisted suggestions scan cache at `/data/suggestions_scan_cache.json` so normal scans can reuse prior results and only scan new unmatched audiobooks.
-- **Full Refresh Control**: Added explicit full refresh scanning to force a complete rescan when desired.
+- Added a dedicated **Library Suggestions** page for scanning unmatched titles, reviewing likely audiobook and ebook pairs, and queueing approved matches in bulk.
+- Added support for using **Booklore audiobooks** as the audio side of a sync, including matching, batch processing, suggestions, Forge, and dashboard tracking.
+- Added more flexible linking flows, including **ebook-only links**, **Storyteller-only links**, and a one-click **Refresh Booklore Cache** action in Settings.
 
-### Bug Fixes
+### Changed
 
-- **Suggestions Session Cookie Overflow**: Fixed oversized Flask session cookie failures (including 502 completion failures) by moving large scan payloads out of cookie-backed session storage into server-side state.
-- **Suggestions Provider Hammering**: Reduced ABS/Booklore scan load by switching suggestions matching to a one-time ebook candidate pool per scan with in-memory fuzzy matching, instead of per-audiobook provider searches.
-- **Booklore Scan Query Path**: `get_searchable_ebooks('')` now uses Booklore `get_all_books()` for scan workloads to avoid aggressive per-query refresh behavior.
-- **Booklore Duplicate Scan Suppression**: Added a non-blocking refresh lock around full-library scans to prevent overlapping `_refresh_book_cache()` runs under concurrent requests. Duplicate refresh attempts now skip safely, and lock release is guaranteed via `try/finally`.
-- **Booklore Search Miss Freshness**: Updated `search_books()` to use cache-first lookup with a single refresh-on-miss path. On non-empty misses, it performs one refresh only when cache age exceeds 60 seconds and cooldown is not active, then retries the in-memory search once.
-- **Booklore Search Refresh Guardrails**: Added explicit debug logs for miss-refresh trigger, fresh-cache skip, and cooldown skip to make runtime behavior and throttling decisions visible in logs.
+- Suggestions scans now run in the background with progress updates, cached repeat scans, and a **Full Refresh** option for rescanning the whole unmatched library.
+- Match, Batch Match, Suggestions, and the dashboard now show clearer source badges and audio-source details so it is easier to tell where each book came from.
+- Storyteller transcript import is more forgiving of real-world file layouts and continues to prefer Storyteller timing data before falling back to SMIL or Whisper.
+
+### Fixed
+
+- Fixed cases where small cross-format differences could cause progress bounce-backs or an incorrect reset when switching between audiobook and ebook apps.
+- Fixed ebook-only links getting stuck in processing by skipping audiobook preparation work they do not need.
+- Fixed edge cases where Storyteller-only links or stale Booklore data could break matching, hashing, or syncing until the book was refreshed.
 
 ---
 
@@ -280,6 +282,153 @@ If you see "Using Storyteller SQLite fallback", check your credentials.
 <!-- markdownlint-disable MD060 -->
 
 > [!NOTE]
+> All settings below can be configured via the **Web UI** at `/settings`. Environment variables are mainly for first boot or advanced overrides. Once a value is saved in the UI, the database value takes precedence.
+
+### Audiobookshelf (Required)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ABS_SERVER` | empty | Audiobookshelf server URL |
+| `ABS_KEY` | empty | Audiobookshelf API token |
+| `ABS_LIBRARY_ID` | empty | Audiobookshelf library ID used for matching and search scoping |
+| `ABS_COLLECTION_NAME` | `Synced with KOReader` | Collection name used for linked ABS audiobooks |
+| `ABS_PROGRESS_OFFSET_SECONDS` | `0` | Rewind progress written back to ABS by this many seconds |
+| `ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID` | `false` | Limit audiobook search to one ABS library. In direct env usage, this can also be set to a library ID string instead of `true`. |
+
+### KOSync
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KOSYNC_ENABLED` | `false` | Enable KOSync integration |
+| `KOSYNC_SERVER` | empty | Target KOSync server URL |
+| `KOSYNC_USER` | empty | KOSync username |
+| `KOSYNC_KEY` | empty | KOSync password |
+| `KOSYNC_HASH_METHOD` | `content` | Hash method: `content` (safer) or `filename` (faster) |
+| `KOSYNC_USE_PERCENTAGE_FROM_SERVER` | `false` | Use raw percentage from KOSync instead of text-based matching |
+| `KOSYNC_PORT` | empty | Optional dedicated KOSync listener port for split-port deployments |
+
+### Storyteller
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORYTELLER_ENABLED` | `false` | Enable Storyteller integration |
+| `STORYTELLER_API_URL` | empty | Storyteller server URL |
+| `STORYTELLER_USER` | empty | Storyteller username |
+| `STORYTELLER_PASSWORD` | empty | Storyteller password |
+| `STORYTELLER_COLLECTION_NAME` | `Synced with KOReader` | Collection name used when linked books are added to Storyteller |
+| `STORYTELLER_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` gives Storyteller its own polling interval. |
+| `STORYTELLER_POLL_SECONDS` | `45` | Poll interval used when `STORYTELLER_POLL_MODE=custom` |
+| `STORYTELLER_ASSETS_DIR` | empty | Optional root path for Storyteller transcript assets |
+
+### Booklore
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BOOKLORE_ENABLED` | `false` | Enable Booklore integration |
+| `BOOKLORE_SERVER` | empty | Booklore server URL |
+| `BOOKLORE_USER` | empty | Booklore username |
+| `BOOKLORE_PASSWORD` | empty | Booklore password |
+| `BOOKLORE_SHELF_NAME` | `Kobo` | Shelf name used for linked ebooks |
+| `BOOKLORE_LIBRARY_ID` | empty | Optional Booklore library restriction |
+| `BOOKLORE_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` gives Booklore its own polling interval. |
+| `BOOKLORE_POLL_SECONDS` | `300` | Poll interval used when `BOOKLORE_POLL_MODE=custom` |
+
+### Booklore Advanced
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BOOKLORE_MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE` | `1200` | Caps how many detailed records a cache rebuild can hydrate in one pass |
+| `BOOKLORE_SEARCH_HIT_REFRESH_MIN_AGE` | `1800` | Minimum cache age before a successful search can trigger a quick validation refresh |
+| `BOOKLORE_SEARCH_HIT_REFRESH_COOLDOWN` | `600` | Cooldown between quick validation refreshes after search hits |
+| `BOOKLORE_LOGIN_RETRY_DELAY_SECONDS` | `1.1` | Delay before retrying duplicate refresh-token login conflicts |
+| `BOOKLORE_LOGIN_MAX_ATTEMPTS` | `2` | Maximum login attempts before failing |
+
+### CWA (Calibre-Web Automated)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CWA_ENABLED` | `false` | Enable OPDS / CWA ebook search and downloads |
+| `CWA_SERVER` | empty | Calibre-Web Automated server URL |
+| `CWA_USERNAME` | empty | Optional Calibre-Web Automated username |
+| `CWA_PASSWORD` | empty | Optional Calibre-Web Automated password |
+
+### Hardcover.app
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARDCOVER_ENABLED` | `false` | Enable Hardcover updates |
+| `HARDCOVER_TOKEN` | empty | API token from hardcover.app/account/api |
+
+### Telegram Notifications
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_ENABLED` | `false` | Enable Telegram notifications |
+| `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | empty | Telegram user or group ID |
+| `TELEGRAM_LOG_LEVEL` | `ERROR` | Lowest log severity that gets forwarded |
+
+### Shelfmark
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SHELFMARK_URL` | empty | URL to your Shelfmark instance |
+
+### Sync Behavior
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNC_PERIOD_MINS` | `5` | Main background sync interval in minutes |
+| `SYNC_DELTA_ABS_SECONDS` | `60` | Minimum ABS timestamp change before it counts as real movement |
+| `SYNC_DELTA_KOSYNC_PERCENT` | `0.5` | Minimum ebook percentage change before it counts as real movement |
+| `SYNC_DELTA_KOSYNC_WORDS` | `400` | Extra guardrail for ebook movement |
+| `SYNC_DELTA_BETWEEN_CLIENTS_PERCENT` | `0.5` | Minimum gap between clients before propagation begins |
+| `FUZZY_MATCH_THRESHOLD` | `80` | Matching threshold used by book and text lookups |
+| `SYNC_ABS_EBOOK` | `false` | Also sync progress to the ABS ebook item when present |
+| `XPATH_FALLBACK_TO_PREVIOUS_SEGMENT` | `false` | Try the previous segment if a locator lookup fails |
+| `SUGGESTIONS_ENABLED` | `false` | Enable the Suggestions workspace and background discovery |
+| `REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT` | `true` | Rebuild missing alignment data after clearing progress when needed |
+| `INSTANT_SYNC_ENABLED` | `true` | Turns ABS playback-triggered sync and KOReader push-triggered sync on or off together |
+| `ABS_SOCKET_ENABLED` | `true` | Enable the ABS socket listener used by instant sync |
+| `ABS_SOCKET_DEBOUNCE_SECONDS` | `30` | Wait time after ABS playback activity before syncing |
+| `CROSSFORMAT_DEADBAND_SECONDS` | `2.0` | Ignores tiny audiobook-to-ebook differences so the leader does not flap between apps |
+| `CROSSFORMAT_ROUNDTRIP_TOLERANCE_CHARS` | `2` | Locator tolerance used when stabilizing cross-format position roundtrips |
+
+### Transcription
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRANSCRIPTION_PROVIDER` | `local` | Provider: `local`, `deepgram`, or `whispercpp` |
+| `WHISPER_MODEL` | `tiny` | Local Whisper model size |
+| `WHISPER_DEVICE` | `auto` | `auto`, `cpu`, or `cuda` |
+| `WHISPER_COMPUTE_TYPE` | `auto` | Precision mode for local Whisper |
+| `WHISPER_CPP_URL` | empty | URL to your Whisper.cpp HTTP endpoint |
+| `DEEPGRAM_API_KEY` | empty | Deepgram API key |
+| `DEEPGRAM_MODEL` | `nova-2` | Deepgram model tier |
+| `SMIL_VALIDATION_THRESHOLD` | `60` | Minimum match percentage required before SMIL timing data is trusted |
+
+### System
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TZ` | `America/New_York` | Container timezone |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `DATA_DIR` | `/data` | Database, cache, and working state |
+| `BOOKS_DIR` | `/books` | Local ebook library path inside the container |
+| `AUDIOBOOKS_DIR` | `/audiobooks` | Optional local audiobook path |
+| `STORYTELLER_LIBRARY_DIR` | `/storyteller_library` | Forge destination path |
+| `PROCESSING_DIR` | `/tmp` | Temporary Forge staging directory |
+| `EBOOK_CACHE_SIZE` | `3` | Parsed-ebook cache size |
+| `JOB_MAX_RETRIES` | `5` | Retry count for failed background jobs |
+| `JOB_RETRY_DELAY_MINS` | `15` | Delay before retrying failed jobs |
+
+<details>
+<summary>Archived legacy reference</summary>
+
+
+<!-- markdownlint-disable MD060 -->
+
+> [!NOTE]
 > All settings below can be configured via the **Web UI** at `/settings`. Environment variables are only used for initial bootstrapping on first launch.
 
 ### Audiobookshelf (Required)
@@ -375,7 +524,7 @@ If you see "Using Storyteller SQLite fallback", check your credentials.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TRANSCRIPTION_PROVIDER` | `local` | Provider: `local` (faster-whisper), `deepgram`, or `whisper_cpp` |
+| `TRANSCRIPTION_PROVIDER` | `local` | Provider: `local` (faster-whisper), `deepgram`, or `whispercpp` |
 | `WHISPER_MODEL` | `tiny` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large`) |
 | `WHISPER_DEVICE` | `auto` | Device: `auto`, `cpu`, or `cuda` |
 | `WHISPER_COMPUTE_TYPE` | `auto` | Precision: `int8`, `float16`, `float32` |
@@ -396,3 +545,5 @@ If you see "Using Storyteller SQLite fallback", check your credentials.
 | `EBOOK_CACHE_SIZE` | `3` | LRU cache size for parsed ebooks |
 | `JOB_MAX_RETRIES` | `5` | Max transcription job retry attempts |
 | `JOB_RETRY_DELAY_MINS` | `15` | Minutes to wait between job retries |
+
+</details>

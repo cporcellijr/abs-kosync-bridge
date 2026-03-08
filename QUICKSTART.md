@@ -1,32 +1,43 @@
 # Quick Start Guide - ABS-KoSync Enhanced
 
-## 🎯 Goal
-Get your audiobooks and ebooks syncing in 10 minutes!
+## Goal
+
+Get your library syncing in about 10 minutes.
 
 ---
 
-## Step 1: Get Your API Keys
+## Step 1: Grab the basics
 
-### Audiobookshelf API Key
-1. Log into your ABS server
-2. Go to **Settings** → **Users** → Your user
-3. Click **"Generate API Token"**
-4. Copy the token (starts with `eyJ...`)
+You will want:
 
-### Find Your ABS Library ID
-1. In ABS, go to your audiobook library
-2. Look at the URL: `https://your-server.com/library/LIBRARY_ID_HERE`
-3. Copy that ID
+- Your Audiobookshelf URL
+- Your Audiobookshelf API token
+- Your ABS library ID
+- Your ebook folder path on the Docker host
 
-### KOSync Credentials
-- Your Calibre/KOSync username and password
-- KOSync server URL (usually `https://your-calibre.com/api/koreader`)
+Optional for later:
+
+- KOSync credentials
+- Booklore credentials
+- Storyteller credentials
+
+### Find your ABS API token
+
+1. Open Audiobookshelf.
+2. Go to **Settings -> Users -> Your user**.
+3. Click **Generate API Token**.
+4. Copy the token.
+
+### Find your ABS library ID
+
+1. Open your audiobook library in Audiobookshelf.
+2. Look at the URL.
+3. Copy the part after `/library/`.
 
 ---
 
-## Step 2: Prepare Your Folders
+## Step 2: Prepare a working folder
 
-Create a directory for the app:
 ```bash
 mkdir ~/abs-kosync
 cd ~/abs-kosync
@@ -34,144 +45,141 @@ cd ~/abs-kosync
 
 ---
 
-## Step 3: Create docker-compose.yml
+## Step 3: Create `docker-compose.yml`
 
-Copy this template and fill in YOUR values:
+Use this compose file:
 
 ```yaml
 services:
-  abs-kosync-enhanced:
-    image: your-username/abs-kosync-enhanced:latest
-    container_name: abs-kosync
+  abs-kosync:
+    container_name: abs_kosync
+    image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
     restart: unless-stopped
-    
-    environment:
-      # REQUIRED - Fill these in!
-      - ABS_SERVER=https://YOUR_ABS_SERVER.com
-      - ABS_KEY=YOUR_API_TOKEN_HERE
-      - ABS_LIBRARY_ID=YOUR_LIBRARY_ID
-      
-      - KOSYNC_SERVER=https://YOUR_CALIBRE_SERVER.com/api/koreader
-      - KOSYNC_USER=YOUR_USERNAME
-      - KOSYNC_KEY=YOUR_PASSWORD
-      - KOSYNC_HASH_METHOD=content
-      
-      # OPTIONAL - Basic settings
-      - TZ=America/New_York
-      - LOG_LEVEL=INFO
-      - SYNC_PERIOD_MINS=5
-      - FUZZY_MATCH_THRESHOLD=88
-    
-    volumes:
-      # REQUIRED
-      - ./data:/data
-      - /path/to/your/ebooks:/books
-      # OPTIONAL - Storyteller forced-alignment transcript ingestion
-      # - /path/to/storyteller/assets:/storyteller/assets
-    
     ports:
       - "8080:5757"
+      # - "5758:5758"  # Optional: expose the sync-only port when using KOSYNC_PORT=5758
+    environment:
+      - TZ=America/New_York
+      - LOG_LEVEL=INFO
+      # - KOSYNC_PORT=5758  # Optional: enable split-port mode
+      # Configure ABS, KOSync, Booklore, Storyteller, and other services in the Web UI.
+    volumes:
+      - ./data:/data
+      - /path/to/ebooks:/books
+      # - /path/to/storyteller/library:/storyteller_library  # Optional: Forge output
+      # - /path/to/storyteller/assets:/storyteller/assets    # Optional: Storyteller transcript ingest
 ```
 
-**Replace these:**
-- `YOUR_ABS_SERVER.com` → Your Audiobookshelf URL
-- `YOUR_API_TOKEN_HERE` → The API key from Step 1
-- `YOUR_LIBRARY_ID` → The library ID from Step 1
-- `YOUR_CALIBRE_SERVER.com` → Your Calibre/KOSync server
-- `YOUR_USERNAME` → Your KOSync username
-- `YOUR_PASSWORD` → Your KOSync password
-- `/path/to/your/ebooks` → Where your EPUB files are
+Replace:
+
+- `/path/to/ebooks` with your real EPUB folder
+- The optional Storyteller paths if you plan to use Forge or transcript ingest
 
 ---
 
-## Step 4: Start the Container
+## Step 4: Start it
 
 ```bash
 docker compose up -d
 ```
 
-Check if it's running:
+Check the logs:
+
 ```bash
 docker compose logs -f
 ```
 
-Look for:
-- ✅ Connected to Audiobookshelf
-- ✅ Connected to KOSync Server
-
-Press `Ctrl+C` to exit logs.
+Press `Ctrl+C` when you are done watching.
 
 ---
 
-## Step 5: Open the Web UI
+## Step 5: Finish setup in the Web UI
 
-Open your browser to: **http://localhost:8080**
+Open **http://localhost:8080** and go to **Settings**.
 
-You should see the ABS-KoSync dashboard!
+Add your:
 
-If you mounted Storyteller assets:
+1. **Audiobookshelf Server URL**
+2. **Audiobookshelf API Token**
+3. **ABS Library ID**
 
-1. Go to **Settings**.
-2. Set **Storyteller Assets Path** to `/storyteller` (not `/storyteller/assets`).
-3. Save settings.
+Then add any optional services you want:
 
----
+- **KOSync** for KOReader sync
+- **Booklore** for ebook sync and Booklore audiobook matching
+- **Storyteller** for read-along links and transcript ingest
 
-## Step 6: Create Your First Mapping
+If you mounted Storyteller assets, set **Storyteller Assets Path** to `/storyteller` and not `/storyteller/assets`.
 
-1. Click **"Single Match"** button
-2. Find an audiobook you're currently listening to
-3. Find the matching ebook
-4. Click **"Create Mapping"**
-
-That's it! The sync will start automatically.
+Save settings and wait for the app to restart.
 
 ---
 
-## 🎉 Success!
+## Step 6: Create your first link
 
-Your progress should now sync between:
-- Audiobookshelf (when listening)
-- KOReader (when reading)
+You now have two easy options:
 
-The system checks every 5 minutes by default.
+### Fast path: Suggestions
+
+1. Open **Suggestions**.
+2. Click **Scan Library**.
+3. Review the likely matches.
+4. Click **Add to Queue** for the good ones.
+5. Click **Process All**.
+
+### Manual path: Add Book
+
+1. Open **Add Book**.
+2. Pick an ABS audiobook, a Booklore audiobook, or leave audio on **None / Skip** for an ebook-only link.
+3. Optionally pick a Storyteller title.
+4. Pick the standard ebook.
+5. Click **Create Mapping**.
 
 ---
 
-## 🔧 Troubleshooting
+## Success
 
-### Container won't start?
+You should now be able to sync between:
+
+- Audiobookshelf
+- KOReader / KOSync
+- Booklore
+- Storyteller
+- Hardcover, if enabled
+
+The normal background sync runs every 5 minutes by default, and instant sync can react faster when supported.
+
+---
+
+## Quick fixes
+
+### The container will not start
+
 ```bash
 docker compose logs
 ```
-Look for error messages about API keys or server connections.
 
-### Can't access web UI?
-- Check if port 8080 is available: `docker compose ps`
-- Try http://localhost:8080 or http://YOUR_SERVER_IP:8080
+Look for path, permission, or connection errors.
 
-### Sync not working?
-- Wait 5 minutes (default sync period)
-- Check the dashboard - does it show progress?
-- Make sure you're using the same ebook file in both systems
+### The web UI will not open
 
----
+- Check that port `8080` is free.
+- Run `docker compose ps`.
+- Try `http://YOUR_SERVER_IP:8080` from another device on your LAN.
 
-## ➡️ What's Next?
+### New Booklore matches are missing
 
-Once basic sync is working, you can add:
-- **Storyteller integration** (three-way sync)
-- **Storyteller transcript backfill** (Settings -> Storyteller Backfill)
-- **Book Linker** (automated Storyteller workflows)
-- **Booklore integration** (shelf organization)
-
-See the full README.md for advanced features!
+- Open **Settings**.
+- Click **Refresh Booklore Cache**.
+- Run **Full Refresh** from the Suggestions page if you changed a lot of books.
 
 ---
 
-## 🆘 Need Help?
+## What next?
 
-- Check the logs: `docker compose logs -f`
-- Read the full README.md
-- Open an issue on GitHub with your logs
+Once the basics work, try:
 
+- **Suggestions** for bulk review and queueing
+- **Forge** for Storyteller processing
+- **Storyteller Backfill** in Settings
+- **Split-port mode** if you want to expose only the sync endpoint

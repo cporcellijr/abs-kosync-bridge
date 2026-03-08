@@ -13,89 +13,80 @@
 
 ---
 
-## 📖 What is it?
+## What is it?
 
-**ABS-KoSync Enhanced** is a powerful, automated synchronization engine designed to unify your reading and listening experiences. It bridges the gap between audiobooks and ebooks, ensuring that whether you're listening on the go or reading on your e-reader, your progress is always perfectly aligned.
+**ABS-KoSync Enhanced** is a self-hosted sync engine for audiobooks and ebooks. It keeps your reading and listening position aligned across multiple apps, whether the source is Audiobookshelf, Booklore, KOReader, or Storyteller.
 
-### 🔄 Five-Way Synchronization
-
-The system keeps your progress in sync across all major platforms:
+### Five-Way Synchronization
 
 | Platform | Type | Capability |
 | :--- | :--- | :--- |
-| **Audiobookshelf** | Audiobooks | Full Read/Write Sync |
-| **KOReader / KOSync** | Ebooks | Full Read/Write Sync |
-| **Storyteller** | Enhanced Reader | Full Read/Write Sync (REST API) |
-| **Booklore** | Library Management | Full Read/Write Sync |
-| **Hardcover.app** | Book Tracking | Write-Only Tracking (Auto-Update Finished Status) |
+| **Audiobookshelf** | Audiobooks + optional ebooks | Full read/write sync |
+| **KOReader / KOSync** | Ebooks | Full read/write sync |
+| **Storyteller** | Read-along reader | Full read/write sync |
+| **Booklore** | Ebooks + audiobooks | Full read/write sync |
+| **Hardcover.app** | Reading tracker | Write-only tracking |
 
 ---
 
-## ✨ Features
+## Features
 
-### 🚀 Core Sync Engine
+### Core Sync Engine
 
-- **Robust Synchronization**: Syncs progress bi-directionally between Audiobookshelf and KOReader.
-- **Split-Port Security**: Optionally run the sync service on a separate port from the admin dashboard for safe internet exposure.
-- **Forge**: Active tooling to prepare and trigger "Read-Along" books for Storyteller.
-- **Multi-Device Support**: Handles multiple KOReader devices seamlessly.
-- **Multi-Platform Support**: Synchronize progress across five different ecosystems simultaneously.
-- **Smart Conflict Resolution**: "Furthest progress wins" logic with built-in anti-regression protection.
-- **Rich Positioning**: Support for XPath, CSS selectors, and EPUB CFI for pixel-perfect positioning.
-- **Storyteller Native Alignment**: For books with Storyteller forced-alignment transcripts, timestamp-to-text mapping is built directly from `wordTimeline` data.
-- **Resumable Jobs**: Background transcription jobs resume automatically if interrupted.
+- **Five-way sync** across Audiobookshelf, KOReader, Storyteller, Booklore, and Hardcover.
+- **Flexible source support**: use Audiobookshelf or Booklore as the audio source, or create ebook-only links when no audiobook is needed.
+- **Split-port security** so the KOSync endpoint can be exposed separately from the dashboard.
+- **Smart conflict handling** with anti-regression guardrails and a deadband to avoid tiny cross-format bounce-backs.
+- **Rich locators** using timestamps, href/fragment data, XPath, and EPUB CFI where available.
+- **Storyteller-first alignment** when valid Storyteller transcript assets exist, followed by SMIL and Whisper fallback.
+- **Resumable jobs** for background processing and transcript work.
 
-### 🖥️ Management Web UI
+### Management Web UI
 
-- **Real-Time Dashboard**: Monitor progress and sync status across all your books.
-- **Advanced Matcher**: Manual mapping for complex titles or different editions.
-- **Batch Processing**: Queue and process multiple books for synchronization in bulk.
-- **Library Suggestions**: Scan for likely audiobook + ebook pairs and send the good ones straight to your queue.
-- **Forge**: Automated workflow for Storyteller readaloud generation.
-- **Dynamic Settings**: Configure your entire system from the Web UI with instant hot-reloading.
+- **Dashboard** for live sync status, direct service links, and source badges.
+- **Add Book** for ABS, Booklore, Storyteller, or ebook-only matching flows.
+- **Batch Match** for queue-based review and bulk linking.
+- **Library Suggestions** for background scanning, review, and queue building.
+- **Forge** for Storyteller read-along preparation.
+- **Dynamic Settings** with automatic restart after saving.
 
-### 🤖 Automation & Reliability
+### Automation and Reliability
 
-- **Background Daemon**: Configurable sync intervals for hands-off operation.
-- **Auto-Organization**: Automatic addition to ABS collections and Booklore shelves.
-- **Error Recovery**: Automatic retry logic for failed transcription or sync tasks.
+- **Background daemon** with configurable polling.
+- **Instant sync** from ABS playback events and KOReader pushes when enabled.
+- **Per-client polling** for Storyteller and Booklore.
+- **Booklore cache refresh** and Storyteller backfill maintenance tools.
 
 ---
 
-## 🛠️ How It Works
+## How It Works
 
-The sync engine operates on a sophisticated event-driven architecture (V2):
-
-1. **Triggers**: Changes are detected via **Instant Pushes** (Internal KOSync) or **Periodic Polling** (ABS/Booklore).
-2. **Normalization**: Progress from all clients is normalized into a common format (timestamp or percentage).
-3. **Discrepancy Check**: The system identifies if a significant change has occurred.
-4. **Leader Election**: The client with the most recent explicit progress becomes the "Leader".
-5. **Translation**: If the Leader is an Audiobook and followers are Ebooks (or vice-versa), the system resolves position via the best available transcript source:
-   - Storyteller forced-alignment transcript (direct mapping),
-   - then SMIL,
-   - then Whisper fallback.
-6. **Propagation**: The new position is sent to all other configured clients.
+1. **Triggers**: the bridge reacts to ABS playback events, KOReader pushes, or scheduled polling.
+2. **Normalization**: timestamps, percentages, CFI, and Storyteller locators are converted into a shared timeline.
+3. **Change check**: tiny gaps are ignored so harmless drift does not cause sync churn.
+4. **Leader election**: the bridge picks the most trustworthy current position.
+5. **Translation**: if audio and text need to cross formats, the bridge resolves that position through Storyteller transcript data, SMIL, or Whisper alignment.
+6. **Propagation**: the resolved position is written back to every applicable client for that mapping.
 
 ```mermaid
 graph TD
     A[Start Sync Cycle] --> B{Trigger?}
-    B -->|Poll Timer| C[Fetch Progress (All Clients)]
-    B -->|Instance Sync| C
-    B -->|KoSync Push| C
-    C --> D[Normalize Positions]
-    D --> E{Leader Check}
-    E -->|Significant Delta| F[Identify Leader]
-    E -->|No Change| A
-    F --> G{Format Mismatch?}
-    G -->|Yes| H[Audio <--> Text Translation]
-    G -->|No| I[Direct Sync]
-    H --> J[Calculate New Position]
+    B -->|Poll Timer| C[Fetch Progress]
+    B -->|Instant Sync| C
+    B -->|KOReader Push| C
+    C --> D[Normalize to Shared Timeline]
+    D --> E{Real Change?}
+    E -->|No| A
+    E -->|Yes| F[Choose Stable Leader]
+    F --> G{Audio/Text Translation Needed?}
+    G -->|Yes| H[Use Storyteller, SMIL, or Whisper Alignment]
+    G -->|No| I[Direct Update]
+    H --> J[Generate Locator or Timestamp]
     I --> J
-    J --> K[Update Follower Clients]
-    K --> L[Save State to DB]
+    J --> K[Update Applicable Clients]
+    K --> L[Save State]
     L --> A
 ```
 
-!!! note "Audio to Text Conversion"
-    For Storyteller-transcript books, the system can map timestamps directly to character offsets without fuzzy search.
-    For non-Storyteller transcript paths, it still uses transcript text extraction and fuzzy search in the EPUB.
+!!! note "Storyteller and Booklore"
+    Storyteller transcript assets improve locator quality, and Booklore can now act as either an ebook target or the audiobook source for a mapping.
