@@ -194,6 +194,40 @@ def test_save_to_db_on_fetch(mock_db):
              assert saved_book.filename == "newbook.epub"
 
 
+def test_get_fresh_token_retries_duplicate_refresh_token_conflict(booklore_client):
+    conflict_response = MagicMock()
+    conflict_response.status_code = 400
+    conflict_response.text = (
+        "Duplicate entry 'abc' for key 'uq_refresh_token'"
+    )
+
+    success_response = MagicMock()
+    success_response.status_code = 200
+    success_response.json.return_value = {"accessToken": "token-123"}
+
+    booklore_client.session.post = MagicMock(
+        side_effect=[conflict_response, success_response]
+    )
+
+    with patch("time.sleep") as mock_sleep:
+        token = booklore_client._get_fresh_token()
+
+    assert token == "token-123"
+    assert booklore_client.session.post.call_count == 2
+    mock_sleep.assert_called_once_with(booklore_client._token_login_retry_delay)
+
+
+def test_get_fresh_token_skips_login_when_cached_token_is_fresh(booklore_client):
+    booklore_client._token = "cached-token"
+    booklore_client._token_timestamp = time.time()
+    booklore_client.session.post = MagicMock()
+
+    token = booklore_client._get_fresh_token()
+
+    assert token == "cached-token"
+    booklore_client.session.post.assert_not_called()
+
+
 def test_update_progress_zero_clears_cfi(booklore_client):
     booklore_client.find_book_by_filename = MagicMock(return_value={
         "id": 6043,

@@ -52,6 +52,14 @@ class BookloreClient:
         self._token = None
         self._token_timestamp = 0
         self._token_max_age = 300
+        self._token_lock = threading.Lock()
+        self._token_login_retry_delay = float(
+            os.getenv("BOOKLORE_LOGIN_RETRY_DELAY_SECONDS", "1.1")
+        )
+        self._token_login_max_attempts = max(
+            1,
+            int(os.getenv("BOOKLORE_LOGIN_MAX_ATTEMPTS", "2"))
+        )
         self.session = requests.Session()
 
         # Legacy Cache file path (for migration only)
@@ -145,29 +153,68 @@ class BookloreClient:
         """
         pass # Database persistence is handled atomically per book elsewhere
 
-    def _get_fresh_token(self):
-        if self._token and (time.time() - self._token_timestamp) < self._token_max_age:
-            return self._token
-        if not all([self.base_url, self.username, self.password]): return None
+    @staticmethod
+    def _is_duplicate_refresh_token_failure(response) -> bool:
+        if response is None:
+            return False
+        if getattr(response, "status_code", None) not in (400, 409):
+            return False
         try:
-            # Use session for login to handle cookies if needed
-            response = self.session.post(
-                f"{self.base_url}/api/v1/auth/login",
-                json={"username": self.username, "password": self.password},
-                timeout=10
-            )
-            if response.status_code == 200:
-                data = self._parse_json_response(response, "Booklore login")
-                if not isinstance(data, dict):
-                    return None
-                # Booklore v1.17+ uses accessToken instead of token
-                self._token = data.get("accessToken") or data.get("token")
-                self._token_timestamp = time.time()
+            text = (response.text or "").lower()
+        except Exception:
+            text = ""
+        return (
+            "uq_refresh_token" in text
+            or ("duplicate entry" in text and "refresh_token" in text)
+        )
+
+    def _current_token_is_fresh(self) -> bool:
+        return bool(self._token) and (time.time() - self._token_timestamp) < self._token_max_age
+
+    def _get_fresh_token(self):
+        if self._current_token_is_fresh():
+            return self._token
+        if not all([self.base_url, self.username, self.password]):
+            return None
+        with self._token_lock:
+            if self._current_token_is_fresh():
                 return self._token
-            else:
-                logger.error(f"❌ Booklore login failed: {response.status_code} - {response.text}")
-        except Exception as e:
-            logger.error(f"❌ Booklore login error: {e}")
+            try:
+                for attempt in range(1, self._token_login_max_attempts + 1):
+                    # Use session for login to handle cookies if needed
+                    response = self.session.post(
+                        f"{self.base_url}/api/v1/auth/login",
+                        json={"username": self.username, "password": self.password},
+                        timeout=10
+                    )
+                    if response.status_code == 200:
+                        data = self._parse_json_response(response, "Booklore login")
+                        if not isinstance(data, dict):
+                            return None
+                        # Booklore v1.17+ uses accessToken instead of token
+                        self._token = data.get("accessToken") or data.get("token")
+                        self._token_timestamp = time.time()
+                        return self._token
+
+                    duplicate_conflict = self._is_duplicate_refresh_token_failure(response)
+                    if duplicate_conflict and attempt < self._token_login_max_attempts:
+                        logger.warning(
+                            "Booklore login conflict (duplicate refresh token). "
+                            "Retrying in %.1fs (attempt %d/%d).",
+                            self._token_login_retry_delay,
+                            attempt,
+                            self._token_login_max_attempts,
+                        )
+                        time.sleep(self._token_login_retry_delay)
+                        continue
+
+                    logger.error(
+                        f"❌ Booklore login failed: {response.status_code} - "
+                        f"{self._response_text_preview(response, limit=300)}"
+                    )
+                    return None
+            except Exception as e:
+                logger.error(f"❌ Booklore login error: {e}")
         return None
 
     def _make_request(self, method, endpoint, json_data=None):
@@ -183,7 +230,9 @@ class BookloreClient:
             else: return None
 
             if response.status_code == 401:
-                self._token = None
+                with self._token_lock:
+                    self._token = None
+                    self._token_timestamp = 0
                 token = self._get_fresh_token()
                 if not token: return None
                 headers["Authorization"] = f"Bearer {token}"
