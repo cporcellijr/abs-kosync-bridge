@@ -24,14 +24,22 @@ def _state(current: dict) -> ServiceState:
     )
 
 
+class _StubClient:
+    def get_supported_sync_types(self):
+        return {'audiobook', 'ebook'}
+
+    def can_be_leader(self):
+        return True
+
+
 def _manager_with_mocks():
     manager = SyncManager.__new__(SyncManager)
     manager.ebook_parser = MagicMock()
     manager.alignment_service = MagicMock()
     manager.sync_clients = {
-        "ABS": object(),
-        "KoSync": object(),
-        "BookLore": object(),
+        "ABS": _StubClient(),
+        "KoSync": _StubClient(),
+        "BookLore": _StubClient(),
     }
     return manager
 
@@ -238,9 +246,9 @@ def test_normalization_uses_cached_extract_once_per_book_per_cycle():
 def test_normalization_uses_client_specific_epub_contexts():
     manager = _manager_with_mocks()
     manager.sync_clients = {
-        "ABS": object(),
-        "Storyteller": object(),
-        "BookLore": object(),
+        "ABS": _StubClient(),
+        "Storyteller": _StubClient(),
+        "BookLore": _StubClient(),
     }
     full_text = "abcdefghijklmnopqrstuvwxyz " * 100
     manager.ebook_parser.resolve_book_path.side_effect = lambda filename: filename

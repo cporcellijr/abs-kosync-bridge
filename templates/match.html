@@ -926,7 +926,7 @@
             // Forge Validation
             const forgeBtn = document.getElementById('forgeBtn');
             // Forge requires Audio + Standard Ebook (NOT Storyteller)
-            if (hasAudio && audioSource === 'ABS' && (ebVal !== "")) {
+            if (hasAudio && (audioSource === 'ABS' || audioSource === 'BookLore') && (ebVal !== "")) {
                 forgeBtn.disabled = false;
                 forgeBtn.style.opacity = "1";
             } else {

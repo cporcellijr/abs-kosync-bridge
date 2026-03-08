@@ -38,7 +38,7 @@ class ABSSyncClient(SyncClient):
         return {'audiobook'}
 
     def supports_book(self, book: Book) -> bool:
-        return getattr(book, "audio_source", "ABS") == "ABS"
+        return (getattr(book, "audio_source", None) or "ABS") == "ABS"
 
     def get_service_state(self, book: Book, prev_state: Optional[State], title_snip: str = "", bulk_context: dict = None) -> Optional[ServiceState]:
         abs_id = book.abs_id

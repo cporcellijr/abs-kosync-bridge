@@ -398,7 +398,7 @@ def test_search_books_miss_triggers_single_refresh_and_returns_new_match(booklor
     booklore_client._cache_timestamp = time.time() - 120
     booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
 
-    def refresh_side_effect():
+    def refresh_side_effect(**kwargs):
         booklore_client._book_cache["new-book.epub"] = {
             "fileName": "new-book.epub",
             "title": "New Arrival",
@@ -465,10 +465,11 @@ def test_search_books_hit_triggers_single_refresh_and_prunes_deleted_result_when
     booklore_client._book_id_cache = {
         "deleted": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
     }
-    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._cache_timestamp = time.time() - 1900
+    booklore_client._search_hit_refresh_min_age = 60
     booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
 
-    def refresh_side_effect():
+    def refresh_side_effect(**kwargs):
         booklore_client._book_cache.clear()
         booklore_client._book_id_cache.clear()
         booklore_client._cache_timestamp = time.time()
@@ -512,7 +513,7 @@ def test_refresh_book_cache_hydrates_small_library(booklore_client):
         )
     )
 
-    assert booklore_client._refresh_book_cache() is True
+    assert booklore_client._refresh_book_cache(refresh_stale_details=False) is True
     assert booklore_client._fetch_book_detail.call_count == 3
     assert len(booklore_client._book_cache) == 3
     assert len(booklore_client._book_id_cache) == 3
@@ -529,7 +530,7 @@ def test_refresh_book_cache_skips_bulk_detail_fetch_for_large_library(booklore_c
     booklore_client._get_fresh_token = MagicMock(return_value="token")
     booklore_client._fetch_book_detail = MagicMock()
 
-    assert booklore_client._refresh_book_cache() is True
+    assert booklore_client._refresh_book_cache(refresh_stale_details=False) is True
     assert booklore_client._fetch_book_detail.call_count == 0
     assert len(booklore_client._book_cache) == 0
     assert len(booklore_client._book_id_cache) == len(books)

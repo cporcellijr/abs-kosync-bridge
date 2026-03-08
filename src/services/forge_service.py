@@ -390,6 +390,90 @@ class ForgeService:
             logger.error(f"❌ Failed to copy ABS '{abs_id}': {e}", exc_info=True)
             return False
 
+    def _copy_booklore_audio_files(self, book_id: str, dest_folder: Path) -> bool:
+        """Download audiobook tracks from Booklore into dest_folder."""
+        def infer_ext(track: dict, info: dict) -> str:
+            allowed = {"mp3", "m4a", "m4b", "flac", "ogg", "opus", "aac", "wav"}
+            raw_ext = str(track.get("extension") or track.get("ext") or "").lower().strip().lstrip(".")
+            if raw_ext in allowed:
+                return raw_ext
+            file_name = str(track.get("fileName") or "").strip()
+            if "." in file_name:
+                from_name = file_name.rsplit(".", 1)[-1].lower().lstrip(".")
+                if from_name in allowed:
+                    return from_name
+            mime = str(track.get("mimeType") or info.get("mimeType") or info.get("contentType") or "").lower()
+            codec = str(track.get("codec") or info.get("codec") or "").lower()
+            descriptor = f"{mime} {codec}"
+            if "mp3" in descriptor or "mpeg" in descriptor:
+                return "mp3"
+            if any(token in descriptor for token in ("mp4", "m4a", "m4b", "aac", "mp4a")):
+                return "m4b"
+            return "mp3"
+
+        try:
+            info = self.booklore_client.get_audiobook_info(book_id)
+            if not info:
+                logger.warning(f"No audiobook info found for Booklore book '{book_id}'")
+                return False
+
+            logger.debug(f"Booklore audiobook info keys for '{book_id}': {list(info.keys())}")
+            tracks = info.get("tracks") or []
+            track_mode = "tracks"
+            if not tracks:
+                chapters = info.get("chapters") or []
+                if chapters:
+                    # Chapter markers are not guaranteed to map 1:1 to stream indexes.
+                    # Use a single-stream fallback when tracks are missing.
+                    tracks = [
+                        {
+                            "index": 0,
+                            "title": "Audiobook",
+                            "codec": info.get("codec"),
+                            "mimeType": info.get("mimeType") or info.get("contentType"),
+                            "extension": infer_ext({}, info),
+                        }
+                    ]
+                    track_mode = "chapter_markers_single_stream"
+            if not tracks:
+                logger.warning(
+                    f"No audio tracks found for Booklore book '{book_id}' "
+                    f"(info keys: {list(info.keys())})"
+                )
+                return False
+            logger.info(
+                f"Booklore audio mode for '{book_id}': {track_mode} ({len(tracks)} stream item(s))"
+            )
+
+            dest_folder.mkdir(parents=True, exist_ok=True)
+            downloaded = 0
+
+            for idx, track in enumerate(tracks):
+                download_index = track.get("index") if isinstance(track.get("index"), int) else idx
+                ext = infer_ext(track, info)
+                dest_path = dest_folder / f"track_{idx:03d}.{ext}"
+                logger.info(
+                    f"Booklore audio: downloading stream index {download_index} -> '{dest_path.name}'"
+                )
+                if self.booklore_client.download_audiobook_track(book_id, download_index, dest_path):
+                    downloaded += 1
+                else:
+                    logger.error(
+                        f"Failed to download Booklore track index {download_index} for book '{book_id}'"
+                    )
+
+            if downloaded == len(tracks):
+                logger.info(f"Booklore audio: downloaded all {downloaded} tracks for book '{book_id}'")
+                return True
+            else:
+                logger.error(
+                    f"Booklore audio: expected {len(tracks)} tracks, downloaded {downloaded} — Aborting"
+                )
+                return False
+        except Exception as e:
+            logger.error(f"Failed to copy Booklore audio for book '{book_id}': {e}", exc_info=True)
+            return False
+
     def start_manual_forge(self, abs_id, text_item, title, author):
         """
         Start manual forge process in background thread.
@@ -683,19 +767,22 @@ class ForgeService:
             with self.lock:
                 self.active_tasks.discard(title)
 
-    def start_auto_forge_match(self, abs_id, text_item, title, author, original_filename, original_hash):
+    def start_auto_forge_match(self, abs_id, text_item, title, author, original_filename, original_hash,
+                               audio_source: str = None, audio_source_id: str = None):
         """
         Start Auto-Forge & Match pipeline in background thread.
         Links forged artifact to DB after completion.
         """
         thread = threading.Thread(
             target=self._auto_forge_background_task,
-            args=(abs_id, text_item, title, author, original_filename, original_hash),
+            args=(abs_id, text_item, title, author, original_filename, original_hash,
+                  audio_source, audio_source_id),
             daemon=True
         )
         thread.start()
 
-    def _auto_forge_background_task(self, abs_id, text_item, title, author, original_filename, original_hash):
+    def _auto_forge_background_task(self, abs_id, text_item, title, author, original_filename, original_hash,
+                                    audio_source: str = None, audio_source_id: str = None):
         """
         Background task for Auto-Forge & Match pipeline.
         Staging -> Trigger -> Wait -> Download -> Sanitize -> Recalc Hash -> Update DB -> Cleanup
@@ -731,8 +818,12 @@ class ForgeService:
                 course_dir.mkdir(parents=True, exist_ok=True)
             
             # Copy Audio
-            if not self._copy_audio_files(abs_id, course_dir):
-                raise Exception("Failed to copy audio files")
+            if audio_source == 'BookLore' and audio_source_id:
+                if not self._copy_booklore_audio_files(audio_source_id, course_dir):
+                    raise Exception("Failed to copy Booklore audio files")
+            else:
+                if not self._copy_audio_files(abs_id, course_dir):
+                    raise Exception("Failed to copy audio files")
                 
             # Copy Text
             epub_dest = course_dir / f"{safe_title}.epub"

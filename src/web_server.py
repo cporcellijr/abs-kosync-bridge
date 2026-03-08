@@ -1931,13 +1931,13 @@ def match():
         audiobooks = container.abs_client().get_all_audiobooks()
         selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None) if abs_id else None
 
-        if request.form.get('action') == 'forge_match' and audio_source != 'ABS':
-            return "Forge match currently supports ABS audiobooks only", 400
+        if request.form.get('action') == 'forge_match' and audio_source not in ('ABS', 'BookLore'):
+            return "Forge match requires an ABS or BookLore audiobook", 400
 
-        if request.form.get('action') == 'forge_match' and not selected_ab:
+        if request.form.get('action') == 'forge_match' and audio_source == 'ABS' and not selected_ab:
             return "Audiobook not found", 404
 
-        if audio_source == 'BookLore' and audio_source_id:
+        if audio_source == 'BookLore' and audio_source_id and request.form.get('action') != 'forge_match':
             saved_book, err_msg, err_code = _create_or_update_booklore_audio_mapping(
                 audio_source_id=audio_source_id,
                 audio_title=audio_title or Path(selected_filename or f"booklore_{audio_source_id}").stem,
@@ -1981,49 +1981,25 @@ def match():
             logger.info("Match: ebook-only mapping ready for '%s'", sanitize_log_data(saved_book.abs_id))
             return redirect(url_for('index'))
 
-        if not selected_ab:
-            return "Audiobook not found", 404
-
-        abs_title = manager.get_abs_title(selected_ab)
-        item_details = container.abs_client().get_item_details(abs_id)
-        chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
-
-        # Get booklore_id if available for API-based hash computation
-        booklore_id = None
-        
-        # [NEW ACTION] Forge & Match
+        # [NEW ACTION] Forge & Match (supports both ABS and BookLore audiobooks)
         if request.form.get('action') == 'forge_match':
             original_filename = request.form.get('ebook_filename')
             if not original_filename:
                 return "Original ebook filename required for forge match", 400
-                
-            # 1. Prepare text item (reconstruct from form/source logic or assume passed)
-            # Actually, standard match doesn't have 'text_item' logic fully exposed in form? 
-            # The forge UI sends text_item JSON. 
-            # But here we are arguably coming from the match page. 
-            # If we add "Forge" button, we need to know the SOURCE of the text.
-            # Assuming the form includes necessary details or we can infer.
-            # [SIMPLIFICATION] For now, assume 'ebook_filename' is a valid Local text file from search?
-            # Or is this action coming from the Forge modal? No, "Forge & Match".
-            # If it's from the match page, the user selected an ebook result.
-            # We need to reconstruct the `text_item` dict expected by ForgeService.
-            
-            # Extract source details from form (hidden inputs?)
-            # We'll need to update match.html to send these.
+
             source_type = request.form.get('source_type')
-            source_path = request.form.get('source_path') 
-            source_id = request.form.get('source_id') # booklore id, cwa id, etc
-            
+            source_path = request.form.get('source_path')
+            source_id = request.form.get('source_id')
+
             text_item = {
                 "source": source_type,
                 "path": source_path,
                 "booklore_id": source_id,
                 "cwa_id": source_id,
-                "abs_id": source_id, # ambiguous but handled by specific keys
+                "abs_id": source_id,
                 "filename": original_filename
             }
-            
-            # Map specific keys based on source
+
             if source_type == 'ABS': text_item['abs_id'] = source_id
             if source_type == 'Booklore': text_item['booklore_id'] = source_id
             if source_type == 'CWA':
@@ -2031,58 +2007,84 @@ def match():
                 if source_path:
                     text_item['download_url'] = source_path
             if source_type == 'Local File': text_item['path'] = source_path
-            
-            # 2. Calculate initial Kosync ID (Original) - strictly for DB record
-            # We use the ORIGINAL file for the ID initially (or forever if tri-linked).
+
             initial_booklore_id = source_id if source_type == 'Booklore' else None
             kosync_doc_id = get_kosync_id_for_ebook(original_filename, initial_booklore_id)
-            
+
             if not kosync_doc_id:
-                # If we can't get ID from original (e.g. remote only?), we might rely on the forged one later.
-                # But we need a DB record now.
-                # Generate a temporary or hash-based ID? Or fail?
-                # Failing is safer.
-                logger.warning(f"⚠️ Could not compute ID for original '{original_filename}'")
-                # return "Could not compute KOSync ID for original file", 400
-                # Actually, `start_auto_forge_match` can update it? 
-                # Let's proceed with a placeholder or fail.
-                # Use a specific error.
-                pass 
+                logger.warning(f"Could not compute ID for original '{original_filename}'")
 
             from src.db.models import Book
-            # Create dummy book record with status='forging'
-            book = Book(
-                abs_id=abs_id,
-                abs_title=abs_title,
-                ebook_filename=original_filename,
-                original_ebook_filename=original_filename,
-                kosync_doc_id=kosync_doc_id or f"forging_{abs_id}", # temporary
-                status="forging",
-                duration=manager.get_duration(selected_ab)
-            )
-            database_service.save_book(book)
-            
-            # Start Auto-Forge
-            author = get_abs_author(selected_ab)
-            title = abs_title
-            
-            # Async launch
-            container.forge_service().start_auto_forge_match(
-                abs_id=abs_id,
-                text_item=text_item,
-                title=title,
-                author=author,
-                original_filename=original_filename,
-                original_hash=kosync_doc_id
-            )
-            
-            # Dismiss pending suggestion if it exists (for both ABS ID and potential KOSync ID)
-            # This cleans up the suggestions list immediately upon starting the forge process
-            database_service.dismiss_suggestion(abs_id)
+
+            if audio_source == 'BookLore':
+                forge_title = audio_title or Path(selected_filename or f"booklore_{audio_source_id}").stem
+                forge_id = f"booklore_audio_{audio_source_id}"
+                book = Book(
+                    abs_id=forge_id,
+                    abs_title=forge_title,
+                    ebook_filename=original_filename,
+                    original_ebook_filename=original_filename,
+                    kosync_doc_id=kosync_doc_id or f"forging_{forge_id}",
+                    status="forging",
+                    duration=audio_duration or 0.0,
+                    audio_source='BookLore',
+                    audio_source_id=audio_source_id,
+                    audio_provider_book_id=audio_provider_book_id,
+                    audio_provider_file_id=audio_provider_file_id,
+                    audio_title=forge_title,
+                    audio_cover_url=audio_cover_url,
+                    audio_duration=audio_duration,
+                )
+                database_service.save_book(book)
+
+                container.forge_service().start_auto_forge_match(
+                    abs_id=forge_id,
+                    text_item=text_item,
+                    title=forge_title,
+                    author=None,
+                    original_filename=original_filename,
+                    original_hash=kosync_doc_id,
+                    audio_source='BookLore',
+                    audio_source_id=audio_source_id,
+                )
+            else:
+                abs_title = manager.get_abs_title(selected_ab)
+                book = Book(
+                    abs_id=abs_id,
+                    abs_title=abs_title,
+                    ebook_filename=original_filename,
+                    original_ebook_filename=original_filename,
+                    kosync_doc_id=kosync_doc_id or f"forging_{abs_id}",
+                    status="forging",
+                    duration=manager.get_duration(selected_ab)
+                )
+                database_service.save_book(book)
+
+                author = get_abs_author(selected_ab)
+                container.forge_service().start_auto_forge_match(
+                    abs_id=abs_id,
+                    text_item=text_item,
+                    title=abs_title,
+                    author=author,
+                    original_filename=original_filename,
+                    original_hash=kosync_doc_id
+                )
+
+            forge_book_id = forge_id if audio_source == 'BookLore' else abs_id
+            database_service.dismiss_suggestion(forge_book_id)
             if kosync_doc_id:
                 database_service.dismiss_suggestion(kosync_doc_id)
 
             return redirect(url_for('index'))
+
+        if not selected_ab:
+            return "Audiobook not found", 404
+
+        abs_title = manager.get_abs_title(selected_ab)
+        item_details = container.abs_client().get_item_details(abs_id)
+        chapters = item_details.get('media', {}).get('chapters', []) if item_details else []
+
+        booklore_id = None
             
         # [NEW] Storyteller Tri-Link Logic
         if storyteller_uuid:

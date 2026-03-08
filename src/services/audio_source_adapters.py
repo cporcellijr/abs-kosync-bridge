@@ -183,8 +183,26 @@ class BookLoreAudioSourceAdapter(AudioSourceAdapter):
 
     @staticmethod
     def _safe_ext(track: dict) -> str:
-        raw_ext = str(track.get("extension") or track.get("ext") or "mp3").lower().strip()
-        return raw_ext.lstrip(".") or "mp3"
+        allowed = {"mp3", "m4a", "m4b", "flac", "ogg", "opus", "aac", "wav"}
+
+        raw_ext = str(track.get("extension") or track.get("ext") or "").lower().strip().lstrip(".")
+        if raw_ext in allowed:
+            return raw_ext
+
+        file_name = str(track.get("fileName") or track.get("filename") or "").strip()
+        if "." in file_name:
+            from_name = file_name.rsplit(".", 1)[-1].lower().lstrip(".")
+            if from_name in allowed:
+                return from_name
+
+        mime = str(track.get("mimeType") or track.get("mime") or "").lower()
+        codec = str(track.get("codec") or "").lower()
+        descriptor = f"{mime} {codec}"
+        if any(token in descriptor for token in ("mp3", "mpeg")):
+            return "mp3"
+        if any(token in descriptor for token in ("mp4", "m4a", "m4b", "aac", "mp4a")):
+            return "m4b"
+        return "mp3"
 
     @staticmethod
     def _to_seconds(raw_value) -> float | None:
@@ -277,8 +295,42 @@ class BookLoreAudioSourceAdapter(AudioSourceAdapter):
     def get_audio_files(self, source_id: str, bridge_key: str | None = None) -> list[dict]:
         info = self.booklore_client.get_audiobook_info(source_id) or {}
         tracks = info.get("tracks") or []
+        track_mode = "tracks"
         if not tracks:
+            # Some BookLore payloads expose chapter markers but no per-file tracks.
+            # In this shape, stream endpoint often serves a single full-book file.
+            chapters = info.get("chapters") or []
+            if chapters:
+                track_mode = "chapter_markers_single_stream"
+                fallback_ext = self._safe_ext(
+                    {
+                        "extension": info.get("extension"),
+                        "mimeType": info.get("mimeType"),
+                        "codec": info.get("codec"),
+                    }
+                )
+                tracks = [
+                    {
+                        "index": 0,
+                        "durationMs": info.get("durationMs"),
+                        "codec": info.get("codec"),
+                        "mimeType": info.get("mimeType") or info.get("contentType"),
+                        "extension": fallback_ext,
+                    }
+                ]
+        if not tracks:
+            logger.warning(
+                "BookLore audio files unavailable: source_id=%s info_keys=%s",
+                source_id,
+                sorted(info.keys()) if isinstance(info, dict) else [],
+            )
             return []
+        logger.debug(
+            "BookLore audio files: source_id=%s mode=%s count=%s",
+            source_id,
+            track_mode,
+            len(tracks),
+        )
 
         cache_key = bridge_key or f"booklore-{source_id}"
         source_cache_dir = self.data_dir / "audio_cache" / str(cache_key) / "source_tracks"
@@ -286,19 +338,22 @@ class BookLoreAudioSourceAdapter(AudioSourceAdapter):
 
         files = []
         for idx, track in enumerate(tracks):
+            download_index = track.get("index")
+            if not isinstance(download_index, int):
+                download_index = idx
             ext = self._safe_ext(track)
             local_path = source_cache_dir / f"track_{idx:03d}.{ext}"
             if not local_path.exists() or local_path.stat().st_size == 0:
-                ok = self.booklore_client.download_audiobook_track(source_id, idx, local_path)
+                ok = self.booklore_client.download_audiobook_track(source_id, download_index, local_path)
                 if not ok:
                     raise RuntimeError(
-                        f"BookLore track download failed for book_id={source_id} track_index={idx}"
+                        f"BookLore track download failed for book_id={source_id} track_index={download_index}"
                     )
             files.append(
                 {
                     "local_path": str(local_path),
                     "ext": ext,
-                    "track_index": idx,
+                    "track_index": download_index,
                     "duration_ms": track.get("durationMs"),
                 }
             )
