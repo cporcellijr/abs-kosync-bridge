@@ -1169,7 +1169,7 @@ class BookloreClient:
                     all_books.append(book_info)
         return self._dedupe_book_results(all_books)
 
-    def search_audiobooks(self, search_term):
+    def search_audiobooks(self, search_term, include_info=True):
         """Search Booklore for audiobook-capable books."""
         results = []
         seen_ids = set()
@@ -1193,10 +1193,11 @@ class BookloreClient:
                 ) or book
             if not self._book_supports_audiobook(hydrated):
                 continue
-            info = self.get_audiobook_info(bid)
-            if info:
-                hydrated = dict(hydrated)
-                hydrated['audiobookInfo'] = info
+            if include_info:
+                info = self.get_audiobook_info(bid)
+                if info:
+                    hydrated = dict(hydrated)
+                    hydrated['audiobookInfo'] = info
             results.append(hydrated)
             seen_ids.add(bid)
         return results

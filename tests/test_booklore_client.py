@@ -951,6 +951,42 @@ def test_search_audiobooks_force_refreshes_legacy_cached_detail_missing_audio_sh
     assert results[0]["id"] == 6798
 
 
+def test_search_audiobooks_can_skip_per_book_info_fetch(booklore_client):
+    combined_detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+            "audiobookMetadata": {"durationSeconds": 33945},
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+            "id": 7605,
+        },
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+    }
+    booklore_client._process_book_detail(combined_detail)
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157})
+
+    results = booklore_client.search_audiobooks("", include_info=False)
+
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+    assert "audiobookInfo" not in results[0]
+    booklore_client.get_audiobook_info.assert_not_called()
+
+
 def test_search_books_dedupes_stale_filename_aliases_by_book_id(booklore_client):
     stale = {
         "id": 6798,

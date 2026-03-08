@@ -653,7 +653,7 @@ class DatabaseService:
             ).first()
 
             if existing:
-                for attr in ['title', 'author', 'cover_url', 'matches_json', 'status']:
+                for attr in ['source', 'title', 'author', 'cover_url', 'matches_json', 'status']:
                     if hasattr(suggestion, attr):
                         setattr(existing, attr, getattr(suggestion, attr))
                 session.flush()

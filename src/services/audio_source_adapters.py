@@ -256,7 +256,8 @@ class BookLoreAudioSourceAdapter(AudioSourceAdapter):
 
     def search(self, query: str) -> list[AudioResult]:
         results: list[AudioResult] = []
-        for book in self.booklore_client.search_audiobooks(query):
+        include_info = bool(query and query.strip())
+        for book in self.booklore_client.search_audiobooks(query, include_info=include_info):
             book_id = book.get("id")
             if book_id is None:
                 continue

@@ -919,6 +919,46 @@ def get_searchable_audiobooks(search_term):
     return results
 
 
+def get_suggestion_audiobooks():
+    """Return provider-normalized audiobook records for suggestions scan."""
+    records = []
+    for item in get_searchable_audiobooks(""):
+        if not isinstance(item, AudioResult):
+            continue
+
+        audio_source = (item.source or "").strip() or "ABS"
+        source_id = str(item.source_id or "").strip()
+        if not source_id:
+            continue
+        bridge_key = _build_bridge_key(audio_source, source_id)
+        if not bridge_key:
+            continue
+
+        title = (item.title or item.display_name or bridge_key).strip()
+        author = (item.authors or "").strip()
+        records.append(
+            {
+                "bridge_key": bridge_key,
+                "audio_source": audio_source,
+                "audio_source_id": source_id,
+                "audio_title": title,
+                "audio_author": author,
+                "audio_duration": item.duration,
+                "audio_cover_url": item.cover_url or "",
+                "audio_provider_book_id": str(item.provider_book_id or source_id),
+                "audio_provider_file_id": str(item.provider_file_id or ""),
+                # Legacy aliases maintained for compatibility with existing templates/session keys.
+                "id": bridge_key,
+                "title": title,
+                "authors": author,
+                "duration": item.duration,
+                "cover_url": item.cover_url or "",
+            }
+        )
+
+    return records
+
+
 def get_searchable_ebooks(search_term):
     """Get ebooks from Booklore API, filesystem, ABS, and CWA.
     Returns list of EbookResult objects for consistent interface."""
@@ -1035,9 +1075,19 @@ def get_searchable_ebooks(search_term):
 
 
 def _build_bridge_key(audio_source, audio_source_id):
-    if audio_source == "BookLore":
-        return f"booklore:{audio_source_id}"
-    return audio_source_id
+    if audio_source_id is None:
+        return None
+    source_id = str(audio_source_id).strip()
+    if not source_id:
+        return None
+
+    if source_id.lower().startswith("booklore:"):
+        return f"booklore:{source_id.split(':', 1)[1].strip()}"
+
+    source_name = str(audio_source or "").strip().lower()
+    if source_name == "booklore":
+        return f"booklore:{source_id}"
+    return source_id
 
 
 def _parse_audio_duration(raw_value):
@@ -2495,7 +2545,7 @@ def _get_suggestions_service():
         database_service=database_service,
         container=container,
         manager=manager,
-        get_audiobooks_conditionally=get_audiobooks_conditionally,
+        get_audiobooks_conditionally=get_suggestion_audiobooks,
         get_searchable_ebooks=get_searchable_ebooks,
         audiobook_matches_search=audiobook_matches_search,
         get_abs_author=get_abs_author,
@@ -2504,7 +2554,7 @@ def _get_suggestions_service():
 
 
 def _get_ignored_suggestion_source_ids():
-    """Return ABS source IDs that are marked as ignored."""
+    """Return suggestion source IDs (bridge keys) that are marked as ignored."""
     return _get_suggestions_service().get_ignored_suggestion_source_ids()
 
 
@@ -2782,32 +2832,64 @@ def suggestions_page():
             return redirect(url_for('suggestions'))
 
         elif action == 'never':
-            abs_id = request.form.get('abs_id')
-            if abs_id:
+            bridge_key = (request.form.get('bridge_key') or request.form.get('abs_id') or '').strip()
+            if bridge_key:
                 from src.db.models import PendingSuggestion
 
                 current_scan_results = suggestions_state.get('scan_results', [])
-                current_entry = next((s for s in current_scan_results if s.get('abs_id') == abs_id), None)
-                abs_title = request.form.get('abs_title') or (current_entry.get('abs_title') if current_entry else '') or ''
-                abs_author = request.form.get('abs_author') or (current_entry.get('abs_author') if current_entry else '') or ''
+                current_entry = next(
+                    (
+                        s for s in current_scan_results
+                        if (s.get('bridge_key') or s.get('abs_id')) == bridge_key
+                    ),
+                    None,
+                )
+                audio_source = (
+                    request.form.get('audio_source')
+                    or (current_entry.get('audio_source') if current_entry else '')
+                    or ('BookLore' if bridge_key.startswith('booklore:') else 'ABS')
+                ).strip() or 'ABS'
+                abs_title = (
+                    request.form.get('audio_title')
+                    or request.form.get('abs_title')
+                    or (current_entry.get('audio_title') if current_entry else '')
+                    or (current_entry.get('abs_title') if current_entry else '')
+                    or ''
+                )
+                abs_author = (
+                    request.form.get('audio_author')
+                    or request.form.get('abs_author')
+                    or (current_entry.get('audio_author') if current_entry else '')
+                    or (current_entry.get('abs_author') if current_entry else '')
+                    or ''
+                )
                 cover_url = request.form.get('cover_url') or (current_entry.get('cover_url') if current_entry else '') or ''
 
-                if not database_service.ignore_suggestion(abs_id):
-                    database_service.save_pending_suggestion(PendingSuggestion(
-                        source_id=abs_id,
+                if not database_service.ignore_suggestion(bridge_key):
+                    suggestion = PendingSuggestion(
+                        source_id=bridge_key,
                         title=abs_title,
                         author=abs_author,
                         cover_url=cover_url,
                         matches_json="[]",
                         status='ignored'
-                    ))
+                    )
+                    suggestion.source = audio_source
+                    database_service.save_pending_suggestion(suggestion)
 
-                suggestions_state['scan_results'] = [item for item in current_scan_results if item.get('abs_id') != abs_id]
+                suggestions_state['scan_results'] = [
+                    item
+                    for item in current_scan_results
+                    if (item.get('bridge_key') or item.get('abs_id')) != bridge_key
+                ]
                 cache_by_abs = suggestions_state.get('scan_cache_by_abs', {}) or {}
-                if abs_id in cache_by_abs:
-                    cache_by_abs.pop(abs_id, None)
+                if bridge_key in cache_by_abs:
+                    cache_by_abs.pop(bridge_key, None)
                     suggestions_state['scan_cache_by_abs'] = cache_by_abs
-                no_match_abs_ids = [x for x in (suggestions_state.get('scan_cache_no_match_abs_ids', []) or []) if x != abs_id]
+                no_match_abs_ids = [
+                    x for x in (suggestions_state.get('scan_cache_no_match_abs_ids', []) or [])
+                    if x != bridge_key
+                ]
                 suggestions_state['scan_cache_no_match_abs_ids'] = no_match_abs_ids
                 suggestions_state['updated_at'] = time.time()
 
@@ -2815,22 +2897,72 @@ def suggestions_page():
 
         elif action == 'add_to_queue':
             session.setdefault('queue', [])
-            abs_id = request.form.get('audiobook_id')
+            bridge_key = (request.form.get('audiobook_id') or '').strip()
+            audio_source = (
+                request.form.get('audio_source')
+                or ('BookLore' if bridge_key.startswith('booklore:') else ('ABS' if bridge_key else ''))
+            ).strip() or None
+            audio_source_id = (request.form.get('audio_source_id') or bridge_key).strip() or None
+            audio_title = (request.form.get('audio_title') or '').strip() or None
+            audio_cover_url = (request.form.get('audio_cover_url') or '').strip() or None
+            audio_provider_book_id = (request.form.get('audio_provider_book_id') or audio_source_id or '').strip() or None
+            audio_provider_file_id = (request.form.get('audio_provider_file_id') or '').strip() or None
+            audio_duration = _parse_audio_duration(request.form.get('audio_duration'))
             ebook_filename = request.form.get('ebook_filename', '')
             ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
+            ebook_source = (request.form.get('ebook_source') or '').strip() or None
+            ebook_source_id = (request.form.get('ebook_source_id') or '').strip() or None
             storyteller_uuid = request.form.get('storyteller_uuid', '')
-            audiobooks = container.abs_client().get_all_audiobooks()
-            selected_ab = next((ab for ab in audiobooks if ab['id'] == abs_id), None)
-            if selected_ab and (ebook_filename or storyteller_uuid):
-                if not any(item['abs_id'] == abs_id for item in session['queue']):
+            selected_audio = None
+            if audio_source == 'ABS' and audio_source_id:
+                selected_ab = None
+                if not audio_title or audio_duration is None:
+                    abs_items = container.abs_client().get_all_audiobooks()
+                    selected_ab = next((ab for ab in abs_items if str(ab.get('id')) == audio_source_id), None)
+
+                resolved_title = audio_title or (manager.get_abs_title(selected_ab) if selected_ab else '') or audio_source_id
+                resolved_duration = audio_duration if audio_duration is not None else (
+                    manager.get_duration(selected_ab) if selected_ab else None
+                )
+                resolved_cover = (
+                    audio_cover_url
+                    or f"{container.abs_client().base_url}/api/items/{audio_source_id}/cover?token={container.abs_client().token}"
+                )
+                selected_audio = {
+                    'bridge_key': bridge_key or audio_source_id,
+                    'audio_source': 'ABS',
+                    'audio_source_id': audio_source_id,
+                    'audio_title': resolved_title,
+                    'audio_duration': resolved_duration,
+                    'audio_cover_url': resolved_cover,
+                    'audio_provider_book_id': audio_provider_book_id or audio_source_id,
+                    'audio_provider_file_id': audio_provider_file_id,
+                }
+            elif audio_source == 'BookLore' and audio_source_id:
+                selected_audio = {
+                    'bridge_key': bridge_key or _build_bridge_key('BookLore', audio_source_id),
+                    'audio_source': 'BookLore',
+                    'audio_source_id': audio_source_id,
+                    'audio_title': audio_title or f"BookLore {audio_source_id}",
+                    'audio_duration': audio_duration,
+                    'audio_cover_url': audio_cover_url,
+                    'audio_provider_book_id': audio_provider_book_id,
+                    'audio_provider_file_id': audio_provider_file_id,
+                }
+
+            if selected_audio and (ebook_filename or storyteller_uuid):
+                if not any(item.get('bridge_key') == selected_audio['bridge_key'] for item in session['queue']):
                     session['queue'].append({
-                        "abs_id": abs_id,
-                        "abs_title": manager.get_abs_title(selected_ab),
+                        **selected_audio,
+                        "abs_id": selected_audio['bridge_key'],
+                        "abs_title": selected_audio['audio_title'],
                         "ebook_filename": ebook_filename,
                         "ebook_display_name": ebook_display_name,
+                        "ebook_source": ebook_source,
+                        "ebook_source_id": ebook_source_id,
                         "storyteller_uuid": storyteller_uuid,
-                        "duration": manager.get_duration(selected_ab),
-                        "cover_url": f"{container.abs_client().base_url}/api/items/{abs_id}/cover?token={container.abs_client().token}"
+                        "duration": selected_audio['audio_duration'],
+                        "cover_url": selected_audio['audio_cover_url'],
                     })
                     session.modified = True
             return redirect(url_for('suggestions'))
@@ -2850,6 +2982,28 @@ def suggestions_page():
             from src.db.models import Book
 
             for item in session.get('queue', []):
+                audio_source = item.get('audio_source') or 'ABS'
+                if audio_source == 'BookLore':
+                    saved_book, err_msg, _err_code = _create_or_update_booklore_audio_mapping(
+                        audio_source_id=item.get('audio_source_id'),
+                        audio_title=item.get('audio_title'),
+                        audio_cover_url=item.get('audio_cover_url'),
+                        audio_duration=_parse_audio_duration(item.get('audio_duration')),
+                        audio_provider_book_id=item.get('audio_provider_book_id'),
+                        audio_provider_file_id=item.get('audio_provider_file_id'),
+                        ebook_filename=item.get('ebook_filename'),
+                        ebook_source=item.get('ebook_source'),
+                        ebook_source_id=item.get('ebook_source_id'),
+                        storyteller_uuid=item.get('storyteller_uuid'),
+                    )
+                    if err_msg:
+                        logger.warning(
+                            "Suggestions skipped BookLore audiobook '%s': %s",
+                            sanitize_log_data(item.get('audio_title') or item.get('audio_source_id')),
+                            err_msg,
+                        )
+                    continue
+
                 ebook_filename = item['ebook_filename']
                 storyteller_uuid = item.get('storyteller_uuid', '')
                 original_ebook_filename = item['ebook_filename']
@@ -2913,6 +3067,12 @@ def suggestions_page():
                 book = Book(
                     abs_id=item['abs_id'],
                     abs_title=item['abs_title'],
+                    audio_source="ABS",
+                    audio_source_id=item['abs_id'],
+                    audio_title=item['abs_title'],
+                    audio_cover_url=item.get('cover_url'),
+                    audio_duration=duration,
+                    audio_provider_book_id=item['abs_id'],
                     ebook_filename=ebook_filename,
                     kosync_doc_id=kosync_doc_id,
                     transcript_file=storyteller_manifest,
@@ -2920,7 +3080,9 @@ def suggestions_page():
                     duration=duration,
                     transcript_source=transcript_source,
                     storyteller_uuid=storyteller_uuid or None,
-                    original_ebook_filename=original_ebook_filename
+                    original_ebook_filename=original_ebook_filename,
+                    ebook_source=item.get('ebook_source'),
+                    ebook_source_id=item.get('ebook_source_id'),
                 )
 
                 database_service.save_book(book)
@@ -2992,7 +3154,10 @@ def suggestions_page():
     cache_by_abs = suggestions_state.get('scan_cache_by_abs', {}) or {}
     no_match_abs_ids = suggestions_state.get('scan_cache_no_match_abs_ids', []) or []
     if ignored_source_ids:
-        filtered_results = [item for item in scan_results if item.get('abs_id') not in ignored_source_ids]
+        filtered_results = [
+            item for item in scan_results
+            if (item.get('bridge_key') or item.get('abs_id')) not in ignored_source_ids
+        ]
         filtered_cache_by_abs = {
             abs_id: suggestion for abs_id, suggestion in cache_by_abs.items()
             if abs_id not in ignored_source_ids
@@ -3010,6 +3175,96 @@ def suggestions_page():
             suggestions_state['scan_cache_no_match_abs_ids'] = filtered_no_match_abs_ids
             no_match_abs_ids = filtered_no_match_abs_ids
             suggestions_state['updated_at'] = time.time()
+        _save_persisted_suggestions_cache({
+            "scan_cache_by_abs": suggestions_state.get('scan_cache_by_abs', {}),
+            "scan_cache_no_match_abs_ids": suggestions_state.get('scan_cache_no_match_abs_ids', []),
+            "scan_last_stats": suggestions_state.get('scan_last_stats', {}),
+        })
+
+    active_suggestion_keys = set()
+    for book in database_service.get_all_books():
+        abs_id = str(getattr(book, 'abs_id', '') or '').strip()
+        if abs_id:
+            active_suggestion_keys.add(abs_id)
+            if abs_id.lower().startswith("booklore_audio_"):
+                legacy_source_id = abs_id.split("_", 2)[-1].strip()
+                legacy_bridge = _build_bridge_key("BookLore", legacy_source_id)
+                if legacy_bridge:
+                    active_suggestion_keys.add(legacy_bridge)
+
+        mapped_bridge = _build_bridge_key(
+            getattr(book, 'audio_source', None),
+            getattr(book, 'audio_source_id', None),
+        )
+        if mapped_bridge:
+            active_suggestion_keys.add(mapped_bridge)
+
+    if active_suggestion_keys:
+        filtered_results = [
+            item for item in scan_results
+            if (item.get('bridge_key') or item.get('abs_id')) not in active_suggestion_keys
+        ]
+        filtered_cache_by_abs = {
+            key: suggestion for key, suggestion in cache_by_abs.items()
+            if key not in active_suggestion_keys
+        }
+        filtered_no_match_abs_ids = [
+            key for key in no_match_abs_ids if key not in active_suggestion_keys
+        ]
+        if len(filtered_results) != len(scan_results):
+            suggestions_state['scan_results'] = filtered_results
+            scan_results = filtered_results
+            suggestions_state['updated_at'] = time.time()
+        if len(filtered_cache_by_abs) != len(cache_by_abs):
+            suggestions_state['scan_cache_by_abs'] = filtered_cache_by_abs
+            cache_by_abs = filtered_cache_by_abs
+            suggestions_state['updated_at'] = time.time()
+        if len(filtered_no_match_abs_ids) != len(no_match_abs_ids):
+            suggestions_state['scan_cache_no_match_abs_ids'] = filtered_no_match_abs_ids
+            no_match_abs_ids = filtered_no_match_abs_ids
+            suggestions_state['updated_at'] = time.time()
+        _save_persisted_suggestions_cache({
+            "scan_cache_by_abs": suggestions_state.get('scan_cache_by_abs', {}),
+            "scan_cache_no_match_abs_ids": suggestions_state.get('scan_cache_no_match_abs_ids', []),
+            "scan_last_stats": suggestions_state.get('scan_last_stats', {}),
+        })
+
+    def _normalize_suggestion_identity_part(value):
+        normalized = re.sub(r'[\W_]+', ' ', str(value or '').lower()).strip()
+        return normalized
+
+    deduped_results = []
+    seen_identity = {}
+    removed_duplicate_keys = []
+    for item in scan_results:
+        suggestion_key = (item.get('bridge_key') or item.get('abs_id') or '').strip()
+        source = (item.get('audio_source') or ('BookLore' if suggestion_key.startswith('booklore:') else 'ABS')).strip().lower()
+        title = _normalize_suggestion_identity_part(item.get('audio_title') or item.get('abs_title'))
+        author = _normalize_suggestion_identity_part(item.get('audio_author') or item.get('abs_author'))
+        if not title:
+            dedupe_key = ('key', suggestion_key)
+        else:
+            dedupe_key = (source, title, author)
+
+        if dedupe_key in seen_identity:
+            removed_duplicate_keys.append(suggestion_key)
+            continue
+
+        seen_identity[dedupe_key] = suggestion_key
+        deduped_results.append(item)
+
+    if removed_duplicate_keys:
+        removed_set = set(removed_duplicate_keys)
+        scan_results = deduped_results
+        suggestions_state['scan_results'] = deduped_results
+        filtered_cache_by_abs = {
+            key: suggestion for key, suggestion in cache_by_abs.items()
+            if key not in removed_set
+        }
+        if len(filtered_cache_by_abs) != len(cache_by_abs):
+            cache_by_abs = filtered_cache_by_abs
+            suggestions_state['scan_cache_by_abs'] = filtered_cache_by_abs
+        suggestions_state['updated_at'] = time.time()
         _save_persisted_suggestions_cache({
             "scan_cache_by_abs": suggestions_state.get('scan_cache_by_abs', {}),
             "scan_cache_no_match_abs_ids": suggestions_state.get('scan_cache_no_match_abs_ids', []),

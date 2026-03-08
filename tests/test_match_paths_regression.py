@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 import json
+import time
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -502,6 +503,124 @@ class TestMatchPathsRegression(unittest.TestCase):
             self.assertEqual(done_payload["count"], 2)
             self.assertEqual(done_payload["stats"]["scanned_new"], 2)
 
+    @patch("src.web_server.render_template", return_value="ok")
+    def test_suggestions_page_dedupes_same_source_title_author(self, _mock_render):
+        import src.web_server as web_server
+
+        self.mock_container.mock_database_service.get_all_books.return_value = []
+
+        with self.client.session_transaction() as session_data:
+            session_data["suggestions_state_id"] = "state-dedupe"
+
+        with web_server.SUGGESTIONS_STATE_LOCK:
+            web_server.SUGGESTIONS_STATE_STORE["state-dedupe"] = {
+                "scan_results": [
+                    {
+                        "bridge_key": "ab-duplicate-1",
+                        "abs_id": "ab-duplicate-1",
+                        "audio_source": "ABS",
+                        "audio_title": "Dark Hollow",
+                        "audio_author": "Brian Keene",
+                        "matches": [{"display_name": "dark-hollow.epub", "score": 92.0}],
+                    },
+                    {
+                        "bridge_key": "ab-duplicate-2",
+                        "abs_id": "ab-duplicate-2",
+                        "audio_source": "ABS",
+                        "audio_title": "Dark Hollow",
+                        "audio_author": "Brian Keene",
+                        "matches": [{"display_name": "dark-hollow-alt.epub", "score": 89.0}],
+                    },
+                    {
+                        "bridge_key": "ab-unique-1",
+                        "abs_id": "ab-unique-1",
+                        "audio_source": "ABS",
+                        "audio_title": "Unique Title",
+                        "audio_author": "Unique Author",
+                        "matches": [{"display_name": "unique.epub", "score": 85.0}],
+                    },
+                ],
+                "scan_cache_by_abs": {
+                    "ab-duplicate-1": {"bridge_key": "ab-duplicate-1"},
+                    "ab-duplicate-2": {"bridge_key": "ab-duplicate-2"},
+                    "ab-unique-1": {"bridge_key": "ab-unique-1"},
+                },
+                "scan_cache_no_match_abs_ids": [],
+                "scan_last_stats": {},
+                "scan_has_run": True,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }
+
+        response = self.client.get("/suggestions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"ok")
+
+        rendered = _mock_render.call_args.kwargs["suggestions"]
+        rendered_keys = [(s.get("bridge_key") or s.get("abs_id")) for s in rendered]
+        self.assertEqual(rendered_keys, ["ab-duplicate-1", "ab-unique-1"])
+
+        with web_server.SUGGESTIONS_STATE_LOCK:
+            updated_state = web_server.SUGGESTIONS_STATE_STORE["state-dedupe"]
+            self.assertEqual(len(updated_state.get("scan_results", [])), 2)
+            self.assertNotIn("ab-duplicate-2", updated_state.get("scan_cache_by_abs", {}))
+
+    @patch("src.web_server.render_template", return_value="ok")
+    def test_suggestions_page_filters_active_booklore_legacy_mapping(self, _mock_render):
+        import src.web_server as web_server
+
+        active_book = Mock()
+        active_book.abs_id = "booklore_audio_8655"
+        active_book.audio_source = "BookLore"
+        active_book.audio_source_id = "8655"
+        self.mock_container.mock_database_service.get_all_books.return_value = [active_book]
+
+        with self.client.session_transaction() as session_data:
+            session_data["suggestions_state_id"] = "state-legacy"
+
+        with web_server.SUGGESTIONS_STATE_LOCK:
+            web_server.SUGGESTIONS_STATE_STORE["state-legacy"] = {
+                "scan_results": [
+                    {
+                        "bridge_key": "booklore:8655",
+                        "abs_id": "booklore:8655",
+                        "audio_source": "BookLore",
+                        "audio_source_id": "8655",
+                        "audio_title": "Legacy BookLore",
+                        "audio_author": "Test Author",
+                        "audio_cover_url": "/api/booklore/audiobook-cover/8655",
+                        "matches": [{"display_name": "legacy.epub", "score": 88.0}],
+                    }
+                ],
+                "scan_cache_by_abs": {
+                    "booklore:8655": {
+                        "bridge_key": "booklore:8655",
+                        "abs_id": "booklore:8655",
+                        "audio_source": "BookLore",
+                        "audio_source_id": "8655",
+                        "audio_title": "Legacy BookLore",
+                        "audio_author": "Test Author",
+                        "audio_cover_url": "/api/booklore/audiobook-cover/8655",
+                        "matches": [{"display_name": "legacy.epub", "score": 88.0}],
+                    }
+                },
+                "scan_cache_no_match_abs_ids": ["booklore:8655"],
+                "scan_last_stats": {},
+                "scan_has_run": True,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            }
+
+        response = self.client.get("/suggestions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"ok")
+
+        with web_server.SUGGESTIONS_STATE_LOCK:
+            updated_state = web_server.SUGGESTIONS_STATE_STORE["state-legacy"]
+            self.assertEqual(updated_state.get("scan_results", []), [])
+            self.assertEqual(updated_state.get("scan_cache_by_abs", {}), {})
+            self.assertEqual(updated_state.get("scan_cache_no_match_abs_ids", []), [])
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-suggestions-1")
     def test_suggestions_queue_add_and_process(self, _mock_kosync):
         add_response = self.client.post(
@@ -527,6 +646,50 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertTrue(process_response.location.endswith("/"))
 
         self.mock_container.mock_database_service.save_book.assert_called_once()
+        with self.client.session_transaction() as session_data:
+            self.assertEqual(session_data.get("queue", []), [])
+
+    @patch("src.web_server._create_or_update_booklore_audio_mapping", return_value=(Mock(abs_id="booklore:42"), None, None))
+    def test_suggestions_queue_add_and_process_booklore_audio(self, _mock_booklore_mapping):
+        add_response = self.client.post(
+            "/suggestions",
+            data={
+                "action": "add_to_queue",
+                "audiobook_id": "booklore:42",
+                "audio_source": "BookLore",
+                "audio_source_id": "42",
+                "audio_title": "BookLore Regression",
+                "audio_cover_url": "/api/booklore/audiobook-cover/42",
+                "audio_duration": "5123",
+                "audio_provider_book_id": "42",
+                "audio_provider_file_id": "991",
+                "ebook_filename": "booklore-suggested.epub",
+                "ebook_display_name": "BookLore Suggested",
+                "ebook_source": "BookLore",
+                "ebook_source_id": "6798",
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+
+        with self.client.session_transaction() as session_data:
+            queue = session_data.get("queue", [])
+            self.assertEqual(len(queue), 1)
+            self.assertEqual(queue[0]["abs_id"], "booklore:42")
+            self.assertEqual(queue[0]["audio_source"], "BookLore")
+
+        process_response = self.client.post("/suggestions", data={"action": "process_queue"})
+        self.assertEqual(process_response.status_code, 302)
+        self.assertTrue(process_response.location.endswith("/"))
+
+        _mock_booklore_mapping.assert_called_once()
+        call_kwargs = _mock_booklore_mapping.call_args.kwargs
+        self.assertEqual(call_kwargs["audio_source_id"], "42")
+        self.assertEqual(call_kwargs["audio_title"], "BookLore Regression")
+        self.assertEqual(call_kwargs["ebook_filename"], "booklore-suggested.epub")
+        self.assertEqual(call_kwargs["ebook_source"], "BookLore")
+        self.assertEqual(call_kwargs["ebook_source_id"], "6798")
+
+        self.mock_container.mock_database_service.save_book.assert_not_called()
         with self.client.session_transaction() as session_data:
             self.assertEqual(session_data.get("queue", []), [])
 

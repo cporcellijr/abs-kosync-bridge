@@ -248,8 +248,10 @@ class PendingSuggestion(Base):
     status = Column(String(20), default='pending')
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    def __init__(self, source_id: str, title: str, author: str = None, 
-                 cover_url: str = None, matches_json: str = "[]", status: str = 'pending'):
+    def __init__(self, source_id: str, title: str, author: str = None,
+                 cover_url: str = None, matches_json: str = "[]", status: str = 'pending',
+                 source: str = None):
+        self.source = source or 'abs'
         self.source_id = source_id
         self.title = title
         self.author = author
