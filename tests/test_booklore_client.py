@@ -836,3 +836,148 @@ def test_search_books_finds_lightweight_entries_without_detail_fetch(booklore_cl
     assert results[0]["id"] == "bl-1"
     assert results[0]["fileName"] == "Fever Dream - Samanta Schweblin (2016).epub"
     booklore_client._fetch_and_cache_detail.assert_not_called()
+
+
+def test_search_audiobooks_includes_combined_book_using_alternative_formats(booklore_client):
+    combined_detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+            "audiobookMetadata": {
+                "durationSeconds": 33945,
+                "chapterCount": 50,
+            },
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+            "id": 7605,
+        },
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+        "audiobookProgress": None,
+        "epubProgress": None,
+    }
+    booklore_client._process_book_detail(combined_detail)
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157, "durationMs": 33945000})
+
+    results = booklore_client.search_audiobooks("Mars Anomaly")
+
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+    assert results[0]["audiobookInfo"]["bookFileId"] == 10157
+
+
+def test_search_audiobooks_force_refreshes_legacy_cached_detail_missing_audio_shape(booklore_client):
+    legacy_cached = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        "bookType": "EPUB",
+        "primaryFile": {
+            "bookType": "EPUB",
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        },
+        "_detail_fetched_at": time.time() - 3600,
+    }
+    refreshed = {
+        **legacy_cached,
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+        "audiobookMetadata": {"durationSeconds": 33945},
+    }
+
+    booklore_client._book_cache = {legacy_cached["fileName"].lower(): legacy_cached}
+    booklore_client._book_id_cache = {6798: legacy_cached}
+    booklore_client._cache_timestamp = time.time()
+    booklore_client._fetch_and_cache_detail = MagicMock(return_value=refreshed)
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157})
+
+    results = booklore_client.search_audiobooks("Mars Anomaly")
+
+    booklore_client._fetch_and_cache_detail.assert_called_once_with(6798, force_refresh=True)
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+
+
+def test_search_books_dedupes_stale_filename_aliases_by_book_id(booklore_client):
+    stale = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "Mars Anomaly_ Hard Science Fiction, The - Joshua T. Calvert.epub",
+        "bookType": "EPUB",
+    }
+    current = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        "bookType": "EPUB",
+    }
+
+    booklore_client._book_cache = {
+        stale["fileName"].lower(): stale,
+        current["fileName"].lower(): current,
+    }
+    booklore_client._book_id_cache = {6798: current}
+    booklore_client._cache_timestamp = time.time()
+
+    results = booklore_client.search_books("Mars Anomaly")
+
+    assert len(results) == 1
+    assert results[0]["fileName"] == current["fileName"]
+
+
+def test_process_book_detail_removes_stale_filename_aliases_for_same_id(booklore_client):
+    old_name = "mars anomaly_ hard science fiction, the - joshua t. calvert.epub"
+    new_name = "the mars anomaly - joshua t. calvert (2024).epub"
+    booklore_client._book_cache = {
+        old_name: {
+            "id": 6798,
+            "fileName": "Mars Anomaly_ Hard Science Fiction, The - Joshua T. Calvert.epub",
+            "title": "The Mars Anomaly",
+            "authors": "Joshua T. Calvert",
+            "bookType": "EPUB",
+        }
+    }
+    booklore_client._book_id_cache = {
+        6798: booklore_client._book_cache[old_name]
+    }
+
+    detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+        },
+    }
+
+    booklore_client._process_book_detail(detail)
+
+    assert old_name not in booklore_client._book_cache
+    assert new_name in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_with(old_name)

@@ -349,6 +349,36 @@ class BookloreClient:
         with self._cache_lock:
             return list(self._book_id_cache.items())
 
+    def _dedupe_book_results(self, books):
+        canonical_by_id = {
+            str(bid): book_info
+            for bid, book_info in self._snapshot_book_id_items()
+            if bid is not None and isinstance(book_info, dict)
+        }
+        deduped = []
+        seen = set()
+
+        for book_info in books:
+            if not isinstance(book_info, dict):
+                continue
+
+            bid = book_info.get('id')
+            if bid is not None:
+                canonical = canonical_by_id.get(str(bid))
+                if canonical is not None:
+                    book_info = canonical
+                key = f"id:{bid}"
+            else:
+                key = f"file:{(book_info.get('fileName') or '').lower()}"
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            deduped.append(book_info)
+
+        return deduped
+
     def _evict_cached_book(self, book_id=None, filename=None, reason=None):
         """Remove a stale Booklore entry from memory and persistent cache."""
         target_id = str(book_id) if book_id is not None else None
@@ -508,17 +538,59 @@ class BookloreClient:
         )
         return str(raw_book_type or '').upper()
 
+    @staticmethod
+    def _iter_audio_format_candidates(book):
+        if not isinstance(book, dict):
+            return []
+
+        candidates = []
+        primary_file = book.get('primaryFile') or {}
+        if isinstance(primary_file, dict):
+            candidates.append(primary_file)
+
+        for key in ('bookFiles', 'alternativeFormats', 'supplementaryFiles'):
+            entries = book.get(key) or []
+            if isinstance(entries, list):
+                candidates.extend(entry for entry in entries if isinstance(entry, dict))
+
+        return candidates
+
+    @staticmethod
+    def _has_audiobook_metadata(book):
+        if not isinstance(book, dict):
+            return False
+
+        audiobook_metadata = book.get('audiobookMetadata')
+        if not isinstance(audiobook_metadata, dict):
+            metadata = book.get('metadata') or {}
+            audiobook_metadata = metadata.get('audiobookMetadata') if isinstance(metadata, dict) else None
+        if not isinstance(audiobook_metadata, dict):
+            return False
+
+        return any(
+            audiobook_metadata.get(key) is not None
+            for key in ('durationSeconds', 'durationMs', 'chapterCount', 'chapters')
+        )
+
+    @staticmethod
+    def _has_audio_shape_fields(book):
+        if not isinstance(book, dict):
+            return False
+        return any(
+            key in book
+            for key in ('alternativeFormats', 'supplementaryFiles', 'audiobookMetadata')
+        )
+
     def _book_supports_audiobook(self, book):
         if not isinstance(book, dict):
             return False
         if self._get_book_type(book) == 'AUDIOBOOK':
             return True
-        primary_file = book.get('primaryFile') or {}
-        if str(primary_file.get('bookType') or '').upper() == 'AUDIOBOOK':
-            return True
-        for file_info in book.get('bookFiles') or []:
+        for file_info in self._iter_audio_format_candidates(book):
             if str(file_info.get('bookType') or '').upper() == 'AUDIOBOOK':
                 return True
+        if self._has_audiobook_metadata(book):
+            return True
         if book.get('audiobookProgress') is not None:
             return True
         return False
@@ -526,10 +598,7 @@ class BookloreClient:
     def _get_audiobook_file_id(self, book):
         if not isinstance(book, dict):
             return None
-        primary_file = book.get('primaryFile') or {}
-        if str(primary_file.get('bookType') or '').upper() == 'AUDIOBOOK':
-            return primary_file.get('id') or primary_file.get('bookFileId')
-        for file_info in book.get('bookFiles') or []:
+        for file_info in self._iter_audio_format_candidates(book):
             if str(file_info.get('bookType') or '').upper() == 'AUDIOBOOK':
                 return file_info.get('id') or file_info.get('bookFileId')
         info_file_id = book.get('audiobookInfo', {}).get('bookFileId') if isinstance(book.get('audiobookInfo'), dict) else None
@@ -875,6 +944,7 @@ class BookloreClient:
         subtitle = metadata.get('subtitle') or ''
         title = metadata.get('title') or detail.get('title') or filename
 
+        stale_filenames = []
         book_info = {
             'id': detail.get('id'),
             'fileName': filename,
@@ -885,6 +955,9 @@ class BookloreClient:
             'bookType': book_type,
             'primaryFile': detail.get('primaryFile'),
             'bookFiles': detail.get('bookFiles'),
+            'alternativeFormats': detail.get('alternativeFormats'),
+            'supplementaryFiles': detail.get('supplementaryFiles'),
+            'audiobookMetadata': metadata.get('audiobookMetadata'),
             'audiobookProgress': detail.get('audiobookProgress'),
             'epubProgress': detail.get('epubProgress'),
             'pdfProgress': detail.get('pdfProgress'),
@@ -895,8 +968,34 @@ class BookloreClient:
 
         # Let's keep it consistent with what we see in database migration
         with self._cache_lock:
+            detail_id = detail.get('id')
+            current_filename = filename.lower()
+            if detail_id is not None:
+                for cached_filename, cached_info in list(self._book_cache.items()):
+                    if cached_filename == current_filename:
+                        continue
+                    cached_id = cached_info.get('id') if isinstance(cached_info, dict) else None
+                    if cached_id is None or str(cached_id) != str(detail_id):
+                        continue
+                    self._book_cache.pop(cached_filename, None)
+                    stale_filenames.append(cached_filename)
+
             self._book_cache[filename.lower()] = book_info
             self._book_id_cache[detail['id']] = book_info
+
+        for stale_filename in stale_filenames:
+            if self.db:
+                try:
+                    self.db.delete_booklore_book(stale_filename)
+                except Exception as e:
+                    logger.error(f"❌ Failed to remove stale Booklore alias '{stale_filename}': {e}")
+
+        if stale_filenames:
+            logger.info(
+                "📚 Booklore: Removed stale filename aliases for book %s: %s",
+                detail.get('id'),
+                stale_filenames,
+            )
 
         # Persist to DB
         if self.db:
@@ -916,11 +1015,11 @@ class BookloreClient:
 
         return None
 
-    def _fetch_and_cache_detail(self, book_id):
+    def _fetch_and_cache_detail(self, book_id, force_refresh=False):
         """Fetch detail for a single book on demand and add it to cache."""
         with self._cache_lock:
             cached = self._book_id_cache.get(book_id)
-            if cached and not cached.get('_needs_detail'):
+            if cached and not cached.get('_needs_detail') and not force_refresh:
                 return cached
 
         token = self._get_fresh_token()
@@ -1019,7 +1118,7 @@ class BookloreClient:
             for bid, book_info in self._book_id_cache.items():
                 if str(bid) not in fully_cached_ids and book_info.get('_needs_detail'):
                     all_books.append(book_info)
-        return all_books
+        return self._dedupe_book_results(all_books)
 
     def search_audiobooks(self, search_term):
         """Search Booklore for audiobook-capable books."""
@@ -1033,8 +1132,16 @@ class BookloreClient:
             if bid in seen_ids:
                 continue
             hydrated = book
+            requires_audio_refresh = (
+                not book.get('_needs_detail')
+                and not self._book_supports_audiobook(book)
+                and not self._has_audio_shape_fields(book)
+            )
             if book.get('_needs_detail') or not self._book_supports_audiobook(book):
-                hydrated = self._fetch_and_cache_detail(bid) or book
+                hydrated = self._fetch_and_cache_detail(
+                    bid,
+                    force_refresh=requires_audio_refresh,
+                ) or book
             if not self._book_supports_audiobook(hydrated):
                 continue
             info = self.get_audiobook_info(bid)
@@ -1084,7 +1191,7 @@ class BookloreClient:
             matches = []
             matched_ids = set()
 
-            for book_info in self._snapshot_book_cache_values():
+            for book_info in self._dedupe_book_results(self._snapshot_book_cache_values()):
                 title = (book_info.get('title') or '').lower()
                 authors = (book_info.get('authors') or '').lower()
                 filename = (book_info.get('fileName') or '').lower()
@@ -1152,7 +1259,7 @@ class BookloreClient:
                     matches.append(hydrated)
                     matched_ids.add(str(hydrated.get('id')))
 
-            return matches
+            return self._dedupe_book_results(matches)
 
         # Avoid expensive full-library refreshes on rapid UI search requests.
         # Keep refresh cadence aligned with other read paths.
