@@ -186,6 +186,12 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="1234567890abcdef1234567890abcdef")
     def test_match_route_creates_ebook_only_mapping_from_storyteller_without_audiobook(self, _mock_kosync):
         self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.is_configured.return_value = True
+        self.mock_container.mock_storyteller_client.get_book_details.return_value = {
+            "title": "Story Only Title",
+            "subtitle": "Story Only Subtitle",
+            "authors": [{"name": "Story Only Author"}],
+        }
 
         response = self.client.post(
             "/match",
@@ -198,6 +204,7 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_database_service.save_book.assert_called_once()
         saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
         self.assertEqual(saved_book.abs_id, "ebook-1234567890abcdef")
+        self.assertEqual(saved_book.abs_title, "Story Only Title")
         self.assertEqual(saved_book.sync_mode, "ebook_only")
         self.assertEqual(saved_book.storyteller_uuid, "story-uuid-ebook-only")
         self.assertEqual(saved_book.transcript_source, "storyteller")

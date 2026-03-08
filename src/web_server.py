@@ -1333,6 +1333,92 @@ def get_abs_author(ab):
     return metadata.get('authorName') or (metadata.get('authors') or [{}])[0].get("name", "")
 
 
+def _coerce_author_display(value):
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return (value.get("name") or value.get("authorName") or "").strip()
+    if isinstance(value, list):
+        names = []
+        for item in value:
+            if isinstance(item, dict):
+                name = (item.get("name") or item.get("authorName") or "").strip()
+            else:
+                name = str(item).strip() if item is not None else ""
+            if name:
+                names.append(name)
+        return ", ".join(names)
+    return ""
+
+
+def _get_cached_ebook_display_metadata(book):
+    candidates = []
+    for filename in (
+        getattr(book, "original_ebook_filename", None),
+        getattr(book, "ebook_filename", None),
+    ):
+        if filename and filename not in candidates:
+            candidates.append(filename)
+
+    for filename in candidates:
+        cached = database_service.get_booklore_book(filename)
+        if not cached:
+            continue
+        raw = cached.raw_metadata_dict if hasattr(cached, "raw_metadata_dict") else {}
+        title = (raw.get("title") or getattr(cached, "title", "") or "").strip()
+        subtitle = (raw.get("subtitle") or "").strip()
+        author = _coerce_author_display(raw.get("authors")) or (getattr(cached, "authors", "") or "").strip()
+        if title or subtitle or author:
+            return {"title": title, "subtitle": subtitle, "author": author}
+    return {}
+
+
+def _get_storyteller_display_metadata(storyteller_uuid):
+    if not storyteller_uuid:
+        return {}
+    try:
+        st_client = container.storyteller_client()
+        if not st_client or not st_client.is_configured() or not hasattr(st_client, "get_book_details"):
+            return {}
+        details = st_client.get_book_details(storyteller_uuid) or {}
+        return {
+            "title": (details.get("title") or "").strip(),
+            "subtitle": (details.get("subtitle") or "").strip(),
+            "author": _coerce_author_display(details.get("authors")),
+        }
+    except Exception as exc:
+        logger.debug("Storyteller metadata lookup failed for '%s': %s", storyteller_uuid, exc)
+        return {}
+
+
+def _resolve_dashboard_display_metadata(book, base_title, base_subtitle, base_author):
+    title = (base_title or "").strip()
+    subtitle = (base_subtitle or "").strip()
+    author = (base_author or "").strip()
+    sync_mode = getattr(book, "sync_mode", "audiobook")
+    is_storyteller_placeholder = title.lower().startswith("storyteller_")
+
+    cached_meta = _get_cached_ebook_display_metadata(book)
+    if cached_meta:
+        if (sync_mode == "ebook_only" or is_storyteller_placeholder or not title) and cached_meta.get("title"):
+            title = cached_meta["title"]
+        if not subtitle and cached_meta.get("subtitle"):
+            subtitle = cached_meta["subtitle"]
+        if not author and cached_meta.get("author"):
+            author = cached_meta["author"]
+
+    storyteller_meta = _get_storyteller_display_metadata(getattr(book, "storyteller_uuid", None))
+    if storyteller_meta:
+        if (sync_mode == "ebook_only" or is_storyteller_placeholder or not title) and storyteller_meta.get("title"):
+            title = storyteller_meta["title"]
+        if not subtitle and storyteller_meta.get("subtitle"):
+            subtitle = storyteller_meta["subtitle"]
+        if not author and storyteller_meta.get("author"):
+            author = storyteller_meta["author"]
+
+    return title or (base_title or "").strip(), subtitle, author
+
+
 def _storyteller_transcript_source(storyteller_uuid, storyteller_manifest):
     return "storyteller" if storyteller_uuid or storyteller_manifest else None
 
@@ -1433,16 +1519,22 @@ def index():
         _abs_meta = abs_metadata_by_id.get(book.abs_id, {})
         abs_subtitle = _abs_meta.get('subtitle', '')
         abs_author = _abs_meta.get('author', '')
+        display_title, abs_subtitle, abs_author = _resolve_dashboard_display_metadata(
+            book,
+            book.abs_title,
+            abs_subtitle,
+            abs_author,
+        )
 
         # Create mapping dict for template compatibility
         mapping = {
             'abs_id': book.abs_id,
-            'abs_title': book.abs_title,
+            'abs_title': display_title,
             'abs_subtitle': abs_subtitle,
             'abs_author': abs_author,
             'audio_source': getattr(book, 'audio_source', None) or ('ABS' if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only' else None),
             'audio_source_id': getattr(book, 'audio_source_id', None) or book.abs_id,
-            'audio_title': getattr(book, 'audio_title', None) or book.abs_title,
+            'audio_title': getattr(book, 'audio_title', None) or display_title,
             'audio_duration': getattr(book, 'audio_duration', None) or book.duration or 0,
             'audio_cover_url': getattr(book, 'audio_cover_url', None),
             'ebook_filename': book.ebook_filename,
@@ -1866,7 +1958,12 @@ def match():
             if not (storyteller_uuid or selected_filename):
                 return "Please select a text source (Storyteller or Standard Ebook)", 400
 
-            ebook_only_title = Path(selected_filename).stem if selected_filename else f"storyteller_{storyteller_uuid or 'book'}"
+            storyteller_meta = _get_storyteller_display_metadata(storyteller_uuid)
+            ebook_only_title = (
+                Path(selected_filename).stem
+                if selected_filename
+                else (storyteller_meta.get("title") or f"storyteller_{storyteller_uuid or 'book'}")
+            )
             logger.info(
                 "Match: entering ebook-only create path (storyteller_selected=%s, ebook_selected=%s)",
                 bool(storyteller_uuid),

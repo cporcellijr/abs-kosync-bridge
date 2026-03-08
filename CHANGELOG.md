@@ -22,14 +22,6 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 - **Booklore Search Miss Freshness**: Updated `search_books()` to use cache-first lookup with a single refresh-on-miss path. On non-empty misses, it performs one refresh only when cache age exceeds 60 seconds and cooldown is not active, then retries the in-memory search once.
 - **Booklore Search Refresh Guardrails**: Added explicit debug logs for miss-refresh trigger, fresh-cache skip, and cooldown skip to make runtime behavior and throttling decisions visible in logs.
 
-### Tests
-
-- **Booklore Search Miss Coverage**: Added unit tests for refresh-on-miss success, fresh-cache skip, cooldown skip, and refresh-failure single-attempt behavior.
-
-### Maintenance
-
-- **Suggestions Service Layer**: Isolated suggestions scan logic in `src/services/suggestions_service.py` to keep route handlers focused on web actions and state handling.
-
 ---
 
 ## [6.3.2] - 2026-02-27
@@ -79,6 +71,7 @@ All notable changes to ABS-KoSync Enhanced will be documented in this file.
 - **Comment Cleanup**: Removed reflective/speculative inline comments for clearer, more maintainable code.
 
 ---
+
 ## [6.3.0] - 2026-02-23
 
 ### � Critical Update Requirements
