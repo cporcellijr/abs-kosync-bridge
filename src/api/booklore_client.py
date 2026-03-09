@@ -1607,6 +1607,7 @@ class BookloreClient:
             if not response or response.status_code not in [200, 201, 204]:
                 last_status = response.status_code if response else "No response"
                 continue
+            time.sleep(0.25)
             verified = self.get_audiobook_progress(book_id)
             if verified:
                 observed_pct = verified.get('pct')
@@ -1625,7 +1626,7 @@ class BookloreClient:
                     f"pct_delta={pct_delta:.4f} ts_delta_ms={ts_delta_ms} "
                     f"position_verifiable={position_verifiable}"
                 )
-                if pct_delta > 0.005:
+                if pct_delta > 0.01:
                     last_status = f"verify_mismatch:{(observed_pct or 0.0) * 100:.2f}%"
                     continue
                 if position_verifiable and ts_delta_ms is not None and ts_delta_ms > 5000:

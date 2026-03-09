@@ -111,6 +111,8 @@ class BookLoreAudioSyncClient(SyncClient):
                 book_file_id=self._resolve_booklore_file_id(book),
                 position_ms=0,
                 percentage=0.0,
+                track_index=0,
+                track_position_ms=0,
             )
             updated_state = {"pct": 0.0, "ts": 0.0}
             if success:
@@ -149,6 +151,8 @@ class BookLoreAudioSyncClient(SyncClient):
             book_file_id=self._resolve_booklore_file_id(book),
             position_ms=position_ms,
             percentage=percentage,
+            track_index=0,
+            track_position_ms=position_ms,
         )
         if success:
             try:
