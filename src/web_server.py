@@ -3668,7 +3668,7 @@ def cleanup_mapping_resources(book):
                     logger.warning(f"⚠️ Failed to delete cached ebook {book.ebook_filename}: {e}")
 
     if getattr(book, 'sync_mode', 'audiobook') == 'ebook_only' and book.kosync_doc_id:
-        logger.info(f"🗑️ Deleting KOSync document record for ebook-only mapping: '{book.kosync_doc_id[:8]}'")
+        logger.info(f"🗑️ Deleting KOSync document record for ebook-only mapping: '{book.kosync_doc_id}'")
         database_service.delete_kosync_document(book.kosync_doc_id)
 
     if getattr(book, 'sync_mode', 'audiobook') != 'ebook_only':
