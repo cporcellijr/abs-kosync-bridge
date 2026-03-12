@@ -752,6 +752,152 @@ def test_get_progress_404_evicts_stale_hydrated_entry(booklore_client):
     booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
 
 
+def test_update_audiobook_progress_single_file_uses_plain_file_progress_payload(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 50.0, "positionMs": 12345}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=12345,
+        percentage=0.5,
+    )
+
+    assert ok is True
+    assert booklore_client._make_request.call_count == 2
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    assert first_post[0] == "POST"
+    assert first_post[1] == "/api/v1/books/progress"
+    assert first_post[2]["fileProgress"]["bookFileId"] == 10157
+    assert first_post[2]["fileProgress"]["positionData"] == "12345"
+    assert first_post[2]["fileProgress"]["progressPercent"] == 50.0
+    assert "positionHref" not in first_post[2]["fileProgress"]
+    assert "audiobookProgress" not in first_post[2]
+
+
+def test_update_audiobook_progress_folder_based_uses_track_relative_file_progress(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 75.0, "positionMs": 15000, "trackIndex": 2}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=15000,
+        percentage=0.75,
+        track_index=2,
+        track_position_ms=15000,
+    )
+
+    assert ok is True
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    assert first_post[2]["fileProgress"]["positionData"] == "15000"
+    assert first_post[2]["fileProgress"]["positionHref"] == "2"
+    assert first_post[2]["fileProgress"]["progressPercent"] == 75.0
+
+
+def test_update_audiobook_progress_requires_verified_position_for_nonzero_resume(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 50.0, "positionMs": None}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=None,
+        position_ms=12345,
+        percentage=0.5,
+    )
+
+    assert ok is False
+    assert booklore_client._make_request.call_count == 2
+
+
+def test_update_audiobook_progress_prefers_file_progress_and_only_falls_back_on_http_failure(booklore_client):
+    file_progress_failure = MagicMock()
+    file_progress_failure.status_code = 500
+    file_progress_failure.text = "write failed"
+
+    fallback_post = MagicMock()
+    fallback_post.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 60.0, "positionMs": 1000, "trackIndex": 1}
+    }
+
+    booklore_client._make_request = MagicMock(
+        side_effect=[file_progress_failure, fallback_post, verify_resp]
+    )
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=1000,
+        percentage=0.6,
+        track_index=1,
+        track_position_ms=1000,
+    )
+
+    assert ok is True
+    assert booklore_client._make_request.call_count == 3
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    second_post = booklore_client._make_request.call_args_list[1][0]
+    assert "fileProgress" in first_post[2]
+    assert "audiobookProgress" not in first_post[2]
+    assert "audiobookProgress" in second_post[2]
+    assert second_post[2]["audiobookProgress"]["positionMs"] == 1000
+    assert second_post[2]["audiobookProgress"]["trackIndex"] == 1
+
+
+def test_get_audiobook_info_uses_plural_endpoint(booklore_client):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"bookFileId": 10157}
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    info = booklore_client.get_audiobook_info(6043)
+
+    assert info == {"bookFileId": 10157}
+    booklore_client._make_request.assert_called_once_with("GET", "/api/v1/audiobooks/6043/info")
+
+
+def test_get_audiobook_cover_bytes_uses_plural_endpoint(booklore_client):
+    response = MagicMock()
+    response.status_code = 200
+    response.content = b"cover"
+    response.headers = {"Content-Type": "image/jpeg"}
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    content, content_type = booklore_client.get_audiobook_cover_bytes(6043)
+
+    assert content == b"cover"
+    assert content_type == "image/jpeg"
+    booklore_client._make_request.assert_called_once_with("GET", "/api/v1/audiobooks/6043/cover")
+
+
 def test_add_to_shelf_404_evicts_stale_hydrated_entry(booklore_client):
     booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
     booklore_client.db.delete_booklore_book.reset_mock()

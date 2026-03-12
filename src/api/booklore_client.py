@@ -1450,6 +1450,18 @@ class BookloreClient:
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _to_optional_int(raw_value):
+        if raw_value in (None, ""):
+            return None
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            try:
+                return int(float(raw_value))
+            except (TypeError, ValueError):
+                return None
+
     def _get_progress_by_book_id(self, book_id):
         """
         Get progress tuple for a specific Booklore book id.
@@ -1500,7 +1512,7 @@ class BookloreClient:
         return None, None
 
     def get_audiobook_info(self, book_id):
-        response = self._make_request("GET", f"/api/v1/audiobook/{book_id}/info")
+        response = self._make_request("GET", f"/api/v1/audiobooks/{book_id}/info")
         if not response or response.status_code != 200:
             return None
         data = self._parse_json_response(response, f"Booklore audiobook info for book {book_id}")
@@ -1523,16 +1535,12 @@ class BookloreClient:
             return None
         raw_pct = progress.get('percentage', 0)
         parsed_pct = self._to_progress_fraction(raw_pct)
-        position_ms = progress.get('positionMs')
-        try:
-            position_ms = int(position_ms) if position_ms is not None else None
-        except (TypeError, ValueError):
-            position_ms = None
+        position_ms = self._to_optional_int(progress.get('positionMs'))
         return {
             'pct': parsed_pct,
             'position_ms': position_ms,
-            'track_index': progress.get('trackIndex'),
-            'track_position_ms': progress.get('trackPositionMs'),
+            'track_index': self._to_optional_int(progress.get('trackIndex')),
+            'track_position_ms': self._to_optional_int(progress.get('trackPositionMs')),
         }
 
     def get_progress(self, ebook_filename):
@@ -1542,7 +1550,7 @@ class BookloreClient:
         return self._get_progress_by_book_id(book['id'])
 
     def get_audiobook_cover_bytes(self, book_id):
-        response = self._make_request("GET", f"/api/v1/audiobook/{book_id}/cover")
+        response = self._make_request("GET", f"/api/v1/audiobooks/{book_id}/cover")
         if not response or response.status_code != 200:
             return None, None
         return response.content, response.headers.get('Content-Type', 'image/jpeg')
@@ -1552,7 +1560,7 @@ class BookloreClient:
         if not token:
             return False
         headers = {"Authorization": f"Bearer {token}"}
-        url = f"{self.base_url}/api/v1/audiobook/{book_id}/track/{track_index}/stream"
+        url = f"{self.base_url}/api/v1/audiobooks/{book_id}/track/{track_index}/stream"
         try:
             with self.session.get(url, headers=headers, stream=True, timeout=120) as response:
                 if response.status_code != 200:
@@ -1583,36 +1591,83 @@ class BookloreClient:
     ):
         pct_display = max(0.0, min(float(percentage), 1.0)) * 100.0
         position_ms = max(int(position_ms or 0), 0)
+        track_index = self._to_optional_int(track_index)
+        if track_index is not None:
+            track_index = max(track_index, 0)
+        track_position_ms = self._to_optional_int(track_position_ms)
+        if track_position_ms is not None:
+            track_position_ms = max(track_position_ms, 0)
+
         progress_payload = {
             "positionMs": position_ms,
             "percentage": pct_display,
         }
         if track_index is not None:
-            progress_payload["trackIndex"] = int(track_index)
+            progress_payload["trackIndex"] = track_index
         if track_position_ms is not None:
-            progress_payload["trackPositionMs"] = max(int(track_position_ms), 0)
+            progress_payload["trackPositionMs"] = track_position_ms
 
-        payloads = [("audiobookProgress", {"bookId": book_id, "audiobookProgress": progress_payload})]
-        if book_file_id is not None:
+        payloads = []
+        book_file_id_value = None
+        if book_file_id not in (None, ""):
+            book_file_id_value = self._to_optional_int(book_file_id)
+            if book_file_id_value is None:
+                book_file_id_value = book_file_id
             file_progress = {
-                "bookFileId": book_file_id,
+                "bookFileId": book_file_id_value,
                 "progressPercent": pct_display,
-                "positionData": json.dumps(progress_payload),
+                "positionData": str(position_ms),
             }
-            payloads.append(("fileProgress", {"bookId": book_id, "fileProgress": file_progress}))
+            if track_index is not None:
+                file_progress["positionHref"] = str(track_index)
+            payloads.append(("fileProgress", {"bookId": book_id, "fileProgress": file_progress}, True))
+        payloads.append(("audiobookProgress", {"bookId": book_id, "audiobookProgress": progress_payload}, False))
 
         last_status = "No response"
-        for variant_name, payload in payloads:
+        file_progress_http_failed = False
+        for variant_name, payload, allow_http_fallback in payloads:
+            if variant_name == "audiobookProgress" and book_file_id_value is not None and not file_progress_http_failed:
+                # Skip the compatibility fallback until fileProgress actually fails at the HTTP layer.
+                continue
+            logger.debug(
+                "Booklore audiobook write attempt: book_id=%s variant=%s expected_pct=%.2f%% "
+                "stored_position_ms=%s track_index=%s track_position_ms=%s has_book_file_id=%s",
+                book_id,
+                variant_name,
+                pct_display,
+                position_ms,
+                track_index,
+                track_position_ms,
+                book_file_id_value is not None,
+            )
             response = self._make_request("POST", "/api/v1/books/progress", payload)
             if not response or response.status_code not in [200, 201, 204]:
                 last_status = response.status_code if response else "No response"
-                continue
+                logger.debug(
+                    "Booklore audiobook write non-success: book_id=%s variant=%s status=%s body_preview=%r",
+                    book_id,
+                    variant_name,
+                    response.status_code if response else "no_response",
+                    self._response_text_preview(response),
+                )
+                if allow_http_fallback:
+                    file_progress_http_failed = True
+                    logger.debug(
+                        "Booklore audiobook write falling back after HTTP failure: book_id=%s "
+                        "variant=%s fallback=audiobookProgress",
+                        book_id,
+                        variant_name,
+                    )
+                    continue
+                break
             time.sleep(0.25)
             verified = self.get_audiobook_progress(book_id)
             if verified:
                 observed_pct = verified.get('pct')
                 observed_position_ms = verified.get('position_ms')
+                observed_track_index = self._to_optional_int(verified.get('track_index'))
                 pct_delta = abs((observed_pct or 0.0) - float(percentage))
+                position_required = position_ms > 0
                 position_verifiable = observed_position_ms is not None
                 ts_delta_ms = (
                     abs(int(observed_position_ms) - int(position_ms))
@@ -1623,15 +1678,25 @@ class BookloreClient:
                     f"Booklore audiobook verify comparison: book_id={book_id} variant={variant_name} "
                     f"expected_pct={pct_display:.2f}% observed_pct={(observed_pct or 0.0) * 100:.2f}% "
                     f"expected_position_ms={position_ms} observed_position_ms={observed_position_ms} "
+                    f"expected_track_index={track_index} observed_track_index={observed_track_index} "
                     f"pct_delta={pct_delta:.4f} ts_delta_ms={ts_delta_ms} "
-                    f"position_verifiable={position_verifiable}"
+                    f"position_verifiable={position_verifiable} position_required={position_required}"
                 )
                 if pct_delta > 0.01:
                     last_status = f"verify_mismatch:{(observed_pct or 0.0) * 100:.2f}%"
-                    continue
+                    break
+                if position_required and not position_verifiable:
+                    last_status = "verify_missing_position"
+                    break
                 if position_verifiable and ts_delta_ms is not None and ts_delta_ms > 5000:
-                    last_status = f"verify_mismatch:{(observed_pct or 0.0) * 100:.2f}%"
-                    continue
+                    last_status = f"verify_position_mismatch:{observed_position_ms}"
+                    break
+                if track_index is not None and observed_track_index != track_index:
+                    last_status = f"verify_track_mismatch:{observed_track_index}"
+                    break
+            elif position_ms > 0:
+                last_status = "verify_unavailable"
+                break
             with self._cache_lock:
                 cached = self._book_id_cache.get(book_id)
                 if cached is not None:
