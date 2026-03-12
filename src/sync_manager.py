@@ -2039,7 +2039,7 @@ class SyncManager:
                 if book.kosync_doc_id:
                     deleted = self.database_service.delete_kosync_document(book.kosync_doc_id)
                     if deleted:
-                        logger.info(f"🗑️ Deleted KOSync document record: {book.kosync_doc_id[:8]}...")
+                        logger.info(f"🗑️ Deleted KOSync document record: {book.kosync_doc_id}")
 
                 # Reset all sync clients to 0% progress
                 reset_results = {}
