@@ -319,11 +319,37 @@
         }
 
         /* Resource Grid (square cards for Storyteller + Ebook) */
+        .selection-grid-scroll {
+            max-height: clamp(220px, 30vh, 360px);
+            overflow-y: auto;
+            padding-right: 6px;
+            margin: 16px 0;
+        }
+
+        .selection-grid-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .selection-grid-scroll::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .selection-grid-scroll::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.3);
+            border-radius: 4px;
+        }
+
+        .selection-grid-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.5);
+        }
+
         .resource-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 16px;
-            margin: 16px 0;
+            margin: 0;
+            align-content: start;
         }
 
         .resource-card {
@@ -642,6 +668,12 @@
                 top: 0;
                 max-height: 600px;
             }
+
+            .selection-grid-scroll {
+                max-height: none;
+                overflow: visible;
+                padding-right: 0;
+            }
         }
 
         @media (max-width: 768px) {
@@ -802,7 +834,8 @@
                     {% if storyteller_books %}
                     {% set single_st_match = storyteller_books|length == 1 %}
                     <h3 class="section-title"><span class="section-number">2</span>Storyteller (Preferred)</h3>
-                    <div class="resource-grid">
+                    <div class="selection-grid-scroll">
+                        <div class="resource-grid">
                         <div class="resource-card st-card ghost-card {% if not single_st_match %}selected{% endif %}"
                             id="st-none-card" data-value="" onclick="selectStoryteller(this, '')">
                             <div class="resource-icon" style="color: rgba(255,255,255,0.35);">⊘</div>
@@ -820,6 +853,7 @@
                             {% endif %}
                         </div>
                         {% endfor %}
+                        </div>
                     </div>
                     {% endif %}
 
@@ -829,7 +863,8 @@
                             style="font-size:12px; color:#aaa; font-weight:normal;">(optional if Storyteller
                             selected)</span></h3>
                     {% if ebooks %}
-                    <div class="resource-grid" id="ebook-card-grid">
+                    <div class="selection-grid-scroll">
+                        <div class="resource-grid" id="ebook-card-grid">
                         {% for eb in ebooks %}
                         <div class="resource-card eb-card {% if single_eb_match %}selected{% endif %}"
                             data-value="{{ eb.name }}"
@@ -851,6 +886,7 @@
                             {% endif %}
                         </div>
                         {% endfor %}
+                        </div>
                     </div>
                     {% else %}
                     <div style="color: rgba(255,255,255,0.4); font-size: 13px; margin: 12px 0;">No ebooks found for this
