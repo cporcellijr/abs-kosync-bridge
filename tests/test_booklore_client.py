@@ -194,6 +194,40 @@ def test_save_to_db_on_fetch(mock_db):
              assert saved_book.filename == "newbook.epub"
 
 
+def test_get_fresh_token_retries_duplicate_refresh_token_conflict(booklore_client):
+    conflict_response = MagicMock()
+    conflict_response.status_code = 400
+    conflict_response.text = (
+        "Duplicate entry 'abc' for key 'uq_refresh_token'"
+    )
+
+    success_response = MagicMock()
+    success_response.status_code = 200
+    success_response.json.return_value = {"accessToken": "token-123"}
+
+    booklore_client.session.post = MagicMock(
+        side_effect=[conflict_response, success_response]
+    )
+
+    with patch("time.sleep") as mock_sleep:
+        token = booklore_client._get_fresh_token()
+
+    assert token == "token-123"
+    assert booklore_client.session.post.call_count == 2
+    mock_sleep.assert_called_once_with(booklore_client._token_login_retry_delay)
+
+
+def test_get_fresh_token_skips_login_when_cached_token_is_fresh(booklore_client):
+    booklore_client._token = "cached-token"
+    booklore_client._token_timestamp = time.time()
+    booklore_client.session.post = MagicMock()
+
+    token = booklore_client._get_fresh_token()
+
+    assert token == "cached-token"
+    booklore_client.session.post.assert_not_called()
+
+
 def test_update_progress_zero_clears_cfi(booklore_client):
     booklore_client.find_book_by_filename = MagicMock(return_value={
         "id": 6043,
@@ -398,7 +432,7 @@ def test_search_books_miss_triggers_single_refresh_and_returns_new_match(booklor
     booklore_client._cache_timestamp = time.time() - 120
     booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
 
-    def refresh_side_effect():
+    def refresh_side_effect(**kwargs):
         booklore_client._book_cache["new-book.epub"] = {
             "fileName": "new-book.epub",
             "title": "New Arrival",
@@ -465,10 +499,11 @@ def test_search_books_hit_triggers_single_refresh_and_prunes_deleted_result_when
     booklore_client._book_id_cache = {
         "deleted": {"id": "deleted", "fileName": "deleted.epub", "title": "Deleted Book", "authors": "Old Author"}
     }
-    booklore_client._cache_timestamp = time.time() - 120
+    booklore_client._cache_timestamp = time.time() - 1900
+    booklore_client._search_hit_refresh_min_age = 60
     booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
 
-    def refresh_side_effect():
+    def refresh_side_effect(**kwargs):
         booklore_client._book_cache.clear()
         booklore_client._book_id_cache.clear()
         booklore_client._cache_timestamp = time.time()
@@ -512,7 +547,7 @@ def test_refresh_book_cache_hydrates_small_library(booklore_client):
         )
     )
 
-    assert booklore_client._refresh_book_cache() is True
+    assert booklore_client._refresh_book_cache(refresh_stale_details=False) is True
     assert booklore_client._fetch_book_detail.call_count == 3
     assert len(booklore_client._book_cache) == 3
     assert len(booklore_client._book_id_cache) == 3
@@ -529,7 +564,7 @@ def test_refresh_book_cache_skips_bulk_detail_fetch_for_large_library(booklore_c
     booklore_client._get_fresh_token = MagicMock(return_value="token")
     booklore_client._fetch_book_detail = MagicMock()
 
-    assert booklore_client._refresh_book_cache() is True
+    assert booklore_client._refresh_book_cache(refresh_stale_details=False) is True
     assert booklore_client._fetch_book_detail.call_count == 0
     assert len(booklore_client._book_cache) == 0
     assert len(booklore_client._book_id_cache) == len(books)
@@ -717,6 +752,152 @@ def test_get_progress_404_evicts_stale_hydrated_entry(booklore_client):
     booklore_client.db.delete_booklore_book.assert_called_once_with("gone.epub")
 
 
+def test_update_audiobook_progress_single_file_uses_plain_file_progress_payload(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 50.0, "positionMs": 12345}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=12345,
+        percentage=0.5,
+    )
+
+    assert ok is True
+    assert booklore_client._make_request.call_count == 2
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    assert first_post[0] == "POST"
+    assert first_post[1] == "/api/v1/books/progress"
+    assert first_post[2]["fileProgress"]["bookFileId"] == 10157
+    assert first_post[2]["fileProgress"]["positionData"] == "12345"
+    assert first_post[2]["fileProgress"]["progressPercent"] == 50.0
+    assert "positionHref" not in first_post[2]["fileProgress"]
+    assert "audiobookProgress" not in first_post[2]
+
+
+def test_update_audiobook_progress_folder_based_uses_track_relative_file_progress(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 75.0, "positionMs": 15000, "trackIndex": 2}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=15000,
+        percentage=0.75,
+        track_index=2,
+        track_position_ms=15000,
+    )
+
+    assert ok is True
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    assert first_post[2]["fileProgress"]["positionData"] == "15000"
+    assert first_post[2]["fileProgress"]["positionHref"] == "2"
+    assert first_post[2]["fileProgress"]["progressPercent"] == 75.0
+
+
+def test_update_audiobook_progress_requires_verified_position_for_nonzero_resume(booklore_client):
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 50.0, "positionMs": None}
+    }
+
+    booklore_client._make_request = MagicMock(side_effect=[post_resp, verify_resp])
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=None,
+        position_ms=12345,
+        percentage=0.5,
+    )
+
+    assert ok is False
+    assert booklore_client._make_request.call_count == 2
+
+
+def test_update_audiobook_progress_prefers_file_progress_and_only_falls_back_on_http_failure(booklore_client):
+    file_progress_failure = MagicMock()
+    file_progress_failure.status_code = 500
+    file_progress_failure.text = "write failed"
+
+    fallback_post = MagicMock()
+    fallback_post.status_code = 200
+
+    verify_resp = MagicMock()
+    verify_resp.status_code = 200
+    verify_resp.json.return_value = {
+        "audiobookProgress": {"percentage": 60.0, "positionMs": 1000, "trackIndex": 1}
+    }
+
+    booklore_client._make_request = MagicMock(
+        side_effect=[file_progress_failure, fallback_post, verify_resp]
+    )
+
+    ok = booklore_client.update_audiobook_progress(
+        book_id=6043,
+        book_file_id=10157,
+        position_ms=1000,
+        percentage=0.6,
+        track_index=1,
+        track_position_ms=1000,
+    )
+
+    assert ok is True
+    assert booklore_client._make_request.call_count == 3
+    first_post = booklore_client._make_request.call_args_list[0][0]
+    second_post = booklore_client._make_request.call_args_list[1][0]
+    assert "fileProgress" in first_post[2]
+    assert "audiobookProgress" not in first_post[2]
+    assert "audiobookProgress" in second_post[2]
+    assert second_post[2]["audiobookProgress"]["positionMs"] == 1000
+    assert second_post[2]["audiobookProgress"]["trackIndex"] == 1
+
+
+def test_get_audiobook_info_uses_plural_endpoint(booklore_client):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"bookFileId": 10157}
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    info = booklore_client.get_audiobook_info(6043)
+
+    assert info == {"bookFileId": 10157}
+    booklore_client._make_request.assert_called_once_with("GET", "/api/v1/audiobooks/6043/info")
+
+
+def test_get_audiobook_cover_bytes_uses_plural_endpoint(booklore_client):
+    response = MagicMock()
+    response.status_code = 200
+    response.content = b"cover"
+    response.headers = {"Content-Type": "image/jpeg"}
+    booklore_client._make_request = MagicMock(return_value=response)
+
+    content, content_type = booklore_client.get_audiobook_cover_bytes(6043)
+
+    assert content == b"cover"
+    assert content_type == "image/jpeg"
+    booklore_client._make_request.assert_called_once_with("GET", "/api/v1/audiobooks/6043/cover")
+
+
 def test_add_to_shelf_404_evicts_stale_hydrated_entry(booklore_client):
     booklore_client._process_book_detail(make_detail("gone", title="Gone Book", filename="gone.epub"))
     booklore_client.db.delete_booklore_book.reset_mock()
@@ -835,3 +1016,221 @@ def test_search_books_finds_lightweight_entries_without_detail_fetch(booklore_cl
     assert results[0]["id"] == "bl-1"
     assert results[0]["fileName"] == "Fever Dream - Samanta Schweblin (2016).epub"
     booklore_client._fetch_and_cache_detail.assert_not_called()
+
+
+def test_search_audiobooks_includes_combined_book_using_alternative_formats(booklore_client):
+    combined_detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+            "audiobookMetadata": {
+                "durationSeconds": 33945,
+                "chapterCount": 50,
+            },
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+            "id": 7605,
+        },
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+        "audiobookProgress": None,
+        "epubProgress": None,
+    }
+    booklore_client._process_book_detail(combined_detail)
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157, "durationMs": 33945000})
+
+    results = booklore_client.search_audiobooks("Mars Anomaly")
+
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+    assert results[0]["audiobookInfo"]["bookFileId"] == 10157
+
+
+def test_search_audiobooks_force_refreshes_legacy_cached_detail_missing_audio_shape(booklore_client):
+    legacy_cached = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        "bookType": "EPUB",
+        "primaryFile": {
+            "bookType": "EPUB",
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        },
+        "_detail_fetched_at": time.time() - 3600,
+    }
+    refreshed = {
+        **legacy_cached,
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+        "audiobookMetadata": {"durationSeconds": 33945},
+    }
+
+    booklore_client._book_cache = {legacy_cached["fileName"].lower(): legacy_cached}
+    booklore_client._book_id_cache = {6798: legacy_cached}
+    booklore_client._cache_timestamp = time.time()
+    booklore_client._fetch_and_cache_detail = MagicMock(return_value=refreshed)
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157})
+
+    results = booklore_client.search_audiobooks("Mars Anomaly")
+
+    booklore_client._fetch_and_cache_detail.assert_called_once_with(6798, force_refresh=True)
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+
+
+def test_search_audiobooks_can_skip_per_book_info_fetch(booklore_client):
+    combined_detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+            "audiobookMetadata": {"durationSeconds": 33945},
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+            "id": 7605,
+        },
+        "alternativeFormats": [
+            {
+                "id": 10157,
+                "bookType": "AUDIOBOOK",
+                "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).m4b",
+            }
+        ],
+        "supplementaryFiles": [],
+    }
+    booklore_client._process_book_detail(combined_detail)
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.get_audiobook_info = MagicMock(return_value={"bookFileId": 10157})
+
+    results = booklore_client.search_audiobooks("", include_info=False)
+
+    assert len(results) == 1
+    assert results[0]["id"] == 6798
+    assert "audiobookInfo" not in results[0]
+    booklore_client.get_audiobook_info.assert_not_called()
+
+
+def test_search_audiobooks_miss_forces_single_refresh_and_returns_new_match(booklore_client):
+    new_audio = {
+        "id": 7101,
+        "title": "New Audio Arrival",
+        "authors": "Test Author",
+        "fileName": "New Audio Arrival.m4b",
+        "bookType": "AUDIOBOOK",
+    }
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.search_books = MagicMock(side_effect=[[], [new_audio]])
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+    booklore_client.get_audiobook_info = MagicMock(return_value=None)
+
+    results = booklore_client.search_audiobooks("New Audio Arrival")
+
+    assert len(results) == 1
+    assert results[0]["id"] == 7101
+    booklore_client._refresh_book_cache.assert_called_once_with(refresh_stale_details=False)
+    assert booklore_client.search_books.call_count == 2
+
+
+def test_search_audiobooks_miss_refresh_is_throttled(booklore_client):
+    booklore_client._cache_timestamp = time.time()
+    booklore_client.search_books = MagicMock(return_value=[])
+    booklore_client._is_refresh_on_cooldown = MagicMock(return_value=False)
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+    booklore_client._audiobook_search_miss_refresh_cooldown = 60
+    booklore_client._last_audiobook_search_miss_refresh_attempt = time.time()
+
+    results = booklore_client.search_audiobooks("Still Missing")
+
+    assert results == []
+    booklore_client._refresh_book_cache.assert_not_called()
+    booklore_client.search_books.assert_called_once_with("Still Missing")
+
+
+def test_search_books_dedupes_stale_filename_aliases_by_book_id(booklore_client):
+    stale = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "Mars Anomaly_ Hard Science Fiction, The - Joshua T. Calvert.epub",
+        "bookType": "EPUB",
+    }
+    current = {
+        "id": 6798,
+        "title": "The Mars Anomaly",
+        "authors": "Joshua T. Calvert",
+        "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+        "bookType": "EPUB",
+    }
+
+    booklore_client._book_cache = {
+        stale["fileName"].lower(): stale,
+        current["fileName"].lower(): current,
+    }
+    booklore_client._book_id_cache = {6798: current}
+    booklore_client._cache_timestamp = time.time()
+
+    results = booklore_client.search_books("Mars Anomaly")
+
+    assert len(results) == 1
+    assert results[0]["fileName"] == current["fileName"]
+
+
+def test_process_book_detail_removes_stale_filename_aliases_for_same_id(booklore_client):
+    old_name = "mars anomaly_ hard science fiction, the - joshua t. calvert.epub"
+    new_name = "the mars anomaly - joshua t. calvert (2024).epub"
+    booklore_client._book_cache = {
+        old_name: {
+            "id": 6798,
+            "fileName": "Mars Anomaly_ Hard Science Fiction, The - Joshua T. Calvert.epub",
+            "title": "The Mars Anomaly",
+            "authors": "Joshua T. Calvert",
+            "bookType": "EPUB",
+        }
+    }
+    booklore_client._book_id_cache = {
+        6798: booklore_client._book_cache[old_name]
+    }
+
+    detail = {
+        "id": 6798,
+        "libraryId": "lib-1",
+        "metadata": {
+            "title": "The Mars Anomaly",
+            "authors": ["Joshua T. Calvert"],
+        },
+        "primaryFile": {
+            "fileName": "The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "filePath": "/books/The Mars Anomaly - Joshua T. Calvert (2024).epub",
+            "bookType": "EPUB",
+        },
+    }
+
+    booklore_client._process_book_detail(detail)
+
+    assert old_name not in booklore_client._book_cache
+    assert new_name in booklore_client._book_cache
+    booklore_client.db.delete_booklore_book.assert_called_with(old_name)

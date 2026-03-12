@@ -719,6 +719,44 @@ def _validate_storyteller_chapters(
     return False, [], []
 
 
+def _read_storyteller_chapter_metrics(chapter_file_path: Path) -> tuple[int, int, float]:
+    """Return transcript lengths and chapter-local duration for a storyteller chapter file."""
+    text_len = 0
+    text_len_utf16 = 0
+    local_duration = 0.0
+
+    if not chapter_file_path.exists():
+        return text_len, text_len_utf16, local_duration
+
+    try:
+        with open(chapter_file_path, "r", encoding="utf-8") as chapter_file:
+            chapter_data = json.load(chapter_file)
+        if not isinstance(chapter_data, dict):
+            return text_len, text_len_utf16, local_duration
+
+        chapter_text = chapter_data.get("transcript", "")
+        text_len = len(chapter_text)
+        text_len_utf16 = len(chapter_text.encode("utf-16-le")) // 2
+
+        timeline = chapter_data.get("wordTimeline")
+        if not isinstance(timeline, list):
+            timeline = chapter_data.get("timeline")
+        if isinstance(timeline, list):
+            for row in timeline:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    end_time = float(row.get("endTime", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    end_time = 0.0
+                if end_time > local_duration:
+                    local_duration = end_time
+    except Exception:
+        return 0, 0, 0.0
+
+    return text_len, text_len_utf16, local_duration
+
+
 def ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list) -> Optional[str]:
     """
     Copy Storyteller chapter JSON files into bridge-managed data storage and write a manifest.
@@ -729,10 +767,6 @@ def ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list) 
         return None
 
     chapter_list = chapters if isinstance(chapters, list) else []
-    expected_count = len(chapter_list)
-    if expected_count <= 0:
-        logger.info(f"Storyteller ingest skipped for '{abs_id}': no ABS chapters available")
-        return None
 
     assets_root = Path(assets_dir_raw)
     title_dir = _resolve_storyteller_title_dir(assets_root, abs_title or "")
@@ -744,6 +778,23 @@ def ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list) 
     if not transcriptions_dir.exists() or not transcriptions_dir.is_dir():
         logger.info(f"Storyteller transcriptions directory missing for '{abs_id}' at '{transcriptions_dir}'")
         return None
+
+    expected_count = len(chapter_list)
+    chapterless_mode = expected_count <= 0
+    if chapterless_mode:
+        numeric_pattern = re.compile(r"^\d{5}-\d{5}\.json$")
+        numeric_files = [p.name for p in transcriptions_dir.glob("*.json") if numeric_pattern.match(p.name)]
+        expected_count = len(numeric_files)
+        if expected_count <= 0:
+            logger.info(
+                f"Storyteller ingest skipped for '{abs_id}': no ABS chapters and no storyteller chapter files at "
+                f"'{transcriptions_dir}'"
+            )
+            return None
+        logger.info(
+            f"Storyteller ingest chapterless mode for '{abs_id}': deriving {expected_count} chapters from "
+            f"'{transcriptions_dir}'"
+        )
 
     is_valid, source_files, expected_files = _validate_storyteller_chapters(transcriptions_dir, expected_count)
     if not is_valid:
@@ -789,31 +840,37 @@ def ingest_storyteller_transcripts(abs_id: str, abs_title: str, chapters: list) 
         )
 
     chapter_entries = []
-    for idx, chapter in enumerate(chapter_list):
-        start = float(chapter.get("start", 0.0) or 0.0)
-        end = float(chapter.get("end", 0.0) or 0.0)
-        chapter_file_name = _storyteller_filename_for_abs_chapter(idx)
-        text_len = 0
-        text_len_utf16 = 0
-        chapter_file_path = target_dir / chapter_file_name
-        if chapter_file_path.exists():
-            try:
-                with open(chapter_file_path, "r", encoding="utf-8") as chapter_file:
-                    chapter_data = json.load(chapter_file)
-                chapter_text = chapter_data.get("transcript", "") if isinstance(chapter_data, dict) else ""
-                text_len = len(chapter_text)
-                text_len_utf16 = len(chapter_text.encode("utf-16-le")) // 2
-            except Exception:
-                text_len = 0
-                text_len_utf16 = 0
-        chapter_entries.append({
-            "index": idx,
-            "file": chapter_file_name,
-            "start": start,
-            "end": end,
-            "text_len": text_len,
-            "text_len_utf16": text_len_utf16,
-        })
+    if chapterless_mode:
+        cumulative_start = 0.0
+        for idx, chapter_file_name in enumerate(expected_files):
+            chapter_file_path = target_dir / chapter_file_name
+            text_len, text_len_utf16, local_duration = _read_storyteller_chapter_metrics(chapter_file_path)
+            start = cumulative_start
+            end = cumulative_start + max(0.0, float(local_duration))
+            cumulative_start = end
+            chapter_entries.append({
+                "index": idx,
+                "file": chapter_file_name,
+                "start": start,
+                "end": end,
+                "text_len": text_len,
+                "text_len_utf16": text_len_utf16,
+            })
+    else:
+        for idx, chapter in enumerate(chapter_list):
+            start = float(chapter.get("start", 0.0) or 0.0)
+            end = float(chapter.get("end", 0.0) or 0.0)
+            chapter_file_name = _storyteller_filename_for_abs_chapter(idx)
+            chapter_file_path = target_dir / chapter_file_name
+            text_len, text_len_utf16, _local_duration = _read_storyteller_chapter_metrics(chapter_file_path)
+            chapter_entries.append({
+                "index": idx,
+                "file": chapter_file_name,
+                "start": start,
+                "end": end,
+                "text_len": text_len,
+                "text_len_utf16": text_len_utf16,
+            })
 
     duration = 0.0
     if chapter_entries:

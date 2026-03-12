@@ -26,6 +26,9 @@ class _LeaderClient:
     def can_be_leader(self):
         return True
 
+    def get_supported_sync_types(self):
+        return {'audiobook', 'ebook'}
+
 
 class _DeterministicAlignmentService:
     def __init__(self, chars_per_second: float = 4.0):

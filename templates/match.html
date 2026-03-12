@@ -638,7 +638,8 @@
                 {% endif %}
 
                 {% if shelfmark_url %}
-                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
+                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool" target="_blank"
+                    rel="noopener noreferrer">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
                         <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
@@ -681,20 +682,48 @@
             <input type="hidden" name="source_type" id="input_source_type">
             <input type="hidden" name="source_path" id="input_source_path">
             <input type="hidden" name="source_id" id="input_source_id">
+            <input type="hidden" name="audio_source" id="input_audio_source">
+            <input type="hidden" name="audio_source_id" id="input_audio_source_id">
+            <input type="hidden" name="audio_title" id="input_audio_title">
+            <input type="hidden" name="audio_duration" id="input_audio_duration">
+            <input type="hidden" name="audio_provider_book_id" id="input_audio_provider_book_id">
+            <input type="hidden" name="audio_provider_file_id" id="input_audio_provider_file_id">
+            <input type="hidden" name="audio_cover_url" id="input_audio_cover_url">
+            <input type="hidden" name="ebook_source" id="input_ebook_source">
+            <input type="hidden" name="ebook_source_id" id="input_ebook_source_id">
 
             <div class="selection-container">
 
                 <!-- GRID COL 1: Audiobook -->
                 <div class="section">
-                    <h3><span class="section-number">1</span>Audiobook (Required)</h3>
+                    <h3><span class="section-number">1</span>Audiobook (Optional)</h3>
                     <div class="scrollable-content">
                         {% if audiobooks %}
                         <div class="media-grid">
                             {% set single_match = audiobooks|length == 1 %}
+                            <!-- None / Skip Option -->
+                            <label class="audiobook-option ab-option ghost-card {% if not single_match %}selected{% endif %}"
+                                onclick="selectItem(this, 'audiobook_id')">
+                                <input type="radio" name="audiobook_id" value="" {% if not single_match %}checked{% endif %}>
+                                <div class="audiobook-cover-container">
+                                    <div class="audiobook-cover-placeholder">⊘</div>
+                                </div>
+                                <div class="audiobook-info">
+                                    <div class="audiobook-title">None / Skip</div>
+                                </div>
+                            </label>
+
                             {% for ab in audiobooks %}
                             <label class="audiobook-option ab-option {% if single_match %}selected{% endif %}"
+                                data-audio-source="{{ ab.source }}"
+                                data-audio-source-id="{{ ab.source_id }}"
+                                data-audio-title="{{ ab.title }}"
+                                data-audio-duration="{{ ab.duration or '' }}"
+                                data-audio-provider-book-id="{{ ab.provider_book_id or ab.source_id }}"
+                                data-audio-provider-file-id="{{ ab.provider_file_id or '' }}"
+                                data-audio-cover-url="{{ ab.cover_url or '' }}"
                                 onclick="selectItem(this, 'audiobook_id')">
-                                <input type="radio" name="audiobook_id" value="{{ ab.id }}" required {% if single_match
+                                <input type="radio" name="audiobook_id" value="{% if ab.source == 'ABS' %}{{ ab.source_id }}{% endif %}" {% if single_match
                                     %}checked{% endif %}>
                                 <div class="audiobook-cover-container">
                                     {% if ab.cover_url %}
@@ -706,7 +735,8 @@
                                     {% endif %}
                                 </div>
                                 <div class="audiobook-info">
-                                    <div class="audiobook-title">{{ get_title(ab) }}</div>
+                                    <div class="audiobook-title">{{ ab.title }}</div>
+                                    <span class="source-badge {{ ab.source.lower().replace(' ', '') }}">{{ ab.source }}</span>
                                 </div>
                             </label>
                             {% endfor %}
@@ -816,7 +846,7 @@
                     🔨 Forge & Match
                 </button>
                 <div id="validationMsg" style="margin-top: 10px; color: #ff6b6b; display: none;">
-                    Please select an Audiobook and a Text Source (Storyteller or Ebook)
+                    Please select a Text Source (Storyteller or Ebook)
                 </div>
             </div>
         </form>
@@ -842,11 +872,23 @@
             const radio = element.querySelector('input[type="radio"]');
             if (radio) radio.checked = true;
 
+            if (groupName === 'audiobook_id') {
+                document.getElementById('input_audio_source').value = element.dataset.audioSource || '';
+                document.getElementById('input_audio_source_id').value = element.dataset.audioSourceId || '';
+                document.getElementById('input_audio_title').value = element.dataset.audioTitle || '';
+                document.getElementById('input_audio_duration').value = element.dataset.audioDuration || '';
+                document.getElementById('input_audio_provider_book_id').value = element.dataset.audioProviderBookId || '';
+                document.getElementById('input_audio_provider_file_id').value = element.dataset.audioProviderFileId || '';
+                document.getElementById('input_audio_cover_url').value = element.dataset.audioCoverUrl || '';
+            }
+
             // If ebook option, populate hidden inputs for Forge
             if (groupName === 'ebook_filename') {
                 document.getElementById('input_source_type').value = element.dataset.sourceType || '';
                 document.getElementById('input_source_path').value = element.dataset.sourcePath || '';
                 document.getElementById('input_source_id').value = element.dataset.sourceId || '';
+                document.getElementById('input_ebook_source').value = element.dataset.sourceType || '';
+                document.getElementById('input_ebook_source_id').value = element.dataset.sourceId || '';
             }
 
             validateForm();
@@ -856,11 +898,12 @@
             const ab = document.querySelector('input[name="audiobook_id"]:checked');
             const st = document.querySelector('input[name="storyteller_uuid"]:checked');
             const eb = document.querySelector('input[name="ebook_filename"]:checked');
+            const audioSource = document.getElementById('input_audio_source').value;
 
             const btn = document.getElementById('submitBtn');
             const msg = document.getElementById('validationMsg');
 
-            let hasAudio = !!ab;
+            let hasAudio = !!audioSource;
             // Valid text source if: 
             // 1. Storyteller UUID is selected AND NOT EMPTY
             // 2. OR Ebook Filename is selected
@@ -869,26 +912,21 @@
 
             let hasText = (stVal !== "") || (ebVal !== "");
 
-            if (hasAudio && hasText) {
+            if (hasText) {
                 btn.disabled = false;
                 btn.style.opacity = "1";
                 msg.style.display = "none";
             } else {
                 btn.disabled = true;
                 btn.style.opacity = "0.5";
-                if (hasAudio && !hasText) {
-                    msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
-                    msg.style.display = "block";
-                } else if (!hasAudio) {
-                    msg.textContent = "Please select an Audiobook";
-                    msg.style.display = "block";
-                }
+                msg.textContent = "Please select a text source (Storyteller or Standard Ebook)";
+                msg.style.display = "block";
             }
 
             // Forge Validation
             const forgeBtn = document.getElementById('forgeBtn');
             // Forge requires Audio + Standard Ebook (NOT Storyteller)
-            if (hasAudio && (ebVal !== "")) {
+            if (hasAudio && (audioSource === 'ABS' || audioSource === 'BookLore') && (ebVal !== "")) {
                 forgeBtn.disabled = false;
                 forgeBtn.style.opacity = "1";
             } else {
@@ -899,6 +937,13 @@
 
         // Initial check and setup
         document.addEventListener('DOMContentLoaded', () => {
+            const initialAb = document.querySelector('input[name="audiobook_id"]:checked');
+            if (initialAb) {
+                const label = initialAb.closest('.ab-option');
+                if (label) {
+                    selectItem(label, 'audiobook_id');
+                }
+            }
             const initialEb = document.querySelector('input[name="ebook_filename"]:checked');
             if (initialEb) {
                 const label = initialEb.closest('.eb-option');

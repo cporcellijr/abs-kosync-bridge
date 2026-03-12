@@ -1,162 +1,222 @@
 # Configuration
 
 > [!NOTE]
-> All configuration is managed via the **Web UI** at `/settings`.
-> Environment variables can be used for initial bootstrapping, but values set in the database (via UI) take precedence.
+> All configuration is managed through the **Web UI** at `/settings`.
+> Environment variables are mainly for first boot or advanced overrides. Once a value is saved in the UI, the database value takes precedence.
 
 ## Web UI Settings
 
-The most convenient way to manage configuration is via the **Settings** page in the Web UI. Changes made here are applied instantly (triggering a soft restart).
+The **Settings** page is the easiest way to manage the bridge. Saving settings restarts the app automatically and sends you back to the dashboard when it is ready.
 
 ### Split-Port Security (Optional)
 
-You can configure the system to listen on two separate ports:
+You can run the admin UI and the KOSync protocol on separate ports:
 
-1. **Primary Port (8080)**: Hosts the Admin Dashboard and all API routes. Keep this private/LAN-only.
-2. **KOSync Port**: Hosts *only* the KOSync protocol routes needed for KOReader devices. This is safe to expose to the internet.
+1. **Primary port (`8080`)**: Dashboard, Settings, logs, matcher, suggestions, and API routes.
+2. **KOSync port**: KOSync routes only. This is the one you can expose to the internet.
 
-To enable this mode, set the `KOSYNC_PORT` environment variable (e.g., `KOSYNC_PORT=5758`) and map it in Docker.
+To enable split-port mode, set `KOSYNC_PORT` and map the same port in Docker.
 
 ```yaml
 ports:
-  - "8080:5757"   # Admin Dashboard
-  - "5758:5758"   # Sync Protocol (Internet Safe)
+  - "8080:5757"
+  - "5758:5758"
 ```
 
 ### Integrations
 
-#### KOSync (KOReader)
+#### Audiobookshelf
 
-- **Server**: Your KOSync server URL (e.g., `https://koreader.mydomain.com/api/koreader`).
-- **Username**: Your KOSync username.
-- **Password**: Your KOSync password.
-- **Save Hash Method**: How KOReader calculates document integrity. Keep as default (`content`) unless you know what you're doing.
+Audiobookshelf remains the default audiobook source when a mapping is not explicitly using Booklore audio.
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Server URL | `ABS_SERVER` | empty | Required. |
+| API Token | `ABS_KEY` | empty | Required. |
+| Library ID | `ABS_LIBRARY_ID` | empty | Used by the matcher and search scoping. |
+| Auto-add Collection | `ABS_COLLECTION_NAME` | `Synced with KOReader` | Collection used for matched audiobooks. |
+| Progress Offset | `ABS_PROGRESS_OFFSET_SECONDS` | `0` | Rewinds progress written back to ABS by this many seconds. |
+| Limit Search to Configured Library | `ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID` | `false` | In the UI this is a checkbox. Direct env usage can also be set to a library ID string. |
+
+#### KOSync / KOReader
+
+Use this when you want KOReader devices to sync directly with the bridge.
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `KOSYNC_ENABLED` | `false` | Turns on KOSync support. |
+| Target KOSync URL | `KOSYNC_SERVER` | empty | External server URL, or the built-in bridge URL if you use the internal server. |
+| Username | `KOSYNC_USER` | empty | KOReader username. |
+| Password | `KOSYNC_KEY` | empty | KOReader password. |
+| Hash Method | `KOSYNC_HASH_METHOD` | `content` | `content` is safest. `filename` is faster but less reliable. |
+| Use Percentage from Server | `KOSYNC_USE_PERCENTAGE_FROM_SERVER` | `false` | Uses raw percentage instead of text matching. |
+| Split-Port Listener | `KOSYNC_PORT` | empty | Optional dedicated KOSync port for internet-safe exposure. |
 
 #### Storyteller
 
-- **Storyteller URL**: URL to your Storyteller instance.
-- **Storyteller Username / Password**: Credentials for your Storyteller admin account.
-- **Sync Mode**: REST API only. The bridge communicates exclusively via the Storyteller API.
-- **Storyteller Assets Path (Optional)**: Root path containing Storyteller `assets/`.
-  - Expected structure: `{assets_root}/assets/{book_title}/transcriptions/`
-  - If your Docker volume is `/path/to/storyteller/assets:/storyteller/assets`, set this value to `/storyteller`.
-  - This setting is optional and can be configured in the Web UI (no compose env var required).
-- **Storyteller Backfill**: Settings includes a maintenance action to scan all Storyteller-linked books, ingest available transcript JSON files, and rebuild alignment maps without re-running SMIL/Whisper.
-- **Forge Staging Directory (Optional env)**: `PROCESSING_DIR` controls temporary Forge staging before files are atomically presented to Storyteller.
-  - Default is `/tmp`, so no dedicated `PROCESSING_DIR` volume mount is required.
+The bridge talks to Storyteller through the REST API only.
 
-> [!NOTE]
-> The legacy method of mapping a local Storyteller database (`/storyteller_data`) has been removed. The bridge now communicates strictly via the Storyteller API.
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `STORYTELLER_ENABLED` | `false` | Turns on Storyteller support. |
+| API URL | `STORYTELLER_API_URL` | empty | Base URL for Storyteller. |
+| Username | `STORYTELLER_USER` | empty | Storyteller username. |
+| Password | `STORYTELLER_PASSWORD` | empty | Storyteller password. |
+| Collection Name | `STORYTELLER_COLLECTION_NAME` | `Synced with KOReader` | Collection used when linked books are added to Storyteller. |
+| Library Path | `STORYTELLER_LIBRARY_DIR` | `/storyteller_library` | Where Forge writes Storyteller-ready books. |
+| Assets Path | `STORYTELLER_ASSETS_DIR` | empty | Root path that contains `/assets/{title}/transcriptions`. |
+| Poll Mode | `STORYTELLER_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls Storyteller separately. |
+| Poll Interval | `STORYTELLER_POLL_SECONDS` | `45` | Used when Poll Mode is `custom`. |
 
-#### Hardcover.app
+Storyteller notes:
 
-- **Enable**: Toggle `HARDCOVER_ENABLED` to `true`.
-- **API Token**: Your personal API token from [hardcover.app/account/api](https://hardcover.app/account/api).
-- **Behavior**: Write-only tracking. The bridge auto-matches books by title/author and updates your reading progress and status (e.g., marks as "Finished" when complete).
-
-#### Telegram Notifications
-
-- **Enable**: Toggle `TELEGRAM_ENABLED` to `true`.
-- **Bot Token**: Your Telegram bot token (from [@BotFather](https://t.me/botfather)).
-- **Chat ID**: The chat ID to send messages to (your user ID or a group ID).
-- **Min Log Level**: The minimum severity level to forward (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). Default: `ERROR`.
-
-#### Shelfmark
-
-- **Shelfmark URL**: URL to your Shelfmark instance. When configured, a Shelfmark icon appears in the navigation bar for quick access.
+- If you mount `/path/to/storyteller/assets:/storyteller/assets`, set **Storyteller Assets Path** to `/storyteller`.
+- Storyteller timing data stays the preferred alignment source whenever valid transcript assets are available.
+- **Settings -> Storyteller Backfill** rechecks existing Storyteller-linked books and rebuilds their alignment data without rerunning Whisper.
 
 #### Booklore
 
-- **Booklore URL**: URL to your Booklore/Calibre-Web instance.
-- **API Key**: For managing shelves/collections.
-- **Target Library**: (Optional) To prevent cross-library contamination, you can specify the Booklore Library ID to use.
+Booklore now supports both ebook sync and Booklore audiobook-backed mappings.
 
-#### CWA (Calibre-Web Automated)
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `BOOKLORE_ENABLED` | `false` | Turns on Booklore support. |
+| Server URL | `BOOKLORE_SERVER` | empty | Booklore base URL. |
+| Username | `BOOKLORE_USER` | empty | Booklore username. |
+| Password | `BOOKLORE_PASSWORD` | empty | Booklore password. |
+| Shelf Name | `BOOKLORE_SHELF_NAME` | `Kobo` | Shelf used for matched ebooks. |
+| Library ID | `BOOKLORE_LIBRARY_ID` | empty | Optional library restriction. |
+| Poll Mode | `BOOKLORE_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls Booklore separately. |
+| Poll Interval | `BOOKLORE_POLL_SECONDS` | `300` | Used when Poll Mode is `custom`. |
 
-- **CWA Server URL**: URL to your Calibre-Web OPDS feed (e.g. `http://my-calibre-web/opds`).
-- **CWA Username/Password**: Credentials for Calibre-Web.
-- **Enabled**: Set to `true` to enable.
-- **Note**: CWA allows the bridge to download ebooks directly from Calibre-Web for Forge/Sync without needing a local `/books` volume.
+Booklore notes:
 
-#### Audiobookshelf
+- Match, Batch Match, Suggestions, and Forge can now use **Booklore audiobooks** as the audio source.
+- The dashboard shows **BL Audio** progress when a mapping is driven by Booklore audio.
+- **Settings -> Refresh Booklore Cache** forces a fresh cache rebuild after imports, removals, or large metadata changes.
 
-- **ABS Server URL**: Your ABS instance.
-- **ABS API Token**: Your secret token.
-- **Limit Search to Library**: (Optional) If set, the bridge will only search for audiobooks within this specific ABS Library ID.
+Advanced Booklore cache tuning:
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Max Detail Fetches per Refresh | `BOOKLORE_MAX_DETAIL_FETCHES_PER_REFRESH_CYCLE` | `1200` | Caps how many detailed records a refresh can hydrate in one pass. |
+| Search Hit Refresh Min Age | `BOOKLORE_SEARCH_HIT_REFRESH_MIN_AGE` | `1800` | Minimum cache age before a successful search can trigger a quick validation refresh. |
+| Search Hit Refresh Cooldown | `BOOKLORE_SEARCH_HIT_REFRESH_COOLDOWN` | `600` | Cooldown between quick validation refreshes after search hits. |
+| Login Retry Delay | `BOOKLORE_LOGIN_RETRY_DELAY_SECONDS` | `1.1` | Delay before retrying duplicate refresh-token login conflicts. |
+| Login Max Attempts | `BOOKLORE_LOGIN_MAX_ATTEMPTS` | `2` | Maximum login attempts before failing. |
+
+#### Calibre-Web Automated (CWA)
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `CWA_ENABLED` | `false` | Turns on OPDS / CWA ebook search and download. |
+| Server URL | `CWA_SERVER` | empty | CWA base URL. |
+| Username | `CWA_USERNAME` | empty | Optional username. |
+| Password | `CWA_PASSWORD` | empty | Optional password. |
+
+#### Hardcover.app
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `HARDCOVER_ENABLED` | `false` | Turns on Hardcover updates. |
+| API Token | `HARDCOVER_TOKEN` | empty | Personal API token from Hardcover. |
+
+#### Telegram Notifications
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `TELEGRAM_ENABLED` | `false` | Turns on Telegram notifications. |
+| Bot Token | `TELEGRAM_BOT_TOKEN` | empty | BotFather token. |
+| Chat ID | `TELEGRAM_CHAT_ID` | empty | Target user or group ID. |
+| Min Log Level | `TELEGRAM_LOG_LEVEL` | `ERROR` | Lowest log severity that gets forwarded. |
+
+#### Shelfmark
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Shelfmark URL | `SHELFMARK_URL` | empty | Adds the Shelfmark shortcut when configured. |
+
+### Suggestions
+
+The Suggestions page is a review workspace, not an auto-linker. It always waits for your approval before creating mappings.
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable Suggestions | `SUGGESTIONS_ENABLED` | `false` | Enables the Suggestions page and background suggestion discovery. |
+
+Suggestions notes:
+
+- A normal scan reuses cached results so repeat scans are faster.
+- **Full Refresh** rescans the whole unmatched library from scratch.
+- Suggestions can queue ABS-backed links, Booklore-audio links, ebook-only links, and Storyteller-only links.
 
 ### Transcription Settings
 
-Configure the engine used for audio-to-text alignment.
-
 > [!TIP]
-> For books with Storyteller forced-alignment transcript files, that source is prioritized over SMIL and Whisper.
+> Storyteller transcript assets are preferred over SMIL and Whisper whenever they are available and valid.
 
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| **Provider** | `local` | `local` (faster-whisper), `deepgram`, or `whisper_cpp` (via server). |
-| **Whisper Model** | `tiny` | Model size (`tiny`, `base`, `small`, `medium`, `large`). |
-| **Whisper Device** | `auto` | `auto`, `cpu`, or `cuda`. See [GPU Support](#gpu-support-optional) below. |
-| **Compute Type** | `auto` | Precision (`int8`, `float16`, `float32`). Use `float16` for GPU. |
-
-#### Deepgram
-
-- **API Key**: Your Deepgram API Key.
-- **Model**: Specific Deepgram model tier (e.g., `nova-2`).
-
-#### WhisperCPP
-
-- **Server URL**: URL to your running `whisper.cpp` server (e.g. `http://my-whisper-server:8080/inference`).
-- **Model**: Now controls the `model` parameter sent to the server (e.g. `small`, `medium`).
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Provider | `TRANSCRIPTION_PROVIDER` | `local` | `local`, `deepgram`, or `whispercpp`. |
+| Whisper Model | `WHISPER_MODEL` | `tiny` | Local Whisper model size. |
+| Whisper Device | `WHISPER_DEVICE` | `auto` | `auto`, `cpu`, or `cuda`. |
+| Whisper Compute Type | `WHISPER_COMPUTE_TYPE` | `auto` | Precision mode for local Whisper. |
+| Whisper.cpp URL | `WHISPER_CPP_URL` | empty | URL to your Whisper.cpp HTTP endpoint. |
+| Deepgram API Key | `DEEPGRAM_API_KEY` | empty | Deepgram API key. |
+| Deepgram Model | `DEEPGRAM_MODEL` | `nova-2` | Deepgram model tier. |
+| SMIL Validation Threshold | `SMIL_VALIDATION_THRESHOLD` | `60` | Minimum token match percentage for accepting SMIL timing data. |
 
 ### Sync Tuning
 
-Advanced settings to fine-tune the synchronization logic.
-
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| **Sync Period (Minutes)** | `5` | How often the background sync runs. |
-| **ABS Delta (Seconds)** | `60` | Minimum progress change (in seconds) required to trigger an update *from* ABS. |
-| **KoSync Delta (%)** | `0.5` | Minimum progress change (0.5%) required to trigger an update *from* KOReader. |
-| **KoSync Delta (Words)** | `400` | Minimum word-count change required to trigger a KOSync update (used alongside the % delta). |
-| **Fuzzy Match Threshold** | `0.80` | (0.0-1.0) Confidence required for text matching (80%). |
-| **Job Retries** | `5` | How many times to retry failed transcription jobs. |
-| **Job Retry Delay (Mins)** | `15` | Minutes to wait before retrying a failed transcription job. |
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Sync Period (Minutes) | `SYNC_PERIOD_MINS` | `5` | Main background sync interval. |
+| Min ABS Change (Seconds) | `SYNC_DELTA_ABS_SECONDS` | `60` | Minimum ABS timestamp change before it counts as real movement. |
+| Min Ebook Change (%) | `SYNC_DELTA_KOSYNC_PERCENT` | `0.5` | Minimum ebook percentage change before it counts as real movement. |
+| Min Ebook Change (Words) | `SYNC_DELTA_KOSYNC_WORDS` | `400` | Extra guardrail for ebook movement. |
+| Client Diff Threshold (%) | `SYNC_DELTA_BETWEEN_CLIENTS_PERCENT` | `0.5` | Minimum gap between clients before propagation begins. |
+| Fuzzy Match Threshold | `FUZZY_MATCH_THRESHOLD` | `80` | Matching threshold used by several book and text lookups. |
+| Job Max Retries | `JOB_MAX_RETRIES` | `5` | Retry count for failed background jobs. |
+| Job Retry Delay (Minutes) | `JOB_RETRY_DELAY_MINS` | `15` | Delay before retrying failed jobs. |
+| Cross-Format Deadband (Seconds) | `CROSSFORMAT_DEADBAND_SECONDS` | `2.0` | Prevents tiny cross-format gaps from causing leader flips. |
+| Cross-Format Roundtrip Tolerance | `CROSSFORMAT_ROUNDTRIP_TOLERANCE_CHARS` | `2` | Locator roundtrip tolerance used when stabilizing cross-format locators. |
 
 ### Advanced Toggles
 
-- **Sync ABS Ebook**: If enabled, also syncs progress to the *ebook* item in ABS (if you have both mapped). This allows you to read the ebook in the ABS web reader and have that progress sync to KOReader.
-- **Use KOSync Percentage from Server**: If enabled, uses the raw percentage value returned by the KOSync server instead of performing text-based position matching. Useful if text matching is unreliable for a specific book.
-- **XPath Fallback**: Strategy for handling position lookups when exact paths fail.
-- **Reprocess on Clear**: (`REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT`) If enabled, clearing a mapping in the UI will also delete the alignment cache, forcing a full re-transcription next time.
-- **Instant Sync**: (`INSTANT_SYNC_ENABLED`) Controls whether event-driven instant sync is active. When disabled, the ABS Socket.IO listener and KoSync PUT trigger are both turned off — sync falls back to the regular background poll only.
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Sync ABS Ebook | `SYNC_ABS_EBOOK` | `false` | Also syncs to the ABS ebook item when present. |
+| XPath Fallback | `XPATH_FALLBACK_TO_PREVIOUS_SEGMENT` | `false` | Tries the previous segment if a locator lookup fails. |
+| Reprocess on Clear | `REPROCESS_ON_CLEAR_IF_NO_ALIGNMENT` | `true` | Rebuilds missing data after resetting progress when needed. |
+| Instant Sync | `INSTANT_SYNC_ENABLED` | `true` | Turns ABS playback-triggered sync and KOReader push-triggered sync on or off together. |
+| ABS Socket Listener | `ABS_SOCKET_ENABLED` | `true` | Enables the ABS socket listener used by instant sync. |
+| ABS Socket Debounce | `ABS_SOCKET_DEBOUNCE_SECONDS` | `30` | Wait time after ABS playback activity before syncing. |
 
-### Per-Client Polling
+### Paths and System
 
-By default, Storyteller and Booklore are only checked during the global sync cycle. If you want the bridge to watch those clients more (or less) frequently than everything else, set their poll mode to **Custom**.
-
-| Setting | Default | Description |
-| :--- | :--- | :--- |
-| **Storyteller Poll Mode** | `global` | `global` uses the normal sync cycle. `custom` polls at its own interval. |
-| **Storyteller Poll Interval** | `45s` | How often (in seconds) to check Storyteller for position changes when in `custom` mode. |
-| **Booklore Poll Mode** | `global` | `global` uses the normal sync cycle. `custom` polls at its own interval. |
-| **Booklore Poll Interval** | `300s` | How often (in seconds) to check Booklore for position changes when in `custom` mode. |
-
-> [!NOTE]
-> Per-client polling only watches for changes *from* that client and triggers a targeted sync when one is detected. It is much lighter than a full global sync cycle.
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Timezone | `TZ` | `America/New_York` | Container timezone. |
+| Log Level | `LOG_LEVEL` | `INFO` | Application log level. |
+| Data Directory | `DATA_DIR` | `/data` | Database, cache, and working state. |
+| Books Directory | `BOOKS_DIR` | `/books` | Local ebook library path inside the container. |
+| Audiobooks Directory | `AUDIOBOOKS_DIR` | `/audiobooks` | Optional local audiobook path. |
+| Storyteller Library Directory | `STORYTELLER_LIBRARY_DIR` | `/storyteller_library` | Forge destination path. |
+| Storyteller Assets Directory | `STORYTELLER_ASSETS_DIR` | empty | Optional transcript asset root. |
+| Forge Processing Directory | `PROCESSING_DIR` | `/tmp` | Temporary staging area before Forge moves files into Storyteller. |
+| Ebook Cache Size | `EBOOK_CACHE_SIZE` | `3` | Parsed-ebook cache size. |
 
 ---
 
 ## GPU Support (Optional)
 
-For significantly faster transcription (when using `local` provider), you can enable NVIDIA GPU acceleration.
+For faster local transcription, you can give the container access to an NVIDIA GPU.
 
 ### 1. Install NVIDIA Container Toolkit
 
-Follow the official guide to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for your host OS.
+Follow the official guide for the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
 
 ### 2. Update Docker Compose
-
-Uncomment/Add the `deploy` section to your `docker-compose.yml`:
 
 ```yaml
 services:
@@ -171,10 +231,11 @@ services:
               capabilities: [gpu]
 ```
 
-### 3. Configure Settings
+### 3. Configure the bridge
 
-In the Web UI Settings:
+In **Settings**:
 
-1. Set **Whisper Device** to `cuda`.
-2. Set **Whisper Compute Type** to `float16`.
-3. Set **Whisper Model** to `small` or `medium` (GPUs can handle larger models easily).
+1. Set **Transcription Provider** to `local`.
+2. Set **Whisper Device** to `cuda`.
+3. Set **Whisper Compute Type** to `float16`.
+4. Use a larger model such as `small` or `medium` if your GPU can handle it.

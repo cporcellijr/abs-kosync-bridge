@@ -127,3 +127,39 @@ def test_storyteller_update_position_call_shape_preserved():
     assert isinstance(args[2], LocatorResult)
     assert args[2].href == "chapter.xhtml"
 
+
+def test_storyteller_update_prefers_storyteller_epub_remap_when_text_available():
+    storyteller_api = MagicMock()
+    storyteller_api.update_position.return_value = True
+    ebook_parser = MagicMock()
+    ebook_parser.resolve_book_path.return_value = "/tmp/storyteller_st-uuid-9.epub"
+    ebook_parser.find_text_location.return_value = LocatorResult(
+        percentage=0.61,
+        href="OEBPS/Text/part0083.xhtml",
+        fragment="x_c079-sentence123",
+    )
+    client = StorytellerSyncClient(storyteller_api, ebook_parser)
+
+    book = SimpleNamespace(
+        abs_id="abs-9",
+        abs_title="Test",
+        ebook_filename="original.epub",
+        original_ebook_filename="original.epub",
+        storyteller_uuid="st-uuid-9",
+    )
+    locator = LocatorResult(percentage=0.61, href="orig.xhtml", fragment="orig-frag")
+    request = UpdateProgressRequest(locator_result=locator, txt="anchor text from leader")
+
+    result = client.update_progress(book, request)
+
+    assert result.success is True
+    ebook_parser.find_text_location.assert_called_once_with(
+        "storyteller_st-uuid-9.epub",
+        "anchor text from leader",
+        hint_percentage=0.61,
+    )
+    args = storyteller_api.update_position.call_args[0]
+    assert args[0] == "st-uuid-9"
+    assert args[2].href == "OEBPS/Text/part0083.xhtml"
+    assert args[2].fragment == "x_c079-sentence123"
+

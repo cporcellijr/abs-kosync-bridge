@@ -23,6 +23,7 @@
 ## ✨ Key Features
 
 - **Five-Way Sync**: Syncs Audiobookshelf, KOReader, Storyteller, Booklore, and Hardcover.
+- **Flexible Match Flows**: Link ABS or Booklore audiobooks, or create ebook-only links when you only want text sync.
 - **Smart Alignment Sources**: Uses Storyteller forced-alignment transcripts when available, then SMIL, then Whisper fallback.
 - **Web UI**: Full management dashboard for tracking syncs and matching books.
 - **Library Suggestions Page**: Scan your library for likely audiobook + ebook pairs, review them, and queue matches in bulk.
@@ -37,19 +38,22 @@
 ```yaml
 services:
   abs-kosync:
+    container_name: abs_kosync
     image: ghcr.io/cporcellijr/abs-kosync-bridge:latest
+    restart: unless-stopped
     ports:
       - "8080:5757"
-      # - "5758:5758"  # Optional: Expose separate sync-only port (requires KOSYNC_PORT=5758)
+      # - "5758:5758"  # Optional: expose the sync-only port when using KOSYNC_PORT=5758
     environment:
       - TZ=America/New_York
-      # - KOSYNC_PORT=5758  # Optional: Enable split-port mode for security
-      # NOTE: All configuration is managed in the Web UI.
+      - LOG_LEVEL=INFO
+      # - KOSYNC_PORT=5758  # Optional: enable split-port mode
+      # Configure ABS, KOSync, Booklore, Storyteller, and other services in the Web UI.
     volumes:
       - ./data:/data
-      - /books:/books
-      # - /path/to/storyteller/library:/storyteller_library # Optional: For Forge
-      # - /path/to/storyteller/assets:/storyteller/assets # Optional: Storyteller transcript ingestion
+      - /path/to/ebooks:/books
+      # - /path/to/storyteller/library:/storyteller_library  # Optional: Forge output
+      # - /path/to/storyteller/assets:/storyteller/assets    # Optional: Storyteller transcript ingest
 ```
 
 For full installation instructions, checking logs, and advanced configuration, please visit the **[Documentation Site](https://cporcellijr.github.io/abs-kosync-bridge/)**.

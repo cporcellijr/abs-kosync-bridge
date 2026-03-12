@@ -219,6 +219,47 @@ def test_storyteller_ingest_removes_stale_canonical_files(tmp_path, monkeypatch)
     assert not (target_dir / "00000-00003.json").exists()
 
 
+def test_storyteller_ingest_chapterless_mode_builds_manifest_from_transcripts(tmp_path, monkeypatch):
+    assets_root = tmp_path / "storyteller_assets"
+    data_dir = tmp_path / "data"
+    transcriptions_dir = assets_root / "assets" / "Book Three" / "transcriptions"
+    transcriptions_dir.mkdir(parents=True, exist_ok=True)
+
+    chapter_one = {
+        "transcript": "chapter one text",
+        "wordTimeline": [
+            {"startTime": 0.0, "endTime": 4.0},
+            {"startTime": 4.0, "endTime": 5.0},
+        ],
+    }
+    chapter_two = {
+        "transcript": "chapter two text",
+        "wordTimeline": [
+            {"startTime": 0.0, "endTime": 2.0},
+            {"startTime": 2.0, "endTime": 3.0},
+        ],
+    }
+    (transcriptions_dir / "00001-00001.json").write_text(json.dumps(chapter_one), encoding="utf-8")
+    (transcriptions_dir / "00002-00001.json").write_text(json.dumps(chapter_two), encoding="utf-8")
+
+    monkeypatch.setenv("STORYTELLER_ASSETS_DIR", str(assets_root))
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+
+    manifest_path = ingest_storyteller_transcripts("ebook-hash-1", "Book Three", [])
+    assert manifest_path is not None
+
+    manifest_payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    assert manifest_payload["chapter_count"] == 2
+    assert manifest_payload["duration"] == 8.0
+    assert [c["file"] for c in manifest_payload["chapters"]] == ["00000-00001.json", "00000-00002.json"]
+    assert manifest_payload["chapters"][0]["start"] == 0.0
+    assert manifest_payload["chapters"][0]["end"] == 5.0
+    assert manifest_payload["chapters"][1]["start"] == 5.0
+    assert manifest_payload["chapters"][1]["end"] == 8.0
+    assert manifest_payload["chapters"][0]["text_len"] > 0
+    assert manifest_payload["chapters"][1]["text_len_utf16"] > 0
+
+
 def test_transcriber_format_dispatch(tmp_path):
     transcriber = AudioTranscriber(tmp_path, MagicMock(), MagicMock())
 

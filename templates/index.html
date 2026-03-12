@@ -17,6 +17,9 @@
     {% if mapping.states.booklore is defined and mapping.states.booklore.percentage %}
     {% set _ = progress_values.append(mapping.states.booklore.percentage) %}
     {% endif %}
+    {% if mapping.states.bookloreaudio is defined and mapping.states.bookloreaudio.percentage %}
+    {% set _ = progress_values.append(mapping.states.bookloreaudio.percentage) %}
+    {% endif %}
     {% if mapping.states.kosync is defined and mapping.states.kosync.percentage %}
     {% set _ = progress_values.append(mapping.states.kosync.percentage) %}
     {% endif %}
@@ -58,6 +61,14 @@
             </div>
 
             <div class="book-author">{{ mapping.abs_author or mapping.ebook_filename }}</div>
+            {% if mapping.audio_source %}
+            <div class="mapping-meta">
+                <span class="mapping-badge">{{ mapping.audio_source }} Audio</span>
+                {% if mapping.audio_url %}
+                <a href="{{ mapping.audio_url }}" target="_blank" rel="noopener noreferrer" class="mapping-link">Open Audio</a>
+                {% endif %}
+            </div>
+            {% endif %}
 
             {# Unified progress bar #}
             <div class="unified-progress">
@@ -75,7 +86,20 @@
             {# Service progress - always visible #}
             {# [START REPLACEMENT BLOCK for service-progress] #}
             <div class="service-progress">
-                {% if integrations.abs %}
+                {% if integrations.bookloreaudio and mapping.audio_source == 'BookLore' and mapping.audio_url %}
+                <a href="{{ mapping.audio_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
+                    title="Open BookLore audiobook">
+                    <img src="/static/booklore.png" alt="BLA" class="service-icon">
+                    <span class="service-name">BL Audio</span>
+                    {% if mapping.states.bookloreaudio is defined %}
+                    <span class="service-value">{{ '%.1f' | format(mapping.states.bookloreaudio.percentage|default(0)) }}%</span>
+                    {% else %}
+                    <span class="service-value">0.0%</span>
+                    {% endif %}
+                </a>
+                {% endif %}
+
+                {% if integrations.abs and mapping.sync_mode != 'ebook_only' and mapping.abs_url %}
                 <a href="{{ mapping.abs_url }}" target="_blank" rel="noopener noreferrer" class="service-item"
                     title="Open in Audiobookshelf">
                     <img src="/static/audiobookshelf.png" alt="ABS" class="service-icon">
@@ -107,9 +131,9 @@
                 </div>
                 {% endif %}
 
-                {# [CHANGED] Only show Storyteller if state exists, UUID link exists, or legacy link needs fix #}
+                {# [CHANGED] Show Storyteller for active links, legacy fixes, and ebook-only rows (link affordance). #}
                 {% if integrations.storyteller and (mapping.states.storyteller is defined or
-                mapping.storyteller_legacy_link or mapping.storyteller_uuid) %}
+                mapping.storyteller_legacy_link or mapping.storyteller_uuid or mapping.sync_mode == 'ebook_only') %}
                 <div class="service-item" title="Storyteller">
                     <img src="/static/storyteller.png" alt="ST" class="service-icon">
                     <span class="service-name">Storyteller</span>
@@ -124,6 +148,12 @@
                         }}%</span>
                     {% elif mapping.storyteller_uuid %}
                     <span class="service-value" title="Linked via UUID">0.0%</span>
+                    {% elif mapping.sync_mode == 'ebook_only' %}
+                    <span class="service-value cursor-pointer" style="color: #4FC3F7;"
+                        onclick='openStorytellerModal({{ mapping.abs_id|tojson }}, {{ mapping.abs_title|tojson }})'
+                        title="Link Storyteller">
+                        Link
+                    </span>
                     {% endif %}
                 </div>
                 {% endif %}
@@ -541,6 +571,35 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        .mapping-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .mapping-badge {
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            background: rgba(79, 195, 247, 0.18);
+            color: #81d4fa;
+        }
+
+        .mapping-link {
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 11px;
+            text-decoration: none;
+        }
+
+        .mapping-link:hover {
+            color: #ffffff;
         }
 
         /* Status Badge */
@@ -1504,7 +1563,8 @@
 
                 {% if shelfmark_url and (get_bool('SHELFMARK_ENABLED') or (get_val('SHELFMARK_URL') != '' and
                 get_val('SHELFMARK_ENABLED') == '')) %}
-                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool">
+                <a href="/shelfmark" class="nav-icon-link" title="Shelfmark Tool" target="_blank"
+                    rel="noopener noreferrer">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"
                         stroke-linejoin="round">
                         <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>

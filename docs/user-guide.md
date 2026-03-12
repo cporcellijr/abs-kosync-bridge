@@ -1,227 +1,233 @@
 # User Guide
 
-This guide covers the features and workflows available in the ABS-KoSync Enhanced Web UI.
+This guide covers the main workflows in the ABS-KoSync Enhanced web UI.
 
 ## Dashboard
 
-The **Dashboard** is your command center. It shows:
+The **Dashboard** is the main status view for your library.
 
-- **Active Syncs**: A list of all books currently being tracked.
-- **Sync Status**: Real-time progress bars for each book.
-- **Recent Activity**: A log of the latest sync actions.
-- **Single Match**: Manually link an audiobook to an ebook.
-- **Batch Match**: Switch to the Batch Matcher view.
-- **Library Suggestions**: Scan your library for likely pairs and review them quickly.
+It shows:
+
+- **Active Syncs** for every tracked mapping
+- **Unified Progress** across all connected clients
+- **Source badges** so you can tell whether the audio side is coming from Audiobookshelf or Booklore
+- **Direct links** into supported services, including Booklore audio when a mapping uses it
+- Quick access to **Add Book**, **Batch Match**, **Suggestions**, **Forge**, **Settings**, and **Logs**
+
+If a book is significantly out of sync, the card is highlighted so you can spot it quickly.
 
 ---
 
 ## Sync Modes
 
-When creating a mapping, the system operates in one of two modes:
+Each mapping runs in one of two modes.
 
-### 1. Audiobook Sync (Default)
+### 1. Audiobook Sync
 
-Links an **Audiobook** in ABS to an **Ebook** in KOReader (and other platforms).
+This is the normal mode when a mapping has an audiobook source.
 
-- **Mechanism**: Transcription-based alignment.
-- **Use Case**: Listening on phone, reading on Kindle/Kobo.
-- **Process**:
-  - If Storyteller forced-alignment transcripts are available, they are ingested and used first.
-  - Otherwise, the system falls back to SMIL extraction, then Whisper transcription.
+- The audio source can be **Audiobookshelf** or **Booklore**.
+- The text side can include a standard ebook, a Storyteller artifact, or both.
+- The bridge prefers Storyteller transcript timing when available, then falls back to SMIL, then Whisper.
+
+Use this when you want listening and reading progress to stay aligned.
 
 ### 2. Ebook-Only Sync
 
-Links your ebook status across platforms.
+This mode tracks reading progress without attaching an audiobook source.
 
-- **Mechanism**: Direct percentage/text position sync.
-- **Triggers**:
-  - **KOReader**: Instant — syncs the moment you close or pause reading.
-  - **Audiobookshelf**: Near-instant (~30s) during audiobook playback.
-  - **Booklore/Others**: Picked up on the regular background sync (every ~5 mins).
-- **Supported Clients**:
-  - **KOReader** (via Internal KOSync Server)
-  - **Booklore** (Requires `BOOKLORE_ENABLED=true`)
-  - **ABS Ebook** (Requires `SYNC_ABS_EBOOK=true`)
-- **Hardcover**: Updates Hardcover.app presence (if configured).
+- Create it by leaving audio on **None / Skip** in **Add Book**.
+- You can still link a standard ebook, a Storyteller title, or both.
+- Ebook-only links skip audiobook preparation work, so they activate faster.
+
+Use this when you only want reading sync between KOReader, Booklore, Storyteller, and optional ABS ebook progress.
 
 ---
 
 ## Real-Time Sync
 
-By default, the bridge checks all your clients for progress changes every 5 minutes. **Real-time sync** makes this happen much faster — within seconds instead of minutes.
+The bridge still runs a normal background sync every 5 minutes by default, but it can also react much faster when supported.
 
-### How It Works
+### Instant triggers
 
-There are two ways progress can sync instantly:
+1. **Audiobookshelf playback**: when playback changes in Audiobookshelf, the bridge can sync shortly after the activity settles.
+2. **KOReader push**: if you use the built-in KOSync bridge, KOReader can push progress directly to the bridge.
 
-1. **Audiobook Playback** — When you listen to an audiobook in Audiobookshelf (web player, mobile app, etc.), the bridge detects the playback activity automatically. Once you stop or pause for about 30 seconds, it syncs your position to all your other platforms right away.
+### Per-client polling
 
-2. **KOReader Reading** — If you use the built-in KoSync server (configured in Settings), KOReader sends your reading position to the bridge the moment you close a book or turn the page. The bridge then pushes that position to all your other clients immediately.
+Storyteller and Booklore can also use their own polling intervals:
 
-> [!NOTE]
-> The regular 5-minute background sync still runs as a safety net. Real-time sync just adds faster updates on top of it.
+- **Global** uses the normal background cycle.
+- **Custom** lets that client be checked on its own schedule.
 
-### Disabling Instant Sync
-
-If you prefer to rely solely on the background poll (e.g., to reduce network activity), you can turn off instant sync entirely from **Settings → Sync Behavior → Instant Sync**. This disables the ABS socket listener and the KoSync push trigger. The global poll cycle continues as normal.
-
-### Per-Client Polling (Storyteller & Booklore)
-
-By default, Storyteller and Booklore are only checked during the global sync cycle. If you make changes directly in one of those apps and want the bridge to notice faster, you can configure a **custom poll interval** for that client under **Settings → Sync Behavior → Per-Client Polling**.
-
-Set the mode to **Custom** and choose how often (in seconds) the bridge should check that client for position changes. Only books with an active mapping are checked, and a full sync is triggered only when a real change is detected — so the overhead is minimal.
+This is useful when you often read directly in Storyteller or Booklore and want the bridge to notice sooner.
 
 ---
 
-## Matcher
+## Add Book
 
-The **Matcher** is where you link an Audiobookshelf audiobook to its corresponding text format. The new **3-Column Interface** makes it easy to select the best source for your needs.
+**Add Book** is the main manual linking tool.
 
-### 1. The 3-Step Flow
+### Step 1: Choose audio
 
-#### Step 1: Select Audiobook (Required)
+You can choose:
 
-First, search for your audiobook. The system queries your ABS library. Select the correct title to proceed.
+- An **Audiobookshelf audiobook**
+- A **Booklore audiobook**
+- **None / Skip** for an ebook-only link
 
-#### Step 2: Storyteller Link (Optional)
+The source badge on each card tells you where the audiobook came from.
 
-If you use **Storyteller**, the system will try to find a matching "Artifact" (the processed ebook) in your Storyteller library.
+### Step 2: Choose Storyteller (optional)
 
-- **Match Found**: Select the card to link it via its precise UUID.
-- **No Match/Incorrect**: Select **"None - Do not link"**. This tells the system to ignore Storyteller for this book and use the standard ebook instead.
+If Storyteller is configured, you can also link a Storyteller title.
 
-> [!TIP]
-> **Tri-Link Feature**: You can link *both* a Storyteller Artifact (for voice-synced reading) AND a standard Retail EPUB (for lightweight reading on other devices). The progress will sync between all three!
+- Pick the Storyteller card when you want read-along support.
+- Leave it on **None / Skip** if you only want the standard ebook.
 
-#### Step 3: Select Standard Ebook (Fallback)
+### Step 3: Choose the standard ebook
 
-Select the standard EPUB file you want to use for regular sync. The system searches multiple sources:
+The bridge can pull ebook choices from:
 
-1. **ABS Direct**: Checks if the Audiobook item in ABS already contains an EPUB file.
-2. **Booklore**: Checks your curated metadata database.
-3. **CWA**: Searches your Calibre-Web Automated OPDS feed.
-4. **ABS Search**: Searches other ABS libraries for a matching title.
-5. **Filesystem**: Scans your local `/books` directory.
+1. Audiobookshelf ebook files
+2. Booklore
+3. CWA
+4. Local `/books` files
 
-**Source Badges**: Look for the colored badges on ebook cards to know where the file is coming from (e.g., `BOOKLORE`, `ABS`, `CWA`, `LOCAL`).
+### Final actions
 
-### Creating the Mapping
+- **Create Mapping** creates the link immediately.
+- **Forge & Match** stages the book for Storyteller processing first, then finishes the link when Forge completes.
 
-Once you've made your selections, click **Create Mapping**. The system will download any necessary files (from CWA/ABS) and begin the alignment process.
-
-If Storyteller transcript files exist in your configured assets path, the mapping uses those directly and skips SMIL/Whisper for that book.
-
-### Batch Match
-
-For users with large libraries, the **Batch Matcher** speeds up the process.
-
-1. **Queue**: Add multiple books to the matching queue.
-2. **Auto-Suggest**: The system will attempt to find the best matching EPUB for each audiobook based on filename similarity.
-3. **Confirm**: Review the suggestions and confirm them in bulk.
+If you skip audio, **Create Mapping** makes an ebook-only link instead.
 
 ---
 
-## Forge (Storyteller Integration)
+## Batch Match
 
-The **Forge** is a powerful tool designed to prepare "Synced Books" for **Storyteller**. It handles the complex file management required to get audio and text aligned.
+**Batch Match** is the queue-based version of Add Book.
 
-### What it does
+Use it when you want to review multiple links and process them together.
 
-1. **Staging**: Copies audio files (from ABS) and ebook files (from Booklore/Local/CWA) to a temporary staging area in the correct `StorytellerLibrary/Title/` structure.
-2. **Processing**: Automatically triggers Storyteller to scan and process the new book.
-3. **Cleanup**: Monitors the output folder. Once Storyteller finishes generating the "Readaloud" ebook, Forge automatically deletes the source files to save space.
-
-### Two Ways to Forge
-
-#### 1. Auto-Forge (from the Matcher — Recommended)
-
-When creating a mapping in the **Matcher**, you can choose **"Forge & Match"** instead of "Create Mapping". This:
-
-- Stages and processes the book through Storyteller automatically.
-- **Automatically creates the sync mapping** once Storyteller finishes, linking the ABS audiobook, the original EPUB, and the new Storyteller artifact in one step.
-
-This is the recommended workflow for most users.
-
-#### 2. Manual Forge (from the Forge page)
-
-The standalone **Forge** page (`/forge`) lets you stage and process a book through Storyteller without creating a sync mapping. Use this if you want to prepare a book for Storyteller independently and then link it manually via the Matcher later.
-
-Forge staging uses `PROCESSING_DIR` if configured, and defaults to `/tmp` if not set. This staging path does not require a dedicated Docker volume mount.
-
-### When to use it
-
-Use Forge if you want the **immersive Read-Along experience** in the Storyteller app.
-
-> [!IMPORTANT]
-> **Active Processing**: Forge is an **active** tool. It communicates directly with the Storyteller API to trigger processing. Ensure your Storyteller integration is configured in Settings.
-
----
-
-## Auto-Discovery (Internal KOSync Only)
-
-If you configure your KOReader devices to sync directly to **this bridge** (using the Built-in KOSync Bridge), the system can automatically detect and link books for you. This is the **only way** to automatically create Ebook-Only links without manual approval.
-
-> [!TIP]
-> **Built-in KOSync Bridge**: In the Settings page, under **KOSync Integration**, enable the integration and check **"Use Built-in KOSync Bridge"**. The UI will display the URL to enter into KOReader's sync settings.
-
-### How it works
-
-1. **Push**: You open a book in KOReader. It pushes progress to the bridge instantaneously.
-2. **Match**: The bridge looks for a matching audiobook in your ABS library.
-3. **Action**:
-    - **Audiobook Found**: Creates a **Suggestion** on your Dashboard (requires approval).
-    - **No Audiobook Found**: Automatically creates an **Ebook-Only Sync** mapping, allowing immediate cross-device tracking.
-
-> [!IMPORTANT]
-> **Trigger Constraint**: This "Auto-Creation" feature requires using the **Internal KOSync Server**. Polling traditional services (ABS/Booklore) will simply create **Suggestions**, which always require manual approval.
+- Queue entries can use **Audiobookshelf** or **Booklore** as the audio source.
+- You can attach a standard ebook, a Storyteller title, or both.
+- Queue items created from **Suggestions** land here too.
 
 ---
 
 ## Suggestions
 
-The **Library Suggestions** page helps you find books that are not linked yet.
+The **Suggestions** page is a review workspace for likely matches that are not linked yet.
 
 ### What it does
 
-- Scans your library and shows likely audiobook + ebook pairs.
-- Lets you review each suggestion before anything is linked.
-- Sends approved picks into the same batch queue used by Batch Match.
+- Scans unmatched titles in your library
+- Shows likely audiobook + ebook pairs
+- Lets you review one suggestion at a time
+- Sends approved picks into the same queue used by Batch Match
 
-### How to use it
+### Scan options
 
-1. Open **Suggestions** in the top navigation.
-2. Click **Scan Library** to load suggestions.
-3. Click a suggestion to review the audiobook and ebook pick.
-4. Click **Add to Queue** for the ones you want.
-5. Click **Process All** to create the mappings.
+- **Scan Library** reuses cached results so repeat scans are faster.
+- **Full Refresh** ignores the previous cache and rescans the whole unmatched library.
 
-### Buttons
+### Actions
 
-- **Scan Library**: Runs a normal scan and keeps previous scan work so repeat scans are faster.
-- **Full Refresh**: Rechecks your whole unmatched library from scratch.
-- **Dismiss**: Hides a suggestion for now.
-- **Never**: Hides a suggestion permanently so it will not come back.
+- **Add to Queue** sends the current pick to the batch queue.
+- **Dismiss** hides a suggestion for now.
+- **Never** hides it permanently so it does not come back.
+
+Suggestions can create:
+
+- Standard ABS-backed links
+- Booklore-audio links
+- Ebook-only links
+- Storyteller-only links when that is enough for the workflow you want
+
+---
+
+## Forge
+
+**Forge** prepares books for Storyteller read-along processing.
+
+### What Forge stages
+
+- Audio from **Audiobookshelf** or **Booklore**
+- Text from **Booklore**, **CWA**, **local files**, or **Audiobookshelf**
+
+### Two ways to use it
+
+1. **Forge & Match from Add Book**
+   - Starts the Storyteller workflow
+   - Finishes the mapping when processing completes
+
+2. **Standalone Forge page**
+   - Stages a Storyteller-ready book without creating a sync mapping yet
+
+Forge uses `PROCESSING_DIR` if you set it, and falls back to `/tmp` if you do not.
+
+---
+
+## Storyteller Transcript Tools
+
+When Storyteller transcript assets are available, the bridge can use them directly for better timing and locator quality.
+
+### Storyteller Backfill
+
+Use **Settings -> Storyteller Backfill** to:
+
+- Re-scan all Storyteller-linked books
+- Ingest any newly available transcript assets
+- Rebuild alignment data without rerunning Whisper
+
+This is useful after importing old Storyteller assets or fixing your Storyteller assets mount.
+
+---
+
+## Booklore Audio
+
+Booklore is no longer only an ebook target.
+
+You can now use **Booklore audiobooks** in:
+
+- **Add Book**
+- **Batch Match**
+- **Suggestions**
+- **Forge**
+- The main **Dashboard**
+
+If Booklore imports change and results look stale, open **Settings** and run **Refresh Booklore Cache**.
+
+---
+
+## Auto-Discovery
+
+If KOReader devices sync directly to the built-in KOSync bridge, the system can discover new reading activity automatically.
+
+### What happens
+
+1. KOReader pushes progress to the bridge.
+2. The bridge looks for a matching audiobook source.
+3. One of two things happens:
+   - If a likely audio match exists, the bridge creates a **Suggestion** for you to review.
+   - If no audiobook source is found, it can create an **ebook-only** workflow instead.
+
+Suggestions still require approval before a real mapping is created.
 
 ---
 
 ## Management
 
-### Editing Mappings
+### Delete mapping
 
-You can edit or delete existing mappings from the Dashboard.
+Stops syncing that book. It does not delete your original media files.
 
-- **Delete**: Stops syncing the book. Does NOT delete the files.
-- **Reset Progress**: Clears the stored sync state if things get out of whack.
+### Reset progress
 
-### Storyteller Backfill
+Clears the stored sync state for a mapping.
 
-Use **Settings -> Storyteller Backfill** to bulk re-check all Storyteller-linked books:
+If **Regenerate Missing Data on Reset** is enabled, the bridge can also rebuild missing alignment data when needed.
 
-- Ingests any newly available Storyteller transcript files.
-- Sets transcript source to Storyteller where valid transcripts exist.
-- Rebuilds alignment maps from Storyteller word timelines (no Whisper/SMIL recompute).
-- Leaves books unchanged when transcripts are missing or incompatible.
+### Logs
 
-### Viewing Logs
-
-Navigate to **Logs** in the sidebar to view the live application logs. This is useful for troubleshooting why a specific book might not be syncing.
+Open **Logs** to inspect live application logs for matching, syncing, Storyteller ingest, Booklore refreshes, and background jobs.

@@ -22,6 +22,7 @@ class ClientPoller:
     _POLLABLE = [
         ('Storyteller', 'STORYTELLER'),
         ('BookLore', 'BOOKLORE'),
+        ('BookLoreAudio', 'BOOKLORE_AUDIO'),
     ]
 
     def __init__(self, database_service, sync_manager, sync_clients_dict: dict):
@@ -108,6 +109,8 @@ class ClientPoller:
         checked = 0
         for book in active_books:
             try:
+                if hasattr(sync_client, "supports_book") and not sync_client.supports_book(book):
+                    continue
                 current_state = sync_client.get_service_state(book, prev_state=None)
                 if current_state is None:
                     continue

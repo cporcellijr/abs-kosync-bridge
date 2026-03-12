@@ -2,64 +2,72 @@
 
 ## Common Issues
 
-### Books not showing up?
+### Books are not showing up
 
-- **Check Volumes**: Ensure your `/books` volume is correctly mounted in `docker-compose.yml`. The path inside the container must match where you are looking.
-- **Permissions**: Ensure the user running the container has read permissions for the ebook files.
+- Make sure your `/books` volume is mounted correctly in `docker-compose.yml`.
+- Check file permissions for the user running the container.
+- If the missing books should come from Booklore, run **Settings -> Refresh Booklore Cache**.
 
-### Storyteller transcripts not found?
+### Suggestions look stale or new imports are missing
 
-- **Issue**: You know transcript files exist on disk, but logs show "Storyteller transcripts not found" or "directory missing".
-- **Checks**:
-  - Verify the Docker volume is mounted: host storyteller assets -> container `/storyteller/assets`.
-  - In Settings, set **Storyteller Assets Path** to `/storyteller` (not `/storyteller/assets`).
-  - Confirm expected structure inside container: `/storyteller/assets/{title}/transcriptions/*.json`.
+- A normal **Scan Library** run reuses cached results on purpose.
+- Use **Full Refresh** after large imports, removals, or metadata cleanup.
+- If Booklore titles are missing from Suggestions, refresh the Booklore cache first.
 
-### Storyteller backfill shows invalid chapter format?
+### Booklore audiobook links are not syncing
 
-- **Issue**: Logs mention invalid storyteller chapter format for a chapter JSON file.
-- **Cause**: The file name pattern matches, but JSON is not Storyteller `wordTimeline` format.
-- **Behavior**: Backfill now skips these books as missing/incompatible instead of failing the whole run.
+- Confirm **Booklore** is enabled and the audiobook still exists in the selected Booklore library.
+- Run **Refresh Booklore Cache** after moving, rescanning, or replacing Booklore items.
+- If the old Booklore item was deleted and recreated with a new ID, rematch that book.
 
-### Transcription taking too long?
+### Storyteller transcripts are not found
 
-- **Model Size**: Try setting `WHISPER_MODEL=tiny` in the Settings page.
-- **Hardware**: Transcription is CPU-intensive. If possible, enable [GPU Acceleration](#gpu-acceleration-optional).
+- Verify the Docker volume is mounted as host Storyteller assets -> container `/storyteller/assets`.
+- In Settings, set **Storyteller Assets Path** to `/storyteller`, not `/storyteller/assets`.
+- Confirm the expected structure exists inside the container: `/storyteller/assets/{title}/transcriptions/*.json`.
 
-### KOSync Port Not Working
+### Storyteller transcripts are still rejected
 
-- **Issue**: You set `KOSYNC_PORT` but cannot connect on that port.
-- **Solution**: Ensure you have mapped the port in your `docker-compose.yml`.
-  - Example: `ports: - "5758:5758"` if `KOSYNC_PORT=5758`.
+- The bridge now accepts more Storyteller filename layouts, but the files still need real Storyteller timeline data.
+- Each chapter JSON should contain `wordTimeline` or compatible Storyteller timeline data.
+- If the filenames are right but the data format is wrong, the bridge will skip those files and fall back to SMIL or Whisper.
 
-### WhisperCpp Model Ignored
+### KOSync split-port mode is not working
 
-- **Issue**: WhisperCpp seems to use 'large-v3' even if I select 'small' in the UI.
-- **Solution**: Previous versions had a bug where the model parameter wasn't sent. This is fixed in the latest release.
-  - Ensure `WHISPER_MODEL` is set in your environment variables (e.g., `WHISPER_MODEL=small`).
-  - Check the logs to see the request URL and data being sent.
+- If you set `KOSYNC_PORT`, you also need to map that same port in Docker.
+- Example:
 
-### Syncing backwards?
+```yaml
+ports:
+  - "8080:5757"
+  - "5758:5758"
+```
 
-The system includes anti-regression logic, but if you switch devices rapidly, issues can occur.
+### Transcription is taking too long
 
-- **Solution**: Go to the Dashboard and click **"Reset Progress"** for the affected book. This clears the stored sync state without affecting your external accounts.
+- Use a smaller local Whisper model such as `tiny`.
+- If you have an NVIDIA GPU, enable GPU support as described in the [Configuration Guide](configuration.md#gpu-support-optional).
+- If Storyteller transcript assets are available, configure them so the bridge can skip Whisper entirely for those books.
 
 ---
 
 ## Logs
 
-Documentation and live logs are available directly in the Web UI.
-Alternatively, you can view them via the terminal:
+You can inspect logs in the web UI or from the terminal:
 
 ```bash
 docker compose logs -f
 ```
 
-Look for lines starting with `[INFO]` or `[ERROR]`.
+Useful places to look:
+
+- Match and Suggestions actions
+- Storyteller transcript ingest
+- Booklore cache refreshes
+- Background job failures
 
 ---
 
 ## GPU Acceleration
 
-See the **[Configuration Guide](configuration.md#gpu-support-optional)** for instructions on enabling NVIDIA GPU acceleration.
+See the **[Configuration Guide](configuration.md#gpu-support-optional)** for NVIDIA GPU setup instructions.

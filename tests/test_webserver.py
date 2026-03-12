@@ -607,6 +607,129 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(saved_book.transcript_file)
         self.assertTrue(Path(saved_book.transcript_file).exists())
 
+    @patch('src.web_server.ingest_storyteller_transcripts', return_value='/tmp/storyteller-manifest.json')
+    @patch('src.web_server.get_kosync_id_for_ebook', return_value='hash-ebook-only-link-1')
+    def test_api_storyteller_link_ebook_only_skips_abs_chapter_lookup(self, _mock_kosync, _mock_ingest):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='ebook-link-1',
+            abs_title='Ebook Link',
+            ebook_filename='ebook-link.epub',
+            kosync_doc_id='hash-existing',
+            sync_mode='ebook_only',
+            status='active',
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_storyteller_client.download_book.return_value = True
+
+        response = self.client.post('/api/storyteller/link/ebook-link-1', json={'uuid': 'uuid-ebook-only'})
+
+        self.assertEqual(response.status_code, 200)
+        self.mock_abs_client.get_item_details.assert_not_called()
+        self.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.sync_mode, 'ebook_only')
+        self.assertEqual(saved_book.storyteller_uuid, 'uuid-ebook-only')
+        self.assertEqual(saved_book.transcript_source, 'storyteller')
+
+    def test_index_endpoint_ebook_only_uses_cached_ebook_metadata_for_display(self):
+        from src.db.models import Book, BookloreBook
+
+        test_book = Book(
+            abs_id='ebook-only-1',
+            abs_title='book-file',
+            ebook_filename='book-file.epub',
+            sync_mode='ebook_only',
+            status='active'
+        )
+        cached_book = BookloreBook(
+            filename='book-file.epub',
+            title='Displayed Title',
+            authors='Displayed Author',
+            raw_metadata=json.dumps({
+                'title': 'Displayed Title',
+                'subtitle': 'Displayed Subtitle',
+                'authors': 'Displayed Author'
+            })
+        )
+
+        self.mock_database_service.get_all_books.return_value = [test_book]
+        self.mock_database_service.get_all_states.return_value = []
+        self.mock_database_service.get_all_hardcover_details.return_value = []
+        self.mock_database_service.get_all_pending_suggestions.return_value = []
+        self.mock_database_service.get_booklore_book.side_effect = lambda filename: cached_book if filename == 'book-file.epub' else None
+        self.mock_booklore_client.is_configured.return_value = False
+
+        clients_dict = {
+            'ABS': Mock(is_configured=Mock(return_value=True)),
+            'KoSync': Mock(is_configured=Mock(return_value=True)),
+            'Storyteller': Mock(is_configured=Mock(return_value=False))
+        }
+        self.mock_container.mock_sync_clients.items.return_value = clients_dict.items()
+
+        import src.web_server
+        original_render = src.web_server.render_template
+        mock_render = Mock(return_value="Mocked HTML Response")
+        src.web_server.render_template = mock_render
+
+        try:
+            response = self.client.get('/')
+            self.assertEqual(response.status_code, 200)
+            mapping = mock_render.call_args.kwargs['mappings'][0]
+            self.assertEqual(mapping['abs_title'], 'Displayed Title')
+            self.assertEqual(mapping['abs_subtitle'], 'Displayed Subtitle')
+            self.assertEqual(mapping['abs_author'], 'Displayed Author')
+        finally:
+            src.web_server.render_template = original_render
+
+    def test_index_endpoint_storyteller_uses_storyteller_metadata_for_display(self):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='ebook-storyteller-1',
+            abs_title='storyteller_uuid-book',
+            ebook_filename='storyteller_uuid-book.epub',
+            storyteller_uuid='uuid-story-1',
+            sync_mode='ebook_only',
+            status='active'
+        )
+
+        self.mock_database_service.get_all_books.return_value = [test_book]
+        self.mock_database_service.get_all_states.return_value = []
+        self.mock_database_service.get_all_hardcover_details.return_value = []
+        self.mock_database_service.get_all_pending_suggestions.return_value = []
+        self.mock_database_service.get_booklore_book.return_value = None
+        self.mock_booklore_client.is_configured.return_value = False
+        self.mock_storyteller_client.is_configured.return_value = True
+        self.mock_storyteller_client.get_book_details.return_value = {
+            'title': 'Storyteller Title',
+            'subtitle': 'Storyteller Subtitle',
+            'authors': [{'name': 'Storyteller Author'}]
+        }
+
+        clients_dict = {
+            'ABS': Mock(is_configured=Mock(return_value=True)),
+            'KoSync': Mock(is_configured=Mock(return_value=True)),
+            'Storyteller': Mock(is_configured=Mock(return_value=True))
+        }
+        self.mock_container.mock_sync_clients.items.return_value = clients_dict.items()
+
+        import src.web_server
+        original_render = src.web_server.render_template
+        mock_render = Mock(return_value="Mocked HTML Response")
+        src.web_server.render_template = mock_render
+
+        try:
+            response = self.client.get('/')
+            self.assertEqual(response.status_code, 200)
+            mapping = mock_render.call_args.kwargs['mappings'][0]
+            self.assertEqual(mapping['abs_title'], 'Storyteller Title')
+            self.assertEqual(mapping['abs_subtitle'], 'Storyteller Subtitle')
+            self.assertEqual(mapping['abs_author'], 'Storyteller Author')
+        finally:
+            src.web_server.render_template = original_render
+
     def test_clear_progress_endpoint_clean_di(self):
         """Test clear progress endpoint with clean dependency injection."""
         # Setup mock book
@@ -671,6 +794,20 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         finally:
             src.web_server.render_template = original_render
+
+    def test_shelfmark_redirects_to_configured_external_url(self):
+        with patch.dict(os.environ, {'SHELFMARK_URL': 'shelfmark.blackcatmedia.xyz'}, clear=False):
+            response = self.client.get('/shelfmark')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://shelfmark.blackcatmedia.xyz')
+
+    def test_shelfmark_redirects_to_index_when_not_configured(self):
+        with patch.dict(os.environ, {'SHELFMARK_URL': ''}, clear=False):
+            response = self.client.get('/shelfmark')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers['Location'].endswith('/'))
 
     def test_api_health_endpoint(self):
         response = self.client.get('/api/health')

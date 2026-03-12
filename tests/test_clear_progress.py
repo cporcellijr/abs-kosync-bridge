@@ -91,6 +91,12 @@ class TestClearProgressMethod(unittest.TestCase):
         self.mock_abs_client = Mock()
 
         # Configure mock clients
+        self.mock_kosync_client.get_supported_sync_types.return_value = {'audiobook', 'ebook'}
+        self.mock_kosync_client.supports_book.return_value = True
+        self.mock_storyteller_client.get_supported_sync_types.return_value = {'audiobook', 'ebook'}
+        self.mock_storyteller_client.supports_book.return_value = True
+        self.mock_abs_client.get_supported_sync_types.return_value = {'audiobook'}
+        self.mock_abs_client.supports_book.return_value = True
         self.mock_kosync_client.update_progress.return_value = SyncResult(success=True, location=0.0)
         self.mock_storyteller_client.update_progress.return_value = SyncResult(success=True, location=0.0)
         self.mock_abs_client.update_progress.return_value = SyncResult(success=True, location=0.0)

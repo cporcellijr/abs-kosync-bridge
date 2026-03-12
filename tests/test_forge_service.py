@@ -83,7 +83,8 @@ class TestForgeService(unittest.TestCase):
             
             mock_thread_cls.assert_called_with(
                 target=self.service._auto_forge_background_task,
-                args=("abs789", {"booklore_id": 1}, "Auto Book", "Auto Author", "orig.epub", "hash123"),
+                args=("abs789", {"booklore_id": 1}, "Auto Book", "Auto Author", "orig.epub", "hash123",
+                      None, None),
                 daemon=True
             )
             mock_thread_instance.start.assert_called_once()

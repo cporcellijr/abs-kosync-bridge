@@ -63,7 +63,7 @@ class KoSyncSyncClient(SyncClient):
     def get_text_from_current_state(self, book: Book, state: ServiceState) -> Optional[str]:
         ko_xpath = state.current.get('xpath')
         ko_pct = state.current.get('pct')
-        epub = getattr(book, "ebook_filename", None)
+        epub = getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
         if ko_xpath and epub:
             txt = self.ebook_parser.resolve_xpath(epub, ko_xpath)
             if txt:
@@ -112,8 +112,13 @@ class KoSyncSyncClient(SyncClient):
         xpath = locator.perfect_ko_xpath if locator and locator.perfect_ko_xpath else locator.xpath
         safe_xpath = self._sanitize_kosync_xpath(xpath, pct)
 
-        if safe_xpath is None and book and book.ebook_filename and pct is not None and pct > 0:
-            regenerated_xpath = self.ebook_parser.get_sentence_level_ko_xpath(book.ebook_filename, pct)
+        epub = (
+            (getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None))
+            if book
+            else None
+        )
+        if safe_xpath is None and epub and pct is not None and pct > 0:
+            regenerated_xpath = self.ebook_parser.get_sentence_level_ko_xpath(epub, pct)
             safe_xpath = self._sanitize_kosync_xpath(regenerated_xpath, pct)
             if safe_xpath:
                 logger.info(f"Recovered malformed KoSync XPath using sentence-level fallback for '{book.abs_title}'")
