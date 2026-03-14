@@ -16,11 +16,20 @@ from src.api.cwa_client import CWAClient
 logger = logging.getLogger(__name__)
 
 class LibraryService:
-    def __init__(self, database_service: DatabaseService, booklore_client, cwa_client: CWAClient, abs_client: ABSClient, epub_cache_dir: str):
+    def __init__(
+        self,
+        database_service: DatabaseService,
+        booklore_client,
+        cwa_client: CWAClient,
+        abs_client: ABSClient,
+        epub_cache_dir: str,
+        kavita_client=None,
+    ):
         self.database_service = database_service
         self.booklore = booklore_client
         self.cwa_client = cwa_client
         self.abs_client = abs_client
+        self.kavita_client = kavita_client
         self.epub_cache_dir = epub_cache_dir
         
         if not os.path.exists(self.epub_cache_dir):
@@ -43,8 +52,9 @@ class LibraryService:
         1. ABS Direct Match (Audiobook item has ebook file)
         2. Booklore (Curated DB Match)
         3. CWA (Automated Library Search via OPDS)
-        4. ABS Search (Search other libraries for title)
-        5. Filesystem (Fallback - handled by caller)
+        4. Kavita (Automated Library Search via OPDS)
+        5. ABS Search (Search other libraries for title)
+        6. Filesystem (Fallback - handled by caller)
         
         Returns:
             Absolute path to the downloaded/found ebook, or None.
@@ -64,6 +74,11 @@ class LibraryService:
         logger.debug(f"   Author: {author}")
         logger.debug(f"   ABS Client available: {self.abs_client is not None}")
         logger.debug(f"   CWA Client available: {self.cwa_client is not None}, configured: {self.cwa_client.is_configured() if self.cwa_client else 'N/A'}")
+        logger.debug(
+            "   Kavita Client available: %s, configured: %s",
+            self.kavita_client is not None,
+            self.kavita_client.is_configured() if self.kavita_client else 'N/A',
+        )
 
         # 1. ABS Direct Match
         if self.abs_client:
@@ -108,7 +123,35 @@ class LibraryService:
             else:
                  logger.debug(f"   CWA: No matches for '{query}'")
 
-        # 4. ABS Search
+        # 4. Kavita (OPDS)
+        if self.kavita_client and self.kavita_client.is_configured():
+            query = f"{title}"
+            if author:
+                query += f" {author}"
+
+            results = self.kavita_client.search_ebooks(query)
+            if results:
+                logger.info(f"   ✅ Priority 4 (Kavita): Found {len(results)} matches for '{query}'")
+                target = next((r for r in results if (r.get('ext') or '').lower() == 'epub'), results[0])
+                filename = f"{item_id}_kavita.{target.get('ext', 'epub')}"
+                output_path = os.path.join(self.epub_cache_dir, filename)
+                downloaded = False
+                download_url = target.get('download_url')
+                if download_url:
+                    downloaded = bool(self.kavita_client.download_ebook(download_url, output_path))
+                elif target.get('id'):
+                    content = self.kavita_client.download_book(target.get('id'))
+                    if content:
+                        with open(output_path, 'wb') as handle:
+                            handle.write(content)
+                        downloaded = os.path.getsize(output_path) > 1024
+                if downloaded:
+                    logger.info(f"   ⬇️ Downloaded Kavita match to {output_path}")
+                    return output_path
+            else:
+                 logger.debug(f"   Kavita: No matches for '{query}'")
+
+        # 5. ABS Search
         if self.abs_client:
              results = self.abs_client.search_ebooks(title)
              if results:

@@ -15,6 +15,7 @@ from src.api.api_clients import ABSClient, KoSyncClient
 from src.api.booklore_client import BookloreClient
 from src.api.cwa_client import CWAClient
 from src.api.hardcover_client import HardcoverClient
+from src.api.kavita_client import KavitaClient, KavitaKoSyncClient
 from src.api.storyteller_api import StorytellerAPIClient
 from src.db.database_service import DatabaseService
 from src.utils.ebook_utils import EbookParser
@@ -92,6 +93,7 @@ class Container(containers.DeclarativeContainer):
     hardcover_client = providers.Singleton(HardcoverClient)
 
     cwa_client = providers.Singleton(CWAClient)
+    kavita_client = providers.Singleton(KavitaClient)
 
 
 
@@ -125,7 +127,8 @@ class Container(containers.DeclarativeContainer):
         booklore_client=booklore_client,
         cwa_client=cwa_client,
         abs_client=abs_client,
-        epub_cache_dir=epub_cache_dir
+        epub_cache_dir=epub_cache_dir,
+        kavita_client=kavita_client,
     )
 
     migration_service = providers.Singleton(
@@ -155,6 +158,7 @@ class Container(containers.DeclarativeContainer):
         booklore_client=booklore_client,
         storyteller_client=storyteller_client,
         library_service=library_service,
+        kavita_client=kavita_client,
         ebook_parser=ebook_parser,
         transcriber=transcriber,
         alignment_service=alignment_service
@@ -172,7 +176,17 @@ class Container(containers.DeclarativeContainer):
     kosync_sync_client = providers.Singleton(
         KoSyncSyncClient,
         kosync_client,
-        ebook_parser
+        ebook_parser,
+        blocked_ebook_source="Kavita",
+    )
+
+    kavita_kosync_client = providers.Singleton(KavitaKoSyncClient)
+
+    kavita_kosync_sync_client = providers.Singleton(
+        KoSyncSyncClient,
+        kavita_kosync_client,
+        ebook_parser,
+        allowed_ebook_source="Kavita",
     )
 
     storyteller_sync_client = providers.Singleton(
@@ -230,6 +244,7 @@ class Container(containers.DeclarativeContainer):
         ABS=abs_sync_client,
         ABSEbook=abs_ebook_sync_client,
         KoSync=kosync_sync_client,
+        KavitaKoSync=kavita_kosync_sync_client,
         Storyteller=storyteller_sync_client,
         BookLore=booklore_sync_client,
         BookLoreAudio=booklore_audio_sync_client,

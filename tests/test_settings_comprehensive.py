@@ -58,6 +58,7 @@ class TestSettingsComprehensive(unittest.TestCase):
             'KOSYNC_ENABLED',
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
+            'KAVITA_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
             'SUGGESTIONS_ENABLED'

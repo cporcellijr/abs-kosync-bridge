@@ -748,6 +748,50 @@
                 </div>
             </div>
 
+            <!-- Kavita (Optional) -->
+            <div class="settings-section">
+                {% set kavita_configured = get_val('KAVITA_SERVER') != '' %}
+                {% set kavita_enabled = get_bool('KAVITA_ENABLED') or (kavita_configured and get_val('KAVITA_ENABLED') == '') %}
+                <div class="section-header">
+                    <h3>Kavita</h3>
+                    <button class="btn btn-sm" type="button" onclick="testConnection('kavita', this)">🔗 Test</button>
+                    <div class="toggle-switch-wrapper">
+                        <span class="toggle-label">Enable</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle_kavita" name="KAVITA_ENABLED"
+                                onchange="toggleSection('kavita_body', this.checked)" {% if kavita_enabled %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div id="kavita_body" class="section-body {% if not kavita_enabled %}collapsed{% endif %}">
+                    <div class="form-group full-width">
+                        <label>Server URL</label>
+                        <input type="text" name="KAVITA_SERVER" value="{{ get_val('KAVITA_SERVER') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" name="KAVITA_API_KEY" value="{{ get_val('KAVITA_API_KEY') }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Library ID (Optional)</label>
+                        <input type="text" name="KAVITA_LIBRARY_ID" value="{{ get_val('KAVITA_LIBRARY_ID') }}" placeholder="e.g. 1">
+                    </div>
+                    <div class="form-group full-width">
+                        <label>OPDS URL Override (Optional)</label>
+                        <input type="text" name="KAVITA_OPDS_URL" value="{{ get_val('KAVITA_OPDS_URL') }}">
+                        <div class="help-text">
+                            Leave empty to auto-derive <code>/api/opds/&lt;api-key&gt;</code> from the server URL.
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <div class="help-text" style="color:#ffb74d;">
+                            Before syncing progress via KOSync, run a forced library scan in Kavita (Edit Library -&gt; Force Scan) to generate document hashes for existing books.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Hardcover.app (Optional) -->
             <div class="settings-section">
                 {% set hardcover_configured = get_val('HARDCOVER_TOKEN') != '' %}
@@ -1092,6 +1136,19 @@
                         </div>
                     </div>
 
+                    <div class="form-group full-width">
+                        <label>Kavita Cache</label>
+                        <div class="cleanup-group">
+                            <button type="button" id="kavita_refresh_btn" class="btn btn-primary" onclick="refreshKavitaCache(this)">
+                                Refresh Kavita Cache
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Rebuilds Kavita OPDS cache immediately, including refreshed acquisition links.
+                                <span id="kavita_refresh_status"></span>
+                            </p>
+                        </div>
+                    </div>
+
                     <hr style="margin: 20px 0; border-color: var(--border-color); opacity: 0.3; grid-column: span 2;">
 
                     <!-- Transcription Settings -->
@@ -1264,6 +1321,7 @@
             storyteller: ['STORYTELLER_ENABLED', 'STORYTELLER_API_URL', 'STORYTELLER_USER', 'STORYTELLER_PASSWORD'],
             booklore: ['BOOKLORE_ENABLED', 'BOOKLORE_SERVER', 'BOOKLORE_USER', 'BOOKLORE_PASSWORD'],
             cwa: ['CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD'],
+            kavita: ['KAVITA_ENABLED', 'KAVITA_SERVER', 'KAVITA_API_KEY', 'KAVITA_OPDS_URL'],
             hardcover: ['HARDCOVER_ENABLED', 'HARDCOVER_TOKEN'],
             telegram: ['TELEGRAM_ENABLED', 'TELEGRAM_BOT_TOKEN'],
         };
@@ -1464,6 +1522,50 @@
                 }
             } catch (err) {
                 console.error('Error refreshing Booklore cache:', err);
+                if (statusEl) {
+                    statusEl.textContent = ` Refresh failed: ${err}`;
+                    statusEl.style.color = '#e57373';
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function refreshKavitaCache(btn) {
+            const statusEl = document.getElementById('kavita_refresh_status');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Refreshing...';
+            if (statusEl) {
+                statusEl.textContent = ' Refresh in progress...';
+                statusEl.style.color = 'rgba(255, 255, 255, 0.55)';
+            }
+
+            try {
+                const response = await fetch('/api/kavita/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    const message = data.error || 'Unknown error';
+                    if (statusEl) {
+                        statusEl.textContent = ` Refresh failed: ${message}`;
+                        statusEl.style.color = '#e57373';
+                    }
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = ' Refresh complete.';
+                    statusEl.style.color = '#81c784';
+                }
+            } catch (err) {
+                console.error('Error refreshing Kavita cache:', err);
                 if (statusEl) {
                     statusEl.textContent = ` Refresh failed: ${err}`;
                     statusEl.style.color = '#e57373';

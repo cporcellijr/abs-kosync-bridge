@@ -4,6 +4,23 @@
 
 All notable changes to ABS-KoSync Enhanced will be documented in this file.
 
+## [6.3.4] - 2026-03-14
+
+### Added
+
+- Added first-class **Kavita integration** via OPDS for ebook search and on-demand EPUB downloads using synthetic filenames (`kavita_<entry_id>.epub`).
+- Added **Kavita Want-to-Read** side effects for Kavita-sourced matches, including add/remove flows during mapping create/delete.
+- Added a dedicated **Kavita cache refresh** endpoint (`POST /api/kavita/refresh`) and Settings UI action.
+- Added **Kavita connectivity testing** in Settings (`/api/test-connection/kavita`).
+
+### Changed
+
+- Added dual-KOSync routing guards so Kavita books sync only through `KavitaKoSync`, while standalone KoSync blocks `Kavita` sources to prevent double writes.
+- Extended Forge/Match/Batch/Suggestions source handling and badges to include `Kavita`.
+- Extended configuration/docs with new `KAVITA_*` environment variables and a forced-scan prerequisite note.
+
+---
+
 ## [6.3.3] - 2026-03-08
 
 ### Added

@@ -19,12 +19,24 @@ HARDLINK_STAGE_MODE = "hardlink"
 VALID_STAGE_MODES = {DEFAULT_STAGE_MODE, HARDLINK_STAGE_MODE}
 
 class ForgeService:
-    def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service):
+    def __init__(
+        self,
+        database_service,
+        abs_client,
+        booklore_client,
+        storyteller_client,
+        library_service,
+        ebook_parser,
+        transcriber,
+        alignment_service,
+        kavita_client=None,
+    ):
         self.database_service = database_service
         self.abs_client = abs_client
         self.booklore_client = booklore_client
         self.storyteller_client = storyteller_client
         self.library_service = library_service
+        self.kavita_client = kavita_client or getattr(library_service, "kavita_client", None)
         self.ebook_parser = ebook_parser
         self.transcriber = transcriber
         self.alignment_service = alignment_service
@@ -629,7 +641,7 @@ class ForgeService:
                 download_url = text_item.get('download_url', '')
                 cwa_id = text_item.get('cwa_id')
                 cwa_client = self.library_service.cwa_client
-                
+
                 if download_url and cwa_client:
                     if cwa_client.download_ebook(download_url, epub_dest):
                         text_success = True
@@ -640,9 +652,32 @@ class ForgeService:
                         if cwa_client.download_ebook(book_info['download_url'], epub_dest):
                             text_success = True
                             logger.info(f"⚡ Forge: CWA epub downloaded via ID lookup")
-                
+
                 if not text_success:
                     logger.error(f"❌ Forge: CWA download failed")
+
+            elif source == 'Kavita':
+                kavita_client = self.kavita_client or getattr(self.library_service, 'kavita_client', None)
+                download_url = text_item.get('download_url', '')
+                kavita_id = text_item.get('kavita_id')
+                text_downloaded = False
+
+                if download_url and kavita_client:
+                    text_downloaded = bool(kavita_client.download_ebook(download_url, epub_dest))
+                elif kavita_id and kavita_client:
+                    content = kavita_client.download_book(kavita_id)
+                    if content:
+                        epub_dest.write_bytes(content)
+                        text_downloaded = epub_dest.exists() and epub_dest.stat().st_size > 1024
+
+                if text_downloaded:
+                    text_success = True
+                    logger.info("⚡ Forge: Kavita epub downloaded")
+                else:
+                    logger.error(
+                        "❌ Forge: Kavita download failed for '%s'",
+                        kavita_id or download_url or 'unknown',
+                    )
 
             else:
                 logger.error(f"❌ Forge: Unknown text source: '{source}'")
@@ -925,6 +960,20 @@ class ForgeService:
                          text_downloaded = bool(cwa_client.download_ebook(book_info['download_url'], epub_dest))
                  if not text_downloaded:
                      logger.error(f"❌ Auto-Forge: CWA download failed for '{cwa_id or download_url or 'unknown'}'")
+            elif source == 'Kavita':
+                 kavita_client = self.kavita_client or getattr(self.library_service, 'kavita_client', None)
+                 download_url = text_item.get('download_url')
+                 kavita_id = text_item.get('kavita_id')
+                 text_downloaded = False
+                 if download_url and kavita_client:
+                     text_downloaded = bool(kavita_client.download_ebook(download_url, epub_dest))
+                 elif kavita_id and kavita_client:
+                     content = kavita_client.download_book(kavita_id)
+                     if content:
+                         epub_dest.write_bytes(content)
+                         text_downloaded = epub_dest.exists() and epub_dest.stat().st_size > 1024
+                 if not text_downloaded:
+                     logger.error(f"❌ Auto-Forge: Kavita download failed for '{kavita_id or download_url or 'unknown'}'")
             else:
                  raise Exception(f"Unknown or missing text source type: '{source}'")
             
@@ -1258,6 +1307,12 @@ class ForgeService:
                         self.storyteller_client.add_to_collection_by_uuid(found_uuid)
                     else:
                         self.storyteller_client.add_to_collection(target_filename)
+
+                if str(text_item.get('source') or '').strip().lower() == 'kavita':
+                    kavita_series_id = text_item.get('kavita_series_id')
+                    kavita_client = self.kavita_client or getattr(self.library_service, 'kavita_client', None)
+                    if kavita_series_id and kavita_client:
+                        kavita_client.add_to_want_to_read(kavita_series_id)
                     
             except Exception as e:
                 logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")

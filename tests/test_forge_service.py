@@ -20,7 +20,9 @@ class TestForgeService(unittest.TestCase):
         self.mock_storyteller = MagicMock()
         self.mock_library = MagicMock()
         self.mock_cwa = MagicMock()
+        self.mock_kavita = MagicMock()
         self.mock_library.cwa_client = self.mock_cwa
+        self.mock_library.kavita_client = self.mock_kavita
         self.mock_ebook_parser = MagicMock()
         self.mock_transcriber = MagicMock()
         self.mock_alignment = MagicMock()
@@ -342,6 +344,20 @@ class TestForgeService(unittest.TestCase):
 
         self.mock_cwa.get_book_by_id.assert_called_once_with("123")
         self.mock_cwa.download_ebook.assert_any_call("http://example.test/book.epub", ANY)
+
+    def test_auto_forge_kavita_falls_back_to_kavita_id_lookup(self):
+        """Auto-forge should use Kavita ID lookup when no direct download URL is provided."""
+        self.mock_kavita.download_book.return_value = b"x" * 2048
+        self.mock_kavita.add_to_want_to_read.return_value = True
+
+        self._run_auto_forge_pipeline(
+            text_item={"source": "Kavita", "kavita_id": "321", "kavita_series_id": "99", "download_url": ""},
+            ingest_manifest=None,
+            storyteller_alignment_ok=False,
+        )
+
+        self.mock_kavita.download_book.assert_called_with("321")
+        self.mock_kavita.add_to_want_to_read.assert_called_with("99")
 
     def test_auto_forge_uses_storyteller_uuid_collection_path(self):
         """Auto-forge should add Storyteller books to collection by UUID when available."""

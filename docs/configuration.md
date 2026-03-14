@@ -114,6 +114,23 @@ Advanced Booklore cache tuning:
 | Username | `CWA_USERNAME` | empty | Optional username. |
 | Password | `CWA_PASSWORD` | empty | Optional password. |
 
+#### Kavita
+
+| Setting | Env Var | Default | Notes |
+| --- | --- | --- | --- |
+| Enable | `KAVITA_ENABLED` | `false` | Turns on Kavita OPDS search/download and Kavita-targeted KoSync sync. |
+| Server URL | `KAVITA_SERVER` | empty | Kavita base URL. |
+| API Key | `KAVITA_API_KEY` | empty | API key from Kavita User Settings -> 3rd Party Clients. |
+| Library ID | `KAVITA_LIBRARY_ID` | empty | Optional library restriction when crawling OPDS. |
+| OPDS URL Override | `KAVITA_OPDS_URL` | empty | Optional manual OPDS endpoint override if auto-derived URL fails. |
+
+Kavita notes:
+
+- The bridge uses Kavita OPDS entries as synthetic files named `kavita_<entry_id>.epub`.
+- Kavita KoSync routing is automatic when the mapping source is `Kavita`; standalone KoSync writes are blocked for those books.
+- Before progress sync works for existing books, run a forced scan in Kavita:
+  `Edit Library -> Force Scan` (this generates KOReader/KOSync document hashes).
+
 #### Hardcover.app
 
 | Setting | Env Var | Default | Notes |

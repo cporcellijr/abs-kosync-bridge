@@ -16,11 +16,51 @@ class KoSyncSyncClient(SyncClient):
         re.IGNORECASE,
     )
 
-    def __init__(self, kosync_client: KoSyncClient, ebook_parser: EbookParser):
+    def __init__(
+        self,
+        kosync_client: KoSyncClient,
+        ebook_parser: EbookParser,
+        allowed_ebook_source: str | None = None,
+        blocked_ebook_source: str | None = None,
+    ):
         super().__init__(ebook_parser)
         self.kosync_client = kosync_client
         self.ebook_parser = ebook_parser
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
+        self.allowed_ebook_source = self._normalize_source_name(allowed_ebook_source)
+        self.blocked_ebook_source = self._normalize_source_name(blocked_ebook_source)
+
+    @staticmethod
+    def _normalize_source_name(source: str | None) -> str | None:
+        normalized = str(source or "").strip().lower()
+        return normalized or None
+
+    @staticmethod
+    def _book_source_name(book: Book | None) -> str:
+        if not book:
+            return ""
+        source = str(getattr(book, "ebook_source", "") or "").strip().lower()
+        if source:
+            return source
+        filename = str(
+            getattr(book, "original_ebook_filename", None)
+            or getattr(book, "ebook_filename", None)
+            or ""
+        ).strip().lower()
+        if filename.startswith("kavita_"):
+            return "kavita"
+        return ""
+
+    def supports_book(self, book: Book) -> bool:
+        source_name = self._book_source_name(book)
+
+        if self.allowed_ebook_source:
+            return source_name == self.allowed_ebook_source
+
+        if self.blocked_ebook_source and source_name == self.blocked_ebook_source:
+            return False
+
+        return True
 
     def is_configured(self) -> bool:
         return self.kosync_client.is_configured()

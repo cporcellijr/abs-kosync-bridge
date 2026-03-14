@@ -33,6 +33,7 @@ class MockContainer:
         self.mock_abs_client = Mock()
         self.mock_booklore_client = Mock()
         self.mock_storyteller_client = Mock()
+        self.mock_kavita_client = Mock()
         self.mock_database_service = Mock()
         self.mock_database_service.get_all_settings.return_value = {}  # Default empty settings
         self.mock_ebook_parser = Mock()
@@ -59,6 +60,9 @@ class MockContainer:
 
     def storyteller_client(self):
         return self.mock_storyteller_client
+
+    def kavita_client(self):
+        return self.mock_kavita_client
 
     def ebook_parser(self):
         return self.mock_ebook_parser
@@ -126,6 +130,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.mock_abs_client = self.mock_container.mock_abs_client
         self.mock_booklore_client = self.mock_container.mock_booklore_client
         self.mock_storyteller_client = self.mock_container.mock_storyteller_client
+        self.mock_kavita_client = self.mock_container.mock_kavita_client
         self.mock_database_service = self.mock_container.mock_database_service
 
     def tearDown(self):
@@ -959,6 +964,48 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertFalse(data['ok'])
         self.assertEqual(data['message'], 'Storyteller is disabled')
         mock_post.assert_not_called()
+
+    @patch('src.web_server.requests.get')
+    def test_test_connection_kavita_uses_post_payload_not_saved_env(self, mock_get):
+        def fake_get(url, headers=None, timeout=None):
+            self.assertEqual(url, 'http://typed-kavita/api/opds/typed-key')
+            self.assertEqual(timeout, 10)
+            self.assertIn('application/atom+xml', headers.get('Accept', ''))
+            return _http_response(200, text='<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>')
+
+        mock_get.side_effect = fake_get
+
+        with patch.dict(os.environ, {
+            'KAVITA_ENABLED': 'true',
+            'KAVITA_SERVER': 'http://saved-kavita',
+            'KAVITA_API_KEY': 'saved-key',
+        }, clear=False):
+            response = self.client.post(
+                '/api/test-connection/kavita',
+                json={
+                    'KAVITA_ENABLED': True,
+                    'KAVITA_SERVER': 'typed-kavita',
+                    'KAVITA_API_KEY': 'typed-key',
+                    'KAVITA_OPDS_URL': '',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['ok'])
+        self.assertIn('Connected to Kavita OPDS feed', data['message'])
+        mock_get.assert_called_once()
+
+    def test_api_kavita_refresh(self):
+        self.mock_kavita_client.is_configured.return_value = True
+        self.mock_kavita_client.clear_and_refresh.return_value = True
+
+        response = self.client.post('/api/kavita/refresh')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.mock_kavita_client.clear_and_refresh.assert_called_once()
 
     def test_clear_stale_suggestions_api(self):
         """Test the clear-stale-suggestions API endpoint."""

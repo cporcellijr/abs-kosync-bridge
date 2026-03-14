@@ -26,6 +26,9 @@ ALL_SETTINGS = [
 
     # CWA (Calibre-Web Automated)
     'CWA_ENABLED', 'CWA_SERVER', 'CWA_USERNAME', 'CWA_PASSWORD',
+
+    # Kavita
+    'KAVITA_ENABLED', 'KAVITA_SERVER', 'KAVITA_API_KEY', 'KAVITA_LIBRARY_ID', 'KAVITA_OPDS_URL',
     
     # Hardcover
     'HARDCOVER_ENABLED', 'HARDCOVER_TOKEN',
@@ -93,6 +96,11 @@ DEFAULT_CONFIG = {
     'CWA_SERVER': '',
     'CWA_USERNAME': '',
     'CWA_PASSWORD': '',
+    'KAVITA_ENABLED': 'false',
+    'KAVITA_SERVER': '',
+    'KAVITA_API_KEY': '',
+    'KAVITA_LIBRARY_ID': '',
+    'KAVITA_OPDS_URL': '',
     'HARDCOVER_ENABLED': 'false',
     'TELEGRAM_ENABLED': 'false',
     'SUGGESTIONS_ENABLED': 'false',

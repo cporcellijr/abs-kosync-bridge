@@ -393,6 +393,7 @@ def inject_global_vars():
             'KOSYNC_ENABLED': 'false',
             'STORYTELLER_ENABLED': 'false',
             'BOOKLORE_ENABLED': 'false',
+            'KAVITA_ENABLED': 'false',
             'HARDCOVER_ENABLED': 'false',
             'TELEGRAM_ENABLED': 'false',
             'SUGGESTIONS_ENABLED': 'false',
@@ -461,6 +462,28 @@ def find_ebook_file(filename):
     escaped_filename = glob.escape(filename)
     matches = list(base.rglob(escaped_filename))
     return matches[0] if matches else None
+
+
+def _get_kavita_client():
+    getter = getattr(container, "kavita_client", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter()
+    except Exception as e:
+        logger.debug(f"Kavita client unavailable: {e}")
+        return None
+
+
+def _decode_kavita_filename_id(ebook_filename: str) -> str | None:
+    name = str(ebook_filename or "").strip()
+    if not name.lower().startswith("kavita_"):
+        return None
+    raw = name[7:]
+    if "." in raw:
+        raw = raw.rsplit(".", 1)[0]
+    raw = raw.strip()
+    return raw or None
 
 
 def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=None):
@@ -575,12 +598,38 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
         except Exception as e:
             logger.error(f"   ❌ Failed CWA on-demand download: {e}")
 
+    # 3. Kavita On-Demand
+    kavita_id = _decode_kavita_filename_id(ebook_filename)
+    if kavita_id:
+        try:
+            kavita_client = _get_kavita_client()
+            if kavita_client and kavita_client.is_configured():
+                logger.info(f"📥 Attempting on-demand Kavita download for ID '{kavita_id}'")
+                if not epub_cache.exists():
+                    epub_cache.mkdir(parents=True, exist_ok=True)
+
+                content = kavita_client.download_book(kavita_id)
+                if content:
+                    with open(cached_path, "wb") as f:
+                        f.write(content)
+                    if cached_path.exists() and cached_path.stat().st_size > 1024:
+                        logger.info(f"   ✅ Downloaded Kavita ebook to '{cached_path}'")
+                        return container.ebook_parser().get_kosync_id(cached_path)
+                logger.warning(f"   ⚠️ Could not download Kavita book for ID '{kavita_id}'")
+        except Exception as e:
+            logger.error(f"   ❌ Failed Kavita on-demand download: {e}")
+
     # Neither source available - log helpful warning
-    if not container.booklore_client().is_configured() and not EBOOK_DIR.exists():
+    kavita_client = _get_kavita_client()
+    if (
+        not container.booklore_client().is_configured()
+        and not (kavita_client and kavita_client.is_configured())
+        and not EBOOK_DIR.exists()
+    ):
         logger.warning(
             f"⚠️ Cannot compute KOSync ID for '{ebook_filename}': "
-            "Neither Booklore integration nor /books volume is configured. "
-            "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "Booklore, Kavita, and /books are all unavailable. "
+            "Enable Booklore/Kavita integration "
             "or mount the ebooks directory to /books"
         )
     elif not booklore_id and not ebook_path:
@@ -837,16 +886,7 @@ def _upsert_storyteller_mapping(
         except Exception as st_err:
             logger.warning(f"Failed to add Storyteller UUID to collection: {st_err}")
 
-    shelf_filename = saved_book.original_ebook_filename or saved_book.ebook_filename
-    if (
-        shelf_filename
-        and not _is_storyteller_artifact_filename(shelf_filename)
-        and container.booklore_client().is_configured()
-    ):
-        try:
-            container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
-        except Exception as bl_err:
-            logger.warning(f"Failed to add Booklore shelf entry for '{shelf_filename}': {bl_err}")
+    _apply_link_ebook_side_effects(saved_book)
 
     if getattr(saved_book, "sync_mode", "audiobook") == "ebook_only":
         logger.info("Skipping ABS collection side effects for ebook-only mapping '%s'", saved_book.abs_id)
@@ -859,7 +899,7 @@ def _upsert_storyteller_mapping(
 
 
 class EbookResult:
-    """Wrapper to provide consistent interface for ebooks from Booklore, CWA, ABS, or filesystem."""
+    """Wrapper to provide consistent interface for ebooks from Booklore, CWA, Kavita, ABS, or filesystem."""
 
     def __init__(self, name, title=None, subtitle=None, authors=None, booklore_id=None, path=None, source=None, source_id=None):
         self.name = name
@@ -868,7 +908,7 @@ class EbookResult:
         self.authors = authors or ''
         self.booklore_id = booklore_id
         self.path = path # Public path
-        self.source = source  # 'booklore', 'cwa', 'abs', 'filesystem'
+        self.source = source  # 'booklore', 'cwa', 'kavita', 'abs', 'filesystem'
         self.source_id = source_id or booklore_id # Generic ID for any source
         # Has metadata if we have a real title (not just filename) or booklore_id
         self.has_metadata = booklore_id is not None or (title is not None and title != name)
@@ -960,7 +1000,7 @@ def get_suggestion_audiobooks():
 
 
 def get_searchable_ebooks(search_term):
-    """Get ebooks from Booklore API, filesystem, ABS, and CWA.
+    """Get ebooks from Booklore API, filesystem, ABS, CWA, and Kavita.
     Returns list of EbookResult objects for consistent interface."""
 
     results = []
@@ -1043,7 +1083,35 @@ def get_searchable_ebooks(search_term):
         except Exception as e:
             logger.warning(f"⚠️ CWA search failed: {e}")
 
-    # 4. Search filesystem (Local) - LOW PRIORITY
+    # 4. Kavita (OPDS)
+    if search_term:
+        try:
+            kavita_client = _get_kavita_client()
+            if kavita_client and kavita_client.is_configured():
+                kavita_results = kavita_client.search_ebooks(search_term)
+                if kavita_results:
+                    for kr in kavita_results:
+                        kavita_id = str(kr.get('id') or '').strip()
+                        if not kavita_id:
+                            continue
+                        ext = str(kr.get('ext') or 'epub').strip().lower() or 'epub'
+                        fname = f"kavita_{kavita_id}.{ext}"
+                        if fname.lower() not in found_filenames:
+                            results.append(EbookResult(
+                                name=fname,
+                                title=kr.get('title'),
+                                authors=kr.get('author'),
+                                path=kr.get('download_url'),
+                                source='Kavita',
+                                source_id=kr.get('series_id'),
+                            ))
+                            found_filenames.add(fname.lower())
+                            if kr.get('title'):
+                                found_stems.add(str(kr.get('title')).lower().strip())
+        except Exception as e:
+            logger.warning(f"⚠️ Kavita search failed: {e}")
+
+    # 5. Search filesystem (Local) - LOW PRIORITY
     if EBOOK_DIR.exists():
         try:
             all_epubs = list(EBOOK_DIR.glob("**/*.epub"))
@@ -1064,10 +1132,17 @@ def get_searchable_ebooks(search_term):
             logger.warning(f"⚠️ Filesystem search failed: {e}")
 
     # Check if we have no sources at all
-    if not results and not EBOOK_DIR.exists() and not container.booklore_client().is_configured():
+    kavita_client = _get_kavita_client()
+    kavita_configured = bool(kavita_client and kavita_client.is_configured())
+    if (
+        not results
+        and not EBOOK_DIR.exists()
+        and not container.booklore_client().is_configured()
+        and not kavita_configured
+    ):
         logger.warning(
-            "⚠️ No ebooks available: Neither Booklore integration nor /books volume is configured. "
-            "Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "⚠️ No ebooks available: Booklore, Kavita, and /books are all unavailable. "
+            "Enable Booklore/Kavita integration "
             "or mount the ebooks directory to /books"
         )
 
@@ -1098,6 +1173,7 @@ def _normalize_text_source_type(raw_source):
         "booklore": "Booklore",
         "abs": "ABS",
         "cwa": "CWA",
+        "kavita": "Kavita",
         "local file": "Local File",
     }
     return source_map.get(source_text.lower(), source_text)
@@ -1114,6 +1190,8 @@ def _build_forge_text_item(source_type, source_id, source_path, original_filenam
         "booklore_id": normalized_source_id,
         "cwa_id": normalized_source_id,
         "abs_id": normalized_source_id,
+        "kavita_id": _decode_kavita_filename_id(original_filename),
+        "kavita_series_id": normalized_source_id,
         "filename": original_filename,
     }
 
@@ -1125,10 +1203,63 @@ def _build_forge_text_item(source_type, source_id, source_path, original_filenam
         text_item["cwa_id"] = normalized_source_id
         if normalized_source_path:
             text_item["download_url"] = normalized_source_path
+    if normalized_source == "Kavita":
+        text_item["kavita_series_id"] = normalized_source_id
+        if normalized_source_path:
+            text_item["download_url"] = normalized_source_path
     if normalized_source == "Local File":
         text_item["path"] = normalized_source_path
 
     return text_item
+
+
+def _apply_link_ebook_side_effects(book):
+    if not book:
+        return
+
+    shelf_filename = getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
+    if (
+        shelf_filename
+        and not _is_storyteller_artifact_filename(shelf_filename)
+        and container.booklore_client().is_configured()
+    ):
+        try:
+            container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+        except Exception as bl_err:
+            logger.warning(f"Failed to add Booklore shelf entry for '{shelf_filename}': {bl_err}")
+
+    source_name = str(getattr(book, "ebook_source", "") or "").strip().lower()
+    source_id = str(getattr(book, "ebook_source_id", "") or "").strip()
+    if source_name == "kavita" and source_id:
+        kavita_client = _get_kavita_client()
+        if kavita_client and kavita_client.is_configured():
+            try:
+                kavita_client.add_to_want_to_read(source_id)
+            except Exception as kv_err:
+                logger.warning(f"Failed to add Kavita Want-to-Read for series '{source_id}': {kv_err}")
+
+
+def _remove_link_ebook_side_effects(book):
+    if not book:
+        return
+
+    shelf_filename = getattr(book, "original_ebook_filename", None) or getattr(book, "ebook_filename", None)
+    if shelf_filename and container.booklore_client().is_configured():
+        shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
+        try:
+            container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
+        except Exception as bl_err:
+            logger.warning(f"⚠️ Failed to remove from Booklore shelf: {bl_err}")
+
+    source_name = str(getattr(book, "ebook_source", "") or "").strip().lower()
+    source_id = str(getattr(book, "ebook_source_id", "") or "").strip()
+    if source_name == "kavita" and source_id:
+        kavita_client = _get_kavita_client()
+        if kavita_client and kavita_client.is_configured():
+            try:
+                kavita_client.remove_from_want_to_read(source_id)
+            except Exception as kv_err:
+                logger.warning(f"Failed to remove Kavita Want-to-Read for series '{source_id}': {kv_err}")
 
 
 def _parse_audio_duration(raw_value):
@@ -1240,16 +1371,7 @@ def _create_or_update_booklore_audio_mapping(
         except Exception as st_err:
             logger.warning(f"Failed to add Storyteller UUID to collection: {st_err}")
 
-    shelf_filename = saved_book.original_ebook_filename or saved_book.ebook_filename
-    if (
-        shelf_filename
-        and not _is_storyteller_artifact_filename(shelf_filename)
-        and container.booklore_client().is_configured()
-    ):
-        try:
-            container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
-        except Exception as bl_err:
-            logger.warning(f"Failed to add Booklore shelf entry for '{shelf_filename}': {bl_err}")
+    _apply_link_ebook_side_effects(saved_book)
 
     database_service.dismiss_suggestion(saved_book.abs_id)
     if isinstance(saved_book.kosync_doc_id, str) and saved_book.kosync_doc_id.strip():
@@ -1314,6 +1436,7 @@ def settings():
             'KOSYNC_ENABLED',
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
+            'KAVITA_ENABLED',
             'CWA_ENABLED',
             'HARDCOVER_ENABLED',
             'TELEGRAM_ENABLED',
@@ -1337,7 +1460,8 @@ def settings():
         }
         url_keys = [
             'SHELFMARK_URL', 'ABS_SERVER', 'BOOKLORE_SERVER',
-            'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER'
+            'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER',
+            'KAVITA_SERVER', 'KAVITA_OPDS_URL'
         ]
 
         def _normalized_form_value(key):
@@ -1859,7 +1983,7 @@ def forge_search_audio():
 
 
 def forge_search_text():
-    """API: Unified text source search for Forge - ABS ebooks, Booklore, CWA, local files."""
+    """API: Unified text source search for Forge - ABS ebooks, Booklore, CWA, Kavita, local files."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify([])
@@ -1936,7 +2060,33 @@ def forge_search_text():
     except Exception as e:
         logger.warning(f"⚠️ Forge: CWA search failed: {e}")
 
-    # 4. Local files from BOOKS_DIR
+    # 4. Kavita
+    try:
+        kavita_client = _get_kavita_client()
+        if kavita_client and kavita_client.is_configured():
+            kavita_results = kavita_client.search_ebooks(query)
+            if kavita_results:
+                for kr in kavita_results:
+                    kavita_id = str(kr.get('id') or '').strip()
+                    if not kavita_id:
+                        continue
+                    key = f"kavita_{kavita_id}"
+                    if key not in found_ids:
+                        found_ids.add(key)
+                        results.append({
+                            "id": key,
+                            "title": kr.get('title', 'Unknown'),
+                            "author": kr.get('author', ''),
+                            "source": "Kavita",
+                            "kavita_id": kavita_id,
+                            "kavita_series_id": str(kr.get('series_id') or '').strip(),
+                            "ext": kr.get('ext', 'epub'),
+                            "download_url": kr.get('download_url', ''),
+                        })
+    except Exception as e:
+        logger.warning(f"⚠️ Forge: Kavita search failed: {e}")
+
+    # 5. Local files from BOOKS_DIR
     try:
         local_books_dir = Path(os.environ.get("BOOKS_DIR", "/books"))
         if local_books_dir.exists():
@@ -2308,11 +2458,7 @@ def match():
             hardcover_sync_client._automatch_hardcover(book)
 
         container.abs_client().add_to_collection(abs_id, ABS_COLLECTION_NAME)
-        if container.booklore_client().is_configured():
-            # Use original filename for shelf if we switched to storyteller
-            shelf_filename = original_ebook_filename or ebook_filename
-            if shelf_filename and not _is_storyteller_artifact_filename(shelf_filename):
-                container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+        _apply_link_ebook_side_effects(book)
         if container.storyteller_client().is_configured():
             if book.storyteller_uuid:
                 container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
@@ -2543,9 +2689,7 @@ def batch_match():
                         hardcover_sync_client._automatch_hardcover(book)
 
                     container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
-                    if container.booklore_client().is_configured():
-                        shelf_filename = original_ebook_filename or ebook_filename
-                        container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+                    _apply_link_ebook_side_effects(book)
                     if container.storyteller_client().is_configured() and book.storyteller_uuid:
                         container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
 
@@ -2581,7 +2725,7 @@ def batch_match():
                     resolved_path = find_ebook_file(original_filename)
                     source_path = str(resolved_path) if resolved_path else ''
 
-                if source_type in ('ABS', 'Booklore', 'CWA') and not source_id:
+                if source_type in ('ABS', 'Booklore', 'CWA', 'Kavita') and not source_id:
                     logger.warning(
                         "Batch Forge skipped '%s': missing source id for source type '%s'",
                         sanitize_log_data(item.get('audio_title') or item.get('abs_title') or item.get('abs_id')),
@@ -2814,9 +2958,7 @@ def batch_match():
                     hardcover_sync_client._automatch_hardcover(book)
 
                 container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
-                if container.booklore_client().is_configured():
-                    shelf_filename = original_ebook_filename or ebook_filename
-                    container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+                _apply_link_ebook_side_effects(book)
                 if container.storyteller_client().is_configured():
                     if book.storyteller_uuid:
                         container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
@@ -3412,9 +3554,7 @@ def suggestions_page():
                     hardcover_sync_client._automatch_hardcover(book)
 
                 container.abs_client().add_to_collection(item['abs_id'], ABS_COLLECTION_NAME)
-                if container.booklore_client().is_configured():
-                    shelf_filename = original_ebook_filename or ebook_filename
-                    container.booklore_client().add_to_shelf(shelf_filename, BOOKLORE_SHELF_NAME)
+                _apply_link_ebook_side_effects(book)
                 if container.storyteller_client().is_configured():
                     if book.storyteller_uuid:
                         container.storyteller_client().add_to_collection_by_uuid(book.storyteller_uuid)
@@ -3717,13 +3857,7 @@ def cleanup_mapping_resources(book):
         except Exception as e:
             logger.warning(f"Failed to remove from Storyteller collection: {e}")
 
-    if book.ebook_filename and container.booklore_client().is_configured():
-        shelf_name = os.environ.get('BOOKLORE_SHELF_NAME', 'Kobo')
-        try:
-            shelf_filename = book.original_ebook_filename or book.ebook_filename
-            container.booklore_client().remove_from_shelf(shelf_filename, shelf_name)
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to remove from Booklore shelf: {e}")
+    _remove_link_ebook_side_effects(book)
 
 
 def delete_mapping(abs_id):
@@ -4465,6 +4599,24 @@ def api_booklore_refresh():
     return jsonify({"success": True, "message": "Booklore cache refreshed successfully"})
 
 
+def api_kavita_refresh():
+    """Clear Kavita cache and trigger a full refresh."""
+    client = _get_kavita_client()
+    if not client or not client.is_configured():
+        return jsonify({"success": False, "error": "Kavita not configured"}), 400
+
+    try:
+        refreshed = client.clear_and_refresh()
+    except Exception as e:
+        logger.error(f"❌ Kavita cache refresh failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    if not refreshed:
+        return jsonify({"success": False, "error": "Kavita refresh failed"}), 500
+
+    return jsonify({"success": True, "message": "Kavita cache refreshed successfully"})
+
+
 def _test_conn_error(e: Exception) -> str:
     """Extract a user-friendly message from a requests exception."""
     msg = str(e)
@@ -4538,6 +4690,12 @@ def test_connection(service: str):
             _normalize_test_url(data.get('CWA_SERVER')),
             _coerce_test_str(data.get('CWA_USERNAME')),
             _coerce_test_str(data.get('CWA_PASSWORD')),
+        ),
+        'kavita': lambda data: _test_kavita(
+            _coerce_test_bool(data.get('KAVITA_ENABLED')),
+            _normalize_test_url(data.get('KAVITA_SERVER')),
+            _coerce_test_str(data.get('KAVITA_API_KEY')),
+            _coerce_test_str(data.get('KAVITA_OPDS_URL')),
         ),
         'hardcover': lambda data: _test_hardcover(
             _coerce_test_bool(data.get('HARDCOVER_ENABLED')),
@@ -4641,6 +4799,36 @@ def _test_cwa(enabled: bool, url: str, user: str, pwd: str) -> dict:
     return {"ok": False, "message": f"Server returned {r.status_code}"}
 
 
+def _test_kavita(enabled: bool, url: str, api_key: str, opds_url: str) -> dict:
+    if not enabled:
+        return {"ok": False, "message": "Kavita is disabled"}
+
+    opds = (opds_url or "").strip().rstrip("/")
+    if opds and not opds.lower().startswith(("http://", "https://")):
+        opds = f"http://{opds}"
+
+    if not opds:
+        if not url or not api_key:
+            return {"ok": False, "message": "Missing server URL or API key"}
+        opds = f"{url}/api/opds/{api_key}"
+
+    r = requests.get(
+        opds,
+        timeout=10,
+        headers={"Accept": "application/atom+xml,application/xml,text/xml;q=0.9,*/*;q=0.8"},
+    )
+    if r.status_code == 200:
+        body = (r.text or "").lstrip().lower()
+        if body.startswith(('<!doctype html', '<html')):
+            return {"ok": False, "message": "Authentication failed — server returned HTML instead of OPDS XML"}
+        if "<feed" not in body:
+            return {"ok": False, "message": "Connected but response was not a valid OPDS feed"}
+        return {"ok": True, "message": "Connected to Kavita OPDS feed"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": "Invalid API key"}
+    return {"ok": False, "message": f"Server returned {r.status_code}"}
+
+
 def _test_hardcover(enabled: bool, token: str) -> dict:
     token = token.strip()
     if not enabled:
@@ -4741,6 +4929,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/booklore/audiobook-cover/<book_id>', 'proxy_booklore_audiobook_cover', proxy_booklore_audiobook_cover, methods=['GET'])
     app.add_url_rule('/api/booklore/libraries', 'get_booklore_libraries', get_booklore_libraries, methods=['GET'])
     app.add_url_rule('/api/booklore/refresh', 'api_booklore_refresh', api_booklore_refresh, methods=['POST'])
+    app.add_url_rule('/api/kavita/refresh', 'api_kavita_refresh', api_kavita_refresh, methods=['POST'])
     app.add_url_rule('/api/test-connection/<service>', 'test_connection', test_connection, methods=['POST'])
 
     # Storyteller API routes
@@ -4821,16 +5010,22 @@ if __name__ == '__main__':
 
     # Check ebook source configuration
     booklore_configured = container.booklore_client().is_configured()
+    kavita_client = _get_kavita_client()
+    kavita_configured = bool(kavita_client and kavita_client.is_configured())
     books_volume_exists = container.books_dir().exists()
 
-    if booklore_configured:
+    if booklore_configured and kavita_configured:
+        logger.info("✅ Booklore and Kavita integrations enabled - ebooks sourced from APIs")
+    elif booklore_configured:
         logger.info(f"✅ Booklore integration enabled - ebooks sourced from API")
+    elif kavita_configured:
+        logger.info("✅ Kavita integration enabled - ebooks sourced from OPDS API")
     elif books_volume_exists:
         logger.info(f"✅ Ebooks directory mounted at {container.books_dir()}")
     else:
         logger.info(
-            "⚠️  NO EBOOK SOURCE CONFIGURED: Neither Booklore integration nor /books volume is available. "
-            "New book matches will fail. Enable Booklore (BOOKLORE_SERVER, BOOKLORE_USER, BOOKLORE_PASSWORD) "
+            "⚠️  NO EBOOK SOURCE CONFIGURED: Booklore, Kavita, and /books are unavailable. "
+            "New book matches will fail. Enable Booklore/Kavita integration "
             "or mount the ebooks directory to /books."
         )
 

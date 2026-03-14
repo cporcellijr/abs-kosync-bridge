@@ -381,6 +381,11 @@
             color: #ffb74d;
         }
 
+        .source-badge.kavita {
+            background: rgba(0, 188, 212, 0.2);
+            color: #80deea;
+        }
+
         .source-badge.local {
             background: rgba(156, 39, 176, 0.2);
             color: #ce93d8;
@@ -841,7 +846,7 @@
                         card.onclick = () => selectText(card, item);
 
                         const badgeClass = (item.source || '').toLowerCase().replace(' ', '').replace('file', '');
-                        const badgeMap = { 'booklore': 'booklore', 'abs': 'abs', 'cwa': 'cwa', 'local': 'local' };
+                        const badgeMap = { 'booklore': 'booklore', 'abs': 'abs', 'cwa': 'cwa', 'kavita': 'kavita', 'local': 'local' };
                         const cls = badgeMap[badgeClass] || 'abs';
 
                         card.innerHTML = `

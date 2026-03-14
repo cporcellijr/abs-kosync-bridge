@@ -677,6 +677,25 @@ class SyncManager:
             if not filesystem_matches:
                 logger.error(f"❌ EPUB not found on filesystem and Booklore not configured")
 
+        # Try Kavita on-demand for synthetic OPDS filenames
+        if str(ebook_filename or "").lower().startswith("kavita_"):
+            kavita_id = str(ebook_filename)[7:].rsplit(".", 1)[0].strip()
+            kavita_client = (
+                getattr(self.library_service, "kavita_client", None)
+                if self.library_service
+                else None
+            )
+            if kavita_id and kavita_client and kavita_client.is_configured():
+                logger.info(f"⚡ Downloading EPUB from Kavita: {sanitize_log_data(ebook_filename)}")
+                content = kavita_client.download_book(kavita_id)
+                if content:
+                    with open(cached_path, "wb") as f:
+                        f.write(content)
+                    if cached_path.exists() and cached_path.stat().st_size > 1024:
+                        logger.info(f"✅ Downloaded EPUB to cache: '{cached_path}'")
+                        return cached_path
+                logger.error(f"❌ Failed to download EPUB content from Kavita ({sanitize_log_data(kavita_id)})")
+
         return None
 
     def _get_storyteller_manifest_path(self, book: Book) -> Path | None:
