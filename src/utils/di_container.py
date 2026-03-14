@@ -177,7 +177,6 @@ class Container(containers.DeclarativeContainer):
         KoSyncSyncClient,
         kosync_client,
         ebook_parser,
-        blocked_ebook_source="Kavita",
     )
 
     kavita_kosync_client = providers.Singleton(KavitaKoSyncClient)

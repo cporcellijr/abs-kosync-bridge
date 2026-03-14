@@ -41,6 +41,7 @@ class TestForgeService(unittest.TestCase):
         # Suppress logging during tests
         self.logger_patch = patch('src.services.forge_service.logger')
         self.logger_patch.start()
+        self.mock_kavita.is_configured.return_value = False
 
     def tearDown(self):
         patch.stopall()
@@ -347,8 +348,9 @@ class TestForgeService(unittest.TestCase):
 
     def test_auto_forge_kavita_falls_back_to_kavita_id_lookup(self):
         """Auto-forge should use Kavita ID lookup when no direct download URL is provided."""
+        self.mock_kavita.is_configured.return_value = True
         self.mock_kavita.download_book.return_value = b"x" * 2048
-        self.mock_kavita.add_to_want_to_read.return_value = True
+        self.mock_kavita.add_to_collection.return_value = True
 
         self._run_auto_forge_pipeline(
             text_item={"source": "Kavita", "kavita_id": "321", "kavita_series_id": "99", "download_url": ""},
@@ -357,7 +359,7 @@ class TestForgeService(unittest.TestCase):
         )
 
         self.mock_kavita.download_book.assert_called_with("321")
-        self.mock_kavita.add_to_want_to_read.assert_called_with("99")
+        self.mock_kavita.add_to_collection.assert_called_with("99", "Bridge")
 
     def test_auto_forge_uses_storyteller_uuid_collection_path(self):
         """Auto-forge should add Storyteller books to collection by UUID when available."""

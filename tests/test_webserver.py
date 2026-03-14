@@ -48,6 +48,7 @@ class MockContainer:
         self.mock_sync_manager.get_abs_title.return_value = 'Test Book Title'
         self.mock_sync_manager.get_duration.return_value = 3600
         self.mock_sync_manager.clear_progress = Mock()
+        self.mock_kavita_client.is_configured.return_value = False
 
     def sync_manager(self):
         return self.mock_sync_manager

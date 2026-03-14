@@ -777,6 +777,11 @@
                         <label>Library ID (Optional)</label>
                         <input type="text" name="KAVITA_LIBRARY_ID" value="{{ get_val('KAVITA_LIBRARY_ID') }}" placeholder="e.g. 1">
                     </div>
+                    <div class="form-group">
+                        <label>Collection Name</label>
+                        <input type="text" name="KAVITA_COLLECTION_NAME" value="{{ get_val('KAVITA_COLLECTION_NAME') }}" placeholder="Bridge">
+                        <div class="help-text">Kavita collection that matched books are added to. Appears in your OPDS feed for KOReader.</div>
+                    </div>
                     <div class="form-group full-width">
                         <label>OPDS URL Override (Optional)</label>
                         <input type="text" name="KAVITA_OPDS_URL" value="{{ get_val('KAVITA_OPDS_URL') }}">
@@ -787,6 +792,9 @@
                     <div class="form-group full-width">
                         <div class="help-text" style="color:#ffb74d;">
                             Before syncing progress via KOSync, run a forced library scan in Kavita (Edit Library -&gt; Force Scan) to generate document hashes for existing books.
+                        </div>
+                        <div class="help-text">
+                            💡 For automatic device sync: point KOReader's OPDS catalog at your Kavita collection feed, and optionally install the OPDSfoldersync KOReader plugin for auto-download/remove on device.
                         </div>
                     </div>
                 </div>

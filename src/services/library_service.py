@@ -133,7 +133,14 @@ class LibraryService:
             if results:
                 logger.info(f"   ✅ Priority 4 (Kavita): Found {len(results)} matches for '{query}'")
                 target = next((r for r in results if (r.get('ext') or '').lower() == 'epub'), results[0])
-                filename = f"{item_id}_kavita.{target.get('ext', 'epub')}"
+                chapter_id = target.get('id')
+                if chapter_id is None:
+                    logger.warning(
+                        "   âš ï¸ Kavita match missing chapter id for '%s'; falling back to item id in synthetic filename",
+                        title,
+                    )
+                    chapter_id = item_id
+                filename = f"kavita_{chapter_id}.epub"
                 output_path = os.path.join(self.epub_cache_dir, filename)
                 downloaded = False
                 download_url = target.get('download_url')

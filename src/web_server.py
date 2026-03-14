@@ -394,6 +394,7 @@ def inject_global_vars():
             'STORYTELLER_ENABLED': 'false',
             'BOOKLORE_ENABLED': 'false',
             'KAVITA_ENABLED': 'false',
+            'KAVITA_COLLECTION_NAME': 'Bridge',
             'HARDCOVER_ENABLED': 'false',
             'TELEGRAM_ENABLED': 'false',
             'SUGGESTIONS_ENABLED': 'false',
@@ -464,17 +465,6 @@ def find_ebook_file(filename):
     return matches[0] if matches else None
 
 
-def _get_kavita_client():
-    getter = getattr(container, "kavita_client", None)
-    if not callable(getter):
-        return None
-    try:
-        return getter()
-    except Exception as e:
-        logger.debug(f"Kavita client unavailable: {e}")
-        return None
-
-
 def _decode_kavita_filename_id(ebook_filename: str) -> str | None:
     name = str(ebook_filename or "").strip()
     if not name.lower().startswith("kavita_"):
@@ -484,6 +474,81 @@ def _decode_kavita_filename_id(ebook_filename: str) -> str | None:
         raw = raw.rsplit(".", 1)[0]
     raw = raw.strip()
     return raw or None
+
+
+def _normalize_ebook_source_id(ebook_source, ebook_source_id, ebook_filename):
+    normalized_source = str(ebook_source or "").strip().lower()
+    normalized_id = str(ebook_source_id or "").strip()
+    normalized_filename = str(ebook_filename or "").strip()
+
+    if normalized_source != "kavita":
+        return normalized_id or None
+
+    if not normalized_filename:
+        return normalized_id or None
+
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
+
+    if not kavita_client or not kavita_client.is_configured():
+        return normalized_id or None
+
+    try:
+        kavita_book = kavita_client.find_book_by_filename(normalized_filename, allow_refresh=False)
+    except Exception as e:
+        logger.warning(
+            "Failed to normalize Kavita series id for '%s': %s",
+            sanitize_log_data(normalized_filename),
+            e,
+        )
+        return normalized_id or None
+
+    resolved_series_id = str((kavita_book or {}).get("series_id") or "").strip()
+    return resolved_series_id or normalized_id or None
+
+
+def _resolve_kavita_series_id(book, kavita_client):
+    if not book or not kavita_client or not kavita_client.is_configured():
+        return None
+
+    source_name = str(getattr(book, "ebook_source", "") or "").strip().lower()
+    source_id = str(getattr(book, "ebook_source_id", "") or "").strip()
+    if source_name == "kavita" and source_id:
+        return source_id
+
+    title = str(getattr(book, "abs_title", "") or "").strip()
+    if not title:
+        logger.warning("Skipping Kavita collection side effect: book title is empty")
+        return None
+
+    try:
+        kavita_results = kavita_client.search_ebooks(title)
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve Kavita series id for '%s': %s",
+            sanitize_log_data(title),
+            e,
+        )
+        return None
+
+    if not kavita_results:
+        logger.warning(
+            "No Kavita match found for '%s' while syncing collection side effect",
+            sanitize_log_data(title),
+        )
+        return None
+
+    resolved_series_id = str(kavita_results[0].get("series_id") or "").strip()
+    if not resolved_series_id:
+        logger.warning(
+            "Kavita match for '%s' did not include a series id",
+            sanitize_log_data(title),
+        )
+        return None
+
+    return resolved_series_id
 
 
 def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=None):
@@ -602,7 +667,10 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
     kavita_id = _decode_kavita_filename_id(ebook_filename)
     if kavita_id:
         try:
-            kavita_client = _get_kavita_client()
+            try:
+                kavita_client = container.kavita_client()
+            except Exception:
+                kavita_client = None
             if kavita_client and kavita_client.is_configured():
                 logger.info(f"📥 Attempting on-demand Kavita download for ID '{kavita_id}'")
                 if not epub_cache.exists():
@@ -620,7 +688,10 @@ def get_kosync_id_for_ebook(ebook_filename, booklore_id=None, original_filename=
             logger.error(f"   ❌ Failed Kavita on-demand download: {e}")
 
     # Neither source available - log helpful warning
-    kavita_client = _get_kavita_client()
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
     if (
         not container.booklore_client().is_configured()
         and not (kavita_client and kavita_client.is_configured())
@@ -1086,7 +1157,10 @@ def get_searchable_ebooks(search_term):
     # 4. Kavita (OPDS)
     if search_term:
         try:
-            kavita_client = _get_kavita_client()
+            try:
+                kavita_client = container.kavita_client()
+            except Exception:
+                kavita_client = None
             if kavita_client and kavita_client.is_configured():
                 kavita_results = kavita_client.search_ebooks(search_term)
                 if kavita_results:
@@ -1132,7 +1206,10 @@ def get_searchable_ebooks(search_term):
             logger.warning(f"⚠️ Filesystem search failed: {e}")
 
     # Check if we have no sources at all
-    kavita_client = _get_kavita_client()
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
     kavita_configured = bool(kavita_client and kavita_client.is_configured())
     if (
         not results
@@ -1228,15 +1305,19 @@ def _apply_link_ebook_side_effects(book):
         except Exception as bl_err:
             logger.warning(f"Failed to add Booklore shelf entry for '{shelf_filename}': {bl_err}")
 
-    source_name = str(getattr(book, "ebook_source", "") or "").strip().lower()
-    source_id = str(getattr(book, "ebook_source_id", "") or "").strip()
-    if source_name == "kavita" and source_id:
-        kavita_client = _get_kavita_client()
-        if kavita_client and kavita_client.is_configured():
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
+
+    if kavita_client and kavita_client.is_configured():
+        series_id = _resolve_kavita_series_id(book, kavita_client)
+        if series_id:
+            collection_name = os.environ.get('KAVITA_COLLECTION_NAME', 'Bridge')
             try:
-                kavita_client.add_to_want_to_read(source_id)
+                kavita_client.add_to_collection(series_id, collection_name)
             except Exception as kv_err:
-                logger.warning(f"Failed to add Kavita Want-to-Read for series '{source_id}': {kv_err}")
+                logger.warning(f"Failed to add Kavita collection entry for series '{series_id}': {kv_err}")
 
 
 def _remove_link_ebook_side_effects(book):
@@ -1251,15 +1332,19 @@ def _remove_link_ebook_side_effects(book):
         except Exception as bl_err:
             logger.warning(f"⚠️ Failed to remove from Booklore shelf: {bl_err}")
 
-    source_name = str(getattr(book, "ebook_source", "") or "").strip().lower()
-    source_id = str(getattr(book, "ebook_source_id", "") or "").strip()
-    if source_name == "kavita" and source_id:
-        kavita_client = _get_kavita_client()
-        if kavita_client and kavita_client.is_configured():
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
+
+    if kavita_client and kavita_client.is_configured():
+        series_id = _resolve_kavita_series_id(book, kavita_client)
+        if series_id:
+            collection_name = os.environ.get('KAVITA_COLLECTION_NAME', 'Bridge')
             try:
-                kavita_client.remove_from_want_to_read(source_id)
+                kavita_client.remove_from_collection(series_id, collection_name)
             except Exception as kv_err:
-                logger.warning(f"Failed to remove Kavita Want-to-Read for series '{source_id}': {kv_err}")
+                logger.warning(f"Failed to remove Kavita collection entry for series '{series_id}': {kv_err}")
 
 
 def _parse_audio_duration(raw_value):
@@ -1342,7 +1427,14 @@ def _create_or_update_booklore_audio_mapping(
     target_book.ebook_filename = resolved_ebook_filename
     target_book.original_ebook_filename = original_ebook_filename or target_book.original_ebook_filename
     target_book.ebook_source = ebook_source or target_book.ebook_source
-    target_book.ebook_source_id = ebook_source_id or target_book.ebook_source_id
+    target_book.ebook_source_id = (
+        _normalize_ebook_source_id(
+            ebook_source,
+            ebook_source_id,
+            original_ebook_filename or resolved_ebook_filename,
+        )
+        or target_book.ebook_source_id
+    )
     target_book.kosync_doc_id = kosync_doc_id
     target_book.status = "pending"
     target_book.sync_mode = "audiobook"
@@ -2062,7 +2154,10 @@ def forge_search_text():
 
     # 4. Kavita
     try:
-        kavita_client = _get_kavita_client()
+        try:
+            kavita_client = container.kavita_client()
+        except Exception:
+            kavita_client = None
         if kavita_client and kavita_client.is_configured():
             kavita_results = kavita_client.search_ebooks(query)
             if kavita_results:
@@ -2179,7 +2274,11 @@ def match():
         audio_duration = _parse_audio_duration(request.form.get('audio_duration'))
         selected_filename = (request.form.get('ebook_filename') or '').strip() or None
         ebook_source = (request.form.get('ebook_source') or request.form.get('source_type') or '').strip() or None
-        ebook_source_id = (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None
+        ebook_source_id = _normalize_ebook_source_id(
+            ebook_source,
+            (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None,
+            selected_filename,
+        )
         storyteller_uuid = (request.form.get('storyteller_uuid') or '').strip() or None
         forge_stage_mode = (request.form.get('forge_stage_mode') or '').strip() or None
         ebook_filename = selected_filename
@@ -2245,7 +2344,11 @@ def match():
 
             source_type = request.form.get('source_type')
             source_path = request.form.get('source_path')
-            source_id = request.form.get('source_id')
+            source_id = _normalize_ebook_source_id(
+                source_type,
+                request.form.get('source_id'),
+                original_filename,
+            )
             text_item = _build_forge_text_item(source_type, source_id, source_path, original_filename)
             normalized_source_type = text_item.get("source")
 
@@ -2438,7 +2541,11 @@ def match():
             original_ebook_filename=original_ebook_filename,
             abs_ebook_item_id=abs_ebook_item_id,
             ebook_source=ebook_source,
-            ebook_source_id=ebook_source_id,
+            ebook_source_id=_normalize_ebook_source_id(
+                ebook_source,
+                ebook_source_id,
+                original_ebook_filename or ebook_filename,
+            ),
         )
 
         database_service.save_book(book)
@@ -2513,7 +2620,11 @@ def batch_match():
             ebook_filename = request.form.get('ebook_filename', '')
             ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
             ebook_source = (request.form.get('ebook_source') or request.form.get('source_type') or '').strip() or None
-            ebook_source_id = (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None
+            ebook_source_id = _normalize_ebook_source_id(
+                ebook_source,
+                (request.form.get('ebook_source_id') or request.form.get('source_id') or '').strip() or None,
+                ebook_filename,
+            )
             ebook_source_path = (request.form.get('ebook_source_path') or request.form.get('source_path') or '').strip() or None
             storyteller_uuid = request.form.get('storyteller_uuid', '')
             audiobooks = container.abs_client().get_all_audiobooks()
@@ -2679,7 +2790,11 @@ def batch_match():
                         storyteller_uuid=storyteller_uuid or None,
                         original_ebook_filename=original_ebook_filename,
                         ebook_source=item.get('ebook_source'),
-                        ebook_source_id=item.get('ebook_source_id'),
+                        ebook_source_id=_normalize_ebook_source_id(
+                            item.get('ebook_source'),
+                            item.get('ebook_source_id'),
+                            original_ebook_filename or ebook_filename,
+                        ),
                     )
 
                     database_service.save_book(book)
@@ -2713,7 +2828,14 @@ def batch_match():
                     continue
 
                 source_type = _normalize_text_source_type(item.get('ebook_source'))
-                source_id = str(item.get('ebook_source_id') or '').strip()
+                source_id = str(
+                    _normalize_ebook_source_id(
+                        source_type,
+                        item.get('ebook_source_id'),
+                        original_filename,
+                    )
+                    or ''
+                ).strip()
                 source_path = str(item.get('ebook_source_path') or '').strip()
 
                 if not source_type:
@@ -2779,7 +2901,11 @@ def batch_match():
                         audio_cover_url=item.get('audio_cover_url') or item.get('cover_url'),
                         audio_duration=audio_duration,
                         ebook_source=item.get('ebook_source'),
-                        ebook_source_id=item.get('ebook_source_id'),
+                        ebook_source_id=_normalize_ebook_source_id(
+                            item.get('ebook_source'),
+                            item.get('ebook_source_id'),
+                            original_filename,
+                        ),
                     )
                     database_service.save_book(book)
 
@@ -2819,7 +2945,11 @@ def batch_match():
                         audio_cover_url=item.get('audio_cover_url') or item.get('cover_url'),
                         audio_duration=audio_duration,
                         ebook_source=item.get('ebook_source'),
-                        ebook_source_id=item.get('ebook_source_id'),
+                        ebook_source_id=_normalize_ebook_source_id(
+                            item.get('ebook_source'),
+                            item.get('ebook_source_id'),
+                            original_filename,
+                        ),
                     )
                     database_service.save_book(book)
 
@@ -2947,7 +3077,11 @@ def batch_match():
                     storyteller_uuid=storyteller_uuid or None,
                     original_ebook_filename=original_ebook_filename,
                     ebook_source=item.get('ebook_source'),
-                    ebook_source_id=item.get('ebook_source_id'),
+                    ebook_source_id=_normalize_ebook_source_id(
+                        item.get('ebook_source'),
+                        item.get('ebook_source_id'),
+                        original_ebook_filename or ebook_filename,
+                    ),
                 )
 
                 database_service.save_book(book)
@@ -3371,7 +3505,11 @@ def suggestions_page():
             ebook_filename = request.form.get('ebook_filename', '')
             ebook_display_name = request.form.get('ebook_display_name', ebook_filename)
             ebook_source = (request.form.get('ebook_source') or '').strip() or None
-            ebook_source_id = (request.form.get('ebook_source_id') or '').strip() or None
+            ebook_source_id = _normalize_ebook_source_id(
+                ebook_source,
+                (request.form.get('ebook_source_id') or '').strip() or None,
+                ebook_filename,
+            )
             ebook_source_path = (request.form.get('ebook_source_path') or request.form.get('source_path') or '').strip() or None
             storyteller_uuid = request.form.get('storyteller_uuid', '')
             selected_audio = None
@@ -3544,7 +3682,11 @@ def suggestions_page():
                     storyteller_uuid=storyteller_uuid or None,
                     original_ebook_filename=original_ebook_filename,
                     ebook_source=item.get('ebook_source'),
-                    ebook_source_id=item.get('ebook_source_id'),
+                    ebook_source_id=_normalize_ebook_source_id(
+                        item.get('ebook_source'),
+                        item.get('ebook_source_id'),
+                        original_ebook_filename or ebook_filename,
+                    ),
                 )
 
                 database_service.save_book(book)
@@ -4601,7 +4743,10 @@ def api_booklore_refresh():
 
 def api_kavita_refresh():
     """Clear Kavita cache and trigger a full refresh."""
-    client = _get_kavita_client()
+    try:
+        client = container.kavita_client()
+    except Exception:
+        client = None
     if not client or not client.is_configured():
         return jsonify({"success": False, "error": "Kavita not configured"}), 400
 
@@ -5010,7 +5155,10 @@ if __name__ == '__main__':
 
     # Check ebook source configuration
     booklore_configured = container.booklore_client().is_configured()
-    kavita_client = _get_kavita_client()
+    try:
+        kavita_client = container.kavita_client()
+    except Exception:
+        kavita_client = None
     kavita_configured = bool(kavita_client and kavita_client.is_configured())
     books_volume_exists = container.books_dir().exists()
 

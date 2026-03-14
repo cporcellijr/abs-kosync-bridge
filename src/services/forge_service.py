@@ -1308,11 +1308,21 @@ class ForgeService:
                     else:
                         self.storyteller_client.add_to_collection(target_filename)
 
-                if str(text_item.get('source') or '').strip().lower() == 'kavita':
-                    kavita_series_id = text_item.get('kavita_series_id')
-                    kavita_client = self.kavita_client or getattr(self.library_service, 'kavita_client', None)
-                    if kavita_series_id and kavita_client:
-                        kavita_client.add_to_want_to_read(kavita_series_id)
+                kavita_client = self.kavita_client or getattr(self.library_service, 'kavita_client', None)
+                if kavita_client and kavita_client.is_configured():
+                    kavita_series_id = str(text_item.get('kavita_series_id') or '').strip()
+                    if not kavita_series_id:
+                        kavita_results = kavita_client.search_ebooks(title or "")
+                        if kavita_results:
+                            kavita_series_id = str(kavita_results[0].get('series_id') or '').strip()
+                        else:
+                            logger.warning(
+                                "Auto-Forge: No Kavita match found for '%s' while syncing collection side effect",
+                                title,
+                            )
+                    if kavita_series_id:
+                        kavita_collection_name = os.environ.get("KAVITA_COLLECTION_NAME", "Bridge")
+                        kavita_client.add_to_collection(kavita_series_id, kavita_collection_name)
                     
             except Exception as e:
                 logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")

@@ -76,23 +76,23 @@ class KavitaClient:
 
     def check_connection(self) -> bool:
         if not self.is_configured():
-            logger.warning("⚠️ Kavita not configured (skipping)")
+            logger.warning("âš ï¸ Kavita not configured (skipping)")
             return False
         try:
             r = self.session.get(self.opds_base, timeout=5)
             if r.status_code == 200:
                 if r.text.lstrip().lower().startswith(("<!doctype html", "<html")):
-                    logger.error("❌ Kavita connection failed: received HTML instead of OPDS XML")
+                    logger.error("âŒ Kavita connection failed: received HTML instead of OPDS XML")
                     return False
-                logger.info(f"✅ Connected to Kavita at {self.base_url}")
+                logger.info(f"âœ… Connected to Kavita at {self.base_url}")
                 return True
             if r.status_code in (401, 403):
-                logger.error("❌ Kavita connection failed: invalid API key")
+                logger.error("âŒ Kavita connection failed: invalid API key")
                 return False
-            logger.error(f"❌ Kavita connection failed: {r.status_code}")
+            logger.error(f"âŒ Kavita connection failed: {r.status_code}")
             return False
         except Exception as e:
-            logger.error(f"❌ Kavita connection error: {e}")
+            logger.error(f"âŒ Kavita connection error: {e}")
             return False
 
     def clear_and_refresh(self) -> bool:
@@ -137,7 +137,7 @@ class KavitaClient:
                 self._save_cache()
                 return list(self._book_cache_by_id.values())
         except Exception as e:
-            logger.error(f"❌ Kavita cache refresh failed: {e}")
+            logger.error(f"âŒ Kavita cache refresh failed: {e}")
             with self._cache_lock:
                 return list(self._book_cache_by_id.values())
         finally:
@@ -160,7 +160,6 @@ class KavitaClient:
             if not series_entries:
                 return []
 
-            # Cache-first detail resolution
             self.get_all_books()
 
             books_by_id: dict[str, dict] = {}
@@ -185,7 +184,7 @@ class KavitaClient:
                     books_by_id[str(book["id"])] = book
             return list(books_by_id.values())
         except Exception as e:
-            logger.error(f"❌ Kavita search failed for '{sanitize_log_data(q)}': {e}")
+            logger.error(f"âŒ Kavita search failed for '{sanitize_log_data(q)}': {e}")
             return []
 
     def find_book_by_filename(self, filename: str, allow_refresh: bool = True) -> Optional[dict]:
@@ -228,13 +227,13 @@ class KavitaClient:
             if r.status_code == 200 and r.content:
                 return r.content
             logger.warning(
-                "⚠️ Kavita download failed for id '%s' (status=%s)",
+                "âš ï¸ Kavita download failed for id '%s' (status=%s)",
                 sanitize_log_data(kid),
                 r.status_code,
             )
             return None
         except Exception as e:
-            logger.error(f"❌ Kavita download failed for id '{sanitize_log_data(kid)}': {e}")
+            logger.error(f"âŒ Kavita download failed for id '{sanitize_log_data(kid)}': {e}")
             return None
 
     def download_ebook(self, download_url: str, output_path: str | Path) -> bool:
@@ -250,11 +249,11 @@ class KavitaClient:
                         if chunk:
                             f.write(chunk)
             if path_obj.stat().st_size < 1024:
-                logger.warning(f"⚠️ Kavita download too small: {path_obj.stat().st_size} bytes")
+                logger.warning(f"âš ï¸ Kavita download too small: {path_obj.stat().st_size} bytes")
                 return False
             return True
         except Exception as e:
-            logger.error(f"❌ Kavita download_ebook failed: {e}")
+            logger.error(f"âŒ Kavita download_ebook failed: {e}")
             try:
                 if path_obj.exists():
                     path_obj.unlink()
@@ -272,42 +271,73 @@ class KavitaClient:
             return item.get("cover_url")
         return None
 
-    def add_to_want_to_read(self, series_id: int | str) -> bool:
+    def add_to_collection(self, series_id: int | str, collection_name: str | None = None) -> bool:
         sid = self._coerce_series_id(series_id)
         if sid is None:
-            return False
-        token = self._auth_jwt()
-        if not token:
-            return False
-        try:
-            r = self.session.post(
-                f"{self.base_url}/api/want-to-read/add-series",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"seriesIds": [sid]},
-                timeout=10,
-            )
-            return r.status_code == 200
-        except Exception as e:
-            logger.error(f"❌ Kavita add_to_want_to_read failed for series '{sid}': {e}")
             return False
 
-    def remove_from_want_to_read(self, series_id: int | str) -> bool:
-        sid = self._coerce_series_id(series_id)
-        if sid is None:
-            return False
+        resolved_collection_name = self._resolve_collection_name(collection_name)
         token = self._auth_jwt()
         if not token:
             return False
+
+        collection_id = self._find_collection_id_by_name(resolved_collection_name, token)
+        if collection_id is None:
+            collection_id = self._create_collection(resolved_collection_name, token)
+        if collection_id is None:
+            return False
+
         try:
             r = self.session.post(
-                f"{self.base_url}/api/want-to-read/remove-series",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"seriesIds": [sid]},
+                f"{self.base_url}/api/Collection/update-series",
+                headers=self._jwt_headers(token),
+                json={"id": collection_id, "seriesIds": [sid]},
                 timeout=10,
             )
-            return r.status_code == 200
+            return r.status_code in (200, 204)
         except Exception as e:
-            logger.error(f"❌ Kavita remove_from_want_to_read failed for series '{sid}': {e}")
+            logger.error(
+                "Kavita add_to_collection failed for series '%s' and collection '%s': %s",
+                sid,
+                sanitize_log_data(resolved_collection_name),
+                e,
+            )
+            return False
+
+    def remove_from_collection(self, series_id: int | str, collection_name: str | None = None) -> bool:
+        sid = self._coerce_series_id(series_id)
+        if sid is None:
+            return False
+
+        resolved_collection_name = self._resolve_collection_name(collection_name)
+        token = self._auth_jwt()
+        if not token:
+            return False
+
+        collection_id = self._find_collection_id_by_name(resolved_collection_name, token)
+        if collection_id is None:
+            logger.warning(
+                "Kavita collection '%s' not found while removing series '%s'",
+                sanitize_log_data(resolved_collection_name),
+                sid,
+            )
+            return False
+
+        try:
+            r = self.session.post(
+                f"{self.base_url}/api/Collection/remove-series",
+                headers=self._jwt_headers(token),
+                json={"id": collection_id, "seriesIds": [sid]},
+                timeout=10,
+            )
+            return r.status_code in (200, 204)
+        except Exception as e:
+            logger.error(
+                "Kavita remove_from_collection failed for series '%s' and collection '%s': %s",
+                sid,
+                sanitize_log_data(resolved_collection_name),
+                e,
+            )
             return False
 
     def _auth_jwt(self) -> Optional[str]:
@@ -324,7 +354,7 @@ class KavitaClient:
                     timeout=10,
                 )
                 if r.status_code != 200:
-                    logger.warning(f"⚠️ Kavita plugin auth failed: {r.status_code}")
+                    logger.warning(f"âš ï¸ Kavita plugin auth failed: {r.status_code}")
                     return None
                 data = r.json() if r.text else {}
                 token = data.get("token")
@@ -334,7 +364,7 @@ class KavitaClient:
                 self._jwt_exp_ts = self._decode_jwt_exp(token) or (now + 300)
                 return self._jwt_token
             except Exception as e:
-                logger.error(f"❌ Kavita plugin auth error: {e}")
+                logger.error(f"âŒ Kavita plugin auth error: {e}")
                 return None
 
     def _decode_jwt_exp(self, token: str) -> Optional[int]:
@@ -358,6 +388,82 @@ class KavitaClient:
         except (TypeError, ValueError):
             return None
 
+    def _resolve_collection_name(self, collection_name: str | None = None) -> str:
+        resolved_name = str(
+            collection_name or os.environ.get("KAVITA_COLLECTION_NAME", "Bridge") or "Bridge"
+        ).strip()
+        return resolved_name or "Bridge"
+
+    def _jwt_headers(self, token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    def _find_collection_id_by_name(self, collection_name: str, token: str) -> Optional[int]:
+        try:
+            r = self.session.get(
+                f"{self.base_url}/api/Collection",
+                headers=self._jwt_headers(token),
+                timeout=10,
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "Kavita collection lookup failed for '%s' (status=%s)",
+                    sanitize_log_data(collection_name),
+                    r.status_code,
+                )
+                return None
+
+            collections = r.json() if r.text else []
+            if not isinstance(collections, list):
+                return None
+
+            for collection in collections:
+                if not isinstance(collection, dict):
+                    continue
+                title = str(collection.get("title") or collection.get("name") or "").strip()
+                if title.lower() != collection_name.lower():
+                    continue
+                collection_id = self._coerce_series_id(collection.get("id"))
+                if collection_id is not None:
+                    return collection_id
+            return None
+        except Exception as e:
+            logger.error(
+                "Kavita collection lookup failed for '%s': %s",
+                sanitize_log_data(collection_name),
+                e,
+            )
+            return None
+
+    def _create_collection(self, collection_name: str, token: str) -> Optional[int]:
+        try:
+            r = self.session.post(
+                f"{self.base_url}/api/Collection",
+                headers=self._jwt_headers(token),
+                json={"title": collection_name, "promoted": False},
+                timeout=10,
+            )
+            if r.status_code not in (200, 201):
+                logger.warning(
+                    "Kavita collection create failed for '%s' (status=%s)",
+                    sanitize_log_data(collection_name),
+                    r.status_code,
+                )
+                return None
+
+            payload = r.json() if r.text else {}
+            collection_id = self._coerce_series_id(payload.get("id"))
+            if collection_id is not None:
+                return collection_id
+
+            return self._find_collection_id_by_name(collection_name, token)
+        except Exception as e:
+            logger.error(
+                "Kavita collection create failed for '%s': %s",
+                sanitize_log_data(collection_name),
+                e,
+            )
+            return None
+
     def _load_cache(self):
         if not self.cache_file.exists():
             return
@@ -374,7 +480,7 @@ class KavitaClient:
                 }
                 self._cache_timestamp = float(payload.get("timestamp", 0) or 0)
         except Exception as e:
-            logger.warning(f"⚠️ Failed to load Kavita cache file: {e}")
+            logger.warning(f"âš ï¸ Failed to load Kavita cache file: {e}")
 
     def _save_cache(self):
         try:
@@ -386,7 +492,7 @@ class KavitaClient:
             }
             self.cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to save Kavita cache file: {e}")
+            logger.warning(f"âš ï¸ Failed to save Kavita cache file: {e}")
 
     def _crawl_all_books(self) -> tuple[list[dict], dict[str, list[dict]]]:
         series_entries: dict[str, dict] = {}
@@ -493,8 +599,8 @@ class KavitaClient:
         detail_url: Optional[str] = None,
         force_refresh: bool = False,
     ) -> list[dict]:
-        sid = str(series_id)
-        if not force_refresh:
+        sid = str(series_id or "").strip()
+        if not force_refresh and sid:
             cached = self._series_cache.get(sid)
             if cached:
                 return cached
@@ -526,6 +632,13 @@ class KavitaClient:
             if not kid:
                 continue
 
+            entry_series_id = sid
+            if not entry_series_id:
+                series_match = self._SERIES_ID_RE.search(href)
+                entry_series_id = series_match.group(1) if series_match else ""
+            if not entry_series_id:
+                continue
+
             item = {
                 "id": str(kid),
                 "title": title or fallback_series_title or str(kid),
@@ -533,7 +646,7 @@ class KavitaClient:
                 "download_url": href,
                 "ext": ext,
                 "source": "Kavita",
-                "series_id": sid,
+                "series_id": str(entry_series_id),
                 "series_title": fallback_series_title or "",
                 "cover_url": self._find_cover_url(entry) or fallback_cover_url or "",
                 "is_continue_alias": is_continue,
@@ -547,7 +660,10 @@ class KavitaClient:
         result = list(books_by_id.values())
         for item in result:
             item.pop("is_continue_alias", None)
-        self._series_cache[sid] = result
+
+        cache_key = sid or str(result[0].get("series_id") or "").strip() if result else ""
+        if cache_key:
+            self._series_cache[cache_key] = result
         return result
 
     def _fetch_feed_root(self, url: str) -> Optional[ET.Element]:
@@ -671,7 +787,7 @@ class KavitaKoSyncClient(KoSyncClient):
 
     @property
     def user(self):
-        return os.environ.get("KOSYNC_USER", "bookbridge")
+        return os.environ.get("KAVITA_KOSYNC_USER", "bridge")
 
     @property
     def auth_token(self):
@@ -684,16 +800,16 @@ class KavitaKoSyncClient(KoSyncClient):
 
     def check_connection(self):
         if not self.is_configured():
-            logger.warning("⚠️ Kavita KoSync not configured (skipping)")
+            logger.warning("âš ï¸ Kavita KoSync not configured (skipping)")
             return False
         try:
             headers = kosync_auth_headers(self.user, self.auth_token)
             r = self.session.get(f"{self.base_url}/users/auth", headers=headers, timeout=5)
             if r.status_code == 200:
-                logger.info(f"✅ Connected to Kavita KoSync at {self.base_url}")
+                logger.info(f"âœ… Connected to Kavita KoSync at {self.base_url}")
                 return True
-            logger.error(f"❌ Kavita KoSync connection failed (status={r.status_code})")
+            logger.error(f"âŒ Kavita KoSync connection failed (status={r.status_code})")
             return False
         except Exception as e:
-            logger.error(f"❌ Kavita KoSync connection error: {e}")
+            logger.error(f"âŒ Kavita KoSync connection error: {e}")
             return False
