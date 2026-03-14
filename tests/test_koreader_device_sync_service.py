@@ -1,0 +1,120 @@
+import os
+import shutil
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from src.db.database_service import DatabaseService
+from src.db.models import Book
+from src.services.koreader_device_sync_service import KOReaderDeviceSyncService
+
+
+TEST_DIR = "/tmp/test_koreader_device_sync_service"
+
+
+class TestKOReaderDeviceSyncService(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DIR):
+            shutil.rmtree(TEST_DIR)
+        os.makedirs(TEST_DIR, exist_ok=True)
+        cls.db = DatabaseService(os.path.join(TEST_DIR, "test.db"))
+
+    def setUp(self):
+        with self.db.get_session() as session:
+            session.query(Book).delete()
+
+        self.books_dir = Path(TEST_DIR) / "books"
+        self.cache_dir = Path(TEST_DIR) / "epub_cache"
+        self.books_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        ebook_parser = MagicMock()
+
+        def resolve_book_path(filename):
+            candidate = self.books_dir / filename
+            if candidate.exists():
+                return candidate
+            cached = self.cache_dir / filename
+            if cached.exists():
+                return cached
+            raise FileNotFoundError(filename)
+
+        ebook_parser.resolve_book_path.side_effect = resolve_book_path
+        ebook_parser.get_kosync_id.return_value = "fallback-hash"
+
+        self.service = KOReaderDeviceSyncService(
+            database_service=self.db,
+            ebook_parser=ebook_parser,
+            abs_client=MagicMock(),
+            booklore_client=MagicMock(),
+            cwa_client=MagicMock(),
+            kavita_client=MagicMock(),
+            epub_cache_dir=self.cache_dir,
+        )
+
+    def test_manifest_prefers_original_non_storyteller_filename(self):
+        book = Book(
+            abs_id="abs-1",
+            abs_title="Dragon's Justice",
+            ebook_filename="storyteller_abc.epub",
+            original_ebook_filename="kavita_187.epub",
+            kosync_doc_id="hash-1",
+            status="active",
+        )
+        self.db.save_book(book)
+
+        manifest = self.service.build_manifest()
+        self.assertEqual(len(manifest["books"]), 1)
+        item = manifest["books"][0]
+        self.assertEqual(item["abs_id"], "abs-1")
+        self.assertEqual(item["content_hash"], "hash-1")
+        self.assertEqual(item["download_path"], "/koreader/device-sync/books/abs-1/download")
+        self.assertEqual(item["filename"], "Dragon's Justice.epub")
+
+    def test_manifest_adds_suffix_for_filename_collisions(self):
+        self.db.save_book(
+            Book(
+                abs_id="abs-a",
+                abs_title="Same Title",
+                original_ebook_filename="kavita_1.epub",
+                kosync_doc_id="hash-a",
+                status="active",
+            )
+        )
+        self.db.save_book(
+            Book(
+                abs_id="abs-b",
+                abs_title="Same Title",
+                original_ebook_filename="kavita_2.epub",
+                kosync_doc_id="hash-b",
+                status="active",
+            )
+        )
+
+        manifest = self.service.build_manifest()
+        filenames = sorted(item["filename"] for item in manifest["books"])
+        self.assertEqual(
+            filenames,
+            ["Same Title__abs-a.epub", "Same Title__abs-b.epub"],
+        )
+
+    def test_resolve_download_uses_local_original_file(self):
+        source_path = self.books_dir / "kavita_187.epub"
+        source_path.write_bytes(b"epub")
+        self.db.save_book(
+            Book(
+                abs_id="abs-1",
+                abs_title="Dragon's Justice",
+                original_ebook_filename="kavita_187.epub",
+                kosync_doc_id="hash-1",
+                status="active",
+            )
+        )
+
+        resolved = self.service.resolve_download("abs-1")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(Path(resolved["path"]), source_path)
+        self.assertEqual(resolved["filename"], "Dragon's Justice.epub")
+        self.assertEqual(resolved["content_hash"], "hash-1")
+        self.assertEqual(resolved["mime_type"], "application/epub+zip")

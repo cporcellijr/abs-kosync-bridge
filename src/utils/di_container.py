@@ -26,6 +26,7 @@ from src.services.alignment_service import AlignmentService # [NEW]
 from src.services.library_service import LibraryService # [NEW]
 from src.services.migration_service import MigrationService # [NEW]
 from src.services.forge_service import ForgeService
+from src.services.koreader_device_sync_service import KOReaderDeviceSyncService
 from src.services.audio_source_adapters import ABSAudioSourceAdapter, BookLoreAudioSourceAdapter
 from src.sync_clients.abs_sync_client import ABSSyncClient
 from src.sync_clients.kosync_sync_client import KoSyncSyncClient
@@ -129,6 +130,17 @@ class Container(containers.DeclarativeContainer):
         abs_client=abs_client,
         epub_cache_dir=epub_cache_dir,
         kavita_client=kavita_client,
+    )
+
+    koreader_device_sync_service = providers.Singleton(
+        KOReaderDeviceSyncService,
+        database_service=database_service,
+        ebook_parser=ebook_parser,
+        abs_client=abs_client,
+        booklore_client=booklore_client,
+        cwa_client=cwa_client,
+        kavita_client=kavita_client,
+        epub_cache_dir=epub_cache_dir,
     )
 
     migration_service = providers.Singleton(

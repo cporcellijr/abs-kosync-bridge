@@ -258,6 +258,70 @@ class TestKosyncEndpoints(unittest.TestCase):
         self.assertEqual(data['device_id'], 'KINDLE456')
         self.assertIn('timestamp', data)
 
+    def test_device_sync_manifest_requires_auth(self):
+        response = self.client.get('/koreader/device-sync/manifest')
+        self.assertEqual(response.status_code, 401)
+
+    def test_device_sync_manifest_returns_service_payload(self):
+        from src.api import kosync_server
+
+        service = MagicMock()
+        service.build_manifest.return_value = {
+            "generated_at": 1,
+            "revision": "abc",
+            "delete_mode": "mirror",
+            "books": [
+                {
+                    "abs_id": "abs-1",
+                    "title": "Dragon's Justice",
+                    "filename": "Dragon's Justice.epub",
+                    "content_hash": "hash-1",
+                    "download_path": "/koreader/device-sync/books/abs-1/download",
+                    "size": 4,
+                }
+            ],
+        }
+        container = MagicMock()
+        container.koreader_device_sync_service.return_value = service
+
+        with patch.object(kosync_server, '_container', container):
+            response = self.client.get('/koreader/device-sync/manifest', headers=self.auth_headers)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["revision"], "abc")
+        self.assertEqual(data["books"][0]["filename"], "Dragon's Justice.epub")
+
+    def test_device_sync_download_returns_file_attachment(self):
+        from src.api import kosync_server
+
+        download_path = Path(TEST_DIR) / "dragon.epub"
+        download_path.write_bytes(b"epub")
+
+        service = MagicMock()
+        service.resolve_download.return_value = {
+            "path": download_path,
+            "filename": "Dragon's Justice.epub",
+            "content_hash": "hash-1",
+            "mime_type": "application/epub+zip",
+        }
+        container = MagicMock()
+        container.koreader_device_sync_service.return_value = service
+
+        with patch.object(kosync_server, '_container', container):
+            response = self.client.get(
+                '/koreader/device-sync/books/abs-1/download',
+                headers=self.auth_headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("ETag"), '"hash-1"')
+        self.assertIn(
+            'attachment; filename="Dragon\'s Justice.epub"',
+            response.headers.get("Content-Disposition", ""),
+        )
+        self.assertEqual(response.data, b"epub")
+
     def test_furthest_wins_rejects_backwards(self):
         """Test that backwards progress is rejected when KOSYNC_FURTHEST_WINS=true."""
         # First PUT at 50%

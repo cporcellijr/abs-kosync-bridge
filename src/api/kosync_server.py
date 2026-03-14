@@ -1,6 +1,7 @@
 # KoSync Server - Extracted from web_server.py for clean code separation
 # Implements KOSync protocol compatible with kosync-dotnet
 import logging
+import mimetypes
 import os
 import threading
 import time
@@ -10,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from src.utils.kosync_headers import hash_kosync_key
 
@@ -43,6 +44,16 @@ def init_kosync_server(database_service, container, manager, ebook_dir=None):
     _container = container
     _manager = manager
     _ebook_dir = ebook_dir
+
+
+def _get_koreader_device_sync_service():
+    if not _container:
+        return None
+    try:
+        return _container.koreader_device_sync_service()
+    except Exception as e:
+        logger.warning(f"KOReader device-sync service unavailable: {e}")
+        return None
 
 
 def _record_kosync_event(abs_id: str, title: str) -> None:
@@ -477,6 +488,49 @@ def kosync_put_progress():
         "document": doc_hash,
         "timestamp": response_timestamp
     }), 200
+
+
+@kosync_sync_bp.route('/device-sync/manifest', methods=['GET'])
+@kosync_sync_bp.route('/koreader/device-sync/manifest', methods=['GET'])
+@kosync_auth_required
+def koreader_device_sync_manifest():
+    """Return the optional KOReader managed-folder sync manifest."""
+    service = _get_koreader_device_sync_service()
+    if not service:
+        return jsonify({"error": "Device sync service unavailable"}), 503
+    return jsonify(service.build_manifest()), 200
+
+
+@kosync_sync_bp.route('/device-sync/books/<path:abs_id>/download', methods=['GET'])
+@kosync_sync_bp.route('/koreader/device-sync/books/<path:abs_id>/download', methods=['GET'])
+@kosync_auth_required
+def koreader_device_sync_download(abs_id):
+    """Download the original ebook for a bridge-managed KOReader sync item."""
+    service = _get_koreader_device_sync_service()
+    if not service:
+        return jsonify({"error": "Device sync service unavailable"}), 503
+
+    resolved = service.resolve_download(abs_id)
+    if not resolved:
+        return jsonify({"error": "Book not available"}), 404
+
+    path = resolved["path"]
+    filename = resolved["filename"]
+    content_hash = resolved["content_hash"]
+    mime_type = resolved.get("mime_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    response = send_file(
+        path,
+        mimetype=mime_type,
+        as_attachment=True,
+        download_name=filename,
+        conditional=True,
+        etag=False,
+        max_age=0,
+    )
+    response.set_etag(content_hash)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 # ---------------- Helper Functions ----------------
