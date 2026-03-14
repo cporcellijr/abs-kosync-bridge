@@ -605,6 +605,89 @@
             background: rgba(156, 39, 176, 0.2);
             color: #ce93d8;
         }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.72);
+            z-index: 1000;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal-card {
+            width: min(560px, 100%);
+            background: #101010;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+        }
+
+        .modal-card h3 {
+            font-size: 22px;
+            margin-bottom: 10px;
+        }
+
+        .modal-card p {
+            color: rgba(255, 255, 255, 0.68);
+            line-height: 1.5;
+            margin-bottom: 18px;
+        }
+
+        .modal-options {
+            display: grid;
+            gap: 12px;
+        }
+
+        .modal-option {
+            width: 100%;
+            text-align: left;
+            padding: 16px 18px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .modal-option:hover {
+            border-color: rgba(102, 126, 234, 0.45);
+            background: rgba(102, 126, 234, 0.12);
+            transform: translateY(-1px);
+        }
+
+        .modal-option strong {
+            display: block;
+            font-size: 15px;
+            margin-bottom: 6px;
+        }
+
+        .modal-option span {
+            display: block;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.62);
+            line-height: 1.45;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .modal-cancel {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.72);
+        }
     </style>
 </head>
 
@@ -691,6 +774,7 @@
             <input type="hidden" name="audio_cover_url" id="input_audio_cover_url">
             <input type="hidden" name="ebook_source" id="input_ebook_source">
             <input type="hidden" name="ebook_source_id" id="input_ebook_source_id">
+            <input type="hidden" name="forge_stage_mode" id="input_forge_stage_mode">
 
             <div class="selection-container">
 
@@ -852,7 +936,49 @@
         </form>
     </div>
 
+    <div class="modal-overlay" id="forgeStageModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="forgeStageTitle">
+            <h3 id="forgeStageTitle">Forge staging mode</h3>
+            <p>Choose what happens to the staged source files after Storyteller finishes processing.</p>
+            <div class="modal-options">
+                <button type="button" class="modal-option" onclick="chooseForgeStageMode('cleanup')">
+                    <strong>Delete staged sources</strong>
+                    <span>Default. Copy files into Storyteller, then remove the staged audio and EPUB after processing completes.</span>
+                </button>
+                <button type="button" class="modal-option" onclick="chooseForgeStageMode('hardlink')">
+                    <strong>Keep staged files / hardlink local</strong>
+                    <span>Use hardlinks for local files when possible and skip staged-source cleanup. Remote downloads still fall back to copied files.</span>
+                </button>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn modal-cancel" onclick="closeForgeStageModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        let pendingForgeStageSelection = null;
+        let allowForgeSubmit = false;
+
+        function openForgeStageModal(onSelect) {
+            pendingForgeStageSelection = onSelect;
+            document.getElementById('forgeStageModal').classList.add('open');
+            document.getElementById('input_forge_stage_mode').value = '';
+        }
+
+        function closeForgeStageModal() {
+            pendingForgeStageSelection = null;
+            document.getElementById('forgeStageModal').classList.remove('open');
+        }
+
+        function chooseForgeStageMode(mode) {
+            const callback = pendingForgeStageSelection;
+            closeForgeStageModal();
+            if (callback) {
+                callback(mode);
+            }
+        }
+
         function selectItem(element, groupName) {
             // Remove selected class from all options in this group
             let wrapperClass = '';
@@ -937,6 +1063,35 @@
 
         // Initial check and setup
         document.addEventListener('DOMContentLoaded', () => {
+            const mappingForm = document.getElementById('mappingForm');
+            const forgeBtn = document.getElementById('forgeBtn');
+            const forgeStageModal = document.getElementById('forgeStageModal');
+
+            forgeStageModal.addEventListener('click', (event) => {
+                if (event.target === forgeStageModal) {
+                    closeForgeStageModal();
+                }
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && forgeStageModal.classList.contains('open')) {
+                    closeForgeStageModal();
+                }
+            });
+
+            mappingForm.addEventListener('submit', (event) => {
+                if (event.submitter !== forgeBtn || allowForgeSubmit || forgeBtn.disabled) {
+                    return;
+                }
+
+                event.preventDefault();
+                openForgeStageModal((mode) => {
+                    document.getElementById('input_forge_stage_mode').value = mode;
+                    allowForgeSubmit = true;
+                    mappingForm.requestSubmit(forgeBtn);
+                });
+            });
+
             const initialAb = document.querySelector('input[name="audiobook_id"]:checked');
             if (initialAb) {
                 const label = initialAb.closest('.ab-option');

@@ -14,6 +14,9 @@ from src.utils.storyteller_transcript import StorytellerTranscript
 
 logger = logging.getLogger(__name__)
 AUDIO_EXTENSIONS = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.wav', '.aac'}
+DEFAULT_STAGE_MODE = "cleanup"
+HARDLINK_STAGE_MODE = "hardlink"
+VALID_STAGE_MODES = {DEFAULT_STAGE_MODE, HARDLINK_STAGE_MODE}
 
 class ForgeService:
     def __init__(self, database_service, abs_client, booklore_client, storyteller_client, library_service, ebook_parser, transcriber, alignment_service):
@@ -60,6 +63,50 @@ class ForgeService:
             return path.resolve()
         except Exception:
             return path
+
+    @staticmethod
+    def _normalize_stage_mode(stage_mode: str) -> str:
+        normalized = str(stage_mode or DEFAULT_STAGE_MODE).strip().lower()
+        if normalized not in VALID_STAGE_MODES:
+            return DEFAULT_STAGE_MODE
+        return normalized
+
+    def _should_cleanup_staged_sources(self, stage_mode: str) -> bool:
+        return self._normalize_stage_mode(stage_mode) == DEFAULT_STAGE_MODE
+
+    def _stage_local_file(self, src_path: Path, dest_path: Path, stage_mode: str, context: str) -> str:
+        src_path = Path(src_path)
+        dest_path = Path(dest_path)
+        normalized_mode = self._normalize_stage_mode(stage_mode)
+
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source file not found: {src_path}")
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if dest_path.exists():
+            try:
+                if dest_path.samefile(src_path):
+                    logger.debug(f"{context}: Staged file already in place: '{dest_path}'")
+                    return "existing"
+            except Exception:
+                pass
+            dest_path.unlink()
+
+        if normalized_mode == HARDLINK_STAGE_MODE:
+            try:
+                os.link(src_path, dest_path)
+                logger.info(f"{context}: Hardlinked local source '{src_path.name}'")
+                return HARDLINK_STAGE_MODE
+            except Exception as link_err:
+                logger.warning(
+                    f"{context}: Hardlink failed for '{src_path}' -> '{dest_path}' ({link_err}); "
+                    "falling back to copy"
+                )
+
+        shutil.copy2(str(src_path), dest_path)
+        logger.info(f"{context}: Copied local source '{src_path.name}'")
+        return "copy"
 
     def _cleanup_staged_sources(
         self,
@@ -324,10 +371,11 @@ class ForgeService:
             "api_ready_seen": api_ready_seen,
         }
 
-    def _copy_audio_files(self, abs_id: str, dest_folder: Path):
+    def _copy_audio_files(self, abs_id: str, dest_folder: Path, stage_mode: str = DEFAULT_STAGE_MODE):
         """Copy audiobook files from ABS - Book Linker version"""
         headers = {"Authorization": f"Bearer {self.ABS_API_TOKEN}"}
         url = urljoin(self.ABS_API_URL, f"/api/items/{abs_id}")
+        normalized_stage_mode = self._normalize_stage_mode(stage_mode)
         try:
             r = requests.get(url, headers=headers, timeout=15)
             r.raise_for_status()
@@ -368,7 +416,12 @@ class ForgeService:
                         src_path = matches[0]
 
                 if src_path and src_path.exists():
-                    shutil.copy2(str(src_path), dest_folder / src_path.name)
+                    self._stage_local_file(
+                        src_path=src_path,
+                        dest_path=dest_folder / src_path.name,
+                        stage_mode=normalized_stage_mode,
+                        context="Forge audio",
+                    )
                     copied += 1
                 else:
                     # 4. API Download Fallback
@@ -474,23 +527,30 @@ class ForgeService:
             logger.error(f"Failed to copy Booklore audio for book '{book_id}': {e}", exc_info=True)
             return False
 
-    def start_manual_forge(self, abs_id, text_item, title, author):
+    def start_manual_forge(self, abs_id, text_item, title, author, stage_mode: str = DEFAULT_STAGE_MODE):
         """
         Start manual forge process in background thread.
         """
+        normalized_stage_mode = self._normalize_stage_mode(stage_mode)
+        thread_kwargs = {}
+        if normalized_stage_mode != DEFAULT_STAGE_MODE:
+            thread_kwargs["kwargs"] = {"stage_mode": normalized_stage_mode}
         thread = threading.Thread(
             target=self._forge_background_task,
             args=(abs_id, text_item, title, author),
-            daemon=True
+            daemon=True,
+            **thread_kwargs
         )
         thread.start()
 
-    def _forge_background_task(self, abs_id, text_item, title, author):
+    def _forge_background_task(self, abs_id, text_item, title, author, stage_mode: str = DEFAULT_STAGE_MODE):
         """
         Background thread: copy files to Storyteller library, trigger processing, cleanup.
         """
         logger.info(f"🔨 Forge: Starting background task for '{title}'")
-        
+        stage_mode = self._normalize_stage_mode(stage_mode)
+        logger.info(f"Forge: Staging mode '{stage_mode}'")
+
         with self.lock:
             self.active_tasks.add(title)
 
@@ -517,7 +577,7 @@ class ForgeService:
             logger.info(f"⚡ Forge: Staging files for '{title}' in '{course_dir}' (Atomic)")
 
             # Step 1: Copy audio files
-            audio_ok = self._copy_audio_files(abs_id, audio_dest)
+            audio_ok = self._copy_audio_files(abs_id, audio_dest, stage_mode=stage_mode)
             if not audio_ok:
                 logger.error(f"❌ Forge: Failed to copy audio files for '{abs_id}'")
                 try:
@@ -536,7 +596,7 @@ class ForgeService:
             if source == 'Local File':
                 src_path = Path(text_item.get('path', ''))
                 if src_path.exists():
-                    shutil.copy2(str(src_path), epub_dest)
+                    self._stage_local_file(src_path, epub_dest, stage_mode, "Forge")
                     text_success = True
                     logger.info(f"⚡ Forge: Local epub copied: {src_path.name}")
                 else:
@@ -747,12 +807,18 @@ class ForgeService:
                             )
                             time.sleep(self.storyteller_cleanup_grace_seconds)
 
-                        self._cleanup_staged_sources(
-                            course_dir=course_dir,
-                            staged_epub_path=epub_dest,
-                            preserve_paths=[completed_epub_path],
-                            context="Forge",
-                        )
+                        if self._should_cleanup_staged_sources(stage_mode):
+                            self._cleanup_staged_sources(
+                                course_dir=course_dir,
+                                staged_epub_path=epub_dest,
+                                preserve_paths=[completed_epub_path],
+                                context="Forge",
+                            )
+                        else:
+                            logger.info(
+                                "Forge: Keeping staged source files because staging mode '%s' disables cleanup",
+                                stage_mode,
+                            )
 
                         return
 
@@ -768,21 +834,28 @@ class ForgeService:
                 self.active_tasks.discard(title)
 
     def start_auto_forge_match(self, abs_id, text_item, title, author, original_filename, original_hash,
-                               audio_source: str = None, audio_source_id: str = None):
+                               audio_source: str = None, audio_source_id: str = None,
+                               stage_mode: str = DEFAULT_STAGE_MODE):
         """
         Start Auto-Forge & Match pipeline in background thread.
         Links forged artifact to DB after completion.
         """
+        normalized_stage_mode = self._normalize_stage_mode(stage_mode)
+        thread_kwargs = {}
+        if normalized_stage_mode != DEFAULT_STAGE_MODE:
+            thread_kwargs["kwargs"] = {"stage_mode": normalized_stage_mode}
         thread = threading.Thread(
             target=self._auto_forge_background_task,
             args=(abs_id, text_item, title, author, original_filename, original_hash,
                   audio_source, audio_source_id),
-            daemon=True
+            daemon=True,
+            **thread_kwargs
         )
         thread.start()
 
     def _auto_forge_background_task(self, abs_id, text_item, title, author, original_filename, original_hash,
-                                    audio_source: str = None, audio_source_id: str = None):
+                                    audio_source: str = None, audio_source_id: str = None,
+                                    stage_mode: str = DEFAULT_STAGE_MODE):
         """
         Background task for Auto-Forge & Match pipeline.
         Staging -> Trigger -> Wait -> Download -> Sanitize -> Recalc Hash -> Update DB -> Cleanup
@@ -791,6 +864,9 @@ class ForgeService:
         
         with self.lock:
             self.active_tasks.add(title)
+
+        stage_mode = self._normalize_stage_mode(stage_mode)
+        logger.info(f"Auto-Forge: Staging mode '{stage_mode}'")
 
         course_dir = None
         epub_dest = None
@@ -822,14 +898,14 @@ class ForgeService:
                 if not self._copy_booklore_audio_files(audio_source_id, course_dir):
                     raise Exception("Failed to copy Booklore audio files")
             else:
-                if not self._copy_audio_files(abs_id, course_dir):
+                if not self._copy_audio_files(abs_id, course_dir, stage_mode=stage_mode):
                     raise Exception("Failed to copy audio files")
                 
             # Copy Text
             epub_dest = course_dir / f"{safe_title}.epub"
             source = text_item.get('source')
             if source == 'Local File':
-                shutil.copy2(text_item.get('path'), epub_dest)
+                self._stage_local_file(text_item.get('path'), epub_dest, stage_mode, "Auto-Forge")
             elif source == 'Booklore':
                 content = self.booklore_client.download_book(text_item.get('booklore_id'))
                 if content: epub_dest.write_bytes(content)
@@ -1060,7 +1136,7 @@ class ForgeService:
             else:
                 raise Exception("Auto-Forge completion detected but no downloadable artifact source was available")
 
-            cleanup_requested = True
+            cleanup_requested = self._should_cleanup_staged_sources(stage_mode)
             if readaloud_path:
                 cleanup_preserve_paths.append(readaloud_path)
 
@@ -1203,6 +1279,11 @@ class ForgeService:
                         staged_epub_path=epub_dest,
                         preserve_paths=cleanup_preserve_paths,
                         context="Auto-Forge",
+                    )
+                elif course_dir and epub_dest:
+                    logger.info(
+                        "Auto-Forge: Keeping staged source files because staging mode '%s' disables cleanup",
+                        stage_mode,
                     )
             except Exception as cleanup_err:
                 logger.warning(f"Auto-Forge: Final cleanup failed: {cleanup_err}")

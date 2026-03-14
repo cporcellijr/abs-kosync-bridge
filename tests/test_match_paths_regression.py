@@ -316,6 +316,44 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.mock_container.mock_abs_client.add_to_collection.assert_not_called()
         self.mock_container.mock_booklore_client.add_to_shelf.assert_not_called()
 
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-forge-hardlink")
+    def test_match_forge_action_forwards_stage_mode(self, _mock_kosync):
+        response = self.client.post(
+            "/match",
+            data={
+                "action": "forge_match",
+                "audiobook_id": "ab-1",
+                "ebook_filename": "source.epub",
+                "source_type": "Booklore",
+                "source_id": "42",
+                "source_path": "",
+                "forge_stage_mode": "hardlink",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        kwargs = self.mock_container.mock_forge_service.start_auto_forge_match.call_args.kwargs
+        self.assertEqual(kwargs["stage_mode"], "hardlink")
+
+    def test_forge_process_forwards_stage_mode(self):
+        response = self.client.post(
+            "/api/forge/process",
+            json={
+                "abs_id": "ab-1",
+                "text_item": {"source": "Booklore", "booklore_id": "42"},
+                "forge_stage_mode": "hardlink",
+            },
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.mock_container.mock_forge_service.start_manual_forge.assert_called_once_with(
+            "ab-1",
+            {"source": "Booklore", "booklore_id": "42"},
+            "Regression Book",
+            "Test Author",
+            stage_mode="hardlink",
+        )
+
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-forge-booklore")
     def test_match_forge_booklore_uses_bridge_key_identity(self, _mock_kosync):
         response = self.client.post(

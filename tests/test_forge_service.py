@@ -64,6 +64,26 @@ class TestForgeService(unittest.TestCase):
             )
             mock_thread_instance.start.assert_called_once()
 
+    def test_start_manual_forge_hardlink_passes_stage_mode_kwargs(self):
+        with patch('threading.Thread') as mock_thread_cls:
+            mock_thread_instance = MagicMock()
+            mock_thread_cls.return_value = mock_thread_instance
+
+            self.service.start_manual_forge(
+                abs_id="abs456",
+                text_item={"path": "other.epub"},
+                title="Test Book 2",
+                author="Test Author 2",
+                stage_mode="hardlink",
+            )
+
+            mock_thread_cls.assert_called_with(
+                target=self.service._forge_background_task,
+                args=("abs456", {"path": "other.epub"}, "Test Book 2", "Test Author 2"),
+                kwargs={"stage_mode": "hardlink"},
+                daemon=True
+            )
+            mock_thread_instance.start.assert_called_once()
 
     def test_start_auto_forge_match(self):
         """Test starting auto forge match."""
@@ -88,6 +108,61 @@ class TestForgeService(unittest.TestCase):
                 daemon=True
             )
             mock_thread_instance.start.assert_called_once()
+
+    def test_start_auto_forge_match_hardlink_passes_stage_mode_kwargs(self):
+        with patch('threading.Thread') as mock_thread_cls:
+            mock_thread_instance = MagicMock()
+            mock_thread_cls.return_value = mock_thread_instance
+
+            self.service.start_auto_forge_match(
+                abs_id="abs789",
+                text_item={"booklore_id": 1},
+                title="Auto Book",
+                author="Auto Author",
+                original_filename="orig.epub",
+                original_hash="hash123",
+                stage_mode="hardlink",
+            )
+
+            mock_thread_cls.assert_called_with(
+                target=self.service._auto_forge_background_task,
+                args=("abs789", {"booklore_id": 1}, "Auto Book", "Auto Author", "orig.epub", "hash123",
+                      None, None),
+                kwargs={"stage_mode": "hardlink"},
+                daemon=True
+            )
+            mock_thread_instance.start.assert_called_once()
+
+    def test_stage_local_file_prefers_hardlink_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.epub"
+            dest = tmp_path / "dest.epub"
+            source.write_bytes(b"source")
+
+            with patch("src.services.forge_service.os.link") as mock_link, patch(
+                "src.services.forge_service.shutil.copy2"
+            ) as mock_copy:
+                result = self.service._stage_local_file(source, dest, "hardlink", "Forge")
+
+            self.assertEqual(result, "hardlink")
+            mock_link.assert_called_once_with(source, dest)
+            mock_copy.assert_not_called()
+
+    def test_stage_local_file_hardlink_falls_back_to_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.epub"
+            dest = tmp_path / "dest.epub"
+            source.write_bytes(b"source")
+
+            with patch("src.services.forge_service.os.link", side_effect=OSError("no hardlink")), patch(
+                "src.services.forge_service.shutil.copy2"
+            ) as mock_copy:
+                result = self.service._stage_local_file(source, dest, "hardlink", "Forge")
+
+            self.assertEqual(result, "copy")
+            mock_copy.assert_called_once_with(str(source), dest)
 
     def test_discover_storyteller_uuid_ignores_fuzzy_non_exact_title_match(self):
         """Forge UUID discovery should not accept unrelated fuzzy Storyteller search hits."""
@@ -159,6 +234,7 @@ class TestForgeService(unittest.TestCase):
     def _run_auto_forge_pipeline(
         self,
         text_item: dict,
+        stage_mode: str = "cleanup",
         ingest_manifest: str = None,
         storyteller_alignment_ok: bool = False,
         smil_transcript=None,
@@ -179,7 +255,7 @@ class TestForgeService(unittest.TestCase):
             if text_item.get("source") == "Local File" and not text_item.get("path"):
                 text_item["path"] = str(source_epub)
 
-            def _copy_audio(_abs_id, dest_path):
+            def _copy_audio(_abs_id, dest_path, stage_mode="cleanup"):
                 dest = Path(dest_path)
                 dest.mkdir(parents=True, exist_ok=True)
                 (dest / "part_001.mp3").write_bytes(b"audio")
@@ -244,6 +320,7 @@ class TestForgeService(unittest.TestCase):
                     author="Auto Author",
                     original_filename="orig.epub",
                     original_hash="hash123",
+                    stage_mode=stage_mode,
                 )
 
             return db_book
@@ -331,6 +408,17 @@ class TestForgeService(unittest.TestCase):
 
         mock_cleanup.assert_called_once()
         self.assertEqual(db_book.status, "error")
+
+    def test_auto_forge_hardlink_mode_skips_final_cleanup(self):
+        with patch.object(self.service, "_cleanup_staged_sources", return_value=0) as mock_cleanup:
+            self._run_auto_forge_pipeline(
+                text_item={"source": "Local File"},
+                stage_mode="hardlink",
+                ingest_manifest=None,
+                storyteller_alignment_ok=False,
+            )
+
+        mock_cleanup.assert_not_called()
 
     def test_poll_auto_forge_completion_api_metadata_does_not_mark_complete(self):
         """Metadata readiness alone should not mark auto-forge complete."""
