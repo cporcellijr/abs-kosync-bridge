@@ -980,13 +980,25 @@ class EbookParser:
             if not target_item:
                 return None
 
-            # Parse path and offset
+            # Parse path and offset. Accept both KOReader's `/text().N` form and
+            # Kavita's element-level `.N` form such as `/body/section/p[3].0`.
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
-            offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
-            target_offset = int(offset_match.group(1)) if offset_match else 0
-            clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
+            target_offset = 0
+            clean_xpath = relative_path
 
-            if clean_xpath.startswith('/'):
+            text_offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
+            if text_offset_match:
+                target_offset = int(text_offset_match.group(1))
+                clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
+            else:
+                element_offset_match = re.search(r'^(.*)\.(\d+)$', relative_path)
+                if element_offset_match:
+                    clean_xpath = element_offset_match.group(1)
+                    target_offset = int(element_offset_match.group(2))
+
+            if clean_xpath == "":
+                clean_xpath = "."
+            elif clean_xpath.startswith('/'):
                 clean_xpath = '.' + clean_xpath
 
             tree = html.fromstring(target_item['content'])
@@ -1118,11 +1130,22 @@ class EbookParser:
             bs4_chapter_text = BeautifulSoup(target_item['content'], 'html.parser').get_text(separator=' ', strip=True)
 
             relative_path = xpath_str.split(f"DocFragment[{spine_index}]")[-1]
-            offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
-            target_offset = int(offset_match.group(1)) if offset_match else 0
-            clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
+            target_offset = 0
+            clean_xpath = relative_path
 
-            if clean_xpath.startswith('/'):
+            text_offset_match = re.search(r'/text\(\)\.(\d+)$', relative_path)
+            if text_offset_match:
+                target_offset = int(text_offset_match.group(1))
+                clean_xpath = re.sub(r'/text\(\)\.(\d+)$', '', relative_path)
+            else:
+                element_offset_match = re.search(r'^(.*)\.(\d+)$', relative_path)
+                if element_offset_match:
+                    clean_xpath = element_offset_match.group(1)
+                    target_offset = int(element_offset_match.group(2))
+
+            if clean_xpath == "":
+                clean_xpath = "."
+            elif clean_xpath.startswith('/'):
                 clean_xpath = '.' + clean_xpath
 
             tree = html.fromstring(target_item['content'])

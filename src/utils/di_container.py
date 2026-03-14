@@ -186,6 +186,7 @@ class Container(containers.DeclarativeContainer):
         kavita_kosync_client,
         ebook_parser,
         allowed_ebook_source="Kavita",
+        display_name="KavitaKoSync",
     )
 
     storyteller_sync_client = providers.Singleton(

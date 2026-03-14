@@ -675,6 +675,29 @@ def test_lightweight_cache_does_not_force_refresh_on_every_read(booklore_client)
     assert booklore_client._refresh_book_cache.call_count == 0
 
 
+def test_disabled_booklore_does_not_serve_cached_search_results(booklore_client):
+    cached = {
+        "id": 42,
+        "title": "Cached Result",
+        "authors": "Cache Author",
+        "fileName": "cached-result.epub",
+        "bookType": "EPUB",
+    }
+    booklore_client._book_cache = {cached["fileName"].lower(): cached}
+    booklore_client._book_id_cache = {cached["id"]: cached}
+    booklore_client._cache_timestamp = time.time()
+    booklore_client._refresh_book_cache = MagicMock(return_value=True)
+
+    with patch.dict(os.environ, {"BOOKLORE_ENABLED": "false"}):
+        assert booklore_client.is_configured() is False
+        assert booklore_client.get_all_books() == []
+        assert booklore_client.search_books("cached") == []
+        assert booklore_client.search_audiobooks("cached") == []
+        assert booklore_client.find_book_by_filename("cached-result.epub") is None
+
+    booklore_client._refresh_book_cache.assert_not_called()
+
+
 def test_refresh_book_cache_prunes_stale_entries_from_both_caches(booklore_client):
     hydrated_detail = make_detail("keep", title="Keep Me", filename="keep.epub")
     booklore_client._process_book_detail(hydrated_detail)

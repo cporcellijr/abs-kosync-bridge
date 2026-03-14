@@ -1158,9 +1158,19 @@ class SyncManager:
                 )
             
             epub_path = None
+            if not ebook_only_mode and getattr(book, "storyteller_uuid", None):
+                storyteller_epub = self._get_storyteller_ebook_filename(book)
+                if storyteller_epub:
+                    epub_path = self._get_local_epub(storyteller_epub)
+                    if epub_path:
+                        logger.info(
+                            "Background prep: using Storyteller artifact for tri-link '%s'",
+                            sanitize_log_data(storyteller_epub),
+                        )
             if self.library_service and item_details:
                 # Try Priority Chain (ABS Direct -> Booklore -> CWA -> ABS Search)
-                epub_path = self.library_service.acquire_ebook(item_details)
+                if not epub_path:
+                    epub_path = self.library_service.acquire_ebook(item_details)
 
             # Fallback to legacy logic (Local Filesystem / Cache / Booklore Classic)
             if not epub_path:
@@ -1712,10 +1722,7 @@ class SyncManager:
                     alignment = self.alignment_service._get_alignment(abs_id)
                     if alignment:
                         # [MIGRATION UPGRADE] If the book has a map but still points to a legacy file, upgrade it
-                        if (
-                            getattr(book, 'transcript_file', None) != 'DB_MANAGED'
-                            and getattr(book, 'transcript_source', None) != 'storyteller'
-                        ):
+                        if getattr(book, 'transcript_file', None) != 'DB_MANAGED':
                             logger.info(f"   🔄 Upgrading '{title_snip}' to DB_MANAGED unified architecture")
                             book.transcript_file = 'DB_MANAGED'
                             self.database_service.save_book(book)

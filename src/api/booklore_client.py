@@ -270,7 +270,7 @@ class BookloreClient:
     def is_configured(self):
         """Return True if Booklore is configured, False otherwise."""
         enabled_val = os.environ.get("BOOKLORE_ENABLED", "").lower()
-        if enabled_val == 'false':
+        if enabled_val in {'false', '0', 'no', 'off'}:
             return False
         return bool(self.base_url and self.username and self.password)
 
@@ -1096,6 +1096,9 @@ class BookloreClient:
         """
         Find a book by its filename using exact, stem, or normalized matching.
         """
+        if not self.is_configured():
+            return None
+
         # Ensure cache is initialized if empty, but respect allow_refresh for updates
         if not self._has_cached_books() and allow_refresh and not self._is_refresh_on_cooldown():
             self._refresh_book_cache()
@@ -1159,6 +1162,9 @@ class BookloreClient:
 
     def get_all_books(self):
         """Get all books from cache, refreshing if necessary."""
+        if not self.is_configured():
+            return []
+
         # Use a reasonable cache time of 1 hour, similar to find_book_by_filename
         if time.time() - self._cache_timestamp > 3600 and not self._is_refresh_on_cooldown():
             self._refresh_book_cache(refresh_stale_details=False)
@@ -1175,6 +1181,9 @@ class BookloreClient:
 
     def search_audiobooks(self, search_term, include_info=True):
         """Search Booklore for audiobook-capable books."""
+        if not self.is_configured():
+            return []
+
         safe_term = str(search_term or "").strip()
 
         def collect_results(books):
@@ -1275,6 +1284,9 @@ class BookloreClient:
 
     def search_books(self, search_term):
         """Search books by title, author, or filename. Returns list of matching books."""
+        if not self.is_configured():
+            return []
+
         def search_in_cache(term):
             search_lower = term.lower()
             search_norm = self._normalize_string(term)

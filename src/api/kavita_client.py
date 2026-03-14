@@ -160,8 +160,6 @@ class KavitaClient:
             if not series_entries:
                 return []
 
-            self.get_all_books()
-
             books_by_id: dict[str, dict] = {}
             for series in series_entries:
                 sid = str(series.get("series_id") or "")
@@ -279,30 +277,74 @@ class KavitaClient:
         resolved_collection_name = self._resolve_collection_name(collection_name)
         token = self._auth_jwt()
         if not token:
-            return False
-
-        collection_id = self._find_collection_id_by_name(resolved_collection_name, token)
-        if collection_id is None:
-            collection_id = self._create_collection(resolved_collection_name, token)
-        if collection_id is None:
-            return False
-
-        try:
-            r = self.session.post(
-                f"{self.base_url}/api/Collection/update-series",
-                headers=self._jwt_headers(token),
-                json={"id": collection_id, "seriesIds": [sid]},
-                timeout=10,
+            logger.warning(
+                "Skipping Kavita add_to_collection for series '%s': JWT authentication failed",
+                sanitize_log_data(series_id),
             )
-            return r.status_code in (200, 204)
-        except Exception as e:
-            logger.error(
-                "Kavita add_to_collection failed for series '%s' and collection '%s': %s",
+            return False
+
+        collection_id = self._get_or_create_collection(resolved_collection_name, token)
+        if collection_id is None:
+            logger.warning(
+                "Skipping Kavita add_to_collection for series '%s': collection '%s' could not be resolved",
                 sid,
                 sanitize_log_data(resolved_collection_name),
-                e,
             )
             return False
+
+        attempts = [
+            (
+                "update-for-series",
+                f"{self.base_url}/api/Collection/update-for-series",
+                {
+                    "collectionTagId": collection_id,
+                    "collectionTagTitle": resolved_collection_name,
+                    "seriesIds": [sid],
+                },
+            ),
+            (
+                "add-series",
+                f"{self.base_url}/api/Collection/add-series",
+                {"id": collection_id, "seriesIds": [sid]},
+            ),
+        ]
+
+        for label, url, payload in attempts:
+            try:
+                r = self.session.post(
+                    url,
+                    headers=self._jwt_headers(token),
+                    json=payload,
+                    timeout=10,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Kavita add_to_collection via %s failed for series '%s' and collection '%s': %s",
+                    label,
+                    sid,
+                    sanitize_log_data(resolved_collection_name),
+                    e,
+                )
+                continue
+
+            if r.status_code in (200, 204):
+                logger.info(
+                    "Kavita collection add succeeded via %s for series '%s' in '%s'",
+                    label,
+                    sid,
+                    sanitize_log_data(resolved_collection_name),
+                )
+                return True
+
+            logger.warning(
+                "Kavita add_to_collection via %s failed for series '%s' and collection '%s' (status=%s)",
+                label,
+                sid,
+                sanitize_log_data(resolved_collection_name),
+                r.status_code,
+            )
+
+        return False
 
     def remove_from_collection(self, series_id: int | str, collection_name: str | None = None) -> bool:
         sid = self._coerce_series_id(series_id)
@@ -312,33 +354,74 @@ class KavitaClient:
         resolved_collection_name = self._resolve_collection_name(collection_name)
         token = self._auth_jwt()
         if not token:
-            return False
-
-        collection_id = self._find_collection_id_by_name(resolved_collection_name, token)
-        if collection_id is None:
             logger.warning(
-                "Kavita collection '%s' not found while removing series '%s'",
-                sanitize_log_data(resolved_collection_name),
-                sid,
+                "Skipping Kavita remove_from_collection for series '%s': JWT authentication failed",
+                sanitize_log_data(series_id),
             )
             return False
 
-        try:
-            r = self.session.post(
-                f"{self.base_url}/api/Collection/remove-series",
-                headers=self._jwt_headers(token),
-                json={"id": collection_id, "seriesIds": [sid]},
-                timeout=10,
-            )
-            return r.status_code in (200, 204)
-        except Exception as e:
-            logger.error(
-                "Kavita remove_from_collection failed for series '%s' and collection '%s': %s",
+        collection = self._find_collection_by_name(resolved_collection_name, token)
+        if collection is None:
+            logger.warning(
+                "Skipping Kavita remove_from_collection for series '%s': collection '%s' was not found",
                 sid,
                 sanitize_log_data(resolved_collection_name),
-                e,
             )
             return False
+
+        collection_id = self._coerce_series_id(collection.get("id"))
+        attempts = [
+            (
+                "update-series",
+                f"{self.base_url}/api/Collection/update-series",
+                {"tag": collection, "seriesIdsToRemove": [sid]},
+            ),
+        ]
+        if collection_id is not None:
+            attempts.append(
+                (
+                    "remove-series",
+                    f"{self.base_url}/api/Collection/remove-series",
+                    {"id": collection_id, "seriesIds": [sid]},
+                )
+            )
+
+        for label, url, payload in attempts:
+            try:
+                r = self.session.post(
+                    url,
+                    headers=self._jwt_headers(token),
+                    json=payload,
+                    timeout=10,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Kavita remove_from_collection via %s failed for series '%s' and collection '%s': %s",
+                    label,
+                    sid,
+                    sanitize_log_data(resolved_collection_name),
+                    e,
+                )
+                continue
+
+            if r.status_code in (200, 204):
+                logger.info(
+                    "Kavita collection removal succeeded via %s for series '%s' in '%s'",
+                    label,
+                    sid,
+                    sanitize_log_data(resolved_collection_name),
+                )
+                return True
+
+            logger.warning(
+                "Kavita remove_from_collection via %s failed for series '%s' and collection '%s' (status=%s)",
+                label,
+                sid,
+                sanitize_log_data(resolved_collection_name),
+                r.status_code,
+            )
+
+        return False
 
     def _auth_jwt(self) -> Optional[str]:
         if not self.is_configured():
@@ -397,7 +480,14 @@ class KavitaClient:
     def _jwt_headers(self, token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
-    def _find_collection_id_by_name(self, collection_name: str, token: str) -> Optional[int]:
+    def _get_or_create_collection(self, collection_name: str, token: str) -> Optional[int]:
+        collection = self._find_collection_by_name(collection_name, token)
+        if collection is not None:
+            return self._coerce_series_id(collection.get("id"))
+
+        return self._create_collection(collection_name, token)
+
+    def _find_collection_by_name(self, collection_name: str, token: str) -> Optional[dict]:
         try:
             r = self.session.get(
                 f"{self.base_url}/api/Collection",
@@ -422,9 +512,7 @@ class KavitaClient:
                 title = str(collection.get("title") or collection.get("name") or "").strip()
                 if title.lower() != collection_name.lower():
                     continue
-                collection_id = self._coerce_series_id(collection.get("id"))
-                if collection_id is not None:
-                    return collection_id
+                return collection
             return None
         except Exception as e:
             logger.error(
@@ -455,7 +543,10 @@ class KavitaClient:
             if collection_id is not None:
                 return collection_id
 
-            return self._find_collection_id_by_name(collection_name, token)
+            collection = self._find_collection_by_name(collection_name, token)
+            if collection is None:
+                return None
+            return self._coerce_series_id(collection.get("id"))
         except Exception as e:
             logger.error(
                 "Kavita collection create failed for '%s': %s",

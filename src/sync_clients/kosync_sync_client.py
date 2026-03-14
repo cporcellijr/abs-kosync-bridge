@@ -22,6 +22,7 @@ class KoSyncSyncClient(SyncClient):
         ebook_parser: EbookParser,
         allowed_ebook_source: str | None = None,
         blocked_ebook_source: str | None = None,
+        display_name: str | None = None,
     ):
         super().__init__(ebook_parser)
         self.kosync_client = kosync_client
@@ -29,6 +30,7 @@ class KoSyncSyncClient(SyncClient):
         self.delta_kosync_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
         self.allowed_ebook_source = self._normalize_source_name(allowed_ebook_source)
         self.blocked_ebook_source = self._normalize_source_name(blocked_ebook_source)
+        self.display_name = str(display_name or "KoSync").strip() or "KoSync"
 
     @staticmethod
     def _normalize_source_name(source: str | None) -> str | None:
@@ -96,7 +98,7 @@ class KoSyncSyncClient(SyncClient):
             delta=delta,
             threshold=self.delta_kosync_thresh,
             is_configured=self.kosync_client.is_configured(),
-            display=("KoSync", "{prev:.4%} -> {curr:.4%}"),
+            display=(self.display_name, "{prev:.4%} -> {curr:.4%}"),
             value_formatter=lambda v: f"{v*100:.4f}%"
         )
 

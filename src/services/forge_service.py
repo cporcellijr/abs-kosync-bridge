@@ -1322,7 +1322,13 @@ class ForgeService:
                             )
                     if kavita_series_id:
                         kavita_collection_name = os.environ.get("KAVITA_COLLECTION_NAME", "Bridge")
-                        kavita_client.add_to_collection(kavita_series_id, kavita_collection_name)
+                        added = kavita_client.add_to_collection(kavita_series_id, kavita_collection_name)
+                        if not added:
+                            logger.warning(
+                                "Auto-Forge: Kavita collection add returned no success for series '%s' in '%s'",
+                                kavita_series_id,
+                                kavita_collection_name,
+                            )
                     
             except Exception as e:
                 logger.warning(f"⚠️ Auto-Forge: Failed to add to collections/shelves: {e}")

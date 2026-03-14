@@ -549,6 +549,57 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         )
         self.mock_database_service.delete_book.assert_called_once_with('delete-st-2')
 
+    def test_delete_mapping_removes_kavita_collection_using_stored_series_id(self):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='delete-kavita-1',
+            abs_title='Delete Kavita Book',
+            ebook_filename='kavita_717.epub',
+            ebook_source='Kavita',
+            ebook_source_id='717',
+            sync_mode='ebook_only',
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_kavita_client.is_configured.return_value = True
+        self.mock_kavita_client.remove_from_collection.return_value = True
+        self.mock_booklore_client.is_configured.return_value = False
+        self.mock_manager.epub_cache_dir = None
+
+        response = self.client.post('/delete/delete-kavita-1')
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_kavita_client.remove_from_collection.assert_called_once_with('717', 'Bridge')
+        self.mock_kavita_client.search_ebooks.assert_not_called()
+        self.mock_database_service.delete_book.assert_called_once_with('delete-kavita-1')
+
+    def test_delete_mapping_resolves_kavita_series_by_title_for_non_kavita_source(self):
+        from src.db.models import Book
+
+        test_book = Book(
+            abs_id='delete-kavita-2',
+            abs_title='Bridge Search Title',
+            ebook_filename='book.epub',
+            ebook_source='BookLore',
+            ebook_source_id='booklore-1',
+            sync_mode='ebook_only',
+            status='active'
+        )
+        self.mock_database_service.get_book.return_value = test_book
+        self.mock_kavita_client.is_configured.return_value = True
+        self.mock_kavita_client.search_ebooks.return_value = [{'series_id': '44'}]
+        self.mock_kavita_client.remove_from_collection.return_value = True
+        self.mock_booklore_client.is_configured.return_value = False
+        self.mock_manager.epub_cache_dir = None
+
+        response = self.client.post('/delete/delete-kavita-2')
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_kavita_client.search_ebooks.assert_called_once_with('Bridge Search Title')
+        self.mock_kavita_client.remove_from_collection.assert_called_once_with('44', 'Bridge')
+        self.mock_database_service.delete_book.assert_called_once_with('delete-kavita-2')
+
     @patch('src.web_server.ingest_storyteller_transcripts', return_value=None)
     def test_api_storyteller_link_preserves_storyteller_source_when_ingest_missing(self, _mock_ingest):
         from src.db.models import Book

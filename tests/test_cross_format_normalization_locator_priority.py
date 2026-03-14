@@ -66,6 +66,32 @@ def test_normalization_prefers_xpath_offset():
     manager.ebook_parser.resolve_xpath_to_index.assert_called_once()
 
 
+def test_sync_cycle_upgrades_storyteller_alignment_rows_to_db_managed():
+    manager = SyncManager.__new__(SyncManager)
+    manager._sync_cycle_ebook_cache = {}
+    manager.sync_clients = {}
+    manager.library_service = None
+    manager._last_library_sync = 0
+    manager.database_service = MagicMock()
+    manager.alignment_service = MagicMock()
+    manager.alignment_service._get_alignment.return_value = [{"char": 10, "ts": 1.0}]
+
+    book = SimpleNamespace(
+        abs_id="abs-1",
+        abs_title="Book",
+        status="active",
+        transcript_file=None,
+        transcript_source="storyteller",
+    )
+    manager.database_service.get_book.return_value = book
+    manager.database_service.get_states_for_book.return_value = []
+
+    manager._sync_cycle_internal(target_abs_id="abs-1")
+
+    assert book.transcript_file == "DB_MANAGED"
+    manager.database_service.save_book.assert_called_once_with(book)
+
+
 def test_normalization_prefers_cfi_before_percent():
     manager = _manager_with_mocks()
     manager.ebook_parser.resolve_book_path.return_value = "book.epub"

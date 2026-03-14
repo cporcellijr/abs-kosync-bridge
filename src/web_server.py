@@ -791,6 +791,8 @@ def _upsert_storyteller_mapping(
     abs_title=None,
     storyteller_uuid=None,
     ebook_filename=None,
+    ebook_source=None,
+    ebook_source_id=None,
     existing_book=None,
     duration=None,
 ):
@@ -804,6 +806,12 @@ def _upsert_storyteller_mapping(
 
     selected_storyteller_uuid = (storyteller_uuid or "").strip() or None
     selected_ebook_filename = (ebook_filename or "").strip() or None
+    selected_ebook_source = (ebook_source or "").strip() or None
+    normalized_ebook_source_id = _normalize_ebook_source_id(
+        selected_ebook_source,
+        ebook_source_id,
+        selected_ebook_filename,
+    )
 
     target_book = existing_book
     if mode_hint == "existing":
@@ -906,6 +914,9 @@ def _upsert_storyteller_mapping(
 
     target_book.abs_title = abs_title or target_book.abs_title or Path(resolved_ebook_filename).stem
     target_book.ebook_filename = resolved_ebook_filename
+    if selected_ebook_source is not None:
+        target_book.ebook_source = selected_ebook_source
+        target_book.ebook_source_id = normalized_ebook_source_id
     target_book.kosync_doc_id = kosync_doc_id
     target_book.status = "pending"
 
@@ -1315,7 +1326,13 @@ def _apply_link_ebook_side_effects(book):
         if series_id:
             collection_name = os.environ.get('KAVITA_COLLECTION_NAME', 'Bridge')
             try:
-                kavita_client.add_to_collection(series_id, collection_name)
+                added = kavita_client.add_to_collection(series_id, collection_name)
+                if not added:
+                    logger.warning(
+                        "Kavita collection add returned no success for series '%s' in '%s'",
+                        sanitize_log_data(series_id),
+                        sanitize_log_data(collection_name),
+                    )
             except Exception as kv_err:
                 logger.warning(f"Failed to add Kavita collection entry for series '{series_id}': {kv_err}")
 
@@ -1342,7 +1359,13 @@ def _remove_link_ebook_side_effects(book):
         if series_id:
             collection_name = os.environ.get('KAVITA_COLLECTION_NAME', 'Bridge')
             try:
-                kavita_client.remove_from_collection(series_id, collection_name)
+                removed = kavita_client.remove_from_collection(series_id, collection_name)
+                if not removed:
+                    logger.warning(
+                        "Kavita collection removal returned no success for series '%s' in '%s'",
+                        sanitize_log_data(series_id),
+                        sanitize_log_data(collection_name),
+                    )
             except Exception as kv_err:
                 logger.warning(f"Failed to remove Kavita collection entry for series '{series_id}': {kv_err}")
 
@@ -2329,6 +2352,8 @@ def match():
                 abs_title=ebook_only_title,
                 storyteller_uuid=storyteller_uuid,
                 ebook_filename=selected_filename,
+                ebook_source=ebook_source,
+                ebook_source_id=ebook_source_id,
                 duration=0.0,
             )
             if err_msg:

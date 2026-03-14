@@ -19,6 +19,7 @@ class MockContainer:
         self.mock_abs_client = Mock()
         self.mock_booklore_client = Mock()
         self.mock_storyteller_client = Mock()
+        self.mock_kavita_client = Mock()
         self.mock_database_service = Mock()
         self.mock_ebook_parser = Mock()
         self.mock_forge_service = Mock()
@@ -64,6 +65,9 @@ class MockContainer:
         # Default storyteller behavior
         self.mock_storyteller_client.is_configured.return_value = False
 
+        # Default Kavita behavior
+        self.mock_kavita_client.is_configured.return_value = False
+
         # Default sync clients map
         self._sync_clients = {
             "Hardcover": Mock(is_configured=Mock(return_value=False))
@@ -80,6 +84,9 @@ class MockContainer:
 
     def storyteller_client(self):
         return self.mock_storyteller_client
+
+    def kavita_client(self):
+        return self.mock_kavita_client
 
     def ebook_parser(self):
         return self.mock_ebook_parser
@@ -231,6 +238,36 @@ class TestMatchPathsRegression(unittest.TestCase):
         self.assertEqual(saved_book.original_ebook_filename, "ebook-source.epub")
         self.assertEqual(saved_book.ebook_filename, "storyteller_story-uuid-with-original.epub")
         self.assertEqual(saved_book.kosync_doc_id, "abcdef1234567890abcdef1234567890")
+
+    @patch("src.web_server.get_kosync_id_for_ebook", return_value="11223344556677889900aabbccddeeff")
+    def test_match_route_ebook_only_storyteller_preserves_kavita_source_metadata(self, _mock_kosync):
+        self.mock_container.mock_database_service.save_book.side_effect = lambda book: book
+        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.is_configured.return_value = True
+        self.mock_container.mock_storyteller_client.get_book_details.return_value = {
+            "title": "Story Only Title",
+        }
+        self.mock_container.mock_kavita_client.is_configured.return_value = True
+        self.mock_container.mock_kavita_client.find_book_by_filename.return_value = {"series_id": "717"}
+
+        response = self.client.post(
+            "/match",
+            data={
+                "ebook_filename": "kavita_717.epub",
+                "ebook_source": "Kavita",
+                "ebook_source_id": "717",
+                "storyteller_uuid": "story-uuid-kavita",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.mock_container.mock_database_service.save_book.assert_called_once()
+        saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
+        self.assertEqual(saved_book.sync_mode, "ebook_only")
+        self.assertEqual(saved_book.ebook_source, "Kavita")
+        self.assertEqual(saved_book.ebook_source_id, "717")
+        self.mock_container.mock_kavita_client.add_to_collection.assert_called_once_with("717", "Bridge")
+        self.mock_container.mock_kavita_client.search_ebooks.assert_not_called()
 
     def test_match_route_rejects_ebook_only_without_text_source(self):
         response = self.client.post("/match", data={})

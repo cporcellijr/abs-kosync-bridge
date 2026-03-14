@@ -85,3 +85,21 @@ def test_resolve_xpath_to_index_unresolved_xpath_returns_none():
     index = parser.resolve_xpath_to_index("book.epub", "/body/DocFragment[1]/body/div[99]/text().0")
 
     assert index is None
+
+
+def test_resolve_xpath_to_index_accepts_element_level_offset():
+    html_content = "<html><body><p>Alpha unique anchor text for deterministic matching.</p></body></html>"
+    parser = _parser_for_single_spine(html_content, start=25)
+
+    index = parser.resolve_xpath_to_index("book.epub", "/body/DocFragment[1]/body/p[1].5")
+
+    assert index == 30
+
+
+def test_resolve_xpath_to_index_accepts_docfragment_root_offset():
+    html_content = "<html><body><h2>Chapter 10</h2><p>Alpha unique anchor text.</p></body></html>"
+    parser = _parser_for_single_spine(html_content, start=12)
+
+    index = parser.resolve_xpath_to_index("book.epub", "/body/DocFragment[1].0")
+
+    assert index == 12
