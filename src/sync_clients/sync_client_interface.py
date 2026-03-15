@@ -34,6 +34,8 @@ class UpdateProgressRequest:
     txt: Optional[str] = None
     # can be percentage or timestamp (ABS)
     previous_location: Optional[float] = None
+    # optional direct audio seek target (seconds)
+    seek_timestamp: Optional[float] = None
 
 @dataclass
 class SyncResult:

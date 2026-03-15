@@ -167,6 +167,26 @@ class ABSSyncClient(SyncClient):
 
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         book_title = book.abs_title or 'Unknown Book'
+
+        if request.seek_timestamp is not None:
+            target_ts = max(float(request.seek_timestamp), 0.0)
+            response = self.abs_client.get_progress(book.abs_id)
+            abs_ts = response.get('currentTime') if response is not None else None
+            if abs_ts is not None and target_ts < abs_ts:
+                logger.info(f"🔄 '{book_title}' Not updating ABS progress — target timestamp {target_ts:.2f}s is before current ABS position {abs_ts:.2f}s")
+                return SyncResult(abs_ts, True, {
+                    'ts': abs_ts,
+                    'pct': self._abs_to_percentage(abs_ts, book) or 0
+                })
+
+            result, final_ts = self._update_abs_progress_with_offset(book.abs_id, target_ts, abs_ts if abs_ts is not None else 0.0)
+            pct = self._abs_to_percentage(final_ts, book)
+            updated_state = {
+                'ts': final_ts,
+                'pct': pct or 0
+            }
+            return SyncResult(final_ts, result.get("success", False), updated_state)
+
         if request.locator_result.percentage == 0.0:
             logger.info(f"🔄 '{book_title}' Locator percentage is 0.0% — Setting ABS progress to start of book")
             result, final_ts = self._update_abs_progress_with_offset(book.abs_id, 0.0)
