@@ -260,7 +260,9 @@ class BookLoreAudioSyncClient(SyncClient):
             return SyncResult(None, False)
 
         target_ts = None
-        if request.locator_result.percentage == 0.0:
+        if request.seek_timestamp is not None:
+            target_ts = max(float(request.seek_timestamp), 0.0)
+        elif request.locator_result.percentage == 0.0:
             target_ts = 0.0
         elif book.transcript_file == "DB_MANAGED" and self.alignment_service and request.txt:
             target_ts = self.alignment_service.get_time_for_text(

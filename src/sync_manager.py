@@ -233,6 +233,43 @@ class SyncManager:
         except Exception:
             return None, None
 
+    def _resolve_locator_char_offset(self, book: Book, locator: LocatorResult, epub_filename: str | None):
+        """Resolve the best available global character offset for a locator."""
+        if not locator:
+            return None, None
+
+        if locator.match_index is not None:
+            try:
+                return int(locator.match_index), "match_index"
+            except (TypeError, ValueError):
+                pass
+
+        target_epub = epub_filename or self._get_non_story_ebook_filename(book) or getattr(book, "ebook_filename", None)
+        if not target_epub:
+            return None, None
+
+        if locator.perfect_ko_xpath:
+            idx = self.ebook_parser.resolve_xpath_to_index(target_epub, locator.perfect_ko_xpath)
+            if idx is not None:
+                return int(idx), "perfect_ko_xpath"
+
+        if locator.xpath:
+            idx = self.ebook_parser.resolve_xpath_to_index(target_epub, locator.xpath)
+            if idx is not None:
+                return int(idx), "xpath"
+
+        if locator.cfi:
+            idx = self.ebook_parser.resolve_cfi_to_index(target_epub, locator.cfi)
+            if idx is not None:
+                return int(idx), "cfi"
+
+        if locator.href:
+            idx, reason = self._resolve_href_to_char_offset(target_epub, locator.href, locator.chapter_progress)
+            if idx is not None:
+                return int(idx), reason or "href"
+
+        return None, None
+
     def _validate_and_stabilize_locator(
         self,
         book: Book,
@@ -1936,28 +1973,46 @@ class SyncManager:
                             )
 
                 if not locator:
-                    if not epub:
-                        logger.warning(
-                            f"⚠️ '{abs_id}' '{title_snip}' Missing locator target EPUB; cannot derive cross-client locator"
+                    if leader != primary_audio_client:
+                        current = leader_state.current or {}
+                        locator = LocatorResult(
+                            percentage=leader_pct,
+                            xpath=current.get('xpath'),
+                            cfi=current.get('cfi'),
+                            href=current.get('href'),
+                            fragment=current.get('frag') or current.get('fragment'),
+                            chapter_progress=current.get('chapter_progress'),
                         )
-                        continue
-                    txt = leader_client.get_text_from_current_state(book, leader_state)
-                    if not txt:
-                        logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
-                        continue
+                        if locator.perfect_ko_xpath is None and leader == 'KoSync':
+                            locator.perfect_ko_xpath = current.get('xpath')
+                        match_index, source = self._resolve_locator_char_offset(book, locator, epub)
+                        if match_index is not None:
+                            locator.match_index = match_index
+                        locator_source = f"ebook_leader_passthrough:{source or 'state_fields'}"
+                        txt = None
+                    else:
+                        if not epub:
+                            logger.warning(
+                                f"⚠️ '{abs_id}' '{title_snip}' Missing locator target EPUB; cannot derive cross-client locator"
+                            )
+                            continue
+                        txt = leader_client.get_text_from_current_state(book, leader_state)
+                        if not txt:
+                            logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not get text from leader '{leader}'")
+                            continue
 
-                    locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
-                    if locator:
-                        locator_source = "fuzzy_text"
-                    if not locator:
-                        if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
-                            fallback_txt = leader_client.get_fallback_text(book, leader_state)
-                            if fallback_txt and fallback_txt != txt:
-                                logger.info(f"🔄 '{abs_id}' '{title_snip}' Primary text match failed. Trying previous segment fallback...")
-                                locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
-                                if locator:
-                                    logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
-                                    locator_source = "fuzzy_text_previous_segment"
+                        locator = leader_client.get_locator_from_text(txt, epub, leader_pct)
+                        if locator:
+                            locator_source = "fuzzy_text"
+                        if not locator:
+                            if getattr(self.ebook_parser, 'useXpathSegmentFallback', False):
+                                fallback_txt = leader_client.get_fallback_text(book, leader_state)
+                                if fallback_txt and fallback_txt != txt:
+                                    logger.info(f"🔄 '{abs_id}' '{title_snip}' Primary text match failed. Trying previous segment fallback...")
+                                    locator = leader_client.get_locator_from_text(fallback_txt, epub, leader_pct)
+                                    if locator:
+                                        logger.info(f"✅ '{abs_id}' '{title_snip}' Fallback successful!")
+                                        locator_source = "fuzzy_text_previous_segment"
 
                 if not locator:
                     logger.warning(f"⚠️ '{abs_id}' '{title_snip}' Could not resolve locator from text for leader '{leader}', falling back to percentage of leader")
@@ -1974,12 +2029,49 @@ class SyncManager:
 
                 # Update all other clients and store results
                 results: dict[str, SyncResult] = {}
+                leader_is_audio = leader == primary_audio_client
                 for client_name, client in active_clients.items():
                     if client_name == leader:
                         continue
 
                     try:
-                        request = UpdateProgressRequest(locator, txt, previous_location=config.get(client_name).previous_pct if config.get(client_name) else None)
+                        previous_location = config.get(client_name).previous_pct if config.get(client_name) else None
+                        request = UpdateProgressRequest(locator, txt, previous_location=previous_location)
+
+                        follower_supports = client.get_supported_sync_types()
+                        follower_is_audio = client_name == primary_audio_client
+                        follower_is_ebook = 'ebook' in follower_supports and not follower_is_audio
+
+                        if (not leader_is_audio) and follower_is_ebook:
+                            logger.debug(
+                                f"'{abs_id}' '{title_snip}' Routing '{leader}' -> '{client_name}': ebook→ebook passthrough"
+                            )
+
+                        elif (not leader_is_audio) and follower_is_audio:
+                            char_offset, char_source = self._resolve_locator_char_offset(book, locator, epub)
+                            if char_offset is not None and self.alignment_service:
+                                seek_ts = self.alignment_service.get_time_for_text(
+                                    book.abs_id,
+                                    query_text=None,
+                                    char_offset_hint=char_offset,
+                                )
+                                if seek_ts is not None:
+                                    request.seek_timestamp = seek_ts
+                                    logger.debug(
+                                        f"'{abs_id}' '{title_snip}' Routing '{leader}' -> '{client_name}': "
+                                        f"ebook→audio alignment via char offset ({char_source}, idx={char_offset}, ts={seek_ts:.2f}s)"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ '{abs_id}' '{title_snip}' Routing '{leader}' -> '{client_name}': "
+                                        f"ebook→audio fallback to percentage (timestamp lookup failed for idx={char_offset})"
+                                    )
+                            else:
+                                logger.warning(
+                                    f"⚠️ '{abs_id}' '{title_snip}' Routing '{leader}' -> '{client_name}': "
+                                    "ebook→audio fallback to percentage (char offset unavailable)"
+                                )
+
                         result = client.update_progress(book, request)
                         results[client_name] = result
                     except Exception as e:
