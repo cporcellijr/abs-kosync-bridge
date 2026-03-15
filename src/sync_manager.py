@@ -637,6 +637,171 @@ class SyncManager:
 
         return normalized if len(normalized) > 1 else None
 
+    def _normalize_single_client(self, book, config, client_name) -> float | None:
+        """Normalize one ebook client to audiobook timeline and persist normalization metadata."""
+        if client_name not in config:
+            return None
+
+        abs_id = getattr(book, "abs_id", "unknown")
+        primary_audio_client = self._get_primary_audio_client_name(book)
+        has_primary_audio = bool(primary_audio_client and primary_audio_client in config)
+        if not has_primary_audio:
+            return None
+
+        client = self.sync_clients.get(client_name)
+        if not client:
+            return None
+        if client_name == primary_audio_client:
+            return config[primary_audio_client].current.get("ts", 0)
+        supported_sync_types = (
+            client.get_supported_sync_types()
+            if hasattr(client, "get_supported_sync_types")
+            else {"audiobook", "ebook"}
+        )
+        if "ebook" not in supported_sync_types:
+            return None
+
+        if not book.transcript_file:
+            logger.debug(f"'{abs_id}' No transcript available for cross-format normalization")
+            return None
+
+        client_epub = self._get_epub_for_client(book, client_name)
+        if not client_epub:
+            logger.debug(f"'{abs_id}' Missing epub filename for normalization client '{client_name}'")
+            return None
+
+        try:
+            full_text, total_text_len = self._get_cached_ebook_text(client_epub)
+            if total_text_len <= 0:
+                logger.debug(
+                    f"'{abs_id}' Empty ebook text during normalization "
+                    f"for '{client_name}' epub='{sanitize_log_data(client_epub)}'"
+                )
+                return None
+        except Exception as e:
+            logger.warning(
+                f"⚠️ '{abs_id}' Failed to load ebook text for normalization "
+                f"client '{client_name}' epub='{sanitize_log_data(client_epub)}': {e}"
+            )
+            return None
+
+        client_state = config[client_name]
+        client_pct = client_state.current.get("pct", 0)
+        client_xpath = client_state.current.get("xpath")
+        client_cfi = client_state.current.get("cfi")
+        client_href = client_state.current.get("href")
+        client_frag = client_state.current.get("frag")
+        client_chapter_progress = client_state.current.get("chapter_progress")
+        normalization_source = "percent_fallback"
+
+        try:
+            char_offset = None
+            if client_xpath:
+                char_offset = self.ebook_parser.resolve_xpath_to_index(client_epub, client_xpath)
+                if char_offset is not None:
+                    normalization_source = "xpath"
+
+            if char_offset is None and client_cfi:
+                char_offset = self.ebook_parser.resolve_cfi_to_index(client_epub, client_cfi)
+                if char_offset is not None:
+                    normalization_source = "cfi"
+
+            if char_offset is None and client_href and client_frag:
+                txt_at_loc = self.ebook_parser.resolve_locator_id(client_epub, client_href, client_frag)
+                if txt_at_loc:
+                    idx = full_text.find(txt_at_loc[:120])
+                    if idx >= 0:
+                        char_offset = idx
+                        normalization_source = "href_frag"
+                else:
+                    logger.debug(
+                        f"'{abs_id}' Could not resolve href+fragment for '{client_name}' "
+                        f"(href='{sanitize_log_data(client_href)}', frag='{sanitize_log_data(client_frag)}')"
+                    )
+
+            if char_offset is None and client_href:
+                char_offset, href_source = self._resolve_href_to_char_offset(
+                    client_epub, client_href, client_chapter_progress
+                )
+                if char_offset is not None:
+                    normalization_source = href_source
+
+            if char_offset is None:
+                char_offset = int(client_pct * total_text_len)
+
+            char_offset = max(0, min(int(char_offset), total_text_len - 1))
+            client_state.current["_normalization_source"] = normalization_source
+            if normalization_source in ("xpath", "cfi", "href_frag", "href_progression"):
+                client_state.current["_locator_pct"] = char_offset / float(total_text_len)
+            else:
+                client_state.current.pop("_locator_pct", None)
+
+            prefix_anchor, suffix_anchor, window_txt = self._build_text_anchors(full_text, char_offset)
+            if not window_txt:
+                return None
+
+            ts_for_text = None
+            if self.alignment_service:
+                ts_for_text = self.alignment_service.get_time_for_text(
+                    abs_id,
+                    window_txt,
+                    char_offset_hint=char_offset,
+                )
+
+            if ts_for_text is None:
+                logger.debug(f"'{abs_id}' Could not find timestamp for '{client_name}' text")
+                return None
+
+            client_state.current["_normalized_ts"] = ts_for_text
+            high_conf_sources = {"xpath", "cfi", "href_frag", "href_progression"}
+            client_state.current["_normalization_confidence"] = (
+                "high" if normalization_source in high_conf_sources else "low"
+            )
+            logger.debug(
+                f"'{abs_id}' ebook->time normalized client={client_name} source={normalization_source} "
+                f"offset={char_offset} prefix_len={len(prefix_anchor)} suffix_len={len(suffix_anchor)} "
+                f"window_len={len(window_txt)} confidence={client_state.current['_normalization_confidence']} "
+                f"ts={ts_for_text:.2f}s"
+            )
+            return ts_for_text
+        except Exception as e:
+            logger.warning(f"⚠️ '{abs_id}' Cross-format normalization failed for '{client_name}': {e}")
+            return None
+
+    def _matches_recent_written_value(self, client_name: str, abs_id: str, current_pct: float | None) -> bool:
+        if current_pct is None:
+            return False
+
+        try:
+            suppression_window = int(os.getenv("SYNC_WRITE_SUPPRESSION_SECONDS", "120"))
+        except (TypeError, ValueError):
+            suppression_window = 120
+
+        from src.services.write_tracker import get_recent_write
+
+        recent = get_recent_write(client_name, abs_id, suppression_window)
+        if not recent:
+            return False
+
+        recent_pct = recent.get("pct")
+        if recent_pct is None:
+            return False
+
+        try:
+            return abs(float(current_pct) - float(recent_pct)) <= 0.005
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _get_persistable_result_state(result: SyncResult) -> dict | None:
+        if result.success:
+            return result.updated_state if result.updated_state else {'pct': result.location}
+
+        if result.updated_state and result.updated_state.get("_persist_observed_state"):
+            return result.updated_state
+
+        return None
+
 
     def _fetch_states_parallel(self, book, prev_states_by_client, title_snip, bulk_states_per_client=None, clients_to_use=None):
         """Fetch states from specified clients (or all if not specified) in parallel."""
@@ -1502,9 +1667,30 @@ class SyncManager:
         # Check which clients have changed (delta > minimum threshold)
         # "Most recent change wins" - if only one client changed, it becomes the leader
         # Use hybrid time/percentage logic to filter out phantom API noise
-        normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+        normalized_positions = None
+        full_normalization_attempted = False
         primary_audio_client = self._get_primary_audio_client_name(book)
-        clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
+        clients_with_delta = {}
+        for client_name, pct in vals.items():
+            if not self._has_significant_delta(client_name, config, book):
+                continue
+
+            current_pct = config[client_name].current.get("pct")
+            if self._matches_recent_written_value(client_name, abs_id, current_pct):
+                logger.debug(
+                    f"Suppressing {client_name} delta: current value matches last written value (stale read-back)"
+                )
+                continue
+
+            clients_with_delta[client_name] = pct
+
+        if len(clients_with_delta) != 1:
+            normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+            full_normalization_attempted = True
+        else:
+            changed_client = list(clients_with_delta.keys())[0]
+            if changed_client != primary_audio_client:
+                self._normalize_single_client(book, config, changed_client)
 
         # Suppress raw pct delta when locator-derived position shows no movement from previous state.
         for client_name in list(clients_with_delta.keys()):
@@ -1533,6 +1719,21 @@ class SyncManager:
         if len(clients_with_delta) == 1:
             changed_client = list(clients_with_delta.keys())[0]
             changed_source = config[changed_client].current.get("_normalization_source")
+            changed_raw_pct = vals.get(changed_client)
+            changed_locator_pct = config[changed_client].current.get("_locator_pct")
+            has_locator_mismatch = (
+                changed_raw_pct is not None
+                and changed_locator_pct is not None
+                and abs(changed_locator_pct - changed_raw_pct) > 0.01
+            )
+
+            single_delta_needs_disambiguation = (
+                changed_client != primary_audio_client
+                and (changed_source == "percent_fallback" or has_locator_mismatch)
+            )
+            if single_delta_needs_disambiguation and not full_normalization_attempted:
+                normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+                full_normalization_attempted = True
 
             if (
                 normalized_positions
@@ -1553,14 +1754,6 @@ class SyncManager:
                         f"'{changed_client}' (low-confidence source=percent_fallback); evaluating all candidates"
                     )
                 elif changed_ts is not None and other_ts:
-                    changed_raw_pct = vals.get(changed_client)
-                    changed_locator_pct = config[changed_client].current.get("_locator_pct")
-                    has_locator_mismatch = (
-                        changed_raw_pct is not None
-                        and changed_locator_pct is not None
-                        and abs(changed_locator_pct - changed_raw_pct) > 0.01
-                    )
-
                     if has_locator_mismatch:
                         max_other_ts = max(other_ts)
                         NORMALIZED_LEAD_EPSILON_SECONDS = 2.0
@@ -1572,15 +1765,22 @@ class SyncManager:
                                 f"{changed_ts:.1f}s vs max peer {max_other_ts:.1f}s); evaluating all candidates"
                             )
 
-        if len(clients_with_delta) == 1 and not single_delta_low_conf:
+        if len(clients_with_delta) == 1 and not single_delta_low_conf and not full_normalization_attempted:
             # Only one client changed - that client is the leader (most recent change wins)
             leader = list(clients_with_delta.keys())[0]
             leader_pct = vals[leader]
+            logger.debug(
+                f"Skipping full normalization: single-delta leader='{leader}', will normalize lazily if needed"
+            )
             logger.info(f"🔄 '{abs_id}' '{title_snip}' {leader} leads at {config[leader].value_formatter(leader_pct)} (only client with change)")
         else:
             # Multiple clients changed or this is a discrepancy resolution
             # Use "furthest wins" logic among changed clients (or all if none changed)
             candidates = vals if single_delta_low_conf else (clients_with_delta if clients_with_delta else vals)
+
+            if not full_normalization_attempted:
+                normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+                full_normalization_attempted = True
             
             # For cross-format sync (audiobook vs ebook), use normalized timestamps
             if normalized_positions and len(normalized_positions) > 1:
@@ -1940,13 +2140,16 @@ class SyncManager:
 
                 leader_client = self.sync_clients[leader]
                 leader_state = config[leader]
+                primary_audio_client = self._get_primary_audio_client_name(book)
+
+                if leader != primary_audio_client and leader_state.current.get("_normalized_ts") is None:
+                    self._normalize_single_client(book, config, leader)
 
                 epub = self._get_locator_target_epub(book, leader)
                 txt = None
                 locator = None
                 locator_source = None
 
-                primary_audio_client = self._get_primary_audio_client_name(book)
                 if leader == primary_audio_client:
                     abs_timestamp = leader_state.current.get('ts')
                     locator, txt = self._resolve_alignment_locator_from_abs_timestamp(book, abs_timestamp)
@@ -2097,10 +2300,14 @@ class SyncManager:
 
                 # Save sync results from other clients
                 for client_name, result in results.items():
-                    if result.success:
-                        # Use updated_state if provided, otherwise fall back to basic state
-                        state_data = result.updated_state if result.updated_state else {'pct': result.location}
-                        logger.info(f"'{abs_id}' '{title_snip}' Updated state data for '{client_name}': {state_data}")
+                    state_data = self._get_persistable_result_state(result)
+                    if state_data is not None:
+                        if result.success:
+                            logger.info(f"'{abs_id}' '{title_snip}' Updated state data for '{client_name}': {state_data}")
+                        else:
+                            logger.info(
+                                f"'{abs_id}' '{title_snip}' Observed state data for '{client_name}' after failed update: {state_data}"
+                            )
                         client_state_model = State(
                             abs_id=book.abs_id,
                             client_name=client_name.lower(),

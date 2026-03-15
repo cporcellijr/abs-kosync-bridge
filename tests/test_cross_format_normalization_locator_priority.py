@@ -7,8 +7,9 @@ from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.sync_clients.booklore_sync_client import BookloreSyncClient
-from src.sync_clients.sync_client_interface import ServiceState
+from src.sync_clients.sync_client_interface import ServiceState, SyncResult
 from src.sync_manager import SyncManager
+from src.services import write_tracker
 from src.utils.ebook_utils import EbookParser
 
 
@@ -90,6 +91,11 @@ def test_sync_cycle_upgrades_storyteller_alignment_rows_to_db_managed():
 
     assert book.transcript_file == "DB_MANAGED"
     manager.database_service.save_book.assert_called_once_with(book)
+
+
+def _clear_write_tracker():
+    with write_tracker._writes_lock:
+        write_tracker._recent_writes.clear()
 
 
 def test_normalization_prefers_cfi_before_percent():
@@ -447,6 +453,160 @@ def test_single_storyteller_delta_with_href_progression_is_not_demoted():
 
     assert leader == "Storyteller"
     assert leader_pct == config["Storyteller"].current["pct"]
+
+
+def test_determine_leader_suppresses_recent_written_stale_readback_delta():
+    _clear_write_tracker()
+    try:
+        manager = SyncManager.__new__(SyncManager)
+
+        class _Client:
+            def can_be_leader(self):
+                return True
+
+        manager.sync_clients = {
+            "Storyteller": _Client(),
+            "KavitaKoSync": _Client(),
+        }
+        manager._has_significant_delta = MagicMock(return_value=True)
+
+        book = SimpleNamespace(abs_id="abs-1", duration=10000, transcript_file="DB_MANAGED")
+        config = {
+            "Storyteller": _state({"pct": 0.030474362895485805}),
+            "KavitaKoSync": _state({"pct": 0.13333334}),
+        }
+        config["Storyteller"].previous_pct = 0.02969767317570265
+        config["KavitaKoSync"].previous_pct = 0.0289209834559195
+
+        write_tracker.record_write("KavitaKoSync", "abs-1", 0.13333334)
+        leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+        assert leader == "Storyteller"
+        assert leader_pct == config["Storyteller"].current["pct"]
+    finally:
+        _clear_write_tracker()
+
+
+def test_single_delta_fast_path_skips_full_normalization():
+    manager = SyncManager.__new__(SyncManager)
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {"ABS": _Client(), "BookLore": _Client()}
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: name == "BookLore")
+    manager._normalize_single_client = MagicMock(return_value=1001.0)
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 1000.0, "BookLore": 1001.0}
+    )
+
+    book = SimpleNamespace(abs_id="abs-1", duration=10000, transcript_file="DB_MANAGED")
+    config = {
+        "ABS": _state({"pct": 0.2, "ts": 1000.0}),
+        "BookLore": _state({"pct": 0.21, "_normalization_source": "xpath", "_locator_pct": 0.21}),
+    }
+    config["BookLore"].previous_pct = 0.2
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "BookLore"
+    assert leader_pct == config["BookLore"].current["pct"]
+    manager._normalize_single_client.assert_called_once_with(book, config, "BookLore")
+    manager._normalize_for_cross_format_comparison.assert_not_called()
+
+
+def test_single_delta_low_conf_percent_fallback_still_uses_full_normalization():
+    manager = SyncManager.__new__(SyncManager)
+
+    class _Client:
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {"ABS": _Client(), "BookLore": _Client()}
+    manager._has_significant_delta = MagicMock(side_effect=lambda name, cfg, book: name == "BookLore")
+    manager._normalize_single_client = MagicMock(return_value=900.0)
+    manager._normalize_for_cross_format_comparison = MagicMock(
+        return_value={"ABS": 1000.0, "BookLore": 900.0}
+    )
+
+    book = SimpleNamespace(abs_id="abs-1", duration=10000, transcript_file="DB_MANAGED")
+    config = {
+        "ABS": _state({"pct": 0.2, "ts": 1000.0}),
+        "BookLore": _state({"pct": 0.21, "_normalization_source": "percent_fallback"}),
+    }
+
+    leader, leader_pct = manager._determine_leader(config, book, "abs-1", "book")
+
+    assert leader == "ABS"
+    assert leader_pct == config["ABS"].current["pct"]
+    manager._normalize_for_cross_format_comparison.assert_called_once_with(book, config)
+
+
+def test_sync_cycle_lazy_normalizes_ebook_leader_when_needed():
+    manager = SyncManager.__new__(SyncManager)
+    manager._sync_cycle_ebook_cache = {}
+    manager.library_service = None
+    manager._last_library_sync = 0
+    manager.sync_delta_between_clients = 0.01
+    manager.delta_chars_thresh = 2000
+    manager.cross_format_deadband_seconds = 2.0
+    manager.alignment_service = MagicMock()
+    manager.database_service = MagicMock()
+
+    class _CycleClient:
+        def get_supported_sync_types(self):
+            return {"audiobook", "ebook"}
+
+        def supports_book(self, book):
+            return True
+
+        def can_be_leader(self):
+            return True
+
+    manager.sync_clients = {"KoSync": _CycleClient()}
+
+    book = SimpleNamespace(
+        abs_id="abs-1",
+        abs_title="Book",
+        status="active",
+        ebook_filename=None,
+        original_ebook_filename=None,
+    )
+    manager.database_service.get_book.return_value = book
+    manager.database_service.get_states_for_book.return_value = []
+
+    config = {
+        "KoSync": _state({"pct": 0.4, "xpath": "/body/DocFragment[1]/body/p[1]/text().0"}),
+    }
+    config["KoSync"].delta = 0.2
+    config["KoSync"].threshold = 0.01
+    manager._fetch_states_parallel = MagicMock(return_value=config)
+    manager._has_significant_delta = MagicMock(return_value=True)
+    manager._determine_leader = MagicMock(return_value=("KoSync", 0.4))
+    manager._get_primary_audio_client_name = MagicMock(return_value="ABS")
+    manager._get_locator_target_epub = MagicMock(return_value="book.epub")
+    manager._resolve_alignment_locator_from_abs_timestamp = MagicMock(return_value=(object(), "txt"))
+    manager._normalize_single_client = MagicMock(
+        side_effect=lambda b, cfg, name: cfg[name].current.__setitem__("_normalized_ts", 777.0) or 777.0
+    )
+
+    manager._sync_cycle_internal(target_abs_id="abs-1")
+
+    manager._normalize_single_client.assert_called_once_with(book, config, "KoSync")
+    manager._resolve_alignment_locator_from_abs_timestamp.assert_called_once_with(book, 777.0)
+
+
+def test_get_persistable_result_state_accepts_flagged_observed_failure():
+    result = SyncResult(
+        location=0.13333334,
+        success=False,
+        updated_state={"pct": 0.13333334, "_persist_observed_state": True},
+    )
+
+    state = SyncManager._get_persistable_result_state(result)
+
+    assert state["pct"] == 0.13333334
 
 
 def test_parse_cfi_components_supports_minimal_cfi():
