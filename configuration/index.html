@@ -2496,7 +2496,31 @@ If you use Storyteller, its transcript assets are preferred over SMIL and Whispe
 <td>Whisper.cpp URL</td>
 <td><code>WHISPER_CPP_URL</code></td>
 <td>empty</td>
-<td>URL to your Whisper.cpp HTTP endpoint.</td>
+<td>Full endpoint URL, including the path — e.g. <code>http://HOST:8080/v1/audio/transcriptions</code>.</td>
+</tr>
+<tr>
+<td>Whisper.cpp Timeout</td>
+<td><code>WHISPER_CPP_TIMEOUT</code></td>
+<td><code>600</code></td>
+<td>Seconds to wait for a single transcription request. Raise it for slow servers or long uploads.</td>
+</tr>
+<tr>
+<td>Split Uploads</td>
+<td><code>WHISPER_CPP_CHUNK_MINUTES</code></td>
+<td><code>0</code></td>
+<td>Split each upload into sub-requests of this many minutes and offset the returned timestamps. <code>0</code> disables.</td>
+</tr>
+<tr>
+<td>Send Original Audio</td>
+<td><code>WHISPER_CPP_SEND_ORIGINAL</code></td>
+<td><code>false</code></td>
+<td>Upload the original mp3/m4b instead of converting to WAV and splitting locally.</td>
+</tr>
+<tr>
+<td>Audio Split Length</td>
+<td><code>AUDIO_SPLIT_DURATION_MINUTES</code></td>
+<td><code>45</code></td>
+<td>Chunk length audio is split into before transcription. Lower it if a small GPU runs out of memory.</td>
 </tr>
 <tr>
 <td>Deepgram API Key</td>
@@ -2521,6 +2545,9 @@ If you use Storyteller, its transcript assets are preferred over SMIL and Whispe
 <p>Transcription notes:</p>
 <ul>
 <li>The <strong>Whisper Model</strong> field in Settings is a text box with common suggestions. You can use a normal preset like <code>tiny</code> or enter a custom model name directly.</li>
+<li>The <code>whispercpp</code> provider works with any OpenAI-compatible transcription endpoint — whisper.cpp server, speaches, parakeet, or a proxy such as llama-swap — not just whisper.cpp itself. Use the 🔗 <strong>Test</strong> button next to the URL to check the endpoint before saving. Inside Docker, do not use <code>localhost</code>; use the host's LAN IP or the whisper container's service name.</li>
+<li><strong>Split Uploads</strong> exists for servers that return one merged segment per request (parakeet does this). Alignment can only be as precise as the segments it gets back, so on those servers set it low — 2 or 3 minutes — and leave it at <code>0</code> for servers that already return fine-grained segments.</li>
+<li><strong>Send Original Audio</strong> skips local ffmpeg normalization and splitting, which saves minutes per book, but only works on servers that decode arbitrary formats <em>and</em> chunk long audio themselves (e.g. parakeet with <code>-long-audio</code>). Leave it off for whisper.cpp, which requires 16kHz WAV input. When it is on, <strong>Audio Split Length</strong> no longer applies — the server controls chunking.</li>
 </ul>
 <h3 id="sync-tuning">Sync Tuning</h3>
 <p>Found under <strong>Settings -&gt; Sync</strong>, alongside instant-sync options and Alignment Health.</p>

@@ -966,9 +966,16 @@ sent unless the user explicitly enables it.</p>
 <span class="w">      </span><span class="nt">&quot;last_seen&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-15T11:58:00+00:00&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;2026-07-15 11:58:00 WARNING …&quot;</span><span class="p">]</span>
 <span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;manual&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;user_message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The sync stopped after I matched this book.&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;recent_logs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;2026-07-15T11:57:59+00:00 INFO src.sync_manager: Starting sync cycle&quot;</span>
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
+<p><code>manual</code>, <code>user_message</code>, and <code>recent_logs</code> are present only on reports sent with
+the <strong>Send bug report</strong> button.</p>
 <h3 id="field-types">Field Types</h3>
 <table>
 <thead>
@@ -1029,6 +1036,21 @@ sent unless the user explicitly enables it.</p>
 <td><code>array&lt;object&gt;</code></td>
 <td>Deduplicated warning entries</td>
 </tr>
+<tr>
+<td><code>manual</code></td>
+<td><code>bool</code></td>
+<td>Marks a user-submitted report (manual reports only)</td>
+</tr>
+<tr>
+<td><code>user_message</code></td>
+<td><code>string</code></td>
+<td>Optional written problem description (manual reports only)</td>
+</tr>
+<tr>
+<td><code>recent_logs</code></td>
+<td><code>array&lt;string&gt;</code></td>
+<td>Up to 200 scrubbed INFO-and-higher lines (manual reports only)</td>
+</tr>
 </tbody>
 </table>
 <p>Each warning object contains: <code>template</code>, <code>message</code>, <code>logger</code>, <code>level</code>,
@@ -1039,8 +1061,10 @@ deterministically scrubbed before inclusion.</p>
 <ul>
 <li><strong>Frequency:</strong> at most once per 24 hours; the sender checks
   <code>DIAGNOSTICS_LAST_SENT</code> before posting.</li>
-<li><strong>Deduplication:</strong> the collector receives deduplicated, template-keyed
-  warnings with occurrence counts — not raw log lines.</li>
+<li><strong>Deduplication:</strong> automatic reports contain only deduplicated, template-keyed
+  warnings with occurrence counts, not the recent-log snapshot.</li>
+<li><strong>Manual evidence:</strong> automatic reports contain deduplicated warning entries;
+  manual reports also contain a bounded snapshot of the scrubbed recent-log ring.</li>
 <li><strong>Scrubbing:</strong> all text passes through <code>scrub_diagnostic_text()</code> which
   replaces URLs, filesystem paths, and long quoted spans with stable
   hash tokens.</li>
@@ -1051,7 +1075,8 @@ deterministically scrubbed before inclusion.</p>
   (instance, version, services, book count) constitutes an intentional
   heartbeat.</li>
 <li><strong>Admin override:</strong> <code>POST /api/diagnostics/send-now</code> (admin-only)
-  bypasses the 24h guard and forces an immediate send.</li>
+  bypasses the 24h guard, forces an immediate send, and includes up to 200 recent
+  scrubbed INFO-and-higher log lines even when no warnings are buffered.</li>
 </ul>
 <h2 id="endpoint">Endpoint</h2>
 <p><code>DIAGNOSTICS_ENDPOINT_URL</code> must be set to the collector's POST URL.
@@ -1101,7 +1126,7 @@ in SQLite for automated and ad-hoc analysis.</p>
   <code>banned</code> (0/1).  Upserted on every incoming batch.</li>
 <li><strong><code>batches</code></strong> — one row per received payload; stores <code>received_at</code>,
   <code>sent_at</code>, <code>app_version</code>, <code>services_json</code>, <code>total_books</code>, window
-  bounds, and <code>dropped</code> count.</li>
+  bounds, <code>dropped</code> count, manual feedback, and manual-only recent logs.</li>
 <li><strong><code>warnings</code></strong> — one row per deduplicated warning entry within a
   batch; <code>context</code> arrays are joined by newline into <code>context_text</code>.</li>
 </ul>
@@ -1126,8 +1151,8 @@ version strings) are sanitized at ingest before any storage:</p>
   line-leading <code>#</code> characters are escaped, and markdown link syntax <code>](</code>
   is broken to <code>] (</code>.</li>
 <li><strong>Length caps</strong> are enforced: template/message 400 chars, logger/level
-  100 chars, context entries 400 chars (max 60 entries), <code>app_version</code>
-  60 chars.</li>
+  100 chars, context entries 400 chars (max 60 entries), manual recent logs
+  400 chars each (max 200 entries), and <code>app_version</code> 60 chars.</li>
 </ul>
 <p>The triage prompt and digest renderer additionally treat stored text as
 untrusted data and apply their own output-sanitization layer.</p>
@@ -1397,9 +1422,13 @@ port.</p>
 <h3 id="manual-bug-reports-and-replies">Manual Bug Reports and Replies</h3>
 <p>When diagnostics are enabled, BookBridge admins see an optional <strong>What went
 wrong?</strong> field and <strong>Send bug report</strong> button under Settings → Diagnostics.
-The written note is stored once on the manual submission; the current scrubbed
+The written note is stored once on the manual submission. The current scrubbed
 warning snapshot is attached automatically and may produce zero, one, or many
-linked anomalies.</p>
+linked anomalies; up to 200 recent scrubbed INFO-and-higher lines are also attached
+as troubleshooting evidence without creating findings.</p>
+<p>Recent logs are returned only by the authenticated maintainer submission-detail
+endpoint. They are omitted from bulk exports, submission lists, and the reporting
+instance's own compact history.</p>
 <p>The same Settings section shows the 50 most recent manual submissions for that
 BookBridge instance. It displays only the submission time, the admin's note,
 whether the report was received or replied to, and the maintainer response. It
@@ -1418,7 +1447,8 @@ token, so that credential never reaches the browser.</p>
 <li>clickable active anomalies with Bugscout's Pattern and Suggested next step;</li>
 <li>finding details with Hypothesis, Severity, Category, versions, enabled
   integrations, and collapsed technical evidence; and</li>
-<li>written user feedback linked to its anomalies, with a response form.</li>
+<li>written user feedback linked to its anomalies, with recent scrubbed logs and a
+  response form.</li>
 </ul>
 <p>The service reads the endpoint from
 <code>docs/automated-review/review-state.json</code> and the admin token from
