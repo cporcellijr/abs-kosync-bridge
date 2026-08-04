@@ -580,6 +580,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#734" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [7.3.4]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#733" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1270,6 +1281,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#734" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [7.3.4]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#733" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1947,6 +1969,9 @@
 
 <h1 id="changelog">Changelog</h1>
 <p>For the full history of changes, please refer to the <strong><a href="https://github.com/cporcellijr/bookbridge/releases">GitHub Releases</a></strong> page.</p>
+<hr />
+<h2 id="734">[7.3.4]</h2>
+<p>A single-fix release: <strong>local transcription works again on the standard image.</strong> Since 7.3.0, the automatic GPU check before local Whisper transcription crashed with <code>No module named 'nvidia'</code> on CPU-only installs, so every transcription failed before it began and books never finished syncing. Missing CUDA libraries now simply mean "use the CPU." Affected books were parked for retry, so they pick themselves back up after updating — no manual steps. The <code>-cuda</code> image, external transcription servers, and Deepgram were unaffected. Reported by <a href="https://github.com/ibrodebill">@ibrodebill</a>. (#355)</p>
 <hr />
 <h2 id="733">[7.3.3]</h2>
 <p>The headline is <strong>audiobook covers load again, and your Audiobookshelf token stays on the server</strong>: if Audiobookshelf is only reachable from the server, every cover came up blank and the address and token went to the browser with it. This release also adds external GPU transcription against any OpenAI-compatible server, stops an Audiobookshelf ebook library from burying real audiobook suggestions, and repairs matching for libraries BookBridge reaches only over the network.</p>
