@@ -3416,7 +3416,8 @@ def settings():
             for key in booklore_setting_keys
         }
         url_keys = [
-            'SHELFMARK_URL', 'ABS_SERVER', 'BOOKLORE_SERVER', 'BOOKFUSION_API_URL',
+            'SHELFMARK_URL', 'ABS_SERVER', 'ABS_WEB_URL', 'BOOKLORE_SERVER', 'BOOKLORE_WEB_URL',
+            'BOOKORBIT_WEB_URL', 'CWA_WEB_URL', 'BOOKFUSION_API_URL',
             'STORYTELLER_API_URL', 'CWA_SERVER', 'KOSYNC_SERVER',
             'OLLAMA_URL', 'LLM_BASE_URL',
         ]
@@ -4435,12 +4436,14 @@ def _build_dashboard_mapping(
         _bo_audio_base = (os.environ.get("BOOKORBIT_SERVER") or "").rstrip("/")
         mapping["audio_url"] = f"{_bo_audio_base}/book/{mapping['audio_source_id']}" if _bo_audio_base else None
     else:
-        mapping["abs_url"] = f"{manager.abs_client.base_url}/item/{book.abs_id}"
+        abs_display_base = os.environ.get('ABS_WEB_URL', '').strip() or manager.abs_client.base_url
+        mapping["abs_url"] = f"{abs_display_base}/item/{book.abs_id}"
         mapping["audio_url"] = mapping["abs_url"]
 
     mapping["booklore_id"] = _get_cached_booklore_id(book, cached_booklore_by_filename=cached_booklore_by_filename)
     if manager.booklore_client.is_configured() and mapping["booklore_id"]:
-        mapping["booklore_url"] = f"{manager.booklore_client.base_url}/book/{mapping['booklore_id']}?tab=view"
+        booklore_display_base = os.environ.get('BOOKLORE_WEB_URL', '').strip() or manager.booklore_client.base_url
+        mapping["booklore_url"] = f"{booklore_display_base}/book/{mapping['booklore_id']}?tab=view"
     else:
         mapping["booklore_url"] = None
 

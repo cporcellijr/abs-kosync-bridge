@@ -43,10 +43,10 @@
     </a>
     {%- endmacro %}
 
-    {% set abs_library_url = get_user_val('ABS_SERVER', abs_server) %}
-    {% set grimmory_url = get_user_val('BOOKLORE_SERVER', booklore_server) %}
-    {% set bookorbit_url = get_user_val('BOOKORBIT_SERVER', get_val('BOOKORBIT_SERVER')) %}
-    {% set cwa_url = get_user_val('CWA_SERVER', get_val('CWA_SERVER')) %}
+    {% set abs_library_url = get_val('ABS_WEB_URL') or get_user_val('ABS_SERVER', abs_server) %}
+    {% set grimmory_url = get_val('BOOKLORE_WEB_URL') or get_user_val('BOOKLORE_SERVER', booklore_server) %}
+    {% set bookorbit_url = get_val('BOOKORBIT_WEB_URL') or get_user_val('BOOKORBIT_SERVER', get_val('BOOKORBIT_SERVER')) %}
+    {% set cwa_url = get_val('CWA_WEB_URL') or get_user_val('CWA_SERVER', get_val('CWA_SERVER')) %}
     {% set grimmory_configured = grimmory_url and get_user_bool('BOOKLORE_ENABLED') %}
     {% set bookorbit_configured = bookorbit_url and get_user_bool('BOOKORBIT_ENABLED') %}
     {% set cwa_configured = cwa_url and get_user_bool('CWA_ENABLED') %}
