@@ -709,6 +709,19 @@ def require_login_guard():
         return None
     user = current_user()
     if user is None:
+        remote_user = _remote_auth_user()
+        if remote_user is not None:
+            session['user_id'] = remote_user.id
+            session['username'] = remote_user.username
+            session['role'] = remote_user.role
+            session.permanent = True
+            g.current_user = remote_user
+            user = remote_user
+            try:
+                database_service.touch_user_login(remote_user.id)
+            except Exception:
+                pass
+    if user is None:
         if _request_wants_json():
             return jsonify({"error": "authentication required"}), 401
         return redirect(url_for('login', next=request.full_path if request.query_string else request.path))
@@ -896,6 +909,23 @@ def _safe_next_url(default=None):
     return next_url
 
 
+def _remote_auth_user():
+    """Return the User named by the configured reverse-proxy header, or None."""
+    if os.environ.get('REMOTE_AUTH_ENABLED', 'false').strip().lower() not in ('true', '1', 'yes', 'on'):
+        return None
+    header_name = os.environ.get('REMOTE_AUTH_HEADER', 'Remote-User').strip() or 'Remote-User'
+    username = (request.headers.get(header_name) or '').strip()
+    if not username or database_service is None:
+        return None
+    try:
+        user = database_service.get_user_by_username(username)
+    except Exception:
+        return None
+    if user is None or not user.active:
+        return None
+    return user
+
+
 def _establish_session_and_redirect(user):
     """Set up an authenticated session for `user` and redirect to a safe next."""
     session['user_id'] = user.id
@@ -919,6 +949,10 @@ def login():
             pass
     if current_user() is not None:
         return redirect(url_for('index'))
+
+    remote_user = _remote_auth_user()
+    if remote_user is not None:
+        return _establish_session_and_redirect(remote_user)
 
     error = None
     if request.method == 'POST':
@@ -3401,6 +3435,7 @@ def settings():
             'OLLAMA_EBOOK_TEXT_FALLBACK',
             'DIAGNOSTICS_OPT_IN',
             'WHISPER_CPP_SEND_ORIGINAL',
+            'REMOTE_AUTH_ENABLED',
         ]
 
         # Current settings in DB

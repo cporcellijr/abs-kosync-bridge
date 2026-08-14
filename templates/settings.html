@@ -1956,6 +1956,29 @@
                 </div>
             </div>
 
+            <div class="settings-section">
+                <div class="section-header">
+                    <h3>Reverse Proxy Auto-Login</h3>
+                    <div class="header-tail">
+                        <div class="toggle-switch-wrapper">
+                            <span class="toggle-label">Enable</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" name="REMOTE_AUTH_ENABLED"
+                                    {% if get_bool('REMOTE_AUTH_ENABLED') %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="section-body">
+                    <div class="form-group full-width">
+                        <label>Username Header</label>
+                        <input type="text" name="REMOTE_AUTH_HEADER" value="{{ get_val('REMOTE_AUTH_HEADER') }}" placeholder="Remote-User">
+                        <div class="help-text">When enabled, a request carrying this header is signed in as the BookBridge user with that username. Existing accounts only; unknown or inactive usernames fall through to the login form. Only enable when a trusted reverse proxy sets this header and strips any client-supplied copy.</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- System Paths -->
             <div class="settings-section">
                 <div class="section-header">
