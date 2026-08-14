@@ -734,6 +734,11 @@
                         <div class="help-text">Enter <code>disabled</code> to skip Audiobookshelf</div>
                     </div>
                     <div class="form-group full-width">
+                        <label>Public URL <span style="font-weight:400;opacity:.65;">(optional)</span></label>
+                        <input type="text" name="ABS_WEB_URL" value="{{ get_val('ABS_WEB_URL') }}">
+                        <div class="help-text">Used for library links and the header button when the server URL is internal-only (Docker hostname, reverse proxy, tunnel). Empty uses the server URL.</div>
+                    </div>
+                    <div class="form-group full-width">
                         <div class="help-text" style="background:rgba(102,126,234,.08);border:1px solid rgba(102,126,234,.25);border-radius:8px;padding:10px 12px;">
                             🔒 <strong>Per-user account.</strong> Each user's Audiobookshelf API token, Library ID &amp;
                             auto-add Collection name are set per user in
@@ -945,6 +950,11 @@
                         <input type="text" name="BOOKLORE_SERVER" value="{{ get_val('BOOKLORE_SERVER') }}">
                     </div>
                     <div class="form-group full-width">
+                        <label>Public URL <span style="font-weight:400;opacity:.65;">(optional)</span></label>
+                        <input type="text" name="BOOKLORE_WEB_URL" value="{{ get_val('BOOKLORE_WEB_URL') }}">
+                        <div class="help-text">Used for library links and the header button when the server URL is internal-only (Docker hostname, reverse proxy, tunnel). Empty uses the server URL.</div>
+                    </div>
+                    <div class="form-group full-width">
                         <div class="help-text" style="background:rgba(102,126,234,.08);border:1px solid rgba(102,126,234,.25);border-radius:8px;padding:10px 12px;">
                             🔒 <strong>Per-user account.</strong> Each user's Grimmory login, Shelf name &amp; Library ID are set per user in
                             <a href="{{ url_for('settings') }}#users" style="color:#aab4f5;">Settings → Users → (user) → Integrations</a>
@@ -1098,6 +1108,11 @@
                         <input type="text" name="BOOKORBIT_SERVER" value="{{ get_val('BOOKORBIT_SERVER') }}">
                     </div>
                     <div class="form-group full-width">
+                        <label>Public URL <span style="font-weight:400;opacity:.65;">(optional)</span></label>
+                        <input type="text" name="BOOKORBIT_WEB_URL" value="{{ get_val('BOOKORBIT_WEB_URL') }}">
+                        <div class="help-text">Used for library links and the header button when the server URL is internal-only (Docker hostname, reverse proxy, tunnel). Empty uses the server URL.</div>
+                    </div>
+                    <div class="form-group full-width">
                         <div class="help-text" style="background:rgba(102,126,234,.08);border:1px solid rgba(102,126,234,.25);border-radius:8px;padding:10px 12px;">
                             🔒 <strong>Per-user account.</strong> Each user's BookOrbit login &amp; Collection name are set per user in
                             <a href="{{ url_for('settings') }}#users" style="color:#aab4f5;">Settings → Users → (user) → Integrations</a>
@@ -1231,6 +1246,11 @@
                         <input type="text" name="CWA_SERVER" value="{{ get_val('CWA_SERVER') }}">
                         <div class="help-text">URL to your Calibre-Web Automated instance (e.g.
                             http://192.168.1.100:8083)</div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label>Public URL <span style="font-weight:400;opacity:.65;">(optional)</span></label>
+                        <input type="text" name="CWA_WEB_URL" value="{{ get_val('CWA_WEB_URL') }}">
+                        <div class="help-text">Used for library links and the header button when the server URL is internal-only (Docker hostname, reverse proxy, tunnel). Empty uses the server URL.</div>
                     </div>
 
                     <!-- OPDS Library -->
