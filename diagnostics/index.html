@@ -933,44 +933,52 @@ sent unless the user explicitly enables it.</p>
 </table>
 <h2 id="post-payload-schema">POST Payload Schema</h2>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;instance_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4e5f6…&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;sent_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-15T12:00:00+00:00&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;app_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;7.2.0&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;services&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;abs&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;kosync&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;storyteller&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;booklore&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;bookfusion&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;book_orbit&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;cwa&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;hardcover&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;storygraph&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;slash_books&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">  </span><span class="nt">"schema"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"instance_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4e5f6…"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sent_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-07-15T12:00:00+00:00"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"app_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"7.2.0"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"services"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"abs"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"kosync"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"storyteller"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"booklore"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bookfusion"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"book_orbit"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"cwa"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"hardcover"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"storygraph"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"slash_books"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;total_books&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;window&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;start&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-14T12:00:00+00:00&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;end&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-15T12:00:00+00:00&quot;</span>
+<span class="w">  </span><span class="nt">"total_books"</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"window"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-07-14T12:00:00+00:00"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-07-15T12:00:00+00:00"</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;dropped&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;warnings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="nt">"dropped"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"python"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3.11.9"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Linux"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"x86_64"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"container"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"journal_override"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"warnings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;template&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Sync failed after # retries&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Sync failed after 3 retries&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;logger&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;src.sync_manager&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;WARNING&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;first_seen&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-14T12:00:00+00:00&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;last_seen&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-15T11:58:00+00:00&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;2026-07-15 11:58:00 WARNING …&quot;</span><span class="p">]</span>
+<span class="w">      </span><span class="nt">"template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Sync failed after # retries"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Sync failed after 3 retries"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"logger"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src.sync_manager"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"WARNING"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-07-14T12:00:00+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-07-15T11:58:00+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"context"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"2026-07-15 11:58:00 WARNING …"</span><span class="p">],</span>
+<span class="w">      </span><span class="nt">"traceback"</span><span class="p">:</span><span class="w"> </span><span class="s2">"File \"src/sync_manager.py\", line 245, in sync_cycle…"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;manual&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;user_message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The sync stopped after I matched this book.&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;recent_logs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;2026-07-15T11:57:59+00:00 INFO src.sync_manager: Starting sync cycle&quot;</span>
+<span class="w">  </span><span class="nt">"manual"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"user_message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The sync stopped after I matched this book."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"recent_logs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">"2026-07-15T11:57:59+00:00 INFO src.sync_manager: Starting sync cycle"</span>
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -1032,6 +1040,16 @@ the <strong>Send bug report</strong> button.</p>
 <td>Warning entries dropped (capacity exceeded)</td>
 </tr>
 <tr>
+<td><code>env</code></td>
+<td><code>object</code></td>
+<td>Coarse environment facts: <code>python</code>, <code>platform</code>, <code>machine</code>, <code>container</code>, <code>journal_override</code></td>
+</tr>
+<tr>
+<td><code>shed</code></td>
+<td><code>bool</code></td>
+<td>Present only when the client dropped context/entries to fit the 1MB receiver cap</td>
+</tr>
+<tr>
 <td><code>warnings</code></td>
 <td><code>array&lt;object&gt;</code></td>
 <td>Deduplicated warning entries</td>
@@ -1055,8 +1073,9 @@ the <strong>Send bug report</strong> button.</p>
 </table>
 <p>Each warning object contains: <code>template</code>, <code>message</code>, <code>logger</code>, <code>level</code>,
 <code>count</code>, <code>first_seen</code>, <code>last_seen</code>, <code>context</code> (array of scrubbed log
-lines).  All PII (URLs, filesystem paths, long quoted spans) is
-deterministically scrubbed before inclusion.</p>
+lines), and optionally <code>traceback</code> (a scrubbed stack tail, capped at 1200
+characters client-side).  All PII (URLs, filesystem paths, long quoted spans)
+is deterministically scrubbed before inclusion.</p>
 <h2 id="send-semantics">Send Semantics</h2>
 <ul>
 <li><strong>Frequency:</strong> at most once per 24 hours; the sender checks
@@ -1203,8 +1222,9 @@ row with counts, not endless re-reports.</p>
   unknown), <code>status</code> (open / triaged / fixed / ignored), optional
   <code>severity</code> (low / medium / high), <code>first_seen</code>, <code>last_seen</code>,
   <code>total_count</code>, <code>instance_count</code>, <code>app_versions_json</code>, sample
-  message/context, and triage fields (<code>analysis_md</code>, <code>analysis_at</code>,
-  <code>reopened_at</code>).</li>
+  message/context, triage fields (<code>analysis_md</code>, <code>analysis_at</code>,
+  <code>reopened_at</code>), and fix/recurrence tracking (<code>fixed_at</code>,
+  <code>versions_at_fix_json</code>, <code>stale_recurrence_count</code>, <code>last_stale_at</code>).</li>
 <li><strong><code>finding_instances</code></strong> — join table linking findings to the instance
   IDs that reported them; drives <code>instance_count</code>.</li>
 </ul>
@@ -1212,9 +1232,15 @@ row with counts, not endless re-reports.</p>
 <ol>
 <li>A new warning arrives → finding created with status <strong>open</strong>.</li>
 <li>Triage sets <code>analysis_md</code> → status auto-promotes to <strong>triaged</strong>.</li>
-<li>Fix verified → manual PATCH to status <strong>fixed</strong>.</li>
-<li>Same warning recurs while fixed → status auto-reopens to <strong>open</strong>
-   (<code>reopened_at</code> stamped).  Status <strong>ignored</strong> is never auto-reopened.</li>
+<li>Fix verified → manual PATCH to status <strong>fixed</strong>, which snapshots the app
+   versions seen so far into <code>versions_at_fix_json</code> and stamps <code>fixed_at</code>.</li>
+<li>Same warning recurs while fixed → <strong>version-gated reopen</strong>: status
+   auto-reopens to <strong>open</strong> (<code>reopened_at</code> stamped) only when the recurrence
+   comes from an app version newer than every version in <code>versions_at_fix_json</code>
+   (for non code-bug categories, any new instance reopens it). A recurrence from
+   an older, already-captured build does not reopen the finding; it is counted
+   in <code>stale_recurrence_count</code> and stamps <code>last_stale_at</code> instead.  Status
+   <strong>ignored</strong> is never auto-reopened.</li>
 </ol>
 <h4 id="ranking">Ranking</h4>
 <p><code>instance_count</code> (number of distinct fleet instances reporting the same
@@ -1366,6 +1392,10 @@ authentication for the ingest endpoint.</p>
 <td><strong>Banned</strong></td>
 <td><code>instances.banned = 1</code> → <code>403 {"ok": false, "error": "banned"}</code>, checked before anything else.</td>
 </tr>
+<tr>
+<td><strong>Storage</strong></td>
+<td>Tokens are stored as a SHA-256 hash, not plaintext. Legacy plaintext rows are migrated transparently (re-hashed) the next time that instance authenticates successfully.</td>
+</tr>
 </tbody>
 </table>
 <p>The sender (<code>diagnostics.py</code>) automatically persists the received token
@@ -1412,12 +1442,17 @@ requests cannot race past the cap.</p>
 <tr>
 <td><code>DIAG_READ_TOKEN</code></td>
 <td><strong>required</strong></td>
-<td>Maintainer read and PATCH endpoints require <code>Authorization: Bearer &lt;that token&gt;</code>. Missing configuration fails closed. <code>GET /api/v1/health</code> remains open and ingest uses per-instance tokens.</td>
+<td>Maintainer read endpoints require <code>Authorization: Bearer &lt;that token&gt;</code>. Missing configuration fails closed. <code>GET /api/v1/health</code> remains open and ingest uses per-instance tokens.</td>
+</tr>
+<tr>
+<td><code>DIAG_ADMIN_TOKEN</code></td>
+<td>(unset)</td>
+<td>When set, PATCH and other mutation endpoints require <code>Authorization: Bearer &lt;that token&gt;</code> instead of the read token, which then only reads. Unset means the read token also authorizes PATCH.</td>
 </tr>
 </tbody>
 </table>
-<p>The receiver Compose file also requires the variable and binds port 20129 to
-<code>127.0.0.1</code>; expose it through a TLS reverse proxy rather than a public raw
+<p>The receiver Compose file also requires <code>DIAG_READ_TOKEN</code> and binds port 20129
+to <code>127.0.0.1</code>; expose it through a TLS reverse proxy rather than a public raw
 port.</p>
 <h3 id="manual-bug-reports-and-replies">Manual Bug Reports and Replies</h3>
 <p>When diagnostics are enabled, BookBridge admins see an optional <strong>What went
