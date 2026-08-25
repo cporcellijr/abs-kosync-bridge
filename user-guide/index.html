@@ -509,6 +509,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Dashboard">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sorting-and-searching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sorting and searching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#show-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show position
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -783,6 +811,17 @@
     <span class="md-ellipsis">
       
         Two ways to use it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-file-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local file sources
       
     </span>
   </a>
@@ -1074,6 +1113,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Dashboard">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sorting-and-searching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sorting and searching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#show-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show position
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1354,6 +1421,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#local-file-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local file sources
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1546,11 +1624,32 @@
 <li><strong>Recent session stats</strong> when session data is available for that mapping</li>
 <li><strong>Source badges</strong> so you can tell whether a mapping is using Audiobookshelf, Grimmory, BookOrbit, CWA, or another connected source</li>
 <li><strong>Direct links</strong> into supported services, including Grimmory and BookOrbit audio when a mapping uses them</li>
+<li><strong>Show position</strong> beside the progress bar on any book with an ebook, opening a short excerpt of the text where you are currently synced</li>
 <li>Annotation sync status when the updated Bridge Sync KOReader plugin is in use</li>
 <li>Quick access to <strong>Add / Update Book</strong>, <strong>Batch Match</strong>, <strong>Suggestions</strong>, <strong>Forge</strong>, <strong>Settings</strong>, and <strong>Logs</strong></li>
 </ul>
 <p>If a book is significantly out of sync, the card is highlighted so you can spot it quickly.</p>
-<p>When you start actions like <strong>Create Mapping</strong>, <strong>Forge &amp; Match</strong>, <strong>Add to Queue</strong>, or <strong>Process All</strong>, the page now shows a working message right away so you know the action started.</p>
+<h3 id="sorting-and-searching">Sorting and searching</h3>
+<p>Sort by title, author, series, progress, or <strong>Date Added</strong>; the arrow beside the
+menu flips the direction. A series sorts by its most recently added book, so
+adding one title to a series you started long ago brings the whole group forward.</p>
+<p>The search box filters the books you already sync. If you search for a book you
+have not matched yet, BookBridge offers to look for that title in your libraries
+instead and carries what you typed straight into <strong>Add / Update Book</strong>.</p>
+<h3 id="show-position">Show position</h3>
+<p>On any book with an ebook, <strong>Show position</strong> opens a short excerpt with a marker
+at the spot you are synced to — enough to recognise where you are without opening
+a reader.</p>
+<ul>
+<li>When your reader saved an exact XPath or CFI, the excerpt uses it.</li>
+<li>When it did not, an audiobook position is mapped through the stored
+  audio-to-ebook alignment.</li>
+<li>A percentage-only position is clearly labelled <strong>approximate</strong> rather than
+  presented as exact.</li>
+</ul>
+<p>The excerpt loads only when you ask for it, is scoped to your own books, and is
+not offered for audiobook-only mappings.</p>
+<p>When you start actions like <strong>Create Mapping</strong>, <strong>Create Storyteller Edition &amp; Match All</strong>, <strong>Add to Queue</strong>, or <strong>Process All</strong>, the page now shows a working message right away so you know the action started.</p>
 <hr />
 <h2 id="account-and-my-integrations">Account and My Integrations</h2>
 <p>The <strong>Account</strong> page is where you manage your own login and reader-specific setup.</p>
@@ -1599,12 +1698,12 @@
 <li><strong>KOReader push</strong>: if you use KOSync, KOReader can send progress straight to the bridge.</li>
 </ol>
 <h3 id="per-client-polling">Per-client polling</h3>
-<p>Storyteller, Grimmory, BookOrbit, and CWA/Kobo sync can also use their own polling intervals when those integrations are enabled:</p>
+<p>Storyteller, Grimmory, BookOrbit, Kavita, and CWA/Kobo sync can also use their own polling intervals when those integrations are enabled:</p>
 <ul>
 <li><strong>Global</strong> uses the normal background cycle.</li>
 <li><strong>Custom</strong> lets that client be checked on its own schedule.</li>
 </ul>
-<p>This is useful when you often read directly in Storyteller, Grimmory, BookOrbit, or a CWA/Kobo client and want the bridge to notice sooner.</p>
+<p>This is useful when you often read directly in Storyteller, Grimmory, BookOrbit, Kavita, or a CWA/Kobo client and want the bridge to notice sooner.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p>The <strong>Settings</strong> page is where you connect your services and adjust how the bridge behaves. The sidebar groups it into <strong>Integrations</strong> (one card per service), <strong>Sync</strong>, <strong>Features</strong>, <strong>AI</strong>, <strong>System</strong>, <strong>Users</strong>, and <strong>Logs</strong>.</p>
@@ -1649,7 +1748,8 @@
 <li><strong>None / Skip</strong> for an ebook-only link</li>
 <li><strong>Audio only (no ebook)</strong> when you want an audiobook mapping without text</li>
 </ul>
-<p>The source badge on each card tells you where the audiobook came from.</p>
+<p>The source badge at the top of each card tells you where the audiobook came from,
+and a language badge appears beside it when the provider supplies one.</p>
 <h3 id="step-2-choose-storyteller-optional">Step 2: Choose Storyteller (optional)</h3>
 <p>This step only appears useful if you run the Storyteller app — skip it otherwise. If Storyteller is configured, you can also link a Storyteller title.</p>
 <ul>
@@ -1662,16 +1762,20 @@
 <li>Audiobookshelf ebook files</li>
 <li>Grimmory</li>
 <li>BookOrbit</li>
+<li>Kavita</li>
 <li>CWA</li>
-<li>Local <code>/books</code> files</li>
+<li>BookFusion</li>
+<li>Local files from <code>BOOKS_DIR</code> and any folder listed in <code>EXTRA_EBOOK_DIRS</code></li>
 </ol>
 <h3 id="final-actions">Final actions</h3>
 <ul>
 <li><strong>Create Mapping</strong> creates the link immediately.</li>
-<li><strong>Forge &amp; Match</strong> uploads the book to Storyteller for processing first, then finishes the link when Forge completes.</li>
+<li><strong>Create Storyteller Edition &amp; Match All</strong> uploads the book to Storyteller for processing first, then finishes the link when processing completes. This appears only when the current reader has a Storyteller account configured.</li>
 </ul>
 <p>If you skip audio, <strong>Create Mapping</strong> makes an ebook-only link instead.
 If you choose <strong>Audio only (no ebook)</strong>, the mapping activates immediately without EPUB or transcript processing.</p>
+<p>The match queue survives leaving the page, and the <strong>Add Book</strong> tab carries a
+count whenever books are waiting in it.</p>
 <hr />
 <h2 id="batch-match">Batch Match</h2>
 <p><strong>Batch Match</strong> is the queue-based version of Add / Update Book.</p>
@@ -1703,6 +1807,9 @@ If you choose <strong>Audio only (no ebook)</strong>, the mapping activates imme
 <li><strong>Dismiss</strong> hides a suggestion for now.</li>
 <li><strong>Never</strong> hides it permanently so it does not come back.</li>
 </ul>
+<p>Each suggestion carries a <strong>provider badge</strong> naming the service its audiobook came
+from — Audiobookshelf, Grimmory, or BookOrbit — and a <strong>language badge</strong> when the
+provider supplies one, so you can tell candidates apart before approving.</p>
 <p>Suggestions can create:</p>
 <ul>
 <li>Audiobook-backed links from Audiobookshelf, Grimmory, or BookOrbit</li>
@@ -1719,17 +1826,27 @@ If you choose <strong>Audio only (no ebook)</strong>, the mapping activates imme
 </ul>
 <h3 id="two-ways-to-use-it">Two ways to use it</h3>
 <ol>
-<li><strong>Forge &amp; Match from Add / Update Book</strong></li>
+<li><strong>Create Storyteller Edition &amp; Match All</strong> from Add / Update Book or Suggestions</li>
 <li>Starts the Storyteller upload and processing workflow</li>
 <li>
 <p>Finishes the mapping when processing completes</p>
 </li>
 <li>
-<p><strong>Standalone Forge page</strong></p>
+<p><strong>Create Storyteller Edition Only</strong></p>
 </li>
 <li>Uploads a Storyteller-ready book without creating a sync mapping yet</li>
 </ol>
+<p>These actions appear only when the current reader has a Storyteller account
+configured. Without one, you see <strong>Match All</strong> on its own. (Before 7.5.0 both
+actions were named "Forge".)</p>
 <p>Forge stages files locally, then uploads them directly to Storyteller over the API. A Storyteller library mount is optional and only needed for local fallback access to Storyteller-generated files.</p>
+<h3 id="local-file-sources">Local file sources</h3>
+<p>A <strong>Local File</strong> text source must live in <code>BOOKS_DIR</code>, one of the folders listed
+in <code>EXTRA_EBOOK_DIRS</code>, or the internal EPUB cache. Anything outside those roots is
+refused — see
+<a href="../configuration/#local-ebook-sources-are-confined-to-these-directories">Local ebook sources are confined to these directories</a>.
+If Forge reports that a local file cannot be used, the usual cause is a library
+folder that is not listed in <code>EXTRA_EBOOK_DIRS</code>.</p>
 <hr />
 <h2 id="storyteller-transcript-tools">Storyteller Transcript Tools</h2>
 <p>When Storyteller transcript assets are available, the bridge can use them directly for better timing and locator quality.</p>

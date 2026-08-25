@@ -668,6 +668,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#kavita" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kavita
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#calibre-web-automated-cwa" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -798,6 +809,17 @@
     <span class="md-ellipsis">
       
         Paths and System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-ebook-sources-are-confined-to-these-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local ebook sources are confined to these directories
       
     </span>
   </a>
@@ -1099,6 +1121,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#kavita" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kavita
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#calibre-web-automated-cwa" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1229,6 +1262,17 @@
     <span class="md-ellipsis">
       
         Paths and System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-ebook-sources-are-confined-to-these-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local ebook sources are confined to these directories
       
     </span>
   </a>
@@ -2019,6 +2063,121 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 </code></pre></div>
 </li>
 </ul>
+<h4 id="kavita">Kavita</h4>
+<p>Kavita is a supported EPUB source and bidirectional reading-progress client. It can
+provide books to Match, Batch Match, Suggestions, Forge, managed KOReader devices,
+and ebook-only mappings. BookBridge uses Kavita's native KOReader progress endpoint,
+so the same Kavita position is visible in its web reader and other compatible
+clients.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Env Var</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enable</td>
+<td><code>KAVITA_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Turns on Kavita catalog and progress support.</td>
+</tr>
+<tr>
+<td>Server URL</td>
+<td><code>KAVITA_SERVER</code></td>
+<td>empty</td>
+<td>Internal/reachable Kavita base URL used by BookBridge.</td>
+</tr>
+<tr>
+<td>Browser URL</td>
+<td><code>KAVITA_WEB_URL</code></td>
+<td>empty</td>
+<td>Optional public URL used for dashboard links; falls back to Server URL.</td>
+</tr>
+<tr>
+<td>Auth Key</td>
+<td><code>KAVITA_API_KEY</code></td>
+<td>empty</td>
+<td>Per-reader Kavita auth key from <strong>User Settings -&gt; 3rd Party Clients</strong>. Treat it like a password.</td>
+</tr>
+<tr>
+<td>Library ID</td>
+<td><code>KAVITA_LIBRARY_ID</code></td>
+<td>empty</td>
+<td>Per-reader optional numeric library ID; blank searches all EPUB libraries visible to that key.</td>
+</tr>
+<tr>
+<td>Collection Name</td>
+<td><code>KAVITA_COLLECTION_NAME</code></td>
+<td><code>BookBridge</code></td>
+<td>Per-reader collection that successfully matched books are moved to.</td>
+</tr>
+<tr>
+<td>Poll Mode</td>
+<td><code>KAVITA_POLL_MODE</code></td>
+<td><code>global</code></td>
+<td><code>global</code> uses the main sync cycle. <code>custom</code> polls Kavita separately.</td>
+</tr>
+<tr>
+<td>Poll Interval</td>
+<td><code>KAVITA_POLL_SECONDS</code></td>
+<td><code>300</code></td>
+<td>Used when Poll Mode is <code>custom</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Optional "Up Next" collection watch — add an EPUB to a Kavita collection and the
+bridge auto-matches it on the next poll:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Env Var</th>
+<th>Default</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Watch a Collection</td>
+<td><code>KAVITA_SHELF_WATCH_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Turns on auto-matching from a watched Kavita collection.</td>
+</tr>
+<tr>
+<td>Collection Name</td>
+<td><code>KAVITA_SHELF_WATCH_NAME</code></td>
+<td><code>Up Next</code></td>
+<td>Books placed here are auto-matched and moved to the collection above on success.</td>
+</tr>
+<tr>
+<td>Match Threshold</td>
+<td><code>KAVITA_SHELF_WATCH_THRESHOLD</code></td>
+<td><code>95</code></td>
+<td>Minimum match confidence (60–100) before a book is auto-linked.</td>
+</tr>
+<tr>
+<td>Rescan Interval (Hours)</td>
+<td><code>KAVITA_SHELF_WATCH_RESCAN_HOURS</code></td>
+<td><code>24</code></td>
+<td>How often a still-unmatched book is retried.</td>
+</tr>
+</tbody>
+</table>
+<p>Kavita notes:</p>
+<ul>
+<li>Create a non-expiring auth key for each reader in Kavita under <strong>User Settings -&gt;
+  3rd Party Clients</strong>, then save it under <strong>Account -&gt; My Integrations -&gt; Kavita</strong>.</li>
+<li>The Kavita user behind the key must be able to read/download the selected library
+  and manage collections if collection workflows are enabled.</li>
+<li>Kavita support is ebook-only. Grimmory and BookOrbit remain the library-server
+  choices when the audio side of a mapping also comes from that service.</li>
+<li>Only EPUB chapters participate; comic/archive and PDF progress models are outside
+  this integration.</li>
+</ul>
 <h4 id="calibre-web-automated-cwa">Calibre-Web Automated (CWA)</h4>
 <p>CWA is a supported ebook source and optional Kobo-sync progress source. Use it to search/download ebooks from Calibre-Web Automated, and enable Kobo sync when you want stock Kobo readers or KOReader-via-CWA to participate in progress sync.</p>
 <table>
@@ -2709,6 +2868,12 @@ If you use Storyteller, its transcript assets are preferred over SMIL and Whispe
 <td>Local ebook library path inside the container.</td>
 </tr>
 <tr>
+<td>Extra Ebook Directories</td>
+<td><code>EXTRA_EBOOK_DIRS</code></td>
+<td>empty</td>
+<td>Additional library folders to search, for multi-library setups where some ebooks live outside <code>BOOKS_DIR</code>. Comma- or newline-separated container paths.</td>
+</tr>
+<tr>
 <td>Audiobooks Directory</td>
 <td><code>AUDIOBOOKS_DIR</code></td>
 <td><code>/audiobooks</code></td>
@@ -2740,6 +2905,18 @@ If you use Storyteller, its transcript assets are preferred over SMIL and Whispe
 </tr>
 </tbody>
 </table>
+<h3 id="local-ebook-sources-are-confined-to-these-directories">Local ebook sources are confined to these directories</h3>
+<p><code>BOOKS_DIR</code>, everything listed in <code>EXTRA_EBOOK_DIRS</code>, and the internal EPUB cache
+are the only places BookBridge will read a <strong>Local File</strong> ebook source from. A
+path outside them — including one reached through <code>..</code> or a symlink pointing out
+of a library folder — is refused and logged, and directories and non-regular
+files are refused as well.</p>
+<p>This is a security boundary, not a convenience filter: it keeps a signed-in
+account from reaching files outside your ebook directories. It matters most on
+multi-user installs.</p>
+<p>The practical consequence: <strong>if some of your ebooks live outside <code>BOOKS_DIR</code>, add
+those folders to <code>EXTRA_EBOOK_DIRS</code>.</strong> Mount them read-only where you can — a
+library BookBridge only reads from does not need write access.</p>
 <hr />
 <h2 id="gpu-support-optional">GPU Support (Optional)</h2>
 <p>For faster local transcription, you can give the container access to an NVIDIA GPU.</p>
