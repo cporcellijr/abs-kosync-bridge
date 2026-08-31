@@ -8,6 +8,25 @@ All notable changes to BookBridge will be documented in this file.
 
 ### Fixed
 
+- **Reading and listening time is no longer counted twice on BookOrbit.** BookBridge
+  records a reading session for you on the service hosting a book — that is what fills in
+  the time you spend reading in KOReader or listening in an app that only reports your
+  position. But when you read or listen on BookOrbit's own site, BookOrbit already logs
+  that session itself, and BookBridge was adding a second, estimated one on top. In one
+  measured case a 149-second read was recorded as 149 seconds by BookOrbit and another 737
+  seconds by BookBridge. Before writing a session, BookBridge now asks BookOrbit whether it
+  already has one covering that reading and stays out of the way if so. Your position was
+  never affected — only the statistics. Existing duplicates stay as they are; you may want
+  to clear the affected books' stats in BookOrbit yourself. Thanks to @vfaergestad for the
+  report and the diagnosis (#424).
+
+  Nothing is lost when BookOrbit *isn't* the one recording: if you listen in an outside
+  player that only syncs your position, BookBridge still logs the session as before. It
+  also no longer counts the same stretch twice when you switch between the ebook and the
+  audiobook — that is one pass through the book, however you got through it. Grimmory is
+  unchanged for now: it offers no way to read back the sessions it already has, so there is
+  nothing to check against.
+
 - **Turning a service off in Settings now turns it off for everyone.** The global
   switch for each integration was only a default: if a reader had switched that service
   on in their own integrations, BookBridge kept syncing it — so a Storyteller that was

@@ -46,6 +46,13 @@ _AUDIO_FORMATS = {"m4b", "mp3", "m4a", "opus", "ogg", "flac", "aax", "aac"}
 # Which cached light-info id a kind-specific lookup may fall back to.
 _KIND_FILE_ID_KEYS = {"ebook": "ebookFileId", "audiobook": "audioFileId"}
 _MAX_FILENAME_QUERIES = 6
+# How far from our session's end to look for one BookOrbit already logged, and how
+# much progress overlap counts as "the same reading" (#424). The window is generous
+# because BookOrbit stamps its session when the reader flushes it while ours is
+# backdated from the poll that noticed the movement; the progress overlap, not the
+# timestamp, is what actually identifies the duplicate.
+_SESSION_DEDUPE_WINDOW_SECONDS = 7200
+_SESSION_OVERLAP_EPSILON_PCT = 0.05
 
 
 class BookOrbitClient:
@@ -1158,6 +1165,90 @@ class BookOrbitClient:
 
     # ------------------------------------------------------------------
     # Reading sessions (per file)
+    #
+    # BookOrbit logs its own session whenever the reading happened in ITS OWN web
+    # reader or web player, so an estimated session posted for the same span
+    # double-counts it (#424). It logs nothing when the progress arrived from a
+    # third-party app that only writes position — verified live 2026-08-31: a book
+    # played in BookOrbit's web player got BookOrbit's own session (endProgress
+    # 15.068159 — six decimals, where we round to two), while a book listened to in
+    # an external player had 25 of 25 sessions written solely by the bridge.
+    # Both are the same call here: ask what BookOrbit already has, skip if it has it.
+
+    @staticmethod
+    def _parse_session_timestamp(value: Optional[str]) -> Optional[float]:
+        """Parse a BookOrbit session ISO-8601 timestamp into a POSIX timestamp."""
+        if not value:
+            return None
+        from datetime import datetime
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    def find_overlapping_session(
+        self,
+        book_ids,
+        start_progress: float,
+        end_progress: float,
+        end_time: float,
+        window_seconds: int = _SESSION_DEDUPE_WINDOW_SECONDS,
+    ) -> Optional[dict]:
+        """Return an existing session covering the same reading, if there is one.
+
+        Matching is by progress range rather than timestamp: BookOrbit stamps its
+        session when the reader flushes it, while ours is backdated from the poll
+        that noticed the movement, so the two windows are offset by up to a poll
+        interval even for identical reading. ``window_seconds`` only bounds how far
+        back to look so an unrelated re-read of the same pages is not mistaken for
+        this one.
+
+        The search deliberately spans **formats**: a stretch of a book is consumed
+        once whether it was read or listened to, and BookBridge itself syncs the
+        position from one format onto the other, so an audiobook session and an
+        ebook session over the same percentages are the same reading counted twice.
+        ``book_ids`` therefore takes every BookOrbit id for the work — audio and
+        ebook are separate books in BookOrbit and keep separate session lists.
+
+        Progress args are 0-1 fractions; BookOrbit's session fields are 0-100.
+        Returns the matching session dict, or None.
+        """
+        if isinstance(book_ids, (str, int)):
+            book_ids = [book_ids]
+        wanted = []
+        for raw in book_ids or ():
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value not in wanted:
+                wanted.append(value)
+        if not wanted:
+            return None
+
+        lo = min(float(start_progress), float(end_progress)) * 100
+        hi = max(float(start_progress), float(end_progress)) * 100
+        for book_id in wanted:
+            resp = self._make_request("GET", f"/api/v1/books/{book_id}/sessions")
+            if not resp or resp.status_code != 200:
+                continue
+            data = self._parse_json(resp)
+            items = data.get("items") if isinstance(data, dict) else None
+            for session in items or ():
+                if not isinstance(session, dict):
+                    continue
+                ended = self._parse_session_timestamp(session.get("endedAt"))
+                if ended is None or abs(ended - float(end_time)) > window_seconds:
+                    continue
+                try:
+                    s_end = float(session.get("endProgress") or 0)
+                    s_start = s_end - float(session.get("progressDelta") or 0)
+                except (TypeError, ValueError):
+                    continue
+                s_lo, s_hi = min(s_start, s_end), max(s_start, s_end)
+                if min(hi, s_hi) - max(lo, s_lo) > _SESSION_OVERLAP_EPSILON_PCT:
+                    return session
+        return None
     # ------------------------------------------------------------------
 
     def create_reading_session(

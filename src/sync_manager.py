@@ -4337,7 +4337,12 @@ class SyncManager:
         prev_states_by_client: dict,
         current_time: float,
     ) -> None:
-        """Record a reading session to Grimmory when progress changes on a tracked book."""
+        """Record a reading session to Grimmory when progress changes on a tracked book.
+
+        Grimmory has no endpoint for reading back its existing sessions, so the
+        BookOrbit double-count guard (#424) has no equivalent here; whether Grimmory
+        self-records is untested.
+        """
         booklore_client = self.active_booklore_client
         if not booklore_client:
             return
@@ -4416,7 +4421,12 @@ class SyncManager:
         """Record a reading session to BookOrbit when progress changes on a
         BookOrbit-hosted ebook or audiobook. Audio-leader sessions are logged
         against the BookOrbit audiobook when the audio is BookOrbit-hosted,
-        falling back to the ebook's BookOrbit id otherwise."""
+        falling back to the ebook's BookOrbit id otherwise.
+
+        Skipped when BookOrbit has already logged a session covering the same
+        reading — its web reader records its own as the user reads, so posting ours
+        on top double-counts it (#424).
+        """
         bookorbit_client = self.active_bookorbit_client
         if not bookorbit_client:
             return
@@ -4457,6 +4467,38 @@ class SyncManager:
             else:
                 book_type = "EBOOK"
             end_location = leader_state.current.get('cfi')
+
+        # Check every BookOrbit id for this work, not just the one we would post to:
+        # audio and ebook are separate BookOrbit books with separate session lists,
+        # and a stretch consumed in either format is the same reading (#424).
+        candidate_ids = [book_id]
+        if getattr(book, "audio_source", None) == "BookOrbit":
+            candidate_ids.append(getattr(book, "audio_provider_book_id", None)
+                                 or getattr(book, "audio_source_id", None))
+        if getattr(book, "ebook_source", None) == "BookOrbit":
+            candidate_ids.append(getattr(book, "ebook_source_id", None))
+
+        existing = None
+        try:
+            existing = bookorbit_client.find_overlapping_session(
+                book_ids=[i for i in candidate_ids if i],
+                start_progress=prev_pct,
+                end_progress=leader_pct,
+                end_time=current_time,
+            )
+        except Exception as e:
+            logger.warning(
+                "BookOrbit session dedupe check failed for '%s': %s",
+                getattr(book, 'abs_id', None), e, exc_info=True,
+            )
+        if existing:
+            logger.info(
+                "⏸️ Skipping BookOrbit reading session for '%s': BookOrbit already logged "
+                "session %s covering %.2f%%->%.2f%% (leader '%s')",
+                getattr(book, 'abs_id', None), existing.get('id'),
+                prev_pct * 100, leader_pct * 100, leader,
+            )
+            return
 
         try:
             bookorbit_client.create_reading_session(
