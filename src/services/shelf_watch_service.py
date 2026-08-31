@@ -29,6 +29,54 @@ from src.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 
+def shelf_watch_scan_key(source_name: str, source_book_id: str) -> str:
+    """Single definition of the shelf-watch throttle-table key.
+
+    BookLore keeps the bare id for back-compat; every other source is
+    namespaced as f"{source_name.lower()}:{source_book_id}". A None or empty
+    source_name is treated as non-BookLore and lowercased.
+    """
+    if not source_name:
+        return f"{source_name}:{source_book_id}".lower()
+    if source_name == 'BookLore':
+        return str(source_book_id)
+    return f"{source_name.lower()}:{source_book_id}"
+
+
+def clear_shelf_watch_throttle(database_service, book) -> bool:
+    """Drop the shelf-watch re-scan throttle for a deleted mapping so the book
+    is re-processed on the next shelf scan instead of being skipped for the
+    rescan window.
+    """
+    ebook_source = getattr(book, 'ebook_source', None)
+    ebook_source_id = getattr(book, 'ebook_source_id', None)
+
+    if not ebook_source or not ebook_source_id:
+        return False
+
+    source_name = str(ebook_source).strip()
+    source_book_id = str(ebook_source_id).strip()
+
+    if not source_name or not source_book_id:
+        return False
+
+    key = shelf_watch_scan_key(source_name, source_book_id)
+
+    try:
+        deleted = database_service.delete_shelf_watch_scan(key)
+        if deleted:
+            abs_id = getattr(book, 'abs_id', None)
+            logger.info(
+                "Shelf-watch: cleared re-scan throttle for %s (abs_id=%s)",
+                key, abs_id
+            )
+            return True
+        return False
+    except Exception:
+        logger.warning("Shelf-watch: failed to clear throttle for %s", key, exc_info=True)
+        return False
+
+
 class ShelfWatchService:
     """Orchestrator for the Grimmory Up Next shelf-watch auto-matching flow."""
 
@@ -175,9 +223,7 @@ class ShelfWatchService:
     def _scan_key(self, source_book_id: str) -> str:
         """Throttle-table key. BookLore keeps the bare id (back-compat); other
         sources are namespaced so numeric ids can't collide across sources."""
-        if self._source_name == 'BookLore':
-            return str(source_book_id)
-        return f"{self._source_name.lower()}:{source_book_id}"
+        return shelf_watch_scan_key(self._source_name, source_book_id)
 
     # ---- main entry point ----------------------------------------------
 

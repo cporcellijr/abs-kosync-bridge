@@ -8,6 +8,15 @@ All notable changes to BookBridge will be documented in this file.
 
 ### Fixed
 
+- **Deleting a mapping now really does force a fresh shelf-watch match.** The
+  "Up Next" watcher remembers when it last looked at each book so it does not
+  re-scan the same one every cycle, but that memory is keyed to the book in your
+  library and outlived the mapping. So the natural fix for a bad or out-of-date
+  match — delete the mapping, correct the book in your library, drop it back on
+  the watch shelf — did nothing for up to a day: the book was silently counted as
+  `skipped_throttled` and left alone. Deleting a mapping now clears that memory, so
+  the book is matched again on the next scan.
+
 - **BookOrbit keeps working through temporary login refresh failures.** If an
   already-issued token is still accepted but a refresh attempt receives an HTTP
   error or loses its connection, BookBridge now keeps using that cached token during

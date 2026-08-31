@@ -2351,6 +2351,21 @@ class DatabaseService:
             session.expunge(row)
             return row
 
+    def delete_shelf_watch_scan(self, grimmory_book_id: str) -> bool:
+        """Delete the shelf-watch throttle row for a Grimmory book.
+
+        Returns True if at least one row was deleted, False otherwise (including
+        when the id is falsy/empty).
+        """
+        if not grimmory_book_id:
+            return False
+        gid = str(grimmory_book_id)
+        with self.get_session() as session:
+            rows = session.query(ShelfWatchScan).filter(
+                ShelfWatchScan.grimmory_book_id == gid
+            ).delete(synchronize_session=False)
+            return rows > 0
+
     def clear_stale_suggestions(self) -> int:
         """
         Delete suggestions that are not for active books in our bridge.

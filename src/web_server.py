@@ -8504,6 +8504,15 @@ def cleanup_mapping_resources(book, defer_audio_cache: bool = False):
     except Exception as e:
         logger.warning(f"⚠️ Failed to delete KOSync data for '{book.abs_id}': {e}", exc_info=True)
 
+    # A deleted mapping is the user's explicit "re-match this" signal, so the
+    # shelf-watch re-scan throttle must not outlive it either: the throttle row
+    # is keyed by the library's book id, which survives both the delete and a
+    # rename in the source library, so re-adding the book to the watch shelf
+    # would otherwise be skipped as `skipped_throttled` for the whole rescan
+    # window.
+    from src.services.shelf_watch_service import clear_shelf_watch_throttle
+    clear_shelf_watch_throttle(database_service, book)
+
     is_abs_backed = (
         getattr(book, 'sync_mode', 'audiobook') != 'ebook_only'
         and not str(book.abs_id).startswith('booklore:')
