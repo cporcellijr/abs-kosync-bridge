@@ -151,7 +151,7 @@ class BookOrbitClient:
             except Exception as exc:
                 self._login_retry_after = time.time() + _LOGIN_RETRY_COOLDOWN
                 logger.error("BookOrbit login error: %s", exc, exc_info=True)
-        return None
+        return self._token
 
     # ------------------------------------------------------------------
     # HTTP helpers

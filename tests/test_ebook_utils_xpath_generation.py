@@ -1,9 +1,11 @@
+import logging
 import unittest
 
 from bs4 import BeautifulSoup
 from lxml import html
 
 from src.utils.ebook_utils import EbookParser
+from src.utils.logging_utils import get_persistent_condition_logger
 
 
 def _lxml_paragraphs(body_inner: str):
@@ -129,6 +131,43 @@ class TestSplitXpathCharOffset(unittest.TestCase):
         clean, _ = EbookParser._split_xpath_char_offset("/body/p[167].0")
         tree = html.fromstring("<html><body><p>a</p><p>b</p></body></html>")
         tree.xpath("." + clean)  # must not raise
+
+    def _resolve_unresolvable(self):
+        """Drive one unresolvable XPath through the resolver, returning its log records."""
+        parser = EbookParser(books_dir=".")
+        spine_map = [{
+            "spine_index": 1,
+            "content": "<html><body><p>Only paragraph</p></body></html>",
+        }]
+
+        with self.assertLogs("src.utils.ebook_utils", level="DEBUG") as captured:
+            result = parser._resolve_xpath_target_node(
+                "book.epub", spine_map, 1, "./body/aside/p[99]"
+            )
+
+        self.assertEqual(result, (None, None, None))
+        return [r for r in captured.records if "Could not resolve XPath" in r.getMessage()]
+
+    def test_first_unresolvable_xpath_warns_verbatim(self):
+        get_persistent_condition_logger().reset()
+
+        records = self._resolve_unresolvable()
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].levelno, logging.WARNING)
+        self.assertEqual(
+            records[0].getMessage(),
+            "Could not resolve XPath in book.epub: ./body/aside/p[99]",
+        )
+
+    def test_repeat_unresolvable_xpaths_drop_to_debug(self):
+        get_persistent_condition_logger().reset()
+        self._resolve_unresolvable()
+
+        for _ in range(3):
+            records = self._resolve_unresolvable()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].levelno, logging.DEBUG)
 
 
 if __name__ == "__main__":

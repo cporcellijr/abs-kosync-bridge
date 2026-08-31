@@ -8,6 +8,25 @@ All notable changes to BookBridge will be documented in this file.
 
 ### Fixed
 
+- **BookOrbit keeps working through temporary login refresh failures.** If an
+  already-issued token is still accepted but a refresh attempt receives an HTTP
+  error or loses its connection, BookBridge now keeps using that cached token during
+  the retry cooldown. Previously only a 429 response got that fallback, so other
+  transient refresh failures made otherwise valid BookOrbit requests report "no
+  response."
+
+- **Automatic matches no longer lose their ebook hash.** Auto-match supplied the
+  ebook ID under a source-neutral field, but the mapping service looked only at the
+  older Grimmory-specific one, so a confident match was dropped instead of linked.
+  This affected every library source the scan can suggest — Grimmory, BookOrbit and
+  Kavita alike. BookBridge now accepts either form.
+
+- **Unresolvable edition-specific XPaths no longer flood the log.** A position
+  saved against a different edition of an ebook can legitimately miss every
+  fallback and leave your position unchanged. BookBridge still reports the first
+  one, and checks in periodically if it keeps happening, but no longer repeats the
+  same warning thousands of times.
+
 - **Reading and listening time is no longer counted twice on BookOrbit.** BookBridge
   records a reading session for you on the service hosting a book — that is what fills in
   the time you spend reading in KOReader or listening in an app that only reports your

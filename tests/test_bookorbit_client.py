@@ -63,6 +63,22 @@ def test_login_throttle_reuses_existing_stale_token(client):
     )
 
 
+def test_login_http_error_reuses_existing_stale_token(client):
+    client._token = "still-accepted"
+    client._token_timestamp = 0
+
+    with patch.object(client.session, "post", return_value=_Resp(status_code=503)):
+        assert client._get_fresh_token() == "still-accepted"
+
+
+def test_login_exception_reuses_existing_stale_token(client):
+    client._token = "still-accepted"
+    client._token_timestamp = 0
+
+    with patch.object(client.session, "post", side_effect=RuntimeError("offline")):
+        assert client._get_fresh_token() == "still-accepted"
+
+
 def test_classify_format():
     assert BookOrbitClient._classify_format("epub") == "ebook"
     assert BookOrbitClient._classify_format("M4B") == "audiobook"

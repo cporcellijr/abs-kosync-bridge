@@ -181,13 +181,14 @@ class BookMappingService:
 
         # Callers that already know the KOSync hash (e.g. the filesystem read path) pass it
         # directly; library-anchored callers compute it from the source download.
+        source_ebook_id = booklore_ebook_id or ebook_source_id
         kosync_doc_id = kosync_doc_id or self._compute_kosync_id(
-            ebook_filename, booklore_ebook_id, ebook_source, user_id=user_id,
+            ebook_filename, source_ebook_id, ebook_source, user_id=user_id,
         )
         if not kosync_doc_id:
             logger.warning(
                 f"Shelf-watch: could not compute kosync id for '{ebook_filename}' "
-                f"(source_id={booklore_ebook_id}); skipping mapping"
+                f"(source_id={source_ebook_id}); skipping mapping"
             )
             return None
 

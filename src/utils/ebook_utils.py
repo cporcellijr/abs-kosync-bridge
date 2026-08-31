@@ -24,6 +24,7 @@ from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult
 from src.utils.cache_paths import safe_cache_path, is_plain_basename
+from src.utils.logging_utils import get_persistent_condition_logger
 
 logger = logging.getLogger(__name__)
 
@@ -1810,7 +1811,11 @@ class EbookParser:
                     _log_fallback(candidate_item)
                     return candidate_item, tree, elements[0]
 
-        logger.warning(f"Could not resolve XPath in {filename}: {clean_xpath}")
+        get_persistent_condition_logger().warn(
+            logger,
+            "xpath_unresolved",
+            f"Could not resolve XPath in {filename}: {clean_xpath}",
+        )
         return None, None, None
 
     def resolve_xpath(self, filename, xpath_str):
