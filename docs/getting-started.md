@@ -157,7 +157,7 @@ You can start in either of these ways:
 2. Click **Scan Library**.
 3. Review the likely pairs.
 4. Add the good ones to the queue.
-5. Click **Process All**.
+5. Click **Match All**.
 
 If your audiobook and ebook services point at the same mounted `/books` tree,
 sibling audio and ebook files in the same title folder appear as high-confidence

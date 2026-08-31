@@ -131,7 +131,7 @@ You now have two easy options:
 2. Click **Scan Library**.
 3. Review the likely matches.
 4. Click **Add to Queue** for the good ones.
-5. Click **Process All**.
+5. Click **Match All**.
 
 ### Manual path: Add Book
 

@@ -104,14 +104,18 @@
     .ebook-subtitle { font-size: 11px; color: var(--muted); line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ebook-grid-empty { margin-bottom: 10px; font-size: 12px; color: var(--muted-soft); }
     .ebook-grid-empty.hidden { display: none; }
-    .queue-list { padding: 12px 14px; overflow-y: auto; }
+    /* The queue can grow past the panel, so only the items scroll — the actions stay
+       pinned as a footer. Both stay inside #queueList, which the async add/remove
+       replaces wholesale, so the "(n)" counts keep updating. */
+    .queue-list { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .queue-items { padding: 12px 14px; overflow-y: auto; flex: 1; min-height: 0; }
     .queue-item { display: flex; align-items: center; gap: 11px; padding: 9px; margin-bottom: 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--panel); }
     .queue-item-cover { width: 40px; height: 60px; border-radius: 4px; object-fit: cover; background: rgba(255,255,255,0.1); }
     .queue-item-info { flex: 1; min-width: 0; }
     .queue-item-title { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; }
     .queue-item-ebook { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .queue-remove { width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(255,107,107,0.24); color: var(--danger); font-size: 16px; cursor: pointer; }
-    .queue-actions { margin-top: 6px; display: grid; gap: 10px; }
+    .queue-actions { flex-shrink: 0; display: grid; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--panel); }
     .w-100 { width: 100%; }
     .inline-form { display: inline-flex; }
     .submit-feedback { display: none; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 13px; }

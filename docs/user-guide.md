@@ -44,7 +44,7 @@ a reader.
 The excerpt loads only when you ask for it, is scoped to your own books, and is
 not offered for audiobook-only mappings.
 
-When you start actions like **Create Mapping**, **Create Storyteller Edition & Match All**, **Add to Queue**, or **Process All**, the page now shows a working message right away so you know the action started.
+When you start actions like **Create Mapping**, **Create Storyteller Edition & Match All**, **Add to Queue**, or **Match All**, the page now shows a working message right away so you know the action started.
 
 ---
 
