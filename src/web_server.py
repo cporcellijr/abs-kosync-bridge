@@ -4480,6 +4480,7 @@ def _resolve_dashboard_display_metadata(
     base_author,
     cached_booklore_by_filename=None,
     storyteller_meta=None,
+    bookorbit_author=None,
 ):
     title = _normalize_dashboard_display_value(base_title)
     subtitle = _normalize_dashboard_display_value(base_subtitle)
@@ -4511,6 +4512,12 @@ def _resolve_dashboard_display_metadata(
             subtitle = storyteller_subtitle
         if not author and storyteller_author:
             author = storyteller_author
+
+    # Ranked below the Grimmory/Storyteller caches but above the filename guess:
+    # it is real library metadata, so it should only ever fill a gap, never
+    # displace an author another source already resolved.
+    if not author and bookorbit_author:
+        author = _normalize_dashboard_display_value(bookorbit_author)
 
     filename_fallback = _parse_dashboard_filename_fallback(display_filename)
     if should_override_base_title and not title:
@@ -4989,6 +4996,74 @@ def _prefetch_bookfusion_links(books: list, integrations: dict | None) -> dict:
         return {}
 
 
+def _bookorbit_source_ids(books: list) -> set:
+    """BookOrbit book ids referenced by these mappings, either side."""
+    ids = set()
+    for book in books or []:
+        for attr, source in (("ebook_source_id", "ebook_source"),
+                             ("audio_source_id", "audio_source")):
+            if getattr(book, source, None) == "BookOrbit":
+                value = getattr(book, attr, None)
+                if value:
+                    ids.add(str(value))
+    return ids
+
+
+def _prefetch_bookorbit_authors(books: list, integrations: dict | None) -> dict:
+    """Resolve BookOrbit's own author metadata in one bulk read.
+
+    Returns ``{bookorbit_book_id: author}``, empty when BookOrbit is unconfigured
+    or nothing in the library came from it.
+
+    BookOrbit is the only author source for a BookOrbit-sourced ebook on an
+    install without Grimmory: ``base_author`` is always empty here,
+    ``_get_cached_ebook_display_metadata`` reads the Grimmory cache alone, and the
+    filename fallback needs a literal ``Title - Author`` stem that BookOrbit's
+    filenames ("03. Other Worlds Than These (2026).epub") do not use. The client
+    keeps its own TTL'd light-info cache behind a non-blocking refresh lock, so
+    this is a dict read once warm and a couple of paginated calls when cold.
+    """
+    if not integrations or not integrations.get('bookorbit'):
+        return {}
+    wanted = _bookorbit_source_ids(books)
+    if not wanted:
+        return {}
+    try:
+        client = uc().bookorbit_client
+        if not client or not client.is_configured():
+            return {}
+        authors = {}
+        for info in client.get_all_books() or []:
+            book_id = info.get("id")
+            if book_id is None:
+                continue
+            key = str(book_id)
+            if key not in wanted:
+                continue
+            author = _normalize_dashboard_display_value(info.get("authors"))
+            if author:
+                authors[key] = author
+        return authors
+    except Exception as exc:
+        logger.debug("BookOrbit dashboard author prefetch failed: %s", exc, exc_info=True)
+        return {}
+
+
+def _bookorbit_author_for_book(book, bookorbit_authors: dict | None) -> str:
+    """The prefetched author for whichever side of this book BookOrbit supplies."""
+    if not bookorbit_authors:
+        return ""
+    for attr, source in (("ebook_source_id", "ebook_source"),
+                         ("audio_source_id", "audio_source")):
+        if getattr(book, source, None) == "BookOrbit":
+            value = getattr(book, attr, None)
+            if value:
+                found = bookorbit_authors.get(str(value))
+                if found:
+                    return found
+    return ""
+
+
 def _build_dashboard_mapping(
     book,
     states_by_book,
@@ -4999,6 +5074,7 @@ def _build_dashboard_mapping(
     cached_booklore_by_filename,
     claim_times_by_book=None,
     bookfusion_by_book=None,
+    bookorbit_authors=None,
 ):
     states = states_by_book.get(book.abs_id, [])
     state_by_client = {state.client_name: state for state in states}
@@ -5010,6 +5086,7 @@ def _build_dashboard_mapping(
         "",
         cached_booklore_by_filename=cached_booklore_by_filename,
         storyteller_meta=_get_cached_storyteller_display_metadata(book),
+        bookorbit_author=_bookorbit_author_for_book(book, bookorbit_authors),
     )
     display_title = display_meta["display_title"]
     display_subtitle = display_meta["display_subtitle"]
@@ -5247,6 +5324,7 @@ def _build_dashboard_mappings(
     cached_booklore_by_filename=None,
     claim_times_by_book=None,
     bookfusion_by_book=None,
+    bookorbit_authors=None,
 ):
     hardcover_by_book = {h.abs_id: h for h in (all_hardcover or [])}
     storygraph_by_book = {s.abs_id: s for s in (all_storygraph or [])}
@@ -5256,6 +5334,8 @@ def _build_dashboard_mappings(
     claim_times_by_book = claim_times_by_book or {}
     if bookfusion_by_book is None:
         bookfusion_by_book = _prefetch_bookfusion_links(books, integrations)
+    if bookorbit_authors is None:
+        bookorbit_authors = _prefetch_bookorbit_authors(books, integrations)
 
     mappings = []
     total_duration = 0
@@ -5272,6 +5352,7 @@ def _build_dashboard_mappings(
             cached_booklore_by_filename,
             claim_times_by_book,
             bookfusion_by_book=bookfusion_by_book,
+            bookorbit_authors=bookorbit_authors,
         )
         mappings.append(mapping)
 

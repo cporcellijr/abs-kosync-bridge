@@ -14,7 +14,10 @@
         data-author="{{ mapping.display_author }}" data-filename="{{ mapping.display_filename }}"
         data-sync-mode="{{ mapping.sync_mode }}" data-abs-id="{{ mapping.abs_id }}"
         data-added="{{ mapping.added_at_unix|default(0) }}"
-        data-rating="{% if mapping.storygraph_rating is not none and mapping.goodreads_rating is not none %}{{ ((mapping.storygraph_rating + mapping.goodreads_rating) / 2) }}{% elif mapping.storygraph_rating is not none %}{{ mapping.storygraph_rating }}{% elif mapping.goodreads_rating is not none %}{{ mapping.goodreads_rating }}{% endif %}">
+        data-rating="{% if mapping.storygraph_rating is not none and mapping.goodreads_rating is not none %}{{ ((mapping.storygraph_rating + mapping.goodreads_rating) / 2) }}{% elif mapping.storygraph_rating is not none %}{{ mapping.storygraph_rating }}{% elif mapping.goodreads_rating is not none %}{{ mapping.goodreads_rating }}{% endif %}"
+        data-last-sync-unix="{{ mapping.last_sync_unix|default(0) }}"
+        data-series-name="{{ mapping.series_name if mapping.series_name is not none else '' }}"
+        data-series-sequence="{{ mapping.series_sequence if mapping.series_sequence is not none else '' }}">
 
         {# Cover image section - prioritize ebook cover, fallback to ABS cover #}
         <div class="book-media-column">
@@ -378,6 +381,7 @@
          data-author="{{ group.series_author }}"
          data-progress="{{ group.avg_progress }}"
          data-last-sync="{{ group.last_sync_unix }}"
+         data-last-sync-unix="{{ group.last_sync_unix|default(0) }}"
          data-added="{{ group.added_at_unix|default(0) }}"
          data-child-count="{{ group.child_count }}">
       <div class="series-header" role="button" tabindex="0"
@@ -563,6 +567,17 @@
 
         .controls-bar .form-select {
             width: auto;
+        }
+
+        /* Pushed to the far end of the bar; wraps with everything else on narrow screens. */
+        .filter-count-group {
+            margin-left: auto;
+        }
+
+        .filter-count {
+            font-size: 13px;
+            color: var(--muted-soft);
+            white-space: nowrap;
         }
 
         .controls-bar select.form-select option {
@@ -2118,22 +2133,59 @@
           {% if m.unified_progress == 0 %}{% set section_flags.has_not_started = true %}{% endif %}
           {% if m.unified_progress >= 100 %}{% set section_flags.has_finished = true %}{% endif %}
         {% endfor %}
+        {# Distinct series in the library, for the series filter. Includes a series
+           whose only owned volume renders as a flat card, since it is still a series. #}
+        {% set series_options = mappings | map(attribute='series_name') | reject('none') | unique | sort(case_sensitive=False) %}
+        {# Distinct authors, same idea. display_author is '' rather than None when
+           unknown, so reject the blanks too. #}
+        {% set author_options = mappings | map(attribute='display_author') | reject('none') | reject('equalto', '') | unique | sort(case_sensitive=False) %}
         <div class="controls-bar">
             <div class="control-group">
                 <input type="text" id="dashboard-search" class="form-input" placeholder="Search books...">
             </div>
             <div class="control-group">
-                <label for="filter-select">Show:</label>
+                <label for="filter-select">Format:</label>
                 <select id="filter-select" class="form-select">
+                    <option value="all">All Formats</option>
+                    <option value="has_audio">Has Audio</option>
+                    <option value="audiobook_only">Audiobook Only</option>
+                    <option value="ebook_only">Ebook Only</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="series-filter">Series:</label>
+                <select id="series-filter" class="form-select">
                     <option value="all">All Books</option>
-                    <option value="audiobook">Audiobooks</option>
-                    <option value="ebook_only">Ebooks Only</option>
+                    <option value="none">No Series</option>
+                    {% if series_options %}
+                    <optgroup label="Series">
+                        {% for series_option_name in series_options %}
+                        <option value="series:{{ series_option_name }}">{{ series_option_name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="author-filter">Author:</label>
+                <select id="author-filter" class="form-select">
+                    <option value="all">All Authors</option>
+                    <option value="none">No Author</option>
+                    {% if author_options %}
+                    <optgroup label="Authors">
+                        {% for author_option_name in author_options %}
+                        <option value="author:{{ author_option_name }}">{{ author_option_name }}</option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
                 </select>
             </div>
             <div class="control-group">
                 <label for="sort-select">Sort by:</label>
                 <select id="sort-select" class="form-select">
                     <option value="title">Title</option>
+                    <option value="author">Author</option>
+                    <option value="series">Series</option>
                     <option value="progress">Progress</option>
                     <option value="status">Status</option>
                     <option value="last_sync">Last Synced</option>
@@ -2147,6 +2199,9 @@
                     <input type="checkbox" id="series-grouping-toggle" checked>
                     <span>Group series</span>
                 </label>
+            </div>
+            <div class="control-group filter-count-group">
+                <span id="filter-count" class="filter-count" role="status" aria-live="polite"></span>
             </div>
         </div>
 
@@ -2222,6 +2277,9 @@
             const dashboardGrids = Array.from(document.querySelectorAll('.dashboard-section .book-grid'));
             const sortSelect = document.getElementById('sort-select');
             const filterSelect = document.getElementById('filter-select');
+            const seriesFilter = document.getElementById('series-filter');
+            const authorFilter = document.getElementById('author-filter');
+            const filterCount = document.getElementById('filter-count');
             const directionBtn = document.getElementById('sort-direction');
             const dashboardSearch = document.getElementById('dashboard-search');
             const searchHandoff = document.getElementById('search-handoff');
@@ -2257,6 +2315,108 @@
                     }
                 });
             }
+            // Counts distinct BOOKS, not cards. The In Progress section renders from the
+            // flat mapping list while the other two render from the grouped one, so an
+            // in-progress book inside a series is rendered twice -- once nested in its
+            // group, once flat. Both copies carry the same abs id, so the id set collapses
+            // them. Grouping is a display choice, so the totals hold either way.
+            // One card per book. The In Progress section renders from the flat mapping
+            // list while the other two render from the grouped one, so an in-progress
+            // volume of a series exists twice in the DOM; both copies carry the same
+            // abs id and the same facet attributes, so the first wins.
+            function distinctBookCards() {
+                const seen = new Map();
+                document.querySelectorAll('.book-card').forEach(card => {
+                    const absId = card.dataset.absId;
+                    if (absId && !seen.has(absId)) seen.set(absId, card);
+                });
+                return Array.from(seen.values());
+            }
+
+            function updateFilteredCount() {
+                if (!filterCount) return;
+
+                const cards = distinctBookCards();
+                const total = cards.length;
+                const shown = cards.reduce(
+                    (n, card) => n + (card.classList.contains('hidden') ? 0 : 1), 0);
+                const noun = total === 1 ? 'book' : 'books';
+                filterCount.textContent = shown === total
+                    ? total + ' ' + noun
+                    : shown + ' of ' + total + ' ' + noun;
+            }
+
+            // Narrow the Series and Author lists to what the OTHER filters leave
+            // reachable, with a count of distinct books per option.
+            //
+            // Three deliberate rules:
+            //  * A list is never computed from its own selection. Otherwise choosing an
+            //    author would leave that author as the only option and you could never
+            //    switch without resetting.
+            //  * The search box is excluded. It is logically another filter, but feeding
+            //    it in would make both lists churn on every keystroke.
+            //  * Format is an input to the other two but is never itself narrowed --
+            //    it has a handful of fixed options and hiding them reads as breakage.
+            function facetOptionBaseLabel(option) {
+                if (option.dataset.facetLabel === undefined) {
+                    option.dataset.facetLabel = option.textContent.trim();
+                }
+                return option.dataset.facetLabel;
+            }
+
+            function applyFacetCounts(select, cards, matches) {
+                if (!select) return;
+                const selected = select.value;
+
+                Array.from(select.querySelectorAll('option')).forEach(option => {
+                    const label = facetOptionBaseLabel(option);
+                    if (option.value === 'all') {
+                        option.textContent = label;
+                        option.hidden = false;
+                        option.disabled = false;
+                        return;
+                    }
+                    let count = 0;
+                    cards.forEach(card => {
+                        if (matches(card, option.value)) count += 1;
+                    });
+                    option.textContent = label + ' (' + count + ')';
+                    // Never hide the current selection: the reader has to be able to
+                    // see what they picked and undo it, even once it matches nothing.
+                    const keep = count > 0 || option.value === selected;
+                    option.hidden = !keep;
+                    option.disabled = !keep;
+                });
+
+                // An optgroup whose every option is hidden would still render its label.
+                Array.from(select.querySelectorAll('optgroup')).forEach(group => {
+                    const usable = Array.from(group.querySelectorAll('option'))
+                        .some(option => !option.hidden);
+                    group.hidden = !usable;
+                });
+            }
+
+            function updateFacetOptions() {
+                if (!seriesFilter && !authorFilter) return;
+                const cards = distinctBookCards();
+                const formatValue = filterSelect ? filterSelect.value : 'all';
+                const seriesValue = seriesFilter ? seriesFilter.value : 'all';
+                const authorValue = authorFilter ? authorFilter.value : 'all';
+
+                applyFacetCounts(
+                    seriesFilter,
+                    cards.filter(card => matchesFormatFilter(card, formatValue)
+                        && matchesAuthorFilter(card, authorValue)),
+                    matchesSeriesFilter,
+                );
+                applyFacetCounts(
+                    authorFilter,
+                    cards.filter(card => matchesFormatFilter(card, formatValue)
+                        && matchesSeriesFilter(card, seriesValue)),
+                    matchesAuthorFilter,
+                );
+            }
+
             // Offers a route into Add Book's library search for a title the dashboard
             // filter can't show, because it isn't synced yet.
             function updateSearchHandoff(rawQuery) {
@@ -2292,23 +2452,72 @@
                 }
             };
 
+            // Format and series are orthogonal axes, so each is its own predicate over
+            // one card rather than a branch in a single mutually-exclusive filter.
+            function matchesFormatFilter(card, formatValue) {
+                if (formatValue === 'all') return true;
+                const syncMode = card.dataset.syncMode || 'audiobook';
+                if (formatValue === 'has_audio') {
+                    return syncMode === 'audiobook' || syncMode === 'audiobook_only';
+                }
+                return syncMode === formatValue;
+            }
+
+            // 'all', 'none' (no series at all), or 'series:<name>' for one named series.
+            // The prefix keeps a series actually called "all" or "none" addressable.
+            // A book counts as being in a series whenever the server gave it a name --
+            // including the sole owned volume of one, which is rendered as a flat card
+            // because single-child groups are demoted server-side.
+            const SERIES_FILTER_PREFIX = 'series:';
+
+            function matchesSeriesFilter(card, seriesValue) {
+                if (!seriesValue || seriesValue === 'all') return true;
+                const seriesName = card.dataset.seriesName || '';
+                if (seriesValue === 'none') return !seriesName;
+                if (seriesValue.indexOf(SERIES_FILTER_PREFIX) === 0) {
+                    return seriesName === seriesValue.slice(SERIES_FILTER_PREFIX.length);
+                }
+                return true;
+            }
+
+            // 'all', 'none' (no author recorded), or 'author:<name>'. Prefixed for the
+            // same reason as the series filter: an author actually called "all" stays
+            // addressable. A series group card carries its most common author, so
+            // selecting an author keeps that author's series intact.
+            const AUTHOR_FILTER_PREFIX = 'author:';
+
+            function matchesAuthorFilter(card, authorValue) {
+                if (!authorValue || authorValue === 'all') return true;
+                const author = card.dataset.author || '';
+                if (authorValue === 'none') return !author;
+                if (authorValue.indexOf(AUTHOR_FILTER_PREFIX) === 0) {
+                    return author === authorValue.slice(AUTHOR_FILTER_PREFIX.length);
+                }
+                return true;
+            }
+
             function filterBooks() {
                 const filterValue = filterSelect.value;
+                const seriesValue = seriesFilter ? seriesFilter.value : 'all';
+                const authorValue = authorFilter ? authorFilter.value : 'all';
                 const searchString = dashboardSearch ? dashboardSearch.value.toLowerCase() : '';
+
+                // Cards clearing every non-search predicate. A series-name search may stand
+                // in for the search term on a group's children, but never for the filters.
+                const passesFilters = new Set();
 
                 // Filter flat book cards
                 const cards = document.querySelectorAll('.book-card');
                 cards.forEach(card => {
-                    const syncMode = card.dataset.syncMode || 'audiobook';
                     const title = (card.dataset.title || '').toLowerCase();
                     const author = (card.dataset.author || '').toLowerCase();
                     const filename = (card.dataset.filename || '').toLowerCase();
 
-                    let isVisible = true;
-                    if (filterValue === 'audiobook' && syncMode !== 'audiobook') {
-                        isVisible = false;
-                    } else if (filterValue === 'ebook_only' && syncMode !== 'ebook_only') {
-                        isVisible = false;
+                    let isVisible = matchesFormatFilter(card, filterValue)
+                        && matchesSeriesFilter(card, seriesValue)
+                        && matchesAuthorFilter(card, authorValue);
+                    if (isVisible) {
+                        passesFilters.add(card);
                     }
                     if (isVisible && searchString) {
                         if (!title.includes(searchString) && !author.includes(searchString) && !filename.includes(searchString)) {
@@ -2333,7 +2542,7 @@
                     const childCards = group.querySelectorAll('.book-card');
                     let anyChildVisible = false;
                     childCards.forEach(child => {
-                        if (seriesNameMatchesSearch) {
+                        if (seriesNameMatchesSearch && passesFilters.has(child)) {
                             child.classList.remove('hidden');
                             child.style.display = '';
                             anyChildVisible = true;
@@ -2352,10 +2561,20 @@
                 });
 
                 updateDashboardSectionVisibility();
+                updateFacetOptions();
+                updateFilteredCount();
                 updateSearchHandoff(dashboardSearch ? dashboardSearch.value.trim() : '');
 
                 // Persist choice
-                localStorage.setItem('abs_kosync_filter', filterValue);
+                try {
+                    localStorage.setItem('abs_kosync_filters', JSON.stringify({
+                        format: filterValue,
+                        series: seriesValue,
+                        author: authorValue
+                    }));
+                } catch (e) {
+                    console.debug('LocalStorage error:', e);
+                }
             }
 
             window.toggleSeries = function (domId) {
@@ -2460,6 +2679,8 @@
             // Initial Sort Defaults
             let sortState = {
                 title: 'asc',      // A-Z default
+                author: 'asc',     // A-Z default
+                series: 'asc',     // Series A-Z, then reading order
                 progress: 'desc',  // Highest progress first
                 status: 'asc',
                 last_sync: 'desc', // Newest sync first
@@ -2507,23 +2728,74 @@
                 return Infinity;
             }
 
-            function sortCards(grid, sortBy, direction) {
-                if (!grid) return;
-                const items = Array.from(grid.children);
+            // Returns age in seconds for sorting (smaller = more recent).
+            // Prefers data-last-sync-unix; falls back to parseLastSync on data-last-sync.
+            function getLastSyncAge(el) {
+                const unixStr = el.dataset.lastSyncUnix;
+                if (unixStr !== undefined && unixStr !== '') {
+                    const unixVal = parseFloat(unixStr);
+                    if (!isNaN(unixVal) && unixVal > 0) {
+                        return Math.max(0, Date.now() / 1000 - unixVal);
+                    }
+                }
+                // Fallback: never-synced (0 or missing) or unparseable -> parse humanized string
+                return parseLastSync(el.dataset.lastSync || '');
+            }
 
-                const sorted = items.sort((a, b) => {
+            // Title value used by the tie-breaks. A series group card carries its series
+            // name rather than a title, so it still compares against book cards.
+            function sortTitleOf(el) {
+                return (el.dataset.title || el.dataset.seriesName || '').toLowerCase();
+            }
+
+            // Returns the comparator for one sort key so both sortCards and the author
+            // view order entries identically.
+            function makeSortComparator(sortBy, direction) {
+                return (a, b) => {
                     let comparison = 0;
                     const isSeries = (el) => el.classList.contains('series-group');
 
                     let valA, valB;
                     if (sortBy === 'last_sync') {
-                        valA = a.dataset.lastSync || '';
-                        valB = b.dataset.lastSync || '';
-                        comparison = parseLastSync(valA) - parseLastSync(valB);
+                        comparison = getLastSyncAge(a) - getLastSyncAge(b);
                     } else if (sortBy === 'title') {
                         valA = (a.dataset.title || a.dataset.seriesName || '').toLowerCase();
                         valB = (b.dataset.title || b.dataset.seriesName || '').toLowerCase();
                         comparison = valA.localeCompare(valB);
+                    } else if (sortBy === 'author') {
+                        const authorA = (a.dataset.author || '').toLowerCase();
+                        const authorB = (b.dataset.author || '').toLowerCase();
+                        // Unattributed books trail the named ones either way, like the
+                        // unrated branch below.
+                        if (!authorA && authorB) return 1;
+                        if (authorA && !authorB) return -1;
+                        comparison = authorA.localeCompare(authorB);
+                        if (comparison === 0) {
+                            // Returned directly, like the added branch: one author's books
+                            // read A-Z whichever way the author column is pointing.
+                            return sortTitleOf(a).localeCompare(sortTitleOf(b));
+                        }
+                    } else if (sortBy === 'series') {
+                        const seriesA = (a.dataset.seriesName || '').toLowerCase();
+                        const seriesB = (b.dataset.seriesName || '').toLowerCase();
+                        // Standalone books trail every series either way.
+                        if (!seriesA && seriesB) return 1;
+                        if (seriesA && !seriesB) return -1;
+                        comparison = seriesA.localeCompare(seriesB);
+                        if (comparison === 0) {
+                            // Within one series, reading order stays ascending whichever way
+                            // the series column points. Sequence 0 is valid, so test for a
+                            // finite number rather than truthiness; a series group card has
+                            // no sequence and trails its own volumes.
+                            const seqA = parseFloat(a.dataset.seriesSequence);
+                            const seqB = parseFloat(b.dataset.seriesSequence);
+                            const hasSeqA = Number.isFinite(seqA);
+                            const hasSeqB = Number.isFinite(seqB);
+                            if (hasSeqA && hasSeqB && seqA !== seqB) return seqA - seqB;
+                            if (hasSeqA && !hasSeqB) return -1;
+                            if (!hasSeqA && hasSeqB) return 1;
+                            return sortTitleOf(a).localeCompare(sortTitleOf(b));
+                        }
                     } else if (sortBy === 'progress') {
                         valA = parseFloat(a.dataset.progress || '0') || 0;
                         valB = parseFloat(b.dataset.progress || '0') || 0;
@@ -2560,7 +2832,13 @@
                     }
 
                     return direction === 'asc' ? comparison : -comparison;
-                });
+                };
+            }
+
+            function sortCards(grid, sortBy, direction) {
+                if (!grid) return;
+                const items = Array.from(grid.children);
+                const sorted = items.sort(makeSortComparator(sortBy, direction));
 
                 sorted.forEach(el => grid.appendChild(el));
             }
@@ -2761,8 +3039,48 @@
             // Filter Logic initialization
             if (filterSelect) {
                 filterSelect.addEventListener('change', filterBooks);
-                const savedFilter = localStorage.getItem('abs_kosync_filter') || 'all';
-                filterSelect.value = savedFilter;
+                if (seriesFilter) seriesFilter.addEventListener('change', filterBooks);
+                if (authorFilter) authorFilter.addEventListener('change', filterBooks);
+
+                let savedFormat = 'all';
+                let savedSeries = 'all';
+                let savedAuthor = 'all';
+                try {
+                    const savedFilters = localStorage.getItem('abs_kosync_filters');
+                    if (savedFilters) {
+                        const parsed = JSON.parse(savedFilters);
+                        savedFormat = parsed.format || 'all';
+                        savedSeries = parsed.series || 'all';
+                        // An earlier iteration of this control was a yes/no pair, and
+                        // those values can still be sitting in a reader's localStorage.
+                        // 'standalone' has a direct equivalent; 'in a series' no longer
+                        // does, so widen to all rather than silently hiding books.
+                        if (savedSeries === 'standalone') savedSeries = 'none';
+                        else if (savedSeries === 'in_series') savedSeries = 'all';
+                        savedAuthor = parsed.author || 'all';
+                    } else {
+                        // Migrate the pre-multi-filter scalar key. Its "audiobook" meant
+                        // sync_mode 'audiobook' alone, which silently hid audiobook-only
+                        // books; "Has Audio" is the option that now covers both.
+                        const legacy = localStorage.getItem('abs_kosync_filter');
+                        if (legacy) savedFormat = legacy === 'audiobook' ? 'has_audio' : legacy;
+                    }
+                } catch (e) {
+                    console.debug('LocalStorage error:', e);
+                }
+
+                filterSelect.value = savedFormat;
+                if (seriesFilter) {
+                    seriesFilter.value = savedSeries;
+                    // A remembered series that is no longer in the library matches no
+                    // option, which leaves the select with no selection at all. Show
+                    // everything rather than stranding the reader on a blank filter.
+                    if (!seriesFilter.value) seriesFilter.value = 'all';
+                }
+                if (authorFilter) {
+                    authorFilter.value = savedAuthor;
+                    if (!authorFilter.value) authorFilter.value = 'all';
+                }
                 // Apply filter initially
                 filterBooks();
             }

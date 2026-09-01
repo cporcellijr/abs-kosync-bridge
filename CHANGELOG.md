@@ -6,6 +6,68 @@ All notable changes to BookBridge will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Sort your library by author or by series.** The dashboard could sort by title,
+  progress, status, last sync, date added and rating — but not by who wrote a book or
+  where it sits in a series. Both are now in the Sort by menu. Series sort puts each
+  series in reading order and keeps standalone books together at the end, so a
+  flattened library reads the way you would actually work through it.
+
+- **The Series and Author lists narrow to what you can actually pick.** With a few
+  hundred authors and a hundred-odd series, most entries in those menus were dead ends
+  under whatever else you had selected. Each list now shows only what is still
+  reachable given your other choices, with a count beside it — pick a format and the
+  author list drops to the authors who have books in it. Your own current choice always
+  stays visible so you can undo it, even when it has stopped matching anything, and
+  choosing an author never collapses the author list to that one author. The Format
+  menu is left alone, and typing in the search box does not disturb the lists.
+
+- **Filter the dashboard to a single author.** An Author filter lists every author in
+  your library by name, plus **No Author** for anything BookBridge could not work one
+  out for. It stacks with the format and series filters, so "everything by this author,
+  in this series, that has audio" is three quick choices.
+
+- **A book count in the filter bar.** The end of the controls bar now tells you how
+  many books you are looking at — "48 books" normally, and "12 of 48 books" as soon as
+  a filter or a search narrows it down, so you can see at a glance how much a filter
+  actually cut. Grouping does not change the number: a series counts as the books
+  inside it, whether it is stacked into one card or not.
+
+- **Filter the dashboard to a single series.** A new Series filter sits beside the
+  format filter and lists every series in your library by name, plus **No Series** for
+  everything that isn't part of one. The two filters work together rather than
+  replacing each other, so "audiobook-only, and only this series" is now one choice
+  each — something the old single dropdown could not express. A series you own just one
+  volume of is listed like any other.
+
+### Fixed
+
+- **Most ebook-only books showed no author.** BookBridge works an author out from
+  Grimmory, from Storyteller, or by reading it off a `Title - Author.epub` filename —
+  so a book from a library that names its files any other way ended up with no author
+  at all, on the dashboard and in the new Author filter. On a BookOrbit library that
+  was well over half of the ebook-only shelf. BookBridge now asks BookOrbit for the
+  author it already knows, which recovered 67 of the 73 affected books on the library
+  this was found on. It only fills a gap: an author already coming from Grimmory or
+  Storyteller is left exactly as it was.
+
+- **Audiobook-only books were invisible to the library filter.** Books matched to an
+  audiobook with no ebook side showed up under All Books but were hidden by *both*
+  "Audiobooks" and "Ebooks Only", so there was no way to list them. The format filter
+  now offers **Has Audio**, which covers everything with an audiobook, and **Audiobook
+  Only** for those books specifically.
+
+- **Sorting by Last Synced was much coarser than it looked.** The sort read the "2h
+  ago" text shown on each card rather than the actual sync time, so every book synced
+  within the same hour was treated as tied and ordered arbitrarily. It now sorts on the
+  real timestamp.
+
+- **Searching a series name ignored your filters.** Typing a series name into the
+  dashboard search revealed every book in that series, including ones the format filter
+  was meant to be hiding. The search now finds the series without overriding what you
+  filtered out.
+
 ## [7.6.0] - 2026-09-01
 
 Positions stop drifting backwards, and a rewind you make now sticks. Audiobookshelf
