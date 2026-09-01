@@ -23,10 +23,9 @@ Just two things:
 1. **Docker** on any host.
 2. **At least two places you read or listen** that you want to keep in sync — for example Audiobookshelf on the audio side and KOReader on the ebook side.
 
-Every service below is **optional** — enable only the ones you actually use. Ebook-only setups (say, KOReader + Grimmory with Audiobookshelf intentionally disabled) work fine too.
+Every service below is **optional** — switch on only the ones you actually use, and add more later. Ebook-only setups (KOReader plus Grimmory, say) work just as well as an audiobook pairing.
 
-!!! tip "You do not need Storyteller"
-    Storyteller is one optional integration among many — **not** a requirement. BookBridge does its own audio ↔ text alignment with built-in Whisper transcription (and the EPUB's SMIL timing data when present). If you happen to run Storyteller, the bridge will use its transcripts as a higher-quality alignment source and sync its read-along position — but nothing in the bridge requires it.
+BookBridge does its own audio ↔ text alignment, using built-in Whisper transcription and the EPUB's own timing data where it exists. Nothing else needs to be in place for an audiobook and an ebook to stay in step.
 
 ### Supported Services
 
@@ -35,7 +34,7 @@ Every service below is **optional** — enable only the ones you actually use. E
 | **Audiobookshelf** | Audiobooks + optional ebooks | Audiobook progress sync, optional ebook progress, library matching |
 | **KOReader / KOSync** | Ebooks | Reading progress sync; highlights/notes through the current Bridge Sync plugin |
 | **BookFusion** | Ebooks | Reading progress sync, highlight relay, and uploading local EPUBs into your BookFusion bookshelf |
-| **Storyteller** | Read-along reader | Progress sync and a bonus alignment source for read-along books |
+| **Storyteller** | Optional read-along reader | Progress sync, plus higher-quality alignment for books you have already built there |
 | **Grimmory** | Ebooks + audiobooks | Ebook progress, audiobook-source sync, reading sessions, optional annotation relay |
 | **BookOrbit** | Ebooks + audiobooks | Ebook progress, audiobook-source sync, reading sessions, optional highlight relay |
 | **Kavita** | Ebooks | EPUB search/download, bidirectional reading progress, collection-based auto-matching |

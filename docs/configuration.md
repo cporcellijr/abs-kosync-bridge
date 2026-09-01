@@ -76,13 +76,22 @@ ports:
 
 ### Integrations
 
+Every integration card has an **Enable** switch, and that switch is server-wide: a
+service switched off in Settings is off for everyone on the install. Readers still
+have their own switch for the services they hold a login for, under **Account -> My
+Integrations**, but it applies only while the service is switched on server-wide. When
+it is off, their switch is shown greyed out with the reason instead of letting them
+turn on something that will not work. Nobody's personal choice is lost — switching the
+service back on restores everyone's settings exactly as they were.
+
 #### Audiobookshelf
 
 Audiobookshelf remains the default audiobook source when a mapping is not explicitly using Grimmory or BookOrbit audio.
 
 | Setting | Env Var | Default | Notes |
 | --- | --- | --- | --- |
-| Server URL | `ABS_SERVER` | empty | Required (or `disabled` for an ebook-only install). Server-wide. |
+| Enable | `ABS_ENABLED` | `true` | Turns Audiobookshelf on or off. Server-wide, with a per-reader switch in **Account -> My Integrations**. |
+| Server URL | `ABS_SERVER` | empty | Required unless Audiobookshelf is switched off. Server-wide. |
 | API Token | `ABS_KEY` | empty | Per-user (set in **Account -> My Integrations**). The admin's token also powers global library scans. |
 | Library ID | `ABS_LIBRARY_ID` | empty | Per-user (set in user Integrations). Used by the matcher and search scoping. |
 | Auto-add Collection | `ABS_COLLECTION_NAME` | `Synced with KOReader` | Per-user (set in user Integrations). Collection matched audiobooks are added to. The value here is the global default; the admin's value seeds from it on first startup. |
@@ -94,7 +103,7 @@ Audiobookshelf remains the default audiobook source when a mapping is not explic
 Audiobookshelf notes:
 
 - Use **Find IDs** next to **Library ID** in Settings to load your available ABS libraries and fill the field from a dropdown.
-- If you want to run without Audiobookshelf for a while, enter `disabled` in the ABS URL or token field to intentionally turn ABS off.
+- To run without Audiobookshelf, switch **Enable** off on the Audiobookshelf card. A reader who wants to opt out on their own account can switch it off under **Account -> My Integrations** instead, without affecting anyone else. The older workaround of entering `disabled` in the ABS URL or token field still works and is still honoured, but the switch is the supported way now.
 - **ABS ebook sync** (`SYNC_ABS_EBOOK`) treats the ebook attached to an Audiobookshelf item as a full sync
   client in its own right, reading and writing its position like any other ebook source. Both of these settings
   live in the Settings UI under **Sync Behavior**, not under Advanced.
@@ -153,6 +162,7 @@ receive copies of your books. It is not a progress sync source.
 
 | Setting | Env Var | Default | Notes |
 | --- | --- | --- | --- |
+| Enable | `READEST_ENABLED` | `true` | Server-wide switch for everything Readest does — the highlight relay and both uploads. Off means off for every reader. |
 | Highlight Sync | `READEST_ANNOTATION_SYNC` | `false` | Per-reader. Enables Readest annotation relay for that reader. |
 | Highlight Sync Interval | `READEST_ANNOTATION_SYNC_MINUTES` | `15` | Minutes between background Readest annotation relay cycles. |
 | Account Email | `READEST_EMAIL` | empty | Per-reader. The Readest account email. |
@@ -224,6 +234,10 @@ Grimmory is a supported ebook and audiobook source. You can use it for ebook syn
 | Highlight Sync Interval | `BOOKLORE_ANNOTATION_SYNC_MINUTES` | `15` | Minutes between background Grimmory annotation relay cycles. |
 | Poll Mode | `BOOKLORE_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls Grimmory separately. |
 | Poll Interval | `BOOKLORE_POLL_SECONDS` | `300` | Used when Poll Mode is `custom`. |
+| Wait for Position to Settle | `BOOKLORE_POLL_WAIT_FOR_SETTLE` | `false` | Holds the sync back while your position is still moving between polls, and runs it once it stops. |
+| Grimmory Audiobook Poll Mode | `BOOKLORE_AUDIO_POLL_MODE` | `global` | Listening progress is read separately from ebook progress and has its own poll. `custom` polls Grimmory audiobooks on their own interval. |
+| Grimmory Audiobook Poll Interval (seconds) | `BOOKLORE_AUDIO_POLL_SECONDS` | `300` | Used when the audiobook poll mode is `custom`. |
+| Wait for Position to Settle (audiobooks) | `BOOKLORE_AUDIO_POLL_WAIT_FOR_SETTLE` | `false` | Recommended while listening: holds the sync until playback pauses or stops, instead of writing on every poll. |
 
 Grimmory notes:
 
@@ -278,6 +292,10 @@ BookOrbit is a supported ebook and audiobook source. You can use it for ebook sy
 | Highlight Sync Interval | `BOOKORBIT_ANNOTATION_SYNC_MINUTES` | `15` | Minutes between background BookOrbit annotation relay cycles. |
 | Poll Mode | `BOOKORBIT_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls BookOrbit separately. |
 | Poll Interval | `BOOKORBIT_POLL_SECONDS` | `300` | Used when Poll Mode is `custom`. |
+| Wait for Position to Settle | `BOOKORBIT_POLL_WAIT_FOR_SETTLE` | `false` | Holds the sync back while your position is still moving between polls, and runs it once it stops. |
+| BookOrbit Audiobook Poll Mode | `BOOKORBIT_AUDIO_POLL_MODE` | `global` | Listening progress is read separately from ebook progress and has its own poll. `custom` polls BookOrbit audiobooks on their own interval. |
+| BookOrbit Audiobook Poll Interval (seconds) | `BOOKORBIT_AUDIO_POLL_SECONDS` | `300` | Used when the audiobook poll mode is `custom`. |
+| Wait for Position to Settle (audiobooks) | `BOOKORBIT_AUDIO_POLL_WAIT_FOR_SETTLE` | `false` | Recommended while listening: holds the sync until playback pauses or stops, instead of writing on every poll. |
 
 Optional "Up Next" collection watch — drop a book onto a collection in BookOrbit and the bridge auto-matches it on the next poll:
 
@@ -317,6 +335,7 @@ clients.
 | Collection Name | `KAVITA_COLLECTION_NAME` | `BookBridge` | Per-reader collection that successfully matched books are moved to. |
 | Poll Mode | `KAVITA_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls Kavita separately. |
 | Poll Interval | `KAVITA_POLL_SECONDS` | `300` | Used when Poll Mode is `custom`. |
+| Wait for Position to Settle | `KAVITA_POLL_WAIT_FOR_SETTLE` | `false` | Holds the sync back while your position is still moving between polls, and runs it once it stops. |
 
 Optional "Up Next" collection watch — add an EPUB to a Kavita collection and the
 bridge auto-matches it on the next poll:
@@ -351,8 +370,10 @@ CWA is a supported ebook source and optional Kobo-sync progress source. Use it t
 | Password | `CWA_PASSWORD` | empty | Per-reader. |
 | Kobo Sync Enabled | `CWA_SYNC_ENABLED` | `false` | Turns on reading-progress sync through CWA's Kobo sync protocol. |
 | Kobo Sync Token | `CWA_SYNC_TOKEN` | empty | Per-reader token used for CWA Kobo sync requests. |
+| Write Kobo span bookmarks | `CWA_KOBO_SPAN_SYNC` | `true` | Writes a position marker the device can act on, read from the KEPUB that CWA serves it. Turn it off to send percentage only and leave the device's own bookmark alone. |
 | Kobo Sync Poll Mode | `CWA_SYNC_POLL_MODE` | `global` | `global` uses the main sync cycle. `custom` polls CWA separately. |
 | Kobo Sync Poll Interval | `CWA_SYNC_POLL_SECONDS` | `300` | Used when Kobo Sync Poll Mode is `custom`. |
+| Wait for Position to Settle | `CWA_SYNC_POLL_WAIT_FOR_SETTLE` | `false` | Holds the sync back while your position is still moving between polls, and runs it once it stops. |
 | Use Calibre ABS Identifier | `CALIBRE_USE_ABS_IDENTIFIER` | `false` | Uses Calibre's `audiobookshelf_id` identifier to make suggestion matching authoritative when available. |
 | Calibre Library Path | `CALIBRE_LIBRARY_PATH` | empty | Optional path to the Calibre library containing `metadata.db` for identifier lookup. |
 

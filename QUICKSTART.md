@@ -111,7 +111,7 @@ Then add any optional services you want:
 
 Use the **Test** button on any service section if you want to check a service before saving.
 
-If you are setting up an ebook-only or maintenance-focused install, you can enter `disabled` in the ABS URL or token field instead of connecting Audiobookshelf.
+If you are setting up an ebook-only or maintenance-focused install, switch the **Enable** toggle off on the Audiobookshelf card instead of connecting Audiobookshelf.
 
 If you mounted Storyteller assets, set **Storyteller Assets Path** to `/storyteller` and not `/storyteller/assets`.
 

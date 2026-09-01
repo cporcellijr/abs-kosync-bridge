@@ -54,6 +54,7 @@ The **Account** page is where you manage your own login and reader-specific setu
 
 - **My Integrations** lets you save your own service usernames, passwords, tokens, API keys, and per-user sync toggles. The cards here use the same names and order as **Settings -> Integrations**, so it is always clear which side holds what: Settings has the server connection, your Account has your login.
 - **Connect a KOReader device** walks you through pointing KOReader at the bridge (an editable sync-server address that respects public HTTPS and warns when localhost must be replaced with the server's LAN hostname/IP) and installing the optional Bridge Sync plugin.
+- Your own switch for a service applies only while that service is switched on in **Settings**. If it is switched off there, your switch is greyed out with the reason — and your saved settings come back untouched if it is switched on again.
 - Admins can still manage the same fields for any reader from **Settings -> Users -> (user) -> Integrations**.
 - Shared engine settings, such as service URLs, poll intervals, and daemon behavior, still live in **Settings**.
 - BookFusion can be linked from **My Integrations** with the device-link button; a separate Calibre API key enables uploading local EPUBs to BookFusion.
@@ -126,7 +127,7 @@ The **Settings** page is where you connect your services and adjust how the brid
 
 - Everything in Settings is server-wide; your own logins live in **Account -> My Integrations**, on cards with the same names in the same order.
 - **My Integrations** cards have **Test** buttons so you can check a login before saving; Audiobookshelf and Grimmory library ID fields include **Find IDs** helpers so you can pick from a dropdown instead of pasting blindly.
-- If you want an ebook-only or maintenance-focused setup, you can intentionally turn off Audiobookshelf by entering `disabled` in the ABS URL field.
+- Every integration card has an **Enable** switch, Audiobookshelf included, so an ebook-only or maintenance-focused setup is a matter of switching off what you are not using. Switching a service off here switches it off for everyone on the install.
 - **Save Settings** applies your changes and restarts the app.
 - When the restart finishes, you are sent back to the dashboard.
 
@@ -463,6 +464,25 @@ Stops syncing that book. It does not delete your original media files.
 Clears the stored sync state for a mapping.
 
 If **Regenerate Missing Data on Reset** is enabled, the bridge can also rebuild missing alignment data when needed.
+
+### Library maintenance
+
+**Settings -> System -> Advanced Options** holds a few whole-library actions. All of them
+are safe to run again, and each one reports what it changed when it finishes.
+
+- **Backfill Series Metadata** looks up every book with no series recorded and groups it
+  with the rest of its series. Books that already have a series are left alone.
+- **Re-check All Series** revisits every book, applies series corrections you have made in
+  your library, and drops a series the library no longer reports. It only removes one when
+  the library actually answers, so a service that is offline or not configured leaves your
+  existing series untouched, and it will not trade a volume number it already knows for an
+  unknown one.
+- **Move Audiobooks to BookOrbit** repoints already-matched books from Audiobookshelf audio
+  to the same audiobook in BookOrbit without rebuilding the match, so progress, alignment,
+  highlights, KOReader links and the ebook pairing all stay as they are. A book moves on
+  its own only when the BookOrbit copy has the same running time; duplicates and anything
+  ambiguous are listed for you to choose from, books BookOrbit does not have stay on
+  Audiobookshelf, and **Undo** sends everything back.
 
 ### Logs
 
