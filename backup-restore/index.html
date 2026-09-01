@@ -12,13 +12,13 @@
         <meta name="author" content="cporcellijr">
       
       
-        <link rel="canonical" href="https://cporcellijr.github.io/bookbridge/troubleshooting/">
+        <link rel="canonical" href="https://cporcellijr.github.io/bookbridge/backup-restore/">
       
       
-        <link rel="prev" href="../backup-restore/">
+        <link rel="prev" href="../configuration/">
       
       
-        <link rel="next" href="../changelog/">
+        <link rel="next" href="../troubleshooting/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Troubleshooting - BookBridge</title>
+        <title>Backup & Restore - BookBridge</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#backup-and-restore" class="md-skip">
           Skip to content
         </a>
       
@@ -113,7 +113,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              Backup & Restore
             
           </span>
         </div>
@@ -300,9 +300,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../backup-restore/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -319,11 +321,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../troubleshooting/" class="md-tabs__link">
         
   
   
@@ -511,33 +511,6 @@
       
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../backup-restore/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Backup & Restore
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
     
   
   
@@ -557,7 +530,7 @@
   <span class="md-ellipsis">
     
   
-    Troubleshooting
+    Backup & Restore
   
 
     
@@ -575,7 +548,7 @@
   <span class="md-ellipsis">
     
   
-    Troubleshooting
+    Backup & Restore
   
 
     
@@ -601,170 +574,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#what-to-back-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Issues
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Common Issues">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#do-i-need-storyteller" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Do I need Storyteller?
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#books-are-not-showing-up" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Books are not showing up
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#suggestions-look-stale-or-new-imports-are-missing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Suggestions look stale or new imports are missing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cwa-progress-is-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CWA progress is not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bookfusion-progress-or-highlights-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BookFusion progress or highlights are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#grimmory-or-bookorbit-audiobook-links-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Grimmory or BookOrbit audiobook links are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bookorbit-books-are-not-matching-or-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BookOrbit books are not matching or syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#highlights-or-notes-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Highlights or notes are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#books-are-not-appearing-in-readest" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Books are not appearing in Readest
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#storyteller-transcripts-are-not-found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storyteller transcripts are not found
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#storyteller-transcripts-are-still-rejected" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storyteller transcripts are still rejected
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kosync-split-port-mode-is-not-working" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        KOSync split-port mode is not working
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#transcription-is-taking-too-long" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transcription is taking too long
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#logs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Logs
+        What to back up
       
     </span>
   </a>
@@ -772,10 +585,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gpu-acceleration" class="md-nav__link">
+  <a href="#recommended-full-data-backup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GPU Acceleration
+        Recommended: full /data backup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#online-database-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Online database snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore
       
     </span>
   </a>
@@ -786,6 +621,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -844,170 +706,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#what-to-back-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Issues
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Common Issues">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#do-i-need-storyteller" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Do I need Storyteller?
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#books-are-not-showing-up" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Books are not showing up
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#suggestions-look-stale-or-new-imports-are-missing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Suggestions look stale or new imports are missing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cwa-progress-is-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        CWA progress is not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bookfusion-progress-or-highlights-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BookFusion progress or highlights are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#grimmory-or-bookorbit-audiobook-links-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Grimmory or BookOrbit audiobook links are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bookorbit-books-are-not-matching-or-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BookOrbit books are not matching or syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#highlights-or-notes-are-not-syncing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Highlights or notes are not syncing
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#books-are-not-appearing-in-readest" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Books are not appearing in Readest
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#storyteller-transcripts-are-not-found" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storyteller transcripts are not found
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#storyteller-transcripts-are-still-rejected" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storyteller transcripts are still rejected
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#kosync-split-port-mode-is-not-working" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        KOSync split-port mode is not working
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#transcription-is-taking-too-long" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transcription is taking too long
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#logs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Logs
+        What to back up
       
     </span>
   </a>
@@ -1015,10 +717,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#gpu-acceleration" class="md-nav__link">
+  <a href="#recommended-full-data-backup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GPU Acceleration
+        Recommended: full /data backup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#online-database-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Online database snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore
       
     </span>
   </a>
@@ -1045,126 +769,64 @@
   
 
 
-<h1 id="troubleshooting">Troubleshooting</h1>
-<h2 id="common-issues">Common Issues</h2>
-<h3 id="do-i-need-storyteller">Do I need Storyteller?</h3>
-<p>No. Storyteller is an optional integration. The bridge does audio ↔ ebook alignment itself
-using built-in Whisper transcription (or the EPUB's SMIL data), so cross-format sync works
-with just an audio source and an ebook client. Add Storyteller only if you actually use the
-Storyteller read-along app — the bridge will then sync its position and use its transcripts
-as a bonus alignment source.</p>
-<h3 id="books-are-not-showing-up">Books are not showing up</h3>
+<h1 id="backup-and-restore">Backup and Restore</h1>
+<p>BookBridge keeps its own persistent state under <code>DATA_DIR</code> (<code>/data</code> in Docker). With the example Compose file, that is the host's <code>./data</code> directory.</p>
+<h2 id="what-to-back-up">What to back up</h2>
+<p>For disaster recovery, back up the whole <code>DATA_DIR</code>, not only <code>database.db</code>.</p>
 <ul>
-<li>Make sure your <code>/books</code> volume is mounted correctly in <code>docker-compose.yml</code>.</li>
-<li>Check file permissions for the user running the container.</li>
-<li>If the missing books should come from Grimmory, run <strong>Settings -&gt; System -&gt; Advanced -&gt; Refresh Grimmory Cache</strong>.</li>
-<li>If the missing books should come from BookOrbit, confirm BookOrbit is enabled, test the connection, and retry the matching flow.</li>
-<li>If the missing books should come from CWA, confirm CWA is enabled, test the connection, and make sure the book is visible in Calibre-Web Automated.</li>
+<li><code>database.db</code> stores mappings, sync state, settings, users, statistics, and computed book alignments.</li>
+<li><code>secret.key</code> is the default key used to decrypt stored credentials.</li>
+<li><code>audio_cache/</code> keeps completed local Whisper transcript data (<code>_progress.json</code>) after a successful transcription so a later re-alignment can reuse it instead of running Whisper again.</li>
+<li>The remaining files under <code>/data</code> are caches or application state that may save re-download or rebuild work after a restore.</li>
 </ul>
-<h3 id="suggestions-look-stale-or-new-imports-are-missing">Suggestions look stale or new imports are missing</h3>
-<ul>
-<li>A normal <strong>Scan Library</strong> run reuses cached results on purpose.</li>
-<li>Use <strong>Full Refresh</strong> after large imports, removals, or metadata cleanup.</li>
-<li>If Grimmory titles are missing from Suggestions, refresh the Grimmory cache first.</li>
-<li>If BookOrbit titles are missing, confirm BookOrbit is enabled and reachable, then retry the scan.</li>
-<li>If CWA titles are missing, confirm CWA is enabled and reachable, then retry the scan.</li>
-</ul>
-<h3 id="cwa-progress-is-not-syncing">CWA progress is not syncing</h3>
-<ul>
-<li>Confirm <strong>CWA</strong> is enabled and the CWA server URL is reachable from the bridge.</li>
-<li>Enable <strong>Kobo Sync</strong> in the CWA integration and enter the correct Kobo sync token for that reader.</li>
-<li>If using custom polling, check the CWA sync poll interval and make sure it is not set higher than expected.</li>
-<li>Confirm the book is linked to a CWA ebook entry; CWA progress only appears for books the bridge can resolve through CWA.</li>
-</ul>
-<h3 id="bookfusion-progress-or-highlights-are-not-syncing">BookFusion progress or highlights are not syncing</h3>
-<ul>
-<li>Open <strong>Account -&gt; My Integrations</strong> and confirm BookFusion is linked and enabled for that reader.</li>
-<li>If you entered a token manually, BookFusion API keys are available from the <a href="https://www.bookfusion.com/integrations/calibre">BookFusion Calibre integration page</a>.</li>
-<li>Confirm the book is linked to a BookFusion book ID. If the book only exists locally, the dashboard link flow can <strong>Upload to BookFusion</strong> — this needs the reader's Calibre API key in My Integrations.</li>
-<li>For highlights, also enable <strong>BookFusion -&gt; Highlight Sync</strong> for that reader and keep the current <strong>Bridge Sync</strong> KOReader plugin installed on devices that should exchange annotations.</li>
-<li>If using custom polling, check the BookFusion poll interval and make sure it is not set higher than expected.</li>
-</ul>
-<h3 id="grimmory-or-bookorbit-audiobook-links-are-not-syncing">Grimmory or BookOrbit audiobook links are not syncing</h3>
-<ul>
-<li>Confirm the source is enabled and the audiobook still exists in the selected Grimmory or BookOrbit library.</li>
-<li>For Grimmory, run <strong>Refresh Grimmory Cache</strong> after moving, rescanning, or replacing items.</li>
-<li>For BookOrbit, confirm the item is still visible in BookOrbit and retry the matching or sync flow.</li>
-<li>If the old source item was deleted and recreated with a new ID, rematch that book.</li>
-</ul>
-<h3 id="bookorbit-books-are-not-matching-or-syncing">BookOrbit books are not matching or syncing</h3>
-<ul>
-<li>Confirm <strong>BookOrbit</strong> is enabled and configured in Settings, and use the <strong>Test</strong> button to check the connection.</li>
-<li>If a book exists in BookOrbit but will not link, make sure it is visible in BookOrbit and that the bridge can reach the BookOrbit server.</li>
-<li>If you switched from Grimmory to BookOrbit, you do not need to rematch — run <code>scripts/migrate_grimmory_to_bookorbit.py</code> (see the <a href="../configuration/#bookorbit">Configuration Guide</a>).</li>
-</ul>
-<h3 id="highlights-or-notes-are-not-syncing">Highlights or notes are not syncing</h3>
-<ul>
-<li>Update the <strong>Bridge Sync</strong> KOReader plugin to the current release or newer on every KOReader device that should sync annotations.</li>
-<li>Plain KOReader/KOSync progress sync does not sync annotations. In KOReader, use <strong>Tools -&gt; Bridge Sync -&gt; Sync Highlights</strong> or <strong>Sweep All Highlights</strong>.</li>
-<li>Make sure <strong>Highlight Sync</strong> is enabled on the <strong>Settings -&gt; Integrations -&gt; KOReader / KoSync</strong> card.</li>
-<li>For Grimmory web-reader annotations, enable <strong>Highlight Sync</strong> in that reader's Grimmory integration.</li>
-<li>For BookOrbit web-reader highlights, fill in the BookOrbit KOReader sync username/password in that reader's Integrations and make sure the owner matches the BookOrbit user.</li>
-<li>For BookFusion, enable <strong>BookFusion -&gt; Highlight Sync</strong> in that reader's Integrations and confirm the book is linked to BookFusion.</li>
-<li>For Readest, enable <strong>Readest -&gt; Highlight Sync</strong> and enter that reader's Readest email/password.</li>
-<li>For Hardcover, enable <strong>Hardcover -&gt; Highlight Sync</strong> and enter that reader's Hardcover API token.</li>
-</ul>
-<h3 id="books-are-not-appearing-in-readest">Books are not appearing in Readest</h3>
-<ul>
-<li>Uploading is off by default. Enable <strong>Upload matched books to Readest</strong> and/or <strong>Upload
-  books you are currently reading</strong> in that reader's <strong>Account -&gt; My Integrations</strong>.</li>
-<li>The currently-reading sweep only sends books with a reading position above 0% and below
-  the completion threshold. A book you have not opened anywhere will not be sent by it —
-  match it with <strong>Upload matched books</strong> enabled, or start reading it.</li>
-<li>Books already in that Readest account are skipped. Check the group named by <strong>Group name
-  for uploaded books</strong> (default <code>BookBridge</code>).</li>
-<li>The sweep shares a timer with the annotation syncs. If every one of those intervals is
-  <code>0</code>, set <strong>Upload: sweep interval (minutes)</strong> to a non-zero value so the timer runs.</li>
-<li>Only EPUB files are uploaded.</li>
-<li>If the Readest account is out of storage the log says so and uploading stops. Readest's
-  free plan includes 500 MB; free space in Readest or lower <strong>Upload: max books per run</strong>.</li>
-</ul>
-<h3 id="storyteller-transcripts-are-not-found">Storyteller transcripts are not found</h3>
-<ul>
-<li>Verify the Docker volume is mounted as host Storyteller assets -&gt; container <code>/storyteller/assets</code>.</li>
-<li>In Settings, set <strong>Storyteller Assets Path</strong> to <code>/storyteller</code>, not <code>/storyteller/assets</code>.</li>
-<li>Confirm the expected structure exists inside the container: <code>/storyteller/assets/{title}/transcriptions/*.json</code>.</li>
-</ul>
-<h3 id="storyteller-transcripts-are-still-rejected">Storyteller transcripts are still rejected</h3>
-<ul>
-<li>The bridge now accepts more Storyteller filename layouts, but the files still need real Storyteller timeline data.</li>
-<li>Each chapter JSON should contain <code>wordTimeline</code> or compatible Storyteller timeline data.</li>
-<li>If the filenames are right but the data format is wrong, the bridge will skip those files and fall back to SMIL or Whisper.</li>
-</ul>
-<h3 id="kosync-split-port-mode-is-not-working">KOSync split-port mode is not working</h3>
-<ul>
-<li>If you set <code>KOSYNC_PORT</code>, you also need to map that same port in Docker.</li>
-<li>Example:</li>
-</ul>
-<div class="highlight"><pre><span></span><code><span class="nt">ports</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"8080:5757"</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"5758:5758"</span>
+<p>The <code>/books</code> mount is library input, not BookBridge state, and should follow your normal library backup policy. The same applies to optional Storyteller or Calibre mounts and to your Compose/environment configuration.</p>
+<blockquote>
+<p>[!IMPORTANT]
+A backup that contains both <code>database.db</code> and <code>secret.key</code> can decrypt BookBridge's stored credentials. Protect it like the server itself.</p>
+</blockquote>
+<p>If you use <code>BOOKBRIDGE_SECRET_KEY</code> or <code>BOOKBRIDGE_SECRET_KEY_FILE</code>, treat that key as separately managed and preserve the exact value or file outside the normal <code>/data</code> backup.</p>
+<h2 id="recommended-full-data-backup">Recommended: full <code>/data</code> backup</h2>
+<p>The safest simple backup is a filesystem copy while BookBridge is stopped. This keeps the SQLite database, credential key, completed transcript cache, and the rest of the data directory at one point in time.</p>
+<p>For the bind mount used by the example Compose file:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>stop
+tar<span class="w"> </span>-czf<span class="w"> </span><span class="s2">"bookbridge-data-</span><span class="k">$(</span>date<span class="w"> </span>+%Y%m%d_%H%M%S<span class="k">)</span><span class="s2">.tar.gz"</span><span class="w"> </span>--exclude<span class="o">=</span>./backups<span class="w"> </span>-C<span class="w"> </span>./data<span class="w"> </span>.
+docker<span class="w"> </span>compose<span class="w"> </span>start
 </code></pre></div>
-<h3 id="transcription-is-taking-too-long">Transcription is taking too long</h3>
-<ul>
-<li>Use a smaller local Whisper model such as <code>tiny</code>.</li>
-<li>If you have an NVIDIA GPU, enable GPU support as described in the <a href="../configuration/#gpu-support-optional">Configuration Guide</a>.</li>
-<li>If Storyteller transcript assets are available, configure them so the bridge can skip Whisper entirely for those books.</li>
-</ul>
-<hr />
-<h2 id="logs">Logs</h2>
-<p>You can inspect logs in the web UI or from the terminal:</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>-f
+<p><code>./backups</code> is excluded because the online snapshots below are written inside <code>DATA_DIR</code>; without the exclusion each archive would also carry every previous snapshot. If you use a named volume or a different host path, snapshot or archive that volume instead. Store the resulting archive somewhere outside the BookBridge data disk; a second copy inside <code>/data</code> does not protect against disk loss.</p>
+<h2 id="online-database-snapshot">Online database snapshot</h2>
+<p>For a quick database snapshot without stopping BookBridge, the image includes a small helper. <code>exec</code> needs the service name from your own <code>docker-compose.yml</code> — <code>abs-kosync</code> in the example Compose file, but yours may differ:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>abs-kosync<span class="w"> </span>/app/scripts/backup_db.sh
 </code></pre></div>
-<p>Useful places to look:</p>
-<ul>
-<li>Match and Suggestions actions</li>
-<li>Storyteller transcript ingest</li>
-<li>Library refreshes</li>
-<li>Background job failures</li>
-</ul>
-<hr />
-<h2 id="gpu-acceleration">GPU Acceleration</h2>
-<p>See the <strong><a href="../configuration/#gpu-support-optional">Configuration Guide</a></strong> for NVIDIA GPU setup instructions.</p>
+<p>The helper uses SQLite's online backup API instead of copying the live database file directly, so committed data in either WAL or rollback-journal mode is included consistently. It also runs <code>PRAGMA integrity_check</code> on the snapshot before publishing it.</p>
+<p>By default it writes:</p>
+<div class="highlight"><pre><span></span><code>/data/backups/bookbridge_YYYYMMDD_HHMMSS.db
+/data/backups/bookbridge_YYYYMMDD_HHMMSS.secret.key
+</code></pre></div>
+<p>Snapshots taken before the BookBridge rename are called <code>abs_kosync_&lt;timestamp&gt;.db</code>. They are still valid backups and restore by exactly the same steps below — nothing renames or removes them, so a backup directory may hold both prefixes.</p>
+<p>The key file is created only when BookBridge is using the default <code>DATA_DIR/secret.key</code>. Explicit <code>BOOKBRIDGE_SECRET_KEY</code> and <code>BOOKBRIDGE_SECRET_KEY_FILE</code> overrides are deliberately not bundled.</p>
+<blockquote>
+<p>[!NOTE]
+This helper is a database snapshot, not a full disaster-recovery backup. It does not include <code>audio_cache/</code>, cached EPUBs, external library mounts, or your Compose/environment configuration. Copy snapshots off the BookBridge data disk if you want them to survive host or disk failure.</p>
+</blockquote>
+<p>The database contains the computed alignment maps, so an ordinary database restore keeps existing book alignments. A full <code>/data</code> backup also preserves the completed Whisper transcript cache, which is what lets BookBridge rebuild an alignment later without transcribing the audiobook again.</p>
+<h2 id="restore">Restore</h2>
+<p>Stop BookBridge before replacing its data. For the example bind mount, restore a full archive into an empty <code>./data</code> directory; keeping the old directory alongside it gives you an easy rollback if the restore is wrong.</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>stop
+mv<span class="w"> </span>./data<span class="w"> </span>./data.before-restore
+mkdir<span class="w"> </span>./data
+tar<span class="w"> </span>-xzf<span class="w"> </span>bookbridge-data-YYYYMMDD_HHMMSS.tar.gz<span class="w"> </span>-C<span class="w"> </span>./data
+docker<span class="w"> </span>compose<span class="w"> </span>start
+</code></pre></div>
+<p>If you use an external credential key, restore the same <code>BOOKBRIDGE_SECRET_KEY</code> value or <code>BOOKBRIDGE_SECRET_KEY_FILE</code> before starting BookBridge.</p>
+<p>For a database-only snapshot, stop BookBridge, remove stale SQLite sidecars, then restore the database and matching default key:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>stop
+rm<span class="w"> </span>-f<span class="w"> </span>./data/database.db-wal<span class="w"> </span>./data/database.db-shm<span class="w"> </span>./data/database.db-journal
+cp<span class="w"> </span>./data/backups/bookbridge_YYYYMMDD_HHMMSS.db<span class="w"> </span>./data/database.db
+cp<span class="w"> </span>./data/backups/bookbridge_YYYYMMDD_HHMMSS.secret.key<span class="w"> </span>./data/secret.key
+chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>./data/secret.key
+docker<span class="w"> </span>compose<span class="w"> </span>start
+</code></pre></div>
+<p>Skip the <code>secret.key</code> copy when the snapshot did not contain one because you manage the key externally. Restore into the same BookBridge version when possible; newer versions can migrate an older database forward on startup, while deliberately restoring a newer database into an older BookBridge build is not supported.</p>
 
 
 

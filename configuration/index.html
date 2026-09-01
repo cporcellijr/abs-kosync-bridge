@@ -18,7 +18,7 @@
         <link rel="prev" href="../user-guide/">
       
       
-        <link rel="next" href="../troubleshooting/">
+        <link rel="next" href="../backup-restore/">
       
       
         
@@ -292,6 +292,25 @@
     
   
   Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../backup-restore/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Backup & Restore
 
       </a>
     </li>
@@ -907,6 +926,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1427,6 +1473,13 @@ the same effect as losing <code>secret.key</code>.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"5758:5758"</span>
 </code></pre></div>
 <h3 id="integrations">Integrations</h3>
+<p>Every integration card has an <strong>Enable</strong> switch, and that switch is server-wide: a
+service switched off in Settings is off for everyone on the install. Readers still
+have their own switch for the services they hold a login for, under <strong>Account -&gt; My
+Integrations</strong>, but it applies only while the service is switched on server-wide. When
+it is off, their switch is shown greyed out with the reason instead of letting them
+turn on something that will not work. Nobody's personal choice is lost — switching the
+service back on restores everyone's settings exactly as they were.</p>
 <h4 id="audiobookshelf">Audiobookshelf</h4>
 <p>Audiobookshelf remains the default audiobook source when a mapping is not explicitly using Grimmory or BookOrbit audio.</p>
 <table>
@@ -1440,10 +1493,16 @@ the same effect as losing <code>secret.key</code>.</p>
 </thead>
 <tbody>
 <tr>
+<td>Enable</td>
+<td><code>ABS_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Turns Audiobookshelf on or off. Server-wide, with a per-reader switch in <strong>Account -&gt; My Integrations</strong>.</td>
+</tr>
+<tr>
 <td>Server URL</td>
 <td><code>ABS_SERVER</code></td>
 <td>empty</td>
-<td>Required (or <code>disabled</code> for an ebook-only install). Server-wide.</td>
+<td>Required unless Audiobookshelf is switched off. Server-wide.</td>
 </tr>
 <tr>
 <td>API Token</td>
@@ -1475,12 +1534,32 @@ the same effect as losing <code>secret.key</code>.</p>
 <td><code>false</code></td>
 <td>In the UI this is a checkbox. Direct env usage can also be set to a library ID string.</td>
 </tr>
+<tr>
+<td>Enable ABS Ebook Sync</td>
+<td><code>SYNC_ABS_EBOOK</code></td>
+<td><code>false</code></td>
+<td>Turns on bidirectional reading-progress sync with the ebook file attached to an Audiobookshelf item.</td>
+</tr>
+<tr>
+<td>ABS Ebook Position Format</td>
+<td><code>ABS_EBOOK_LOCATOR_FORMAT</code></td>
+<td><code>cfi</code></td>
+<td><code>cfi</code>, <code>readium</code>, or <code>auto</code>. See the note below.</td>
+</tr>
 </tbody>
 </table>
 <p>Audiobookshelf notes:</p>
 <ul>
 <li>Use <strong>Find IDs</strong> next to <strong>Library ID</strong> in Settings to load your available ABS libraries and fill the field from a dropdown.</li>
-<li>If you want to run without Audiobookshelf for a while, enter <code>disabled</code> in the ABS URL or token field to intentionally turn ABS off.</li>
+<li>To run without Audiobookshelf, switch <strong>Enable</strong> off on the Audiobookshelf card. A reader who wants to opt out on their own account can switch it off under <strong>Account -&gt; My Integrations</strong> instead, without affecting anyone else. The older workaround of entering <code>disabled</code> in the ABS URL or token field still works and is still honoured, but the switch is the supported way now.</li>
+<li><strong>ABS ebook sync</strong> (<code>SYNC_ABS_EBOOK</code>) treats the ebook attached to an Audiobookshelf item as a full sync
+  client in its own right, reading and writing its position like any other ebook source. Both of these settings
+  live in the Settings UI under <strong>Sync Behavior</strong>, not under Advanced.</li>
+<li><strong>Position format.</strong> Audiobookshelf stores one position field that every reader shares, but readers disagree
+  on how to write it. <strong>CFI</strong> is the safe default, and is what the official Audiobookshelf apps and the web
+  reader read and write. <strong>Readium locator</strong> is for readers that speak Readium JSON. <strong>Auto</strong> mirrors whichever
+  format your reader last wrote. If a mixed set of readers is opening books at the wrong place, or at the very
+  start, this setting is the first thing to check.</li>
 </ul>
 <h4 id="koreader-kosync">KOReader / KoSync</h4>
 <p>The bridge <strong>is</strong> a KoSync server — KOReader devices sync directly with it. Device onboarding
@@ -1609,7 +1688,8 @@ the same effect as losing <code>secret.key</code>.</p>
 <li>BookFusion matching uses linked BookFusion IDs. When a book is not linked, the dashboard link flow offers <strong>Upload to BookFusion</strong> if the book has a local EPUB and the reader has a Calibre API key configured.</li>
 </ul>
 <h4 id="readest">Readest</h4>
-<p>Readest can participate in highlight and note relay through Readest cloud sync. It is not a progress sync source.</p>
+<p>Readest can participate in highlight and note relay through Readest cloud sync, and can
+receive copies of your books. It is not a progress sync source.</p>
 <table>
 <thead>
 <tr>
@@ -1620,6 +1700,12 @@ the same effect as losing <code>secret.key</code>.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>Enable</td>
+<td><code>READEST_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Server-wide switch for everything Readest does — the highlight relay and both uploads. Off means off for every reader.</td>
+</tr>
 <tr>
 <td>Highlight Sync</td>
 <td><code>READEST_ANNOTATION_SYNC</code></td>
@@ -1656,6 +1742,36 @@ the same effect as losing <code>secret.key</code>.</p>
 <td>empty</td>
 <td>Optional override for self-hosted Readest.</td>
 </tr>
+<tr>
+<td>Upload Matched Books</td>
+<td><code>READEST_UPLOAD_ON_MATCH</code></td>
+<td><code>false</code></td>
+<td>Per-reader. Uploads a book to Readest at the moment you match it.</td>
+</tr>
+<tr>
+<td>Upload Currently Reading</td>
+<td><code>READEST_UPLOAD_READING</code></td>
+<td><code>false</code></td>
+<td>Per-reader. Timed sweep that uploads books you are part-way through.</td>
+</tr>
+<tr>
+<td>Group Name</td>
+<td><code>READEST_GROUP_NAME</code></td>
+<td><code>BookBridge</code></td>
+<td>Per-reader. The Readest group uploaded books are filed into.</td>
+</tr>
+<tr>
+<td>Upload Max Per Run</td>
+<td><code>READEST_UPLOAD_MAX_PER_RUN</code></td>
+<td><code>5</code></td>
+<td>Global. Caps uploads per sweep so a first run cannot flood an account. <code>0</code> pauses uploading.</td>
+</tr>
+<tr>
+<td>Upload Sweep Interval</td>
+<td><code>READEST_UPLOAD_SWEEP_MINUTES</code></td>
+<td><code>60</code></td>
+<td>Global. How often to look for newly started books. Shares a daemon with the annotation syncs, so the fastest of those intervals wins. <code>0</code> removes it from that schedule.</td>
+</tr>
 </tbody>
 </table>
 <p>Readest notes:</p>
@@ -1663,6 +1779,15 @@ the same effect as losing <code>secret.key</code>.</p>
 <li>Enter the Readest email and password under <strong>Account -&gt; My Integrations</strong> for each reader that wants Readest highlights.</li>
 <li>Tokens are cached and refreshed by the bridge after login.</li>
 <li>Readest sync depends on the same book identity being available to Readest and the bridge.</li>
+<li>Uploads are off by default and set per reader. The two upload switches are independent:
+  you can upload on match, on the currently-reading sweep, or both.</li>
+<li>The sweep only considers books with a reading position above 0% and below
+  <code>SYNC_COMPLETION_THRESHOLD</code>, and skips any book already present in that Readest account.
+  This matters because Readest's free plan includes 500 MB, which a full library will not fit.</li>
+<li>Uploading never overwrites your Readest reading position, reading status, or cover.
+  If you move an uploaded book into a different group inside Readest, the bridge leaves it there.</li>
+<li>Only EPUB files are uploaded. If the account runs out of storage, the bridge logs the
+  quota and stops uploading rather than failing quietly.</li>
 </ul>
 <h4 id="storyteller">Storyteller</h4>
 <p>Storyteller is <strong>optional</strong> — the bridge does its own audio ↔ text alignment with built-in
@@ -1713,7 +1838,7 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 <td>Library Path</td>
 <td><code>STORYTELLER_LIBRARY_DIR</code></td>
 <td><code>/storyteller_library</code></td>
-<td>Optional local Storyteller library path used for fallback/download helpers. Forge uploads go through the API.</td>
+<td>Optional local Storyteller library path used for fallback/download helpers. Storyteller edition uploads go through the API.</td>
 </tr>
 <tr>
 <td>Assets Path</td>
@@ -1743,7 +1868,7 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 </table>
 <p>Storyteller notes:</p>
 <ul>
-<li>Forge imports use the Storyteller REST/TUS API directly. A Storyteller library mount is optional unless you want local fallback access to generated artifacts.</li>
+<li>Storyteller edition uploads use the Storyteller REST/TUS API directly. A Storyteller library mount is optional unless you want local fallback access to generated artifacts.</li>
 <li>If you mount <code>/path/to/storyteller/assets:/storyteller/assets</code>, set <strong>Storyteller Assets Path</strong> to <code>/storyteller</code>.</li>
 <li>Storyteller timing data stays the preferred alignment source whenever valid transcript assets are available.</li>
 <li><strong>Settings -&gt; System -&gt; Advanced -&gt; Storyteller Backfill</strong> rechecks existing Storyteller-linked books and rebuilds their alignment data without rerunning Whisper.</li>
@@ -1826,11 +1951,35 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 <td><code>300</code></td>
 <td>Used when Poll Mode is <code>custom</code>.</td>
 </tr>
+<tr>
+<td>Wait for Position to Settle</td>
+<td><code>BOOKLORE_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Holds the sync back while your position is still moving between polls, and runs it once it stops.</td>
+</tr>
+<tr>
+<td>Grimmory Audiobook Poll Mode</td>
+<td><code>BOOKLORE_AUDIO_POLL_MODE</code></td>
+<td><code>global</code></td>
+<td>Listening progress is read separately from ebook progress and has its own poll. <code>custom</code> polls Grimmory audiobooks on their own interval.</td>
+</tr>
+<tr>
+<td>Grimmory Audiobook Poll Interval (seconds)</td>
+<td><code>BOOKLORE_AUDIO_POLL_SECONDS</code></td>
+<td><code>300</code></td>
+<td>Used when the audiobook poll mode is <code>custom</code>.</td>
+</tr>
+<tr>
+<td>Wait for Position to Settle (audiobooks)</td>
+<td><code>BOOKLORE_AUDIO_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Recommended while listening: holds the sync until playback pauses or stops, instead of writing on every poll.</td>
+</tr>
 </tbody>
 </table>
 <p>Grimmory notes:</p>
 <ul>
-<li>Match, Batch Match, Suggestions, and Forge can now use <strong>Grimmory audiobooks</strong> as the audio source.</li>
+<li>Add / Update Book, the match queue, and Suggestions can all use <strong>Grimmory audiobooks</strong> as the audio source.</li>
 <li>The dashboard shows <strong>BL Audio</strong> progress when a mapping is driven by Grimmory audio.</li>
 <li>When <strong>Record Reading Sessions</strong> is enabled, Grimmory gets session updates as you make progress.</li>
 <li>Enable <strong>Highlight Sync</strong> in each reader's Grimmory integration if you want Grimmory web-reader highlights and notes to round-trip through the bridge.</li>
@@ -2013,6 +2162,30 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 <td><code>300</code></td>
 <td>Used when Poll Mode is <code>custom</code>.</td>
 </tr>
+<tr>
+<td>Wait for Position to Settle</td>
+<td><code>BOOKORBIT_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Holds the sync back while your position is still moving between polls, and runs it once it stops.</td>
+</tr>
+<tr>
+<td>BookOrbit Audiobook Poll Mode</td>
+<td><code>BOOKORBIT_AUDIO_POLL_MODE</code></td>
+<td><code>global</code></td>
+<td>Listening progress is read separately from ebook progress and has its own poll. <code>custom</code> polls BookOrbit audiobooks on their own interval.</td>
+</tr>
+<tr>
+<td>BookOrbit Audiobook Poll Interval (seconds)</td>
+<td><code>BOOKORBIT_AUDIO_POLL_SECONDS</code></td>
+<td><code>300</code></td>
+<td>Used when the audiobook poll mode is <code>custom</code>.</td>
+</tr>
+<tr>
+<td>Wait for Position to Settle (audiobooks)</td>
+<td><code>BOOKORBIT_AUDIO_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Recommended while listening: holds the sync until playback pauses or stops, instead of writing on every poll.</td>
+</tr>
 </tbody>
 </table>
 <p>Optional "Up Next" collection watch — drop a book onto a collection in BookOrbit and the bridge auto-matches it on the next poll:</p>
@@ -2054,7 +2227,7 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 </table>
 <p>BookOrbit notes:</p>
 <ul>
-<li>BookOrbit is available across Match, Batch Match, Suggestions, Forge, and the dashboard. Pick it as the ebook source, the audio source, or both when you create a mapping.</li>
+<li>BookOrbit is available across Add / Update Book, the match queue, Suggestions, and the dashboard. Pick it as the ebook source, the audio source, or both when you create a mapping.</li>
 <li>Use the <strong>Test</strong> button in Settings to check the connection before saving.</li>
 <li>To sync BookOrbit web-reader highlights through the bridge, fill in the BookOrbit KOReader sync username/password in each reader's Integrations. BookBridge only relays annotations when ownership is clear.</li>
 <li>
@@ -2065,7 +2238,7 @@ as an alignment source. The bridge talks to Storyteller through the REST API onl
 </ul>
 <h4 id="kavita">Kavita</h4>
 <p>Kavita is a supported EPUB source and bidirectional reading-progress client. It can
-provide books to Match, Batch Match, Suggestions, Forge, managed KOReader devices,
+provide books to Add / Update Book, the match queue, Suggestions, managed KOReader devices,
 and ebook-only mappings. BookBridge uses Kavita's native KOReader progress endpoint,
 so the same Kavita position is visible in its web reader and other compatible
 clients.</p>
@@ -2126,6 +2299,12 @@ clients.</p>
 <td><code>KAVITA_POLL_SECONDS</code></td>
 <td><code>300</code></td>
 <td>Used when Poll Mode is <code>custom</code>.</td>
+</tr>
+<tr>
+<td>Wait for Position to Settle</td>
+<td><code>KAVITA_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Holds the sync back while your position is still moving between polls, and runs it once it stops.</td>
 </tr>
 </tbody>
 </table>
@@ -2227,6 +2406,12 @@ bridge auto-matches it on the next poll:</p>
 <td>Per-reader token used for CWA Kobo sync requests.</td>
 </tr>
 <tr>
+<td>Write Kobo span bookmarks</td>
+<td><code>CWA_KOBO_SPAN_SYNC</code></td>
+<td><code>true</code></td>
+<td>Writes a position marker the device can act on, read from the KEPUB that CWA serves it. Turn it off to send percentage only and leave the device's own bookmark alone.</td>
+</tr>
+<tr>
 <td>Kobo Sync Poll Mode</td>
 <td><code>CWA_SYNC_POLL_MODE</code></td>
 <td><code>global</code></td>
@@ -2237,6 +2422,12 @@ bridge auto-matches it on the next poll:</p>
 <td><code>CWA_SYNC_POLL_SECONDS</code></td>
 <td><code>300</code></td>
 <td>Used when Kobo Sync Poll Mode is <code>custom</code>.</td>
+</tr>
+<tr>
+<td>Wait for Position to Settle</td>
+<td><code>CWA_SYNC_POLL_WAIT_FOR_SETTLE</code></td>
+<td><code>false</code></td>
+<td>Holds the sync back while your position is still moving between polls, and runs it once it stops.</td>
 </tr>
 <tr>
 <td>Use Calibre ABS Identifier</td>
@@ -2254,7 +2445,7 @@ bridge auto-matches it on the next poll:</p>
 </table>
 <p>CWA notes:</p>
 <ul>
-<li>CWA appears as a standard ebook source in Add / Update Book, Batch Match, Suggestions, and Forge.</li>
+<li>CWA appears as a standard ebook source in Add / Update Book, the match queue, and Suggestions.</li>
 <li>Kobo sync lets CWA-sourced ebook progress participate alongside KOReader, Grimmory, BookOrbit, Storyteller, and ABS ebook progress.</li>
 <li>The CWA username/password and Kobo sync token are per-reader integration credentials.</li>
 <li>If you use the Audiobookshelf Calibre plugin, the bridge can read the <code>audiobookshelf_id</code> identifier from Calibre metadata or CWA as a fallback to avoid fuzzy matching already-linked books.</li>
@@ -2793,12 +2984,6 @@ If you use Storyteller, its transcript assets are preferred over SMIL and Whispe
 </tr>
 </thead>
 <tbody>
-<tr>
-<td>Sync ABS Ebook</td>
-<td><code>SYNC_ABS_EBOOK</code></td>
-<td><code>false</code></td>
-<td>Also syncs to the ABS ebook item when present.</td>
-</tr>
 <tr>
 <td>XPath Fallback</td>
 <td><code>XPATH_FALLBACK_TO_PREVIOUS_SEGMENT</code></td>

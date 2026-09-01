@@ -304,6 +304,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="../backup-restore/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Backup & Restore
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="../troubleshooting/" class="md-tabs__link">
         
   
@@ -725,6 +744,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../troubleshooting/" class="md-nav__link">
         
   
@@ -1015,16 +1061,12 @@
 <p>Common starting points:</p>
 <ul>
 <li><strong>Audiobookshelf + KOReader</strong> — the classic audiobook ↔ ebook pairing</li>
-<li><strong>Ebook-only</strong> — KOReader, BookFusion, Grimmory, BookOrbit, or CWA in any combination, with Audiobookshelf intentionally disabled</li>
+<li><strong>Ebook-only</strong> — KOReader, BookFusion, Grimmory, BookOrbit, or CWA in any combination, with Audiobookshelf switched off</li>
 </ul>
-<p>Everything else — Storyteller, Hardcover, StoryGraph, Readest, Telegram, AI assist — is optional and can be added later from the Settings UI.</p>
-<div class="admonition note">
-<p class="admonition-title">Storyteller is optional</p>
-<p>You do <strong>not</strong> need Storyteller for audio ↔ ebook sync. The bridge aligns audio and text itself using built-in Whisper transcription (or the EPUB's SMIL data). Add Storyteller only if you actually use the Storyteller read-along app.</p>
-</div>
+<p>Everything else — Storyteller, Hardcover, StoryGraph, Readest, Telegram, AI assist — is optional and can be added later from the Settings UI. BookBridge aligns audio and text on its own, using built-in Whisper transcription and the EPUB's own timing data, so an audiobook and an ebook stay in step without any of them.</p>
 <hr />
 <h2 id="step-1-gather-your-abs-details">Step 1: Gather your ABS details</h2>
-<p>Setting up ebook-only? Skip this step — you will enter <code>disabled</code> for Audiobookshelf later.</p>
+<p>Setting up ebook-only? Skip this step — you will switch Audiobookshelf off later.</p>
 <h3 id="audiobookshelf-api-token">Audiobookshelf API token</h3>
 <ol>
 <li>Log into Audiobookshelf.</li>
@@ -1088,7 +1130,7 @@ mkdir<span class="w"> </span>data
 <p class="admonition-title">Optional Integrations</p>
 <p>It is usually easiest to start with the minimal compose file above and finish configuration in the Web UI.</p>
 <p>If you enable Grimmory or BookOrbit, the bridge can use them for ebook matching and audiobook sources. If you enable CWA, the bridge can use it as an ebook source and, when Kobo sync is enabled, as a reading-progress participant.</p>
-<p>Forge uploads directly to Storyteller over the API, so a Storyteller library mount is not required for normal Forge imports.</p>
+<p>Storyteller editions upload directly to Storyteller over the API, so a Storyteller library mount is not required for normal imports.</p>
 <p>If you mount Storyteller assets at <code>/storyteller/assets</code>, set <strong>Storyteller Assets Path</strong> in Settings to <code>/storyteller</code>.
 The assets path can be configured entirely in the UI; <code>STORYTELLER_ASSETS_DIR</code> is optional.</p>
 </div>
@@ -1108,7 +1150,7 @@ same names, in the same order.</p>
 <ol>
 <li>Open <code>http://localhost:8080</code>. The first time you open it, you will be asked to create your account — choose a username and password. This becomes your main (admin) account.</li>
 <li>Open <strong>Settings → Integrations</strong>.</li>
-<li>On the <strong>Audiobookshelf</strong> card, enter your <strong>Server URL</strong> — or <code>disabled</code> for an ebook-only install.</li>
+<li>On the <strong>Audiobookshelf</strong> card, enter your <strong>Server URL</strong> — or switch the card's <strong>Enable</strong> toggle off for an ebook-only install.</li>
 <li>Enable any optional services you use and enter their server URLs: Grimmory, BookOrbit, CWA, BookFusion, Storyteller, Readest, Hardcover, StoryGraph.</li>
 <li>Click <strong>Save Settings</strong> and wait for the app to come back.</li>
 <li>Open <strong>Account → My Integrations</strong> and enter your personal logins: your ABS API token and Library ID, KoSync username/password, and any other service accounts. Use the <strong>Test</strong> button on a card to check a login before saving.</li>
@@ -1127,7 +1169,7 @@ same names, in the same order.</p>
 <li>Click <strong>Scan Library</strong>.</li>
 <li>Review the likely pairs.</li>
 <li>Add the good ones to the queue.</li>
-<li>Click <strong>Process All</strong>.</li>
+<li>Click <strong>Match All</strong>.</li>
 </ol>
 <p>If your audiobook and ebook services point at the same mounted <code>/books</code> tree,
 sibling audio and ebook files in the same title folder appear as high-confidence

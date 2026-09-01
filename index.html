@@ -302,6 +302,25 @@
   
   
     <li class="md-tabs__item">
+      <a href="backup-restore/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Backup & Restore
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
       <a href="troubleshooting/" class="md-tabs__link">
         
   
@@ -640,6 +659,33 @@
   
   
     <li class="md-nav__item">
+      <a href="backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="troubleshooting/" class="md-nav__link">
         
   
@@ -853,11 +899,8 @@
 <li><strong>Docker</strong> on any host.</li>
 <li><strong>At least two places you read or listen</strong> that you want to keep in sync — for example Audiobookshelf on the audio side and KOReader on the ebook side.</li>
 </ol>
-<p>Every service below is <strong>optional</strong> — enable only the ones you actually use. Ebook-only setups (say, KOReader + Grimmory with Audiobookshelf intentionally disabled) work fine too.</p>
-<div class="admonition tip">
-<p class="admonition-title">You do not need Storyteller</p>
-<p>Storyteller is one optional integration among many — <strong>not</strong> a requirement. BookBridge does its own audio ↔ text alignment with built-in Whisper transcription (and the EPUB's SMIL timing data when present). If you happen to run Storyteller, the bridge will use its transcripts as a higher-quality alignment source and sync its read-along position — but nothing in the bridge requires it.</p>
-</div>
+<p>Every service below is <strong>optional</strong> — switch on only the ones you actually use, and add more later. Ebook-only setups (KOReader plus Grimmory, say) work just as well as an audiobook pairing.</p>
+<p>BookBridge does its own audio ↔ text alignment, using built-in Whisper transcription and the EPUB's own timing data where it exists. Nothing else needs to be in place for an audiobook and an ebook to stay in step.</p>
 <h3 id="supported-services">Supported Services</h3>
 <table>
 <thead>
@@ -885,8 +928,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Storyteller</strong></td>
-<td style="text-align: left;">Read-along reader</td>
-<td style="text-align: left;">Progress sync and a bonus alignment source for read-along books</td>
+<td style="text-align: left;">Optional read-along reader</td>
+<td style="text-align: left;">Progress sync, plus higher-quality alignment for books you have already built there</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Grimmory</strong></td>
@@ -911,7 +954,7 @@
 <tr>
 <td style="text-align: left;"><strong>Readest</strong></td>
 <td style="text-align: left;">Ebooks</td>
-<td style="text-align: left;">Optional cloud highlight relay</td>
+<td style="text-align: left;">Optional cloud highlight relay, optional book upload into a group</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Hardcover</strong></td>
@@ -938,6 +981,8 @@
 <li><strong>Split-port security</strong> so the KOSync endpoint can be exposed separately from the dashboard.</li>
 <li><strong>Smart conflict handling</strong> with anti-regression guardrails and a deadband to avoid tiny cross-format bounce-backs.</li>
 <li><strong>Highlight and note sync</strong> for KOReader devices using the current Bridge Sync plugin, with optional Grimmory, BookOrbit, BookFusion, Readest, and Hardcover relay.</li>
+<li><strong>Book upload to Readest</strong> (optional, per reader) that copies matched books, or just the
+  ones you are currently reading, into your Readest cloud library and files them into a group.</li>
 <li><strong>Rich locators</strong> using timestamps, href/fragment data, XPath, and EPUB CFI where available.</li>
 <li><strong>Built-in audio ↔ text alignment</strong> using Whisper transcription and EPUB SMIL timing data — no extra services required. Storyteller transcript assets are used as a premium alignment source when you happen to run Storyteller.</li>
 <li><strong>Resumable jobs</strong> for background processing and transcript work.</li>
@@ -947,10 +992,11 @@
 <li><strong>Multiple readers</strong> with their own sign-in, their own service logins, and their own progress — each person sees only the books they are reading.</li>
 <li><strong>Self-service integrations</strong> so each reader can manage their own usernames, passwords, tokens, API keys, and sync toggles from Account -&gt; My Integrations, while admins can still manage them centrally.</li>
 <li><strong>Dashboard</strong> for live sync status, reading session details, direct service links, source badges, sorting by date added, and a <strong>Show position</strong> excerpt of the text where you are currently synced.</li>
-<li><strong>Add / Update Book</strong> for ABS, Grimmory, or BookOrbit audio; CWA, Grimmory, BookOrbit, Kavita, ABS, or local ebook sources; Storyteller links; ebook-only flows; and reader document fixes.</li>
-<li><strong>Batch Match</strong> for queue-based review and bulk linking.</li>
+<li><strong>Add / Update Book</strong> for ABS, Grimmory, or BookOrbit audio; ABS, Grimmory, BookOrbit, Kavita, CWA, BookFusion, or local ebook sources; Storyteller links; ebook-only flows; and reader document fixes.</li>
+<li><strong>A match queue</strong> inside Add / Update Book for reviewing and linking books in bulk.</li>
 <li><strong>Library Suggestions</strong> for background scanning, review, and queue building.</li>
-<li><strong>Forge</strong> for Storyteller read-along preparation.</li>
+<li><strong>Storyteller Editions</strong> for building and uploading read-along books.</li>
+<li><strong>Watched collections</strong> in Grimmory, BookOrbit, and Kavita that auto-match anything you drop into them.</li>
 <li><strong>Dynamic Settings</strong> with live connection tests and automatic restart after saving.</li>
 <li><strong>Flexible setup</strong> including an intentional Audiobookshelf-off mode for ebook-only or maintenance-focused use.</li>
 <li><strong>Optional Bridge Sync plugin support</strong> for turning Grimmory shelves or Hardcover lists into KOReader collections, syncing reading stats, and syncing highlights/notes.</li>
