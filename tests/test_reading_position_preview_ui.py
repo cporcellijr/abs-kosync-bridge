@@ -38,6 +38,17 @@ def test_preview_script_renders_book_text_as_text_only():
     assert "console.error" not in script
 
 
+def test_expanded_preview_only_disables_grid_stretch_while_needed():
+    script = (ROOT / "static" / "js" / "reading-position-preview.js").read_text(encoding="utf-8")
+    css = (ROOT / "static" / "css" / "reading-position-preview.css").read_text(encoding="utf-8")
+
+    assert "button.closest('.book-grid')" in script
+    assert "[data-position-preview-toggle][aria-expanded=\"true\"]" in script
+    assert "grid.classList.toggle('position-preview-expanded', hasExpandedPreview)" in script
+    assert ".book-grid.position-preview-expanded" in css
+    assert "align-items: start" in css
+
+
 def test_preview_css_uses_existing_bookbridge_tokens_and_has_mobile_layout():
     css = (ROOT / "static" / "css" / "reading-position-preview.css").read_text(encoding="utf-8")
 
@@ -45,4 +56,22 @@ def test_preview_css_uses_existing_bookbridge_tokens_and_has_mobile_layout():
     assert 'var(--border)' in css
     assert 'var(--accent)' in css
     assert ':focus-visible' in css
+    assert 'white-space: pre-line' in css
     assert '@media (max-width: 480px)' in css
+
+
+def test_grid_layout_is_resynced_when_series_grouping_moves_cards():
+    """Series grouping relocates cards, so the grid class must be recomputed.
+
+    `setExpanded` only ever fixes up the grid the button currently sits in.  When
+    `applySeriesGrouping` moves an expanded card to another grid, the grid it left
+    keeps `position-preview-expanded` and the grid it joined never gets it.
+    """
+    script = (ROOT / "static" / "js" / "reading-position-preview.js").read_text(encoding="utf-8")
+    index = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert "window.bookbridgeSyncPreviewLayout = syncAllGridPreviewLayouts" in script
+    assert "document.querySelectorAll('.book-grid').forEach(applyGridPreviewLayout)" in script
+
+    start = index.index("function applySeriesGrouping")
+    assert "window.bookbridgeSyncPreviewLayout()" in index[start:start + 800]

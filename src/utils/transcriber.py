@@ -112,6 +112,21 @@ class AudioTranscriber:
                 + (f" [{stage}]" if stage else "")
             )
 
+    def _audio_covers_runtime(self, actual_duration: Optional[float], expected_duration: Optional[float]) -> bool:
+        """Return True when the decoded audio meets the coverage bar for a known runtime.
+
+        A falsy or zero expected_duration means there is nothing to judge against, so
+        we return True (no basis for rejection). A falsy min_coverage also returns
+        True (guard disabled). Otherwise we require actual_duration to be truthy and
+        at least expected_duration * min_coverage.
+        """
+        threshold = self.min_coverage
+        if not threshold or not expected_duration or expected_duration <= 0:
+            return True
+        if not actual_duration or actual_duration <= 0:
+            return False
+        return actual_duration >= expected_duration * threshold
+
     @staticmethod
     def _transcript_extent(transcript: Optional[list]) -> float:
         """Last timestamp covered by a transcript, or 0.0 when it is unusable."""
@@ -550,7 +565,7 @@ class AudioTranscriber:
         raw_audio = getattr(provider, 'supports_raw_audio', False)
 
         downloaded_files = []
-        source_durations = []
+        decoded_durations = []
         full_transcript = []
         chunks_completed = 0
         cumulative_duration = 0.0
@@ -644,7 +659,6 @@ class AudioTranscriber:
                             # short, this is what says whether the source was already
                             # short or whether a later stage lost the audio.
                             source_seconds = self.get_audio_duration(local_path)
-                            source_durations.append(source_seconds)
                             logger.info(
                                 f"   Part {idx + 1}/{len(audio_urls)}: "
                                 f"{local_path.stat().st_size:,} bytes, {source_seconds / 60:.1f} min"
@@ -666,15 +680,34 @@ class AudioTranscriber:
                             if not normalized_path:
                                 raise ValueError(f"Normalization failed for part {idx+1}")
 
-                            # FFmpeg can stop early on a damaged stream and still exit
-                            # 0, which silently shortens the book. Compare against what
-                            # we just measured rather than discovering it later.
+                            # Container metadata (ffprobe on MP3) is a declaration, not a
+                            # measurement, and can be wildly wrong. A shortfall is fatal
+                            # only when the decoded audio also falls short of the runtime
+                            # the library reports, or when there is no runtime to compare
+                            # against. The decoded WAV duration is the only real measurement.
                             normalized_seconds = self.get_audio_duration(normalized_path)
                             if source_seconds > 0 and normalized_seconds < source_seconds * 0.99:
-                                raise ValueError(
+                                msg = (
                                     f"Normalization lost audio for part {idx + 1}: source "
                                     f"{source_seconds:.0f}s -> WAV {normalized_seconds:.0f}s"
                                 )
+                                # Raise when there is no expected_duration to judge against
+                                # (e.g., forge_service callers), OR when this is a single-part
+                                # book (the WAV is the whole book) and the decoded audio fails
+                                # the coverage check against the library runtime.
+                                if not expected_duration or (
+                                    len(audio_urls) == 1
+                                    and not self._audio_covers_runtime(normalized_seconds, expected_duration)
+                                ):
+                                    raise ValueError(msg)
+                                logger.warning(
+                                    f"⚠️ Part {idx + 1}/{len(audio_urls)}: container claims {source_seconds:.0f}s "
+                                    f"but decoded audio is {normalized_seconds:.0f}s — MP3 header is a declaration "
+                                    f"not a measurement; book will be judged on decoded audio against library runtime"
+                                )
+
+                            # Track the decoded duration for the aggregate source-stage check
+                            decoded_durations.append(normalized_seconds)
 
                             # Split if needed
                             downloaded_files.extend(self.split_audio_file(normalized_path, MAX_DURATION_SECONDS))
@@ -683,11 +716,14 @@ class AudioTranscriber:
                         raise ValueError("No audio files were successfully downloaded and normalized")
 
                     # Attribute a shortfall to the source before any later stage can be
-                    # blamed for it: this fires when the bytes the library served are
-                    # already shorter than the runtime it reports.
-                    if len(source_durations) > 1:
+                    # blamed for it: this fires when the audio the library served is
+                    # already shorter than the runtime it reports. The sum is decoded
+                    # audio: an MP3 container duration is a declaration, not a
+                    # measurement, so a part whose header lied is judged on what
+                    # actually came out of the decoder.
+                    if decoded_durations:
                         self._check_audio_coverage(
-                            sum(source_durations), expected_duration,
+                            sum(decoded_durations), expected_duration,
                             stage="source audio as downloaded",
                         )
 

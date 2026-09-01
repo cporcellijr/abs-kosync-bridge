@@ -64,14 +64,14 @@ services:
     volumes:
       - ./data:/data
       - /path/to/ebooks:/books
-      # - /path/to/storyteller/library:/storyteller_library  # Optional: Forge output
+      # - /path/to/storyteller/library:/storyteller_library  # Optional: Storyteller output
       # - /path/to/storyteller/assets:/storyteller/assets    # Optional: Storyteller transcript ingest
 ```
 
 Replace:
 
 - `/path/to/ebooks` with your real EPUB folder
-- The optional Storyteller paths if you plan to use Forge or transcript ingest
+- The optional Storyteller paths if you plan to build Storyteller editions or use transcript ingest
 
 ---
 
@@ -111,7 +111,7 @@ Then add any optional services you want:
 
 Use the **Test** button on any service section if you want to check a service before saving.
 
-If you are setting up an ebook-only or maintenance-focused install, you can enter `disabled` in the ABS URL or token field instead of connecting Audiobookshelf.
+If you are setting up an ebook-only or maintenance-focused install, switch the **Enable** toggle off on the Audiobookshelf card instead of connecting Audiobookshelf.
 
 If you mounted Storyteller assets, set **Storyteller Assets Path** to `/storyteller` and not `/storyteller/assets`.
 
@@ -131,7 +131,7 @@ You now have two easy options:
 2. Click **Scan Library**.
 3. Review the likely matches.
 4. Click **Add to Queue** for the good ones.
-5. Click **Process All**.
+5. Click **Match All**.
 
 ### Manual path: Add Book
 
@@ -186,7 +186,7 @@ Look for path, permission, or connection errors.
 Once the basics work, try:
 
 - **Suggestions** for bulk review and queueing
-- **Forge** for Storyteller processing
+- **Storyteller Editions** for read-along processing
 - **Storyteller Backfill** in Settings
 - **Bridge Sync plugin + Grimmory shelf settings** if you want plugin-managed KOReader collections
 - **Split-port mode** if you want to expose only the sync endpoint

@@ -65,7 +65,15 @@ class ABSClient:
         self.session.headers.update(self.headers)
 
     def is_configured(self):
-        """Check if ABS is configured with URL and token."""
+        """Check if ABS is enabled and configured with URL and token.
+
+        Only an explicit falsey ABS_ENABLED disables: the key is per-user, and
+        `resolve_setting` hands a regular user the default rather than the global
+        value, so blank has to keep ABS on for everyone who never touched it.
+        """
+        enabled_val = str(self._cfg("ABS_ENABLED", "")).strip().lower()
+        if enabled_val in ('false', '0', 'no', 'off'):
+            return False
         if is_abs_disabled_value(self._cfg("ABS_SERVER")) or is_abs_disabled_value(self._cfg("ABS_KEY")):
             return False
         return bool(self.base_url and self.token)
@@ -767,6 +775,32 @@ class ABSClient:
         except Exception as e:
             logger.warning(f"⚠️ Failed to close session for ABS: {e}", exc_info=True)
 
+    def _resolve_collection_library_id(self, item_id) -> Optional[str]:
+        """The id of the library hosting ``item_id``, for creating a collection in it.
+
+        An ABS collection belongs to one library and only accepts books from that
+        library, so picking the first library on the server is a coin flip on a
+        multi-library install. Fall back to the only library when there is exactly
+        one, where there is nothing to get wrong.
+        """
+        details = self.get_item_details(item_id)
+        library_id = (details or {}).get('libraryId')
+        if library_id:
+            return library_id
+
+        r_lib = self.session.get(f"{self.base_url}/api/libraries")
+        if r_lib.status_code != 200:
+            logger.warning("⚠️ ABS: Failed to list libraries (status %s)", r_lib.status_code)
+            return None
+        libraries = r_lib.json().get('libraries', [])
+        if len(libraries) == 1:
+            return libraries[0].get('id')
+        logger.warning(
+            "⚠️ ABS: Could not resolve the library hosting item '%s' (%s libraries on the server)",
+            item_id, len(libraries)
+        )
+        return None
+
     def add_to_collection(self, item_id, collection_name=None):
         """Add an audiobook to a collection, creating the collection if it doesn't exist."""
         if not collection_name:
@@ -783,18 +817,31 @@ class ABSClient:
             target_collection = next((c for c in collections if c.get('name') == collection_name), None)
 
             if not target_collection:
-                lib_url = f"{self.base_url}/api/libraries"
-                r_lib = self.session.get(lib_url)
-                if r_lib.status_code == 200:
-                    libraries = r_lib.json().get('libraries', [])
-                    library_id = libraries[0].get('id') if libraries else None
-                    if library_id:
-                        r_create = self.session.post(collections_url,
-                                                 json={"libraryId": library_id, "name": collection_name,
-                                                       "books": [item_id]})
-                        if r_create.status_code in [200, 201]:
-                            logger.info("Added item to newly created ABS Collection: %s", collection_name)
-                            return True
+                # The collection has to be created in the library that actually holds
+                # the item — ABS rejects books from any other one.
+                library_id = self._resolve_collection_library_id(item_id)
+                if not library_id:
+                    logger.warning(
+                        "Failed to add item to ABS collection '%s': no library resolved for the item",
+                        collection_name
+                    )
+                    return False
+
+                r_create = self.session.post(collections_url,
+                                             json={"libraryId": library_id, "name": collection_name,
+                                                   "books": [item_id]})
+                if r_create.status_code in [200, 201]:
+                    logger.info("Added item to newly created ABS Collection: %s", collection_name)
+                    return True
+
+                # Say what ABS actually answered: this used to fall through to the
+                # generic 'collection id unavailable' warning below, which named a
+                # cause that was never the real one (#2808).
+                logger.warning(
+                    "Failed to add item to ABS collection '%s': create returned %s - %s",
+                    collection_name, r_create.status_code, sanitize_log_data(r_create.text)
+                )
+                return False
 
             collection_id = target_collection.get('id') if isinstance(target_collection, dict) else None
             if not collection_id:

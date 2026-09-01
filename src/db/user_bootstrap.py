@@ -5,8 +5,94 @@ backfills pre-existing single-user data to an admin once one exists.
 """
 
 import logging
+import os
+from typing import List
+
+from src.utils.config_loader import env_truthy
 
 logger = logging.getLogger(__name__)
+
+
+def _is_truthy_value(value: object) -> bool:
+    """Whether a stored setting value reads as on.
+
+    Per-user checkboxes post 'on', the settings form writes 'true' — both spellings
+    have to count.
+    """
+    return str(value or "").strip().lower() in ("true", "1", "yes", "on")
+
+
+def reconcile_service_gates(database_service) -> List[str]:
+    """One-time upgrade safety net for the install-wide service gate.
+
+    When the global SERVICE_ENABLE_KEYS became authoritative, a service that had
+    only ever been switched on per-user — with the global left at its seeded 'false'
+    — would go dark for those users on upgrade. This runs exactly once, on the first
+    boot after the upgrade, and switches the global on for any service where at least
+    one user had it enabled.
+
+    Contract:
+    - Runs only if SERVICE_GATE_RECONCILED is not already truthy in os.environ.
+    - Only acts on keys where global_service_disabled(key) is True (explicit falsey
+      global). An unset global is not a decision and is never touched.
+    - For each such key, counts users with that key truthy per _is_truthy_value.
+    - If any user has it on, writes the global to 'true' in both DB and os.environ.
+    - Persists SERVICE_GATE_RECONCILED = 'true' so the pass never runs again.
+    - Never raises: on failure logs error, returns [], and leaves the marker unset
+      so the next boot retries. Partial progress is safe because a gate already
+      switched to 'true' no longer satisfies global_service_disabled on retry.
+    """
+    if env_truthy('SERVICE_GATE_RECONCILED'):
+        logger.debug("Service gate reconcile: already reconciled, skipping")
+        return []
+
+    from src.utils.user_config import SERVICE_ENABLE_KEYS, global_service_disabled
+
+    switched_on = []
+
+    try:
+        users = database_service.list_users()
+        user_creds = {}
+        for user in users:
+            user_creds[user.id] = database_service.get_user_credentials(user.id)
+
+        for key in sorted(SERVICE_ENABLE_KEYS):
+            if not global_service_disabled(key):
+                continue
+
+            count = 0
+            for creds in user_creds.values():
+                if _is_truthy_value(creds.get(key)):
+                    count += 1
+
+            if count == 0:
+                continue
+
+            database_service.set_setting(key, 'true')
+            os.environ[key] = 'true'
+            switched_on.append(key)
+            logger.info(
+                "🔧 Service gate reconcile: %s was off install-wide but %d user(s) had it on "
+                "— switching the global on so nobody loses sync on upgrade",
+                key, count,
+            )
+
+        database_service.set_setting('SERVICE_GATE_RECONCILED', 'true')
+        os.environ['SERVICE_GATE_RECONCILED'] = 'true'
+
+        if switched_on:
+            logger.info(
+                "Service gate reconcile: switched on globals for %s",
+                ", ".join(switched_on),
+            )
+        else:
+            logger.debug("Service gate reconcile: no globals needed switching on")
+
+    except Exception as e:
+        logger.error("❌ Service gate reconcile failed: %s", e, exc_info=True)
+        return []
+
+    return switched_on
 
 
 def _backfill_orphans_to_admin(database_service, admin) -> dict:

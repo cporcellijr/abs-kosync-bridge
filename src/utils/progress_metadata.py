@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # current-dict keys that are NOT locator metadata (core sync values or the
 # rich-metadata fields themselves).
-_NON_LOCATOR_KEYS = {"pct", "ts", "service_updated_at", "status"}
+_NON_LOCATOR_KEYS = {"pct", "ts", "service_updated_at", "status", "skipped"}
 
 # Epoch values at or above this are treated as milliseconds (1e11 seconds is
 # the year 5138; 1e11 milliseconds is 1973 — real ms timestamps are ~1.7e12).

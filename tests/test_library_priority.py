@@ -85,6 +85,30 @@ class TestLibraryPriority(unittest.TestCase):
         self.mock_abs.search_ebooks.assert_called()
 
     @patch('os.path.exists')
+    @patch('os.path.getsize')
+    def test_priority_4_survives_null_author(self, mock_getsize, mock_exists):
+        """Diagnostics finding 4185 - ABS sends author: null and acquisition died.
+
+        The reported symptom, which killed the whole book's sync cycle:
+            ❌ The Wedding People: 'NoneType' object has no attribute 'lower'
+        """
+        mock_exists.return_value = False
+        item = {'id': 'item1', 'media': {'metadata': {'title': 'T', 'authorName': 'A'}}}
+        self.mock_abs.get_ebook_files.side_effect = [[], [{'stream_url': 'surl', 'ext': 'epub'}]]
+
+        self.mock_cwa.is_configured.return_value = True
+        self.mock_cwa.search_ebooks.return_value = []
+
+        # The key exists, so dict.get()'s default never applies.
+        self.mock_abs.search_ebooks.return_value = [{'id': 'other1', 'author': None}]
+        self.mock_abs.download_file.return_value = True
+
+        result = self.service.acquire_ebook(item)
+
+        expected = os.path.join(self.epub_cache, 'item1_abs_search.epub')
+        self.assertEqual(result, expected)
+
+    @patch('os.path.exists')
     def test_fallback(self, mock_exists):
         # All fail
         item = {'id': 'item1', 'media': {'metadata': {'title': 'T', 'authorName': 'A'}}}

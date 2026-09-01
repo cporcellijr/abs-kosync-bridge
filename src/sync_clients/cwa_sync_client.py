@@ -13,8 +13,10 @@ import logging
 from src.api.cwa_sync_api import CWASyncApi, STATUS_READING, STATUS_FINISHED, STATUS_READY
 from src.api.cwa_client import CWAClient
 from src.db.models import Book, State
-from src.utils.ebook_utils import EbookParser
+from src.utils.ebook_utils import EbookParser, LRUCache
 from src.utils.progress_metadata import parse_service_timestamp
+from src.utils.config_loader import env_truthy
+from src.utils import kepub_locator
 from src.sync_clients.sync_client_interface import (
     SyncClient, SyncResult, UpdateProgressRequest, ServiceState,
 )
@@ -28,6 +30,9 @@ class CWASyncClient(SyncClient):
         self.cwa_sync_api = cwa_sync_api
         self.cwa_client = cwa_client
         self.delta_thresh = float(os.getenv("SYNC_DELTA_KOSYNC_PERCENT", 1)) / 100.0
+        # Span maps are library-global and expensive to fetch (the kepub is ~1 MB),
+        # so they are cached per Calibre id rather than re-downloaded each cycle.
+        self._span_maps = LRUCache(capacity=8)
 
     def is_configured(self) -> bool:
         return self.cwa_sync_api.is_configured()
@@ -77,6 +82,15 @@ class CWASyncClient(SyncClient):
             current["href"] = state["href"]
         if state.get("frag"):
             current["frag"] = state["frag"]
+        # The device reports a koboSpan id, which does not exist in the plain EPUB the
+        # bridge normalizes against. Convert it back to an in-chapter progression so
+        # the read lands where the reader actually is, rather than at the chapter
+        # start the bare href would resolve to.
+        chapter_progress = self._chapter_progress_from_span(
+            uuid, state.get("href"), state.get("frag")
+        )
+        if chapter_progress is not None:
+            current["chapter_progress"] = chapter_progress
         # Rich metadata (capture-only): the bookmark's own modification time is
         # the position-freshness signal; status is Kobo's reading status.
         service_updated_at = parse_service_timestamp(state.get("bookmark_last_modified"))
@@ -102,6 +116,67 @@ class CWASyncClient(SyncClient):
             return self.ebook_parser.get_text_at_percentage(epub, pct)
         return None
 
+    def _chapter_progress_from_span(self, book_uuid: str, href, frag) -> Optional[float]:
+        """In-chapter progression for a device-reported koboSpan, when resolvable."""
+        if not href or not frag or not env_truthy("CWA_KOBO_SPAN_SYNC", "true"):
+            return None
+        try:
+            span_map = self._get_span_map(book_uuid)
+            if span_map is None:
+                return None
+            return kepub_locator.progress_for_span(span_map, href, frag)
+        except Exception as e:
+            logger.debug(f"📖 CWA Sync: could not place koboSpan {frag}: {e}", exc_info=True)
+            return None
+
+    def _get_span_map(self, book_uuid: str):
+        """Span map for a book's kepub, downloading and caching it on first use."""
+        cached = self._span_maps.get(book_uuid)
+        if cached is not None:
+            return cached or None
+        kepub = self.cwa_sync_api.download_kepub(book_uuid)
+        span_map = kepub_locator.build_span_map(kepub) if kepub else None
+        # Cache the miss too: a book CWA cannot kepubify would otherwise be
+        # re-downloaded on every single cycle.
+        self._span_maps.put(book_uuid, span_map if span_map is not None else False)
+        return span_map
+
+    def _resolve_kobo_location(self, book: Book, uuid: str, locator) -> Optional[dict]:
+        """Resolve the locator to a Kobo bookmark, or None to leave the device's alone.
+
+        CWA never derives a span of its own — it stores whatever Location it is handed
+        — and a Kobo only moves for a span, so without this the position we write is
+        cosmetic and the device pushes its own bookmark back (#364).
+        """
+        if not env_truthy("CWA_KOBO_SPAN_SYNC", "true"):
+            return None
+        if not uuid or locator is None:
+            return None
+        try:
+            span_map = self._get_span_map(uuid)
+            if span_map is None:
+                return None
+            resolved = kepub_locator.resolve_span(
+                span_map,
+                href=getattr(locator, "href", None),
+                chapter_progress=getattr(locator, "chapter_progress", None),
+                percentage=locator.percentage,
+            )
+            if not resolved:
+                logger.debug(
+                    f"📖 CWA Sync: no koboSpan resolved for '{book.abs_title}'; "
+                    f"leaving the device bookmark untouched"
+                )
+                return None
+            source_href, span_id = resolved
+            return kepub_locator.build_location(source_href, span_id)
+        except Exception as e:
+            logger.warning(
+                f"⚠️ CWA Sync: koboSpan resolution failed for '{book.abs_title}': {e}",
+                exc_info=True,
+            )
+            return None
+
     def update_progress(self, book: Book, request: UpdateProgressRequest) -> SyncResult:
         uuid = self._resolve_uuid(book)
         if not uuid:
@@ -118,7 +193,14 @@ class CWASyncClient(SyncClient):
         else:
             status = STATUS_READY
 
-        success = self.cwa_sync_api.update_reading_state(uuid, pct, status)
+        location = self._resolve_kobo_location(book, uuid, request.locator_result)
+        if location:
+            logger.info(
+                f"📖 CWA Sync: resolved koboSpan {location['Value']} in {location['Source']} "
+                f"for '{book.abs_title}' at {pct:.1%}"
+            )
+
+        success = self.cwa_sync_api.update_reading_state(uuid, pct, status, location=location)
 
         if success:
             try:

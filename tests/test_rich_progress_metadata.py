@@ -106,6 +106,15 @@ class TestCwaCapture(unittest.TestCase):
     outer LastModified (which moves on status changes and our own writes —
     verified live 2026-07-02)."""
 
+    def setUp(self):
+        # The enable flag is read per call now, and an unset global is not a
+        # decision — so the credentials bundle below is what decides.
+        self._saved_gate = os.environ.pop("CWA_SYNC_ENABLED", None)
+
+    def tearDown(self):
+        if self._saved_gate is not None:
+            os.environ["CWA_SYNC_ENABLED"] = self._saved_gate
+
     _LIVE_SHAPED = [{
         "Created": "2026-05-15T20:43:26Z",
         "LastModified": "2026-06-27T14:00:43Z",
@@ -123,7 +132,7 @@ class TestCwaCapture(unittest.TestCase):
         api = CWASyncApi.__new__(CWASyncApi)
         api._server = "http://cwa"
         api._token = "tok"
-        api._enabled = True
+        api._creds = {"CWA_SYNC_ENABLED": "true"}
         api._timeout = 5
         api._session = MagicMock()
         response = MagicMock()

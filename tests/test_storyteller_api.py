@@ -216,7 +216,7 @@ class TestStorytellerSlimReadaloudEpub(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir)
 
-            def fake_download(uuid, out_path):
+            def fake_download(uuid, out_path, polling=False):
                 self._make_epub(Path(out_path))
                 return True
 
@@ -240,6 +240,132 @@ class TestStorytellerSlimReadaloudEpub(unittest.TestCase):
                 ok = self.client.ensure_readaloud_epub_cached("uuid-3", cache_dir)
             self.assertFalse(ok)
             self.assertFalse((cache_dir / "storyteller_uuid-3.epub").exists())
+
+    # ------------------------------------------------------------------
+    # Issue #414: every path that writes storyteller_<uuid>.epub must strip
+    # the narration audio. The match / Batch Match / Batch Forge paths wrote
+    # the full artifact straight to the cache path, producing 0.6-3.6 GB files
+    # that OOM-killed the container on the next extract_text_and_map().
+    # ------------------------------------------------------------------
+
+    def test_has_embedded_audio_true_for_full_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full = Path(tmpdir) / "full.epub"
+            self._make_epub(full)
+            self.assertTrue(self.client._epub_has_embedded_audio(full))
+
+    def test_has_embedded_audio_false_for_stripped_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full = Path(tmpdir) / "full.epub"
+            slim = Path(tmpdir) / "slim.epub"
+            self._make_epub(full)
+            self.client._strip_audio_from_epub(full, slim)
+            # The audio entries survive by name (manifest integrity) but are
+            # empty, so they must not count as embedded audio.
+            self.assertFalse(self.client._epub_has_embedded_audio(slim))
+
+    def test_has_embedded_audio_false_for_unreadable_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            junk = Path(tmpdir) / "not-a-zip.epub"
+            junk.write_bytes(b"definitely not a zip")
+            self.assertFalse(self.client._epub_has_embedded_audio(junk))
+
+    def test_download_slim_book_strips_audio_and_clears_tmp(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir) / "storyteller_uuid-slim.epub"
+
+            def fake_download(uuid, out_path, polling=False):
+                self._make_epub(Path(out_path))
+                return True
+
+            with patch.object(self.client, "download_book", side_effect=fake_download) as mock_dl:
+                ok = self.client.download_slim_book("uuid-slim", dest)
+
+            self.assertTrue(ok)
+            # The full artifact may only ever land on the transient .full.tmp.
+            self.assertEqual(Path(mock_dl.call_args[0][1]).name, dest.name + ".full.tmp")
+            self.assertFalse(dest.with_name(dest.name + ".full.tmp").exists())
+            self.assertFalse(self.client._epub_has_embedded_audio(dest))
+            with zipfile.ZipFile(dest, "r") as z:
+                self.assertEqual(z.read("audio/part0000.mp3"), b"")
+                self.assertIn("id1-s1", z.read("MediaOverlays/part0000.smil").decode())
+
+    def test_download_slim_book_forwards_polling_flag(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir) / "storyteller_uuid-poll.epub"
+            with patch.object(self.client, "download_book", return_value=False) as mock_dl:
+                ok = self.client.download_slim_book("uuid-poll", dest, polling=True)
+            self.assertFalse(ok)
+            self.assertTrue(mock_dl.call_args.kwargs["polling"])
+
+    def test_download_slim_book_removes_partial_cache_on_strip_failure(self):
+        # A half-written cache file would be adopted as valid by every later
+        # caller (ensure_readaloud_epub_cached short-circuits on existence).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir) / "storyteller_uuid-bad.epub"
+
+            def fake_download(uuid, out_path, polling=False):
+                Path(out_path).write_bytes(b"not a zip")
+                return True
+
+            with patch.object(self.client, "download_book", side_effect=fake_download):
+                ok = self.client.download_slim_book("uuid-bad", dest)
+
+            self.assertFalse(ok)
+            self.assertFalse(dest.exists())
+            self.assertFalse(dest.with_name(dest.name + ".full.tmp").exists())
+
+    def test_ensure_cached_restrips_fat_cache_file_in_place(self):
+        # The #414 recovery story: an install whose cache was written by an
+        # unfixed path self-heals on the next sync cycle, without the reporter
+        # having to delete the file by hand.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            fat = cache_dir / "storyteller_uuid-fat.epub"
+            self._make_epub(fat)
+            fat_size = fat.stat().st_size
+
+            with patch.object(self.client, "download_book") as mock_dl:
+                with self.assertLogs("src.api.storyteller_api", level="INFO") as logs:
+                    ok = self.client.ensure_readaloud_epub_cached("uuid-fat", cache_dir)
+
+            self.assertTrue(ok)
+            mock_dl.assert_not_called()
+            self.assertLess(fat.stat().st_size, fat_size)
+            self.assertFalse(self.client._epub_has_embedded_audio(fat))
+            self.assertFalse((cache_dir / "storyteller_uuid-fat.epub.slim.tmp").exists())
+            self.assertTrue(any("Re-stripped audio" in line for line in logs.output))
+            # The text + SMIL the locator work depends on survive the repair.
+            with zipfile.ZipFile(fat, "r") as z:
+                self.assertIn("hello", z.read("text/part0000.html").decode())
+                self.assertIn("id1-s1", z.read("MediaOverlays/part0000.smil").decode())
+
+    def test_strip_cached_audio_in_place_leaves_slim_file_alone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full = Path(tmpdir) / "full.epub"
+            slim = Path(tmpdir) / "storyteller_uuid-slim.epub"
+            self._make_epub(full)
+            self.client._strip_audio_from_epub(full, slim)
+            before = slim.read_bytes()
+
+            self.assertFalse(self.client.strip_cached_audio_in_place(slim))
+            self.assertEqual(slim.read_bytes(), before)
+
+    def test_strip_cached_audio_in_place_keeps_original_when_strip_fails(self):
+        # A failed repair must never destroy the only cached copy.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fat = Path(tmpdir) / "storyteller_uuid-keep.epub"
+            self._make_epub(fat)
+            before = fat.read_bytes()
+
+            with patch.object(
+                StorytellerAPIClient, "_strip_audio_from_epub", side_effect=OSError("disk full")
+            ):
+                ok = self.client.strip_cached_audio_in_place(fat)
+
+            self.assertFalse(ok)
+            self.assertEqual(fat.read_bytes(), before)
+            self.assertFalse((Path(tmpdir) / "storyteller_uuid-keep.epub.slim.tmp").exists())
 
 
 class TestStorytellerIsConfigured(unittest.TestCase):

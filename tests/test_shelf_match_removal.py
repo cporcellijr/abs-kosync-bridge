@@ -55,6 +55,52 @@ class TestShelveMatchedEbook(unittest.TestCase):
         self.booklore.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
         self.booklore.remove_from_shelf.assert_called_once_with("book.epub", "Up Next")
 
+    def test_abs_hosted_ebook_is_not_sent_to_grimmory(self):
+        """Diagnostics finding 4184/4187 - the fallback branch was a catch-all.
+
+        An ABS-hosted ebook has no Grimmory catalog entry, so every cycle logged:
+            ⚠️ Grimmory: Book not found for shelf assignment: 39fed857-875e-41f0-b41c-04ba9e361fa4_abs.epub
+            ⚠️ Grimmory: Book not found for shelf removal: 39fed857-875e-41f0-b41c-04ba9e361fa4_abs.epub
+        """
+        with patch.dict(os.environ, {
+            "BOOKLORE_SHELF_WATCH_ENABLED": "true",
+            "BOOKLORE_SHELF_WATCH_NAME": "Up Next",
+        }):
+            web_server._shelve_matched_ebook(
+                "39fed857-875e-41f0-b41c-04ba9e361fa4_abs.epub", "ABS",
+                "39fed857-875e-41f0-b41c-04ba9e361fa4",
+            )
+
+        self.booklore.add_to_shelf.assert_not_called()
+        self.booklore.remove_from_shelf.assert_not_called()
+
+    def test_abs_source_is_skipped_even_without_the_filename_marker(self):
+        """Source is authoritative: a Grimmory-shaped name on an ABS book still skips."""
+        with patch.dict(os.environ, {
+            "BOOKLORE_SHELF_WATCH_ENABLED": "true",
+            "BOOKLORE_SHELF_WATCH_NAME": "Up Next",
+        }):
+            web_server._shelve_matched_ebook("Some Book - Author.epub", "ABS")
+
+        self.booklore.add_to_shelf.assert_not_called()
+
+    def test_unrecorded_source_still_shelves_on_grimmory(self):
+        """Legacy rows and /books-mount installs never recorded an ebook_source."""
+        with patch.dict(os.environ, {
+            "BOOKLORE_SHELF_WATCH_ENABLED": "false",
+        }):
+            web_server._shelve_matched_ebook("book.epub", None)
+
+        self.booklore.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
+
+    def test_explicit_booklore_source_still_shelves_on_grimmory(self):
+        with patch.dict(os.environ, {
+            "BOOKLORE_SHELF_WATCH_ENABLED": "false",
+        }):
+            web_server._shelve_matched_ebook("book.epub", "BookLore", 42)
+
+        self.booklore.add_to_shelf.assert_called_once_with("book.epub", "Kobo")
+
     def test_does_not_remove_when_watch_disabled(self):
         with patch.dict(os.environ, {
             "BOOKLORE_SHELF_WATCH_ENABLED": "false",

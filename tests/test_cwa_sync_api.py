@@ -16,13 +16,21 @@ class TestCWASyncApi(unittest.TestCase):
 
     def _make_client(self, server='http://cwa.local:8083', token='abc123token',
                      enabled='true', cwa_client=None):
-        """Create a client with config snapshotted from env."""
-        with patch.dict('os.environ', {
+        """Create a client with server/token snapshotted from env.
+
+        The enable flag is read per call, not snapshotted — the class is a DI
+        Singleton, so a flag captured at construction would outlive an admin
+        switching CWA off. The patch therefore has to stay up for the whole test,
+        not just the constructor.
+        """
+        patcher = patch.dict('os.environ', {
             'CWA_SERVER': server,
             'CWA_SYNC_ENABLED': enabled,
             'CWA_SYNC_TOKEN': token,
-        }):
-            return CWASyncApi(cwa_client=cwa_client)
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return CWASyncApi(cwa_client=cwa_client)
 
     def setUp(self):
         self.mock_cwa_client = Mock()
@@ -134,8 +142,16 @@ class TestCWASyncApi(unittest.TestCase):
             "Reading",
         )
 
-    def test_update_clears_stale_location_that_would_rewind_stock_kobo(self):
-        """CWA must not retain a locator from the older reported percentage."""
+    def test_update_without_span_preserves_device_bookmark(self):
+        """With no span to offer, the device's own locator must survive untouched.
+
+        7.4.1 sent ``{"Source": "", "Type": "", "Value": ""}`` here on the theory that a
+        stale span would rewind the device. It does not help: the Kobo keeps its own
+        local bookmark either way, so blanking only destroyed the server-side copy —
+        live, it left 0 of 370 CWA bookmarks with a span while users still reported the
+        rewind (#364). The cure is writing a correct span (see the next test), not
+        erasing the old one.
+        """
         stored_bookmark = {
             "ProgressPercent": 12.0,
             "location_source": "OEBPS/chapter.xhtml",
@@ -167,9 +183,55 @@ class TestCWASyncApi(unittest.TestCase):
         self.assertEqual(stored_bookmark["ProgressPercent"], 16.0)
         self.assertEqual(
             stored_bookmark["location_value"],
-            "",
-            "A stale 12% KoboSpan makes stock Kobo reopen at 12% and send it back",
+            "#point(/1/4/2/2:0)",
+            "Writing no span must not wipe the locator the device wrote",
         )
+        self.assertEqual(stored_bookmark["location_source"], "OEBPS/chapter.xhtml")
+
+        # CWA reads request_bookmark["Location"] unguarded and 400s without the key.
+        sent = self.client._session.put.call_args.kwargs["json"]
+        self.assertIn("Location", sent["ReadingStates"][0]["CurrentBookmark"])
+        self.assertIsNone(sent["ReadingStates"][0]["CurrentBookmark"]["Location"])
+
+    def test_update_with_span_writes_the_kobo_bookmark(self):
+        """A resolved span replaces the stored locator so the device actually moves."""
+        stored_bookmark = {
+            "ProgressPercent": 12.0,
+            "location_source": "OEBPS/Text/part0001.xhtml",
+            "location_type": "KoboSpan",
+            "location_value": "kobo.4.1",
+        }
+
+        def apply_cwa_update(_url, json, timeout):
+            bookmark = json["ReadingStates"][0]["CurrentBookmark"]
+            stored_bookmark["ProgressPercent"] = bookmark["ProgressPercent"]
+            location = bookmark["Location"]
+            if location:
+                stored_bookmark["location_source"] = location["Source"]
+                stored_bookmark["location_type"] = location["Type"]
+                stored_bookmark["location_value"] = location["Value"]
+            response = Mock()
+            response.status_code = 200
+            response.json.return_value = {"RequestResult": "Success"}
+            return response
+
+        self.client._session = Mock()
+        self.client._session.put.side_effect = apply_cwa_update
+
+        self.assertTrue(
+            self.client.update_reading_state(
+                "test-uuid", 0.16, STATUS_READING,
+                location={
+                    "Source": "OEBPS/Text/part0024.xhtml",
+                    "Type": "KoboSpan",
+                    "Value": "kobo.114.4",
+                },
+            )
+        )
+        self.assertEqual(stored_bookmark["ProgressPercent"], 16.0)
+        self.assertEqual(stored_bookmark["location_value"], "kobo.114.4")
+        self.assertEqual(stored_bookmark["location_source"], "OEBPS/Text/part0024.xhtml")
+        self.assertEqual(stored_bookmark["location_type"], "KoboSpan")
 
     def test_update_reading_state_failure(self):
         mock_resp = Mock()

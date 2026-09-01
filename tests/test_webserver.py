@@ -966,7 +966,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             status='active'
         )
         self.mock_database_service.get_book.return_value = test_book
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_abs_client.get_item_details.return_value = {
             'media': {'chapters': [{'start': 0.0, 'end': 10.0}]}
         }
@@ -996,7 +996,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             status='active'
         )
         self.mock_database_service.get_book.return_value = test_book
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_abs_client.get_item_details.return_value = {
             'media': {'chapters': [{'start': 0.0, 'end': 10.0}]}
         }
@@ -1031,7 +1031,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             status='active'
         )
         self.mock_database_service.get_book.return_value = test_book
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_abs_client.get_item_details.return_value = {
             'media': {
                 'chapters': [
@@ -1065,7 +1065,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             status='active',
         )
         self.mock_database_service.get_book.return_value = test_book
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
 
         response = self.client.post('/api/storyteller/link/ebook-link-1', json={'uuid': 'uuid-ebook-only'})
 
@@ -2777,7 +2777,7 @@ class TestStorytellerNoCacheFlag(CleanFlaskIntegrationTest):
 
         self.assertEqual(filename, "original.epub")
         self.assertEqual(Path(path), original_path)
-        self.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_storyteller_client.download_slim_book.assert_not_called()
 
     def test_uses_original_when_flag_value_is_on(self):
         # The settings toggle (and legacy DBs) store "on", not "true".
@@ -2796,13 +2796,13 @@ class TestStorytellerNoCacheFlag(CleanFlaskIntegrationTest):
 
         self.assertEqual(filename, "original.epub")
         self.assertEqual(Path(path), original_path)
-        self.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_storyteller_client.download_slim_book.assert_not_called()
 
     def test_falls_back_to_download_when_original_missing(self):
         from src.web_server import _download_storyteller_artifact
 
         self.mock_container.mock_ebook_parser.resolve_book_path.side_effect = FileNotFoundError()
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         os.environ["STORYTELLER_NO_EPUB_CACHE"] = "true"
 
         filename, path = _download_storyteller_artifact(
@@ -2813,24 +2813,24 @@ class TestStorytellerNoCacheFlag(CleanFlaskIntegrationTest):
 
         self.assertEqual(filename, "storyteller_uuid-abc.epub")
         self.assertEqual(Path(path), self.epub_cache_dir / "storyteller_uuid-abc.epub")
-        self.mock_storyteller_client.download_book.assert_called_once()
+        self.mock_storyteller_client.download_slim_book.assert_called_once()
 
     def test_flag_ignored_when_original_filename_not_provided(self):
         from src.web_server import _download_storyteller_artifact
 
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         os.environ["STORYTELLER_NO_EPUB_CACHE"] = "true"
 
         filename, _path = _download_storyteller_artifact("uuid-abc", "Some Title")
 
         self.assertEqual(filename, "storyteller_uuid-abc.epub")
-        self.mock_storyteller_client.download_book.assert_called_once()
+        self.mock_storyteller_client.download_slim_book.assert_called_once()
         self.mock_container.mock_ebook_parser.resolve_book_path.assert_not_called()
 
     def test_flag_disabled_still_downloads(self):
         from src.web_server import _download_storyteller_artifact
 
-        self.mock_storyteller_client.download_book.return_value = True
+        self.mock_storyteller_client.download_slim_book.return_value = True
         os.environ["STORYTELLER_NO_EPUB_CACHE"] = "false"
 
         filename, _path = _download_storyteller_artifact(
@@ -2840,7 +2840,7 @@ class TestStorytellerNoCacheFlag(CleanFlaskIntegrationTest):
         )
 
         self.assertEqual(filename, "storyteller_uuid-abc.epub")
-        self.mock_storyteller_client.download_book.assert_called_once()
+        self.mock_storyteller_client.download_slim_book.assert_called_once()
         self.mock_container.mock_ebook_parser.resolve_book_path.assert_not_called()
 
     def test_api_storyteller_link_no_cache_stores_original_filename(self):
@@ -2872,7 +2872,7 @@ class TestStorytellerNoCacheFlag(CleanFlaskIntegrationTest):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_storyteller_client.download_slim_book.assert_not_called()
         self.mock_database_service.save_book.assert_called_once()
         saved_book = self.mock_database_service.save_book.call_args[0][0]
         self.assertEqual(saved_book.ebook_filename, "original.epub")

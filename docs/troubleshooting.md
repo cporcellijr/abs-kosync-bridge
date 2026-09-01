@@ -65,6 +65,21 @@ as a bonus alignment source.
 - For Readest, enable **Readest -> Highlight Sync** and enter that reader's Readest email/password.
 - For Hardcover, enable **Hardcover -> Highlight Sync** and enter that reader's Hardcover API token.
 
+### Books are not appearing in Readest
+
+- Uploading is off by default. Enable **Upload matched books to Readest** and/or **Upload
+  books you are currently reading** in that reader's **Account -> My Integrations**.
+- The currently-reading sweep only sends books with a reading position above 0% and below
+  the completion threshold. A book you have not opened anywhere will not be sent by it —
+  match it with **Upload matched books** enabled, or start reading it.
+- Books already in that Readest account are skipped. Check the group named by **Group name
+  for uploaded books** (default `BookBridge`).
+- The sweep shares a timer with the annotation syncs. If every one of those intervals is
+  `0`, set **Upload: sweep interval (minutes)** to a non-zero value so the timer runs.
+- Only EPUB files are uploaded.
+- If the Readest account is out of storage the log says so and uploading stops. Readest's
+  free plan includes 500 MB; free space in Readest or lower **Upload: max books per run**.
+
 ### Storyteller transcripts are not found
 
 - Verify the Docker volume is mounted as host Storyteller assets -> container `/storyteller/assets`.

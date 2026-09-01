@@ -9,6 +9,7 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.api.bookorbit_client import BookOrbitClient
+from src.sync_clients.sync_client_interface import LocatorResult
 
 
 class _Resp:
@@ -60,6 +61,22 @@ def test_login_throttle_reuses_existing_stale_token(client):
     warning.assert_called_once_with(
         "BookOrbit login throttled (429); reusing stale cached token"
     )
+
+
+def test_login_http_error_reuses_existing_stale_token(client):
+    client._token = "still-accepted"
+    client._token_timestamp = 0
+
+    with patch.object(client.session, "post", return_value=_Resp(status_code=503)):
+        assert client._get_fresh_token() == "still-accepted"
+
+
+def test_login_exception_reuses_existing_stale_token(client):
+    client._token = "still-accepted"
+    client._token_timestamp = 0
+
+    with patch.object(client.session, "post", side_effect=RuntimeError("offline")):
+        assert client._get_fresh_token() == "still-accepted"
 
 
 def test_classify_format():
@@ -171,10 +188,30 @@ def test_update_audiobook_progress_resolves_file_id_when_missing(client):
 def test_update_ebook_progress_uses_primary_file(client):
     captured = {}
     with patch.object(client, '_make_request', side_effect=lambda m, e, p=None: captured.update(endpoint=e, payload=p) or _Resp(status_code=204)):
-        ok = client.update_ebook_progress({"id": 3, "primaryFileId": 12, "title": "X"}, 0.5)
+        ok = client.update_ebook_progress({"id": 3, "ebookFileId": 12, "title": "X"}, 0.5)
     assert ok is True
     assert captured["endpoint"] == "/api/v1/books/files/12/progress"
     assert captured["payload"]["percentage"] == pytest.approx(50.0)
+
+
+def test_update_ebook_progress_includes_koreader_progress_when_perfect_ko_xpath_present(client):
+    captured = {}
+    locator = LocatorResult(percentage=0.5, cfi="epubcfi(/6/4)", perfect_ko_xpath="/body/DocFragment[12]/body/p[7]/text().0")
+    with patch.object(client, '_make_request', side_effect=lambda m, e, p=None: captured.update(endpoint=e, payload=p) or _Resp(status_code=204)):
+        ok = client.update_ebook_progress({"id": 3, "ebookFileId": 12, "title": "X"}, 0.5, locator)
+    assert ok is True
+    assert "koreaderProgress" in captured["payload"]
+    assert captured["payload"]["koreaderProgress"] == "/body/DocFragment[12]/body/p[7]/text().0"
+    assert captured["payload"]["koreaderProgress"].startswith("/body/DocFragment[")
+
+
+def test_update_ebook_progress_omits_koreader_progress_when_perfect_ko_xpath_none(client):
+    captured = {}
+    locator = LocatorResult(percentage=0.5, cfi="epubcfi(/6/4)", perfect_ko_xpath=None)
+    with patch.object(client, '_make_request', side_effect=lambda m, e, p=None: captured.update(endpoint=e, payload=p) or _Resp(status_code=204)):
+        ok = client.update_ebook_progress({"id": 3, "ebookFileId": 12, "title": "X"}, 0.5, locator)
+    assert ok is True
+    assert "koreaderProgress" not in captured["payload"]
 
 
 def test_update_ebook_progress_reports_http_error_status(client, caplog):
@@ -183,7 +220,7 @@ def test_update_ebook_progress_reports_http_error_status(client, caplog):
 
     with patch.object(client, '_make_request', return_value=failed):
         ok = client.update_ebook_progress(
-            {"id": 3, "primaryFileId": 12, "title": "X"}, 0.5
+            {"id": 3, "ebookFileId": 12, "title": "X"}, 0.5
         )
 
     assert ok is False

@@ -270,3 +270,91 @@ def test_sync_cycle_internal_clears_local_epub_cache(tmp_path):
     manager._sync_cycle_internal()
 
     assert manager._sync_cycle_local_epub_cache == {}
+
+
+# Issue #414: an install that matched a book before the fix has the full multi-GB
+# artifact sitting at the cache path. Every resolver short-circuits on the file
+# already existing, so a download-time guard never runs for exactly that
+# population -- the repair has to fire where a fat artifact is FOUND.
+
+
+def test_get_storyteller_ebook_filename_repairs_found_fat_artifact(tmp_path):
+    manager = _build_manager(tmp_path)
+    resolved_path = tmp_path / "epub_cache" / "storyteller_uuid-414.epub"
+    manager._resolve_local_epub_uncached = MagicMock(return_value=resolved_path)
+
+    book = Book(
+        abs_id="book-414",
+        abs_title="Story Book",
+        storyteller_uuid="uuid-414",
+        ebook_filename=None,
+        status="active",
+    )
+
+    result = manager._get_storyteller_ebook_filename(book)
+
+    assert result == "storyteller_uuid-414.epub"
+    manager.storyteller_client.strip_cached_audio_in_place.assert_called_once_with(resolved_path)
+    # The cached file is present, so nothing should be re-downloaded.
+    manager.storyteller_client.ensure_readaloud_epub_cached.assert_not_called()
+
+
+def test_get_storyteller_ebook_filename_repairs_stored_artifact_filename(tmp_path):
+    # The mapping already points at the artifact, so the uuid branch is never reached.
+    manager = _build_manager(tmp_path)
+    resolved_path = tmp_path / "epub_cache" / "storyteller_uuid-414.epub"
+    manager._resolve_local_epub_uncached = MagicMock(return_value=resolved_path)
+
+    book = Book(
+        abs_id="book-414b",
+        abs_title="Story Book",
+        storyteller_uuid="uuid-414",
+        ebook_filename="storyteller_uuid-414.epub",
+        status="active",
+    )
+
+    assert manager._get_storyteller_ebook_filename(book) == "storyteller_uuid-414.epub"
+    manager.storyteller_client.strip_cached_audio_in_place.assert_called_once_with(resolved_path)
+
+
+def test_storyteller_artifact_repair_runs_at_most_once_per_cycle(tmp_path):
+    manager = _build_manager(tmp_path)
+    resolved_path = tmp_path / "epub_cache" / "storyteller_uuid-414.epub"
+    manager._resolve_local_epub_uncached = MagicMock(return_value=resolved_path)
+
+    book = Book(
+        abs_id="book-414c",
+        abs_title="Story Book",
+        storyteller_uuid="uuid-414",
+        ebook_filename=None,
+        status="active",
+    )
+
+    manager._get_storyteller_ebook_filename(book)
+    manager._get_storyteller_ebook_filename(book)
+    assert manager.storyteller_client.strip_cached_audio_in_place.call_count == 1
+
+    # A new cycle clears the guard, so a file that went fat again is repaired.
+    manager._storyteller_epub_ensure_attempted.clear()
+    manager._get_storyteller_ebook_filename(book)
+    assert manager.storyteller_client.strip_cached_audio_in_place.call_count == 2
+
+
+def test_storyteller_artifact_repair_survives_a_manager_without_a_client(tmp_path):
+    # Some manager builds carry no storyteller_client at all; the repair must not
+    # be the thing that raises.
+    manager = _build_manager(tmp_path)
+    del manager.storyteller_client
+    manager._resolve_local_epub_uncached = MagicMock(
+        return_value=tmp_path / "epub_cache" / "storyteller_uuid-414.epub"
+    )
+
+    book = Book(
+        abs_id="book-414d",
+        abs_title="Story Book",
+        storyteller_uuid="uuid-414",
+        ebook_filename=None,
+        status="active",
+    )
+
+    assert manager._get_storyteller_ebook_filename(book) == "storyteller_uuid-414.epub"

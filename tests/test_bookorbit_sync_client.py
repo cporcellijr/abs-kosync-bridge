@@ -2,12 +2,13 @@
 
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from src.api.bookorbit_client import BookOrbitClient
 from src.sync_clients.bookorbit_sync_client import BookOrbitSyncClient
 from src.sync_clients.bookorbit_audio_sync_client import BookOrbitAudioSyncClient
 from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgressRequest
@@ -53,6 +54,45 @@ def test_ebook_update_records_write():
     assert res.success is True
     assert res.updated_state["pct"] == 0.5
     assert res.updated_state["cfi"] == "cfiZ"
+
+
+def test_ebook_update_sends_koreader_xpointer_through_to_bookorbit():
+    """The KOReader XPointer must survive the sync-client -> API-client hop (#415).
+
+    BookOrbit hands `koreaderProgress` back to KOReader as the pull position; when
+    it is missing BookOrbit derives a chapter-root xpointer from the CFI and the
+    device opens at the top of the chapter instead of the synced position.
+    """
+    captured = {}
+    with patch.dict(os.environ, {
+        "BOOKORBIT_SERVER": "http://mock",
+        "BOOKORBIT_USER": "u",
+        "BOOKORBIT_PASSWORD": "p",
+    }):
+        client = BookOrbitClient()
+    client.get_book_by_id = MagicMock(return_value={"id": 7, "ebookFileId": 12, "title": "X"})
+
+    sc = BookOrbitSyncClient(client, ebook_parser=None)
+    book = _book(ebook_source="BookOrbit", ebook_source_id="7", abs_id="abs1",
+                 original_ebook_filename=None, ebook_filename="X.epub")
+    req = UpdateProgressRequest(locator_result=LocatorResult(
+        percentage=0.5,
+        cfi="epubcfi(/6/24!/4/2/2)",
+        perfect_ko_xpath="/body/DocFragment[12]/body/p[7]/text().0",
+    ))
+
+    with patch.object(
+        client, "_make_request",
+        side_effect=lambda m, e, p=None: captured.update(endpoint=e, payload=p)
+        or MagicMock(status_code=204),
+    ):
+        res = sc.update_progress(book, req)
+
+    assert res.success is True
+    assert captured["endpoint"] == "/api/v1/books/files/12/progress"
+    assert captured["payload"]["percentage"] == pytest.approx(50.0)
+    assert captured["payload"]["cfi"] == "epubcfi(/6/24!/4/2/2)"
+    assert captured["payload"]["koreaderProgress"] == "/body/DocFragment[12]/body/p[7]/text().0"
 
 
 # ---- audio sync client ----

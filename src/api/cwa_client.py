@@ -31,7 +31,6 @@ class CWAClient:
         # Sanitize credentials (strip whitespace)
         self.username = (resolve_setting(credentials, "CWA_USERNAME", "") or "").strip()
         self.password = (resolve_setting(credentials, "CWA_PASSWORD", "") or "").strip()
-        self.enabled = str(resolve_setting(credentials, "CWA_ENABLED", "")).lower() == "true"
         
         if self.username:
             # Log masked username to confirm what we loaded
@@ -77,6 +76,17 @@ class CWAClient:
         except Exception as e:
             logger.error(f"❌ CWA Request failed: {e}", exc_info=True)
             raise
+
+    @property
+    def enabled(self) -> bool:
+        """Whether CWA is switched on, read per call.
+
+        The client is a DI Singleton, so a flag captured in ``__init__`` would
+        outlive the setting: ``resolve_setting`` enforces the install-wide service
+        gate, and an admin switching CWA off in Settings must take effect without
+        a restart.
+        """
+        return str(resolve_setting(self._creds, "CWA_ENABLED", "")).lower() == "true"
 
     def is_configured(self):
         """Check if CWA is enabled and configured."""

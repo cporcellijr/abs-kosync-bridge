@@ -4,6 +4,61 @@ For the full history of changes, please refer to the **[GitHub Releases](https:/
 
 ---
 
+## [7.6.0]
+
+Positions stop drifting backwards and a rewind you make now sticks. Audiobookshelf and Readest gain proper Enable switches — and a service switched off in Settings is now switched off for everyone. Audiobooks you have moved to BookOrbit can be repointed in bulk instead of re-matched, your books can upload themselves to Readest, and series and cover art now come from whichever library actually holds each book.
+
+### What's New
+
+- **An Enable switch for Audiobookshelf, including per user.** The one service you could not simply switch off now has the same toggle as every other, server-wide under Settings → Integrations and per reader under Account → My Integrations. It stays on unless you turn it off.
+- **An Enable switch for Readest**, covering the highlight relay and both book uploads together. On by default; each reader's own choices are remembered if it is ever switched off.
+- **Move Audiobooks to BookOrbit.** Settings → System → Advanced Options can repoint every already-matched book at its BookOrbit audiobook without rebuilding the match — progress, alignment, highlights and KOReader links all stay as they are. A book moves automatically only when the running time matches, ambiguous cases are listed for you to pick, and an **Undo** button sends everything back.
+- **Your books can upload themselves to Readest.** Two per-account switches under *Account → My Integrations*: upload a book the moment you match it, and upload the books you are currently reading on a timer. Both off by default, capped so they cannot flood the account, filed into a **BookBridge** group you can rename. EPUB only; this does not sync progress to Readest.
+- **A collapsed series card now lists the books in the series**, each with its volume number and its own progress bar, and the book you are up to highlighted.
+- **Chapter headings stand apart in the reading-position preview.** Contributed by [@Kyomorie](https://github.com/Kyomorie) in #409.
+- **A Backup & Restore guide, and a backup helper that is safe to run while BookBridge is running** — a proper verified online snapshot, with the credential key saved beside it. Contributed by [@Kyomorie](https://github.com/Kyomorie) in #410 (#343).
+- **New CWA setting: "Write Kobo span bookmarks"** (on by default), to send percentage only and leave the device's own bookmark alone.
+
+### Changed
+
+- **Creating a Storyteller edition is called the same thing everywhere.** The last corners that still said "Forge" — the two **Forge Recovery** settings, the progress banner, and the Storyteller permission notes — now say what they do. Wording only; the settings keep their meaning, defaults and stored values, and are now **Storyteller Recovery Max Wait** and **Storyteller Recovery Poll Interval**.
+
+### Fixed
+
+- **Your reading position no longer drifts backwards, and a rewind you make now sticks (#413, #416).** BookBridge writes the agreed position out to your other services, and was then reading its own echo back as though you had moved there — nudging you back roughly a page, and blocking a deliberate rewind forever. It now recognises its own write-back and refuses to let it overrule you. Reapply a rewind that was already overwritten once after upgrading and it will hold.
+- **BookOrbit ebook progress no longer lands on the audiobook file (#417).** Progress is now written to the file that matches the format, so the ebook stops looking permanently behind and the audiobook stops being overwritten with ebook percentages.
+- **BookOrbit and Grimmory audiobook progress can now be polled.** Listening progress had no poll setting at all and was only ever checked on the slow global cycle. It now has its own **Poll Mode**, **Poll Interval** and **Wait for Position to Settle** options, and settle mode has been added to the BookOrbit, Grimmory and Kavita ebook polls as well. CWA gains poll settings in the UI.
+- **KOReader now opens where the audiobook actually was, not at the top of the chapter (#415)**, for ebooks that live in BookOrbit. Your next sync of an affected book repairs it.
+- **A book could open at the very beginning instead of where you left off.** A chapter whose text sat inside styling tags, or that held no text at all, produced a position KOReader could not find — which then came back as near-zero progress. Contributed by [@Kyomorie](https://github.com/Kyomorie) in #420.
+- **Storyteller books no longer fill your disk with narration audio, or take the container down with them (#414).** Cached readalong copies kept the full narration — 5.4 GB across 33 books on one measured install — and opening one could exhaust memory and put the container in a restart loop. Narration is now stripped as each copy is cached, and oversized ones you already have are repaired on the next sync.
+- **An audiobook whose files misreport their own length can be transcribed again.** Coverage was judged from the file header rather than the audio itself, so a part that declared a wrong duration failed the whole job before the rest was even downloaded.
+- **Your Kobo no longer reverts the position BookBridge just synced (#364).** BookOrbit, Grimmory and CWA now receive a position the device can act on, not just a percentage.
+- **BookBridge no longer erases the Kobo bookmarks stored in Calibre-Web Automated.** 7.4.1 cleared the stored bookmark on every write; it now writes a correct one where it can and otherwise leaves yours alone. Bookmarks are restored as each book next syncs.
+- **Reading and listening time is no longer counted twice on BookOrbit (#424).** BookBridge now checks whether BookOrbit already logged the session before adding its own estimate, and no longer counts the same stretch twice when you switch between the ebook and the audiobook. Positions were never affected — only the statistics; existing duplicates stay as they are.
+- **Turning a service off in Settings now turns it off for everyone.** The server-wide switch was only a default, so a service an admin had switched off kept syncing for any reader who had switched it on. It is now authoritative, CWA reacts to its switch without a restart, and readers' own settings return untouched if the service is switched back on.
+- **A rewind Audiobookshelf declines is no longer recorded as though it happened.** Contributed by [@Kyomorie](https://github.com/Kyomorie) in #421.
+- **An open dashboard no longer keeps a CPU core busy (#412).** The 30-second refresh was rebuilding the whole dashboard, alignment reads included. It now asks only for the figures it updates, caches the out-of-sync result, and stops polling in a background tab.
+- **Ebook-only books now show their real covers**, taken from the library that hosts them and served through BookBridge, instead of a blank gradient tile.
+- **Series now come from the library that actually holds each book, and corrections reach the dashboard.** Series were read from Audiobookshelf and nowhere else, so ebook-only books never grouped. **Backfill Series Metadata** fills in what is missing and the new **Re-check All Series** applies corrections and removes a series the library no longer reports — both in Settings → System → Advanced Options, both safe to re-run.
+- **Expanding a series, or opening a position preview, no longer stretches the cards beside it.** Contributed by [@Kyomorie](https://github.com/Kyomorie) in #411.
+- **The Match All button stays reachable on a long queue (#423)** — the actions no longer scroll away with the list.
+- **"Out of sync" warnings on audiobooks you moved to BookOrbit.** The drift badge was comparing against the frozen Audiobookshelf position the move keeps for undo, so a book in perfect sync could read "Out of sync by 15.0%" forever.
+- **Deleting a mapping now really does force a fresh shelf-watch match** — the re-scan throttle outlived the mapping, so delete-correct-and-reshelve did nothing for up to a day.
+- **Automatic matches no longer lose their ebook hash**, so a confident match from Grimmory, BookOrbit or Kavita is linked rather than dropped.
+- **BookOrbit keeps working through temporary login refresh failures**, reusing a cached token that the service still accepts instead of reporting "no response."
+- **A book with no author in Audiobookshelf no longer fails its whole sync cycle.**
+- **Audiobookshelf collections are created in the library that holds the book**, rather than always the first library on the server.
+- **Quieter, more accurate logs** — a position saved against a different edition is reported once and then periodically rather than thousands of times, books Grimmory does not hold no longer warn about a Grimmory shelf, and a missing Storyteller book reports the status Storyteller actually returned instead of "No Response".
+
+### Operational Notes
+
+- No database migration and no KOReader plugin update in this release: pull the image and restart.
+- Audiobookshelf and Readest are on unless you switch them off, so nothing changes on upgrade. If you previously switched Audiobookshelf off by typing `disabled` into its server URL, use the new Enable toggle instead.
+- A service switched off server-wide is now off for everyone. On the first start after upgrading, BookBridge switches on any service its readers were actually using, so nobody goes dark.
+- Oversized cached Storyteller books repair themselves on the next sync; nothing to delete by hand.
+
+---
+
 ## [7.5.0]
 
 Kavita joins as a full ebook source and reading client, library cards can show you the text at your current position, and the dashboard learned to sort by when you added a book. This release also carries a **security fix that matters for multi-user installs** — see below.

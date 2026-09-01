@@ -43,7 +43,16 @@ _TOKEN_MAX_AGE = 840
 _LOGIN_RETRY_COOLDOWN = 60
 _EBOOK_FORMATS = {"epub", "kepub", "pdf", "cbz", "cbr", "cb7", "mobi", "azw3", "azw", "fb2"}
 _AUDIO_FORMATS = {"m4b", "mp3", "m4a", "opus", "ogg", "flac", "aax", "aac"}
+# Which cached light-info id a kind-specific lookup may fall back to.
+_KIND_FILE_ID_KEYS = {"ebook": "ebookFileId", "audiobook": "audioFileId"}
 _MAX_FILENAME_QUERIES = 6
+# How far from our session's end to look for one BookOrbit already logged, and how
+# much progress overlap counts as "the same reading" (#424). The window is generous
+# because BookOrbit stamps its session when the reader flushes it while ours is
+# backdated from the poll that noticed the movement; the progress overlap, not the
+# timestamp, is what actually identifies the duplicate.
+_SESSION_DEDUPE_WINDOW_SECONDS = 7200
+_SESSION_OVERLAP_EPSILON_PCT = 0.05
 
 
 class BookOrbitClient:
@@ -142,7 +151,7 @@ class BookOrbitClient:
             except Exception as exc:
                 self._login_retry_after = time.time() + _LOGIN_RETRY_COOLDOWN
                 logger.error("BookOrbit login error: %s", exc, exc_info=True)
-        return None
+        return self._token
 
     # ------------------------------------------------------------------
     # HTTP helpers
@@ -235,29 +244,65 @@ class BookOrbitClient:
             return "ebook"
         return None
 
+    @staticmethod
+    def _info_offers_kind(info: dict, kind: str) -> bool:
+        """Whether a cached light-info entry offers `kind` ('ebook'|'audiobook').
+
+        A book holding both an EPUB and an M4B is both kinds, so it lists each
+        one in `kinds`; the single `kind` scalar only names the preferred one.
+        Entries built without `kinds` fall back to that scalar.
+        """
+        if not isinstance(info, dict):
+            return False
+        kinds = info.get("kinds")
+        if isinstance(kinds, (list, tuple, set)):
+            return kind in kinds
+        return info.get("kind") == kind
+
     def _build_light_info(self, book: dict) -> Optional[dict]:
-        """Build a lightweight cache entry from a `/books/query` list row."""
+        """Build a lightweight cache entry from a `/books/query` list row.
+
+        File ids are recorded per kind. Neither of BookOrbit's own notions of a
+        "primary" file is kind-aware: `books.primary_file_id` is book-wide, and
+        the file-level `role == "primary"` is format-agnostic where it exists at
+        all (measured live 2026-08-28: present on every book, and an audio format
+        in 57 of 200 sampled - m4b or mp3; the reporter's instance constrains
+        `book_files.role` to content|cover|metadata|supplement, so it is absent
+        there and file order decided instead). Either way a format-agnostic id
+        can name the audiobook on a book that also holds an EPUB, and it must
+        never satisfy a kind-specific lookup - so the ebook and audio ids are
+        kept apart here (#417).
+        """
         book_id = book.get("id")
         if book_id is None:
             return None
-        files = book.get("files") or []
-        primary = None
-        for f in files:
-            if isinstance(f, dict) and f.get("role") == "primary":
-                primary = f
-                break
-        if primary is None:
-            # Fall back to the first audio/ebook file by format priority.
-            for f in files:
-                if isinstance(f, dict) and (f.get("format") or "").lower() in (_EBOOK_FORMATS | _AUDIO_FORMATS):
-                    primary = f
-                    break
+        ebook_file = None
+        audio_file = None
+        for f in book.get("files") or []:
+            if not isinstance(f, dict):
+                continue
+            fmt = (f.get("format") or "").lower()
+            if ebook_file is None and fmt in _EBOOK_FORMATS:
+                ebook_file = f
+            if audio_file is None and fmt in _AUDIO_FORMATS:
+                audio_file = f
+        kinds = []
+        if ebook_file is not None:
+            kinds.append("ebook")
+        if audio_file is not None:
+            kinds.append("audiobook")
+        primary = ebook_file if ebook_file is not None else audio_file
         primary_format = (primary or {}).get("format")
         return {
             "id": book_id,
             "title": (book.get("title") or "").strip(),
             "authors": self._format_authors(book.get("authors")),
             "language": str(book.get("language") or "").strip(),
+            "ebookFileId": (ebook_file or {}).get("id"),
+            "ebookFormat": ((ebook_file or {}).get("format") or "").lower(),
+            "audioFileId": (audio_file or {}).get("id"),
+            "audioFormat": ((audio_file or {}).get("format") or "").lower(),
+            "kinds": kinds,
             "primaryFileId": (primary or {}).get("id"),
             "primaryFormat": (primary_format or "").lower(),
             "kind": self._classify_format(primary_format),
@@ -445,7 +490,7 @@ class BookOrbitClient:
                  "language": info.get("language") or "",
                  "duration_seconds": None, "num_files": None}
                 for info in self.get_all_books()
-                if info.get("kind") == "audiobook"
+                if self._info_offers_kind(info, "audiobook")
             ]
 
         out = []
@@ -491,7 +536,7 @@ class BookOrbitClient:
         elsewhere (local /books index for the pool, or by id at apply time)."""
         out = []
         for info in self.get_all_books():
-            if info.get("kind") != "ebook":
+            if not self._info_offers_kind(info, "ebook"):
                 continue
             out.append({
                 "id": info.get("id"),
@@ -715,7 +760,7 @@ class BookOrbitClient:
         with self._cache_lock:
             items = list(self._book_cache.values())
         if ebook_only:
-            items = [i for i in items if i.get("kind") == "ebook"]
+            items = [i for i in items if self._info_offers_kind(i, "ebook")]
         if not items:
             return None
 
@@ -746,11 +791,19 @@ class BookOrbitClient:
             return None
 
     def _resolve_primary_file_id(self, book_id, kind: str) -> Optional[int]:
+        """Resolve the file id `kind` ('ebook'|'audiobook') should act on.
+
+        The cache fallback used when the detail call fails is kind-specific: the
+        format-agnostic `primaryFileId` can name the wrong format's file, and
+        returning it here misrouted ebook writes onto the audiobook (#417).
+        None means "unknown" - callers refuse the write rather than guess.
+        """
         detail = self.get_book_detail(book_id)
         if not detail:
             with self._cache_lock:
                 info = self._book_cache.get(book_id)
-            return (info or {}).get("primaryFileId")
+            cache_key = _KIND_FILE_ID_KEYS.get(kind)
+            return (info or {}).get(cache_key or "primaryFileId")
         pf = self._primary_file(detail, kind=kind)
         return (pf or {}).get("id")
 
@@ -797,12 +850,18 @@ class BookOrbitClient:
         if not entries:
             return dict(baseline)
 
-        if len(entries) == 1:
+        ebook_file_id = self._resolve_primary_file_id(book_id, "ebook")
+        if ebook_file_id is not None:
+            chosen = next((e for e in entries if e.get("fileId") == ebook_file_id), None)
+            if chosen is None:
+                # The ebook file has no progress row of its own. Standing another
+                # file's row in for it is how an audiobook row came back as ebook
+                # progress (#417); an unstarted ebook is the 0.0 baseline.
+                return dict(baseline)
+        elif len(entries) == 1:
             chosen = entries[0]
         else:
-            primary_file_id = self._resolve_primary_file_id(book_id, "ebook")
-            chosen = next((e for e in entries if e.get("fileId") == primary_file_id), None) \
-                or max(entries, key=lambda e: e.get("percentage") or 0)
+            chosen = max(entries, key=lambda e: e.get("percentage") or 0)
 
         raw_pct = chosen.get("percentage")
         pct = self._to_pct_fraction(raw_pct) if raw_pct is not None else 0.0
@@ -818,18 +877,42 @@ class BookOrbitClient:
     def update_ebook_progress(
         self, book_info: dict, percentage: float, locator: Optional[LocatorResult] = None
     ) -> bool:
-        """Push ebook progress (percentage is a 0-1 fraction)."""
+        """Push ebook progress (percentage is a 0-1 fraction).
+
+        When the locator carries a truthy `perfect_ko_xpath`, it is sent as
+        `koreaderProgress`. BookOrbit relays this value to KOReader as the pull
+        position; without it BookOrbit derives a chapter-root xpointer from the CFI.
+        """
         book_id = book_info.get("id")
-        file_id = book_info.get("primaryFileId") or self._resolve_primary_file_id(book_id, "ebook")
+        file_id = book_info.get("ebookFileId")
+        if file_id is None:
+            cached_id = book_info.get("primaryFileId")
+            cached_format = (book_info.get("primaryFormat") or "").lower()
+            if cached_id is not None and cached_format in _EBOOK_FORMATS:
+                file_id = cached_id
+            else:
+                if cached_id is not None:
+                    logger.info(
+                        "BookOrbit: ignoring cached primary file %s (format=%s) for book %s "
+                        "- it is not an ebook file; resolving the ebook file instead",
+                        cached_id, cached_format or "unknown", book_id,
+                    )
+                file_id = self._resolve_primary_file_id(book_id, "ebook")
         if file_id is None:
             logger.error("BookOrbit: cannot update ebook — no primary file id for book %s", book_id)
             return False
         payload: dict = {"percentage": round(percentage * 100.0, 4)}
         if locator and locator.cfi:
             payload["cfi"] = locator.cfi
+        if locator and locator.perfect_ko_xpath:
+            payload["koreaderProgress"] = locator.perfect_ko_xpath
         resp = self._make_request("POST", f"/api/v1/books/files/{file_id}/progress", payload)
         if resp is not None and resp.status_code in (200, 201, 204):
-            logger.info("BookOrbit: %s → %.1f%%", book_info.get("title") or book_id, percentage * 100)
+            has_ko_xpath = bool(locator and locator.perfect_ko_xpath)
+            logger.info(
+                "BookOrbit: %s → %.1f%% (koreader_xpath=%s)",
+                book_info.get("title") or book_id, percentage * 100, has_ko_xpath,
+            )
             return True
         status = resp.status_code if resp is not None else "no response"
         logger.error("BookOrbit ebook update failed: %s", status)
@@ -1082,6 +1165,90 @@ class BookOrbitClient:
 
     # ------------------------------------------------------------------
     # Reading sessions (per file)
+    #
+    # BookOrbit logs its own session whenever the reading happened in ITS OWN web
+    # reader or web player, so an estimated session posted for the same span
+    # double-counts it (#424). It logs nothing when the progress arrived from a
+    # third-party app that only writes position — verified live 2026-08-31: a book
+    # played in BookOrbit's web player got BookOrbit's own session (endProgress
+    # 15.068159 — six decimals, where we round to two), while a book listened to in
+    # an external player had 25 of 25 sessions written solely by the bridge.
+    # Both are the same call here: ask what BookOrbit already has, skip if it has it.
+
+    @staticmethod
+    def _parse_session_timestamp(value: Optional[str]) -> Optional[float]:
+        """Parse a BookOrbit session ISO-8601 timestamp into a POSIX timestamp."""
+        if not value:
+            return None
+        from datetime import datetime
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    def find_overlapping_session(
+        self,
+        book_ids,
+        start_progress: float,
+        end_progress: float,
+        end_time: float,
+        window_seconds: int = _SESSION_DEDUPE_WINDOW_SECONDS,
+    ) -> Optional[dict]:
+        """Return an existing session covering the same reading, if there is one.
+
+        Matching is by progress range rather than timestamp: BookOrbit stamps its
+        session when the reader flushes it, while ours is backdated from the poll
+        that noticed the movement, so the two windows are offset by up to a poll
+        interval even for identical reading. ``window_seconds`` only bounds how far
+        back to look so an unrelated re-read of the same pages is not mistaken for
+        this one.
+
+        The search deliberately spans **formats**: a stretch of a book is consumed
+        once whether it was read or listened to, and BookBridge itself syncs the
+        position from one format onto the other, so an audiobook session and an
+        ebook session over the same percentages are the same reading counted twice.
+        ``book_ids`` therefore takes every BookOrbit id for the work — audio and
+        ebook are separate books in BookOrbit and keep separate session lists.
+
+        Progress args are 0-1 fractions; BookOrbit's session fields are 0-100.
+        Returns the matching session dict, or None.
+        """
+        if isinstance(book_ids, (str, int)):
+            book_ids = [book_ids]
+        wanted = []
+        for raw in book_ids or ():
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value not in wanted:
+                wanted.append(value)
+        if not wanted:
+            return None
+
+        lo = min(float(start_progress), float(end_progress)) * 100
+        hi = max(float(start_progress), float(end_progress)) * 100
+        for book_id in wanted:
+            resp = self._make_request("GET", f"/api/v1/books/{book_id}/sessions")
+            if not resp or resp.status_code != 200:
+                continue
+            data = self._parse_json(resp)
+            items = data.get("items") if isinstance(data, dict) else None
+            for session in items or ():
+                if not isinstance(session, dict):
+                    continue
+                ended = self._parse_session_timestamp(session.get("endedAt"))
+                if ended is None or abs(ended - float(end_time)) > window_seconds:
+                    continue
+                try:
+                    s_end = float(session.get("endProgress") or 0)
+                    s_start = s_end - float(session.get("progressDelta") or 0)
+                except (TypeError, ValueError):
+                    continue
+                s_lo, s_hi = min(s_start, s_end), max(s_start, s_end)
+                if min(hi, s_hi) - max(lo, s_lo) > _SESSION_OVERLAP_EPSILON_PCT:
+                    return session
+        return None
     # ------------------------------------------------------------------
 
     def create_reading_session(

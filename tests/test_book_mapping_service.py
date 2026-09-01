@@ -72,6 +72,24 @@ def test_audio_mapping_abs_source_creates_book_with_abs_bridge_key():
     abs_client.add_to_collection.assert_called_once()
 
 
+def test_audio_mapping_uses_generic_ebook_source_id_for_kosync_hash():
+    svc, db, booklore_client, _ep, _abs = _build_service()
+
+    saved = svc.create_audio_mapping_from_match(
+        audio_source='ABS',
+        audio_source_id='abs-item-1',
+        audio_title='Test Audiobook',
+        ebook_filename='test.epub',
+        ebook_source='Grimmory',
+        ebook_source_id='123',
+    )
+
+    assert saved is not None
+    assert saved.kosync_doc_id == 'abcdef0123456789'
+    booklore_client.download_book.assert_called_once_with('123')
+    db.save_book.assert_called_once()
+
+
 def test_audio_mapping_booklore_source_uses_bridge_key_prefix():
     svc, db, _bl, _ep, abs_client = _build_service()
 

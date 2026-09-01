@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     fi
 
 # 3. Create directories
-RUN mkdir -p /app/src /app/templates /app/static /data/audio_cache /data/logs /data/transcripts
+RUN mkdir -p /app/src /app/templates /app/static /app/scripts /data/audio_cache /data/logs /data/transcripts
 
 # 4. Copy Application Code
 COPY src/ /app/src/
@@ -42,9 +42,11 @@ COPY static/ /app/static/
 COPY alembic/ /app/alembic/
 COPY alembic.ini /app/alembic.ini
 COPY plugins/ /app/plugins/
+COPY scripts/backup_db.sh /app/scripts/backup_db.sh
 
 COPY start.sh /app/start.sh
-RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
+RUN sed -i 's/\r$//' /app/start.sh /app/scripts/backup_db.sh && \
+    chmod +x /app/start.sh /app/scripts/backup_db.sh
 
 EXPOSE 5757
 

@@ -1147,7 +1147,7 @@ class ForgeService:
                     epub_cache.mkdir(parents=True, exist_ok=True)
                     completed_epub_path = epub_cache / f".forge_readaloud_{book_uuid}.epub"
 
-                    if st_client.download_book(book_uuid, completed_epub_path, polling=True):
+                    if st_client.download_slim_book(book_uuid, completed_epub_path, polling=True):
                         if completed_epub_path.exists() and completed_epub_path.stat().st_size > 0:
                             logger.info(f"⚡ Forge: Readaloud downloaded for {book_uuid}")
 
@@ -1637,7 +1637,7 @@ class ForgeService:
                 logger.info("Auto-Forge: Processing complete. Downloading artifact...")
                 self._update_forge_match_job(abs_id, progress=0.75, last_error="Downloading Storyteller artifact")
                 try:
-                    if not st_client.download_book(book_uuid, target_path):
+                    if not st_client.download_slim_book(book_uuid, target_path):
                         raise Exception("API download returned False")
                 except Exception as api_err:
                     raise Exception(f"Failed to download Storyteller artifact: {api_err}")

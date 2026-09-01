@@ -239,3 +239,73 @@ class TestStorytellerSyncClientStaleFilename(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestStorytellerCachedArtifactRepair(unittest.TestCase):
+    """Issue #414: repair a found fat artifact, not just a missing one.
+
+    Pre-fix installs have the full multi-GB ReadAloud EPUB at the cache path, and
+    this resolver returns as soon as resolve_book_path succeeds -- so a guard on
+    the download path never runs for the population that needs it.
+    """
+
+    def _client(self, resolved_path):
+        mock_ebook_parser = MagicMock()
+        mock_ebook_parser.resolve_book_path.return_value = resolved_path
+        mock_ebook_parser.epub_cache_dir = "/tmp/epub_cache"
+        mock_storyteller_client = MagicMock()
+        client = StorytellerSyncClient(
+            storyteller_client=mock_storyteller_client,
+            ebook_parser=mock_ebook_parser,
+        )
+        return client, mock_storyteller_client
+
+    def test_resolved_artifact_is_repaired(self):
+        client, st = self._client("/data/epub_cache/storyteller_uuid-414.epub")
+        book = Book(
+            abs_id="abs-414",
+            abs_title="Story Book",
+            storyteller_uuid="uuid-414",
+            ebook_filename=None,
+            status="active",
+        )
+
+        result = client._resolve_storyteller_epub_filename(book)
+
+        self.assertEqual(result, "storyteller_uuid-414.epub")
+        st.strip_cached_audio_in_place.assert_called_once_with(
+            "/data/epub_cache/storyteller_uuid-414.epub"
+        )
+        st.ensure_readaloud_epub_cached.assert_not_called()
+
+    def test_stored_artifact_filename_is_repaired(self):
+        client, st = self._client("/data/epub_cache/storyteller_uuid-414.epub")
+        book = Book(
+            abs_id="abs-414b",
+            abs_title="Story Book",
+            storyteller_uuid="uuid-414",
+            ebook_filename="storyteller_uuid-414.epub",
+            status="active",
+        )
+
+        self.assertEqual(
+            client._resolve_storyteller_epub_filename(book), "storyteller_uuid-414.epub"
+        )
+        st.strip_cached_audio_in_place.assert_called_once_with(
+            "/data/epub_cache/storyteller_uuid-414.epub"
+        )
+
+    def test_repair_failure_does_not_break_resolution(self):
+        client, st = self._client("/data/epub_cache/storyteller_uuid-414.epub")
+        st.strip_cached_audio_in_place.side_effect = OSError("read-only filesystem")
+        book = Book(
+            abs_id="abs-414c",
+            abs_title="Story Book",
+            storyteller_uuid="uuid-414",
+            ebook_filename=None,
+            status="active",
+        )
+
+        self.assertEqual(
+            client._resolve_storyteller_epub_filename(book), "storyteller_uuid-414.epub"
+        )

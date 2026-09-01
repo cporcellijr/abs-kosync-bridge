@@ -187,7 +187,7 @@ class TestCWASyncClient(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertAlmostEqual(result.location, 0.50)
         self.mock_sync_api.update_reading_state.assert_called_once_with(
-            'test-uuid', 0.50, 'Reading'
+            'test-uuid', 0.50, 'Reading', location=None
         )
 
     def test_update_progress_finished(self):
@@ -201,7 +201,7 @@ class TestCWASyncClient(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.mock_sync_api.update_reading_state.assert_called_once_with(
-            'test-uuid', 0.995, 'Finished'
+            'test-uuid', 0.995, 'Finished', location=None
         )
 
     def test_update_progress_ready_to_read(self):
@@ -215,7 +215,7 @@ class TestCWASyncClient(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.mock_sync_api.update_reading_state.assert_called_once_with(
-            'test-uuid', 0.0, 'ReadyToRead'
+            'test-uuid', 0.0, 'ReadyToRead', location=None
         )
 
     def test_update_progress_no_uuid(self):

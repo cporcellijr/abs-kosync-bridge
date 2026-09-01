@@ -33,12 +33,28 @@ class StorytellerSyncClient(SyncClient):
         """Storyteller participates in both audiobook and ebook sync modes."""
         return {"audiobook", "ebook"}
 
+    def _repair_cached_artifact(self, resolved_path) -> None:
+        """Re-strip a resolved ReadAloud artifact that still carries narration audio.
+
+        Pre-#414 installs have a full multi-GB EPUB at the cache path, and every
+        resolver short-circuits on its existence -- so the repair belongs here, where
+        a fat artifact is found, not on the download path that never runs for it.
+        On an already-slim file this is a zip central-directory read.
+        """
+        if not resolved_path:
+            return
+        try:
+            self.storyteller_client.strip_cached_audio_in_place(resolved_path)
+        except Exception as e:
+            logger.debug(f"Storyteller cached EPUB repair skipped for '{resolved_path}': {e}")
+
     def _resolve_storyteller_epub_filename(self, book: Book) -> Optional[str]:
         """Resolve the best EPUB context for Storyteller href/fragment operations."""
         current = getattr(book, "ebook_filename", None)
         if current and str(current).startswith("storyteller_"):
             try:
-                self.ebook_parser.resolve_book_path(current)
+                resolved = self.ebook_parser.resolve_book_path(current)
+                self._repair_cached_artifact(resolved)
                 return current
             except Exception:
                 pass
@@ -48,7 +64,8 @@ class StorytellerSyncClient(SyncClient):
             candidate = f"storyteller_{storyteller_uuid}.epub"
             try:
                 # Verify the candidate can be resolved by configured EPUB paths.
-                self.ebook_parser.resolve_book_path(candidate)
+                resolved = self.ebook_parser.resolve_book_path(candidate)
+                self._repair_cached_artifact(resolved)
                 return candidate
             except Exception:
                 pass

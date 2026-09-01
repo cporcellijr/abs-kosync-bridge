@@ -312,6 +312,7 @@ def test_bundle_adapters_include_bookorbit():
 def test_bookorbit_session_logs_audio_leader_against_audio_book_id():
     bo = MagicMock()
     bo.is_configured.return_value = True
+    bo.find_overlapping_session.return_value = None  # BookOrbit has not logged it (#424)
     sm = _sync_manager(bookorbit_client=bo)
     book = SimpleNamespace(
         audio_source="BookOrbit",

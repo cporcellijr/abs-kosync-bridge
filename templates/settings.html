@@ -74,6 +74,31 @@
             display: none;
         }
 
+        .repoint-scroll {
+            max-height: 320px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color, #444);
+            border-radius: 6px;
+            padding: 8px;
+        }
+
+        .repoint-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 0;
+            font-size: 0.9em;
+        }
+
+        .repoint-list {
+            margin: 4px 0 0 18px;
+            font-size: 0.9em;
+        }
+
+        .repoint-choice {
+            max-width: 100%;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -706,6 +731,7 @@
             </div>
 
             <div class="settings-section section-highlight" data-svc="audiobookshelf">
+                {% set abs_enabled = get_val('ABS_ENABLED', 'true')|lower in ['true','1','yes','on'] %}
                 <div class="section-header">
                     <div class="svc-left">
                         <span class="svc-chev">▶</span>
@@ -716,12 +742,21 @@
                         </div>
                     </div>
                     <div class="header-tail">
-                        {% if get_val('ABS_SERVER')|lower == 'disabled' %}<span class="pill off">Disabled</span>
+                        {% if not abs_enabled or get_val('ABS_SERVER')|lower == 'disabled' %}<span class="pill off">Disabled</span>
                         {% elif get_val('ABS_SERVER') %}<span class="pill ok">Configured</span>
                         {% else %}<span class="pill off">Not configured</span>{% endif %}
+                        <div class="toggle-switch-wrapper">
+                            <span class="toggle-label">Enable</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle_abs" name="ABS_ENABLED"
+                                    onchange="toggleSection('abs_body', this.checked)" {% if abs_enabled
+                                    %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
-                <div class="section-body">
+                <div id="abs_body" class="section-body {% if not abs_enabled %}collapsed{% endif %}">
                     <div class="checkbox-wrapper full-width">
                         <input type="checkbox" id="abs_only_lib" name="ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID" {% if
                             get_bool('ABS_ONLY_SEARCH_IN_ABS_LIBRARY_ID') %}checked{% endif %}>
@@ -731,7 +766,7 @@
                     <div class="form-group full-width">
                         <label>Server URL</label>
                         <input type="text" name="ABS_SERVER" value="{{ get_val('ABS_SERVER') }}">
-                        <div class="help-text">Enter <code>disabled</code> to skip Audiobookshelf</div>
+                        <div class="help-text">Turn Audiobookshelf off with the Enable switch above. Entering <code>disabled</code> here does the same thing and is the equivalent for a compose-env-only setup.</div>
                     </div>
                     <div class="form-group full-width">
                         <label>Public URL <span style="font-weight:400;opacity:.65;">(optional)</span></label>
@@ -928,7 +963,7 @@
                                 {% if get_bool('STORYTELLER_NO_EPUB_CACHE') %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
-                        <div class="help-text">When enabled, BookBridge uses the original EPUB for text extraction across all Storyteller flows (Auto-Forge, manual Create Mapping, Match, and the Batch Forge/Match flows) instead of downloading and caching Storyteller's ReadAloud EPUB. Requires the original EPUB to be accessible via a mapped library path (<code>/books</code>).</div>
+                        <div class="help-text">When enabled, BookBridge uses the original EPUB for text extraction across all Storyteller flows (automatic and manual Storyteller edition creation, Create Mapping, and Match) instead of downloading and caching Storyteller's ReadAloud EPUB. Requires the original EPUB to be accessible via a mapped library path (<code>/books</code>).</div>
                     </div>
                     <div class="form-group" style="align-items: center;">
                         <label>Count as Listening Time</label>
@@ -1287,6 +1322,7 @@
 
             <!-- Readest Highlight Sync (engine knobs; account is per-user) -->
             <div class="settings-section" data-svc="readest">
+                {% set readest_enabled = get_val('READEST_ENABLED', 'true')|lower in ['true','1','yes','on'] %}
                 <div class="section-header">
                     <div class="svc-left">
                         <span class="svc-chev">▶</span>
@@ -1297,12 +1333,24 @@
                         </div>
                     </div>
                     <div class="header-tail">
-                        <span class="pill off">Per-user accounts</span>
+                        {% if not readest_enabled %}<span class="pill off">Disabled</span>
+                        {% else %}<span class="pill off">Per-user accounts</span>{% endif %}
+                        <div class="toggle-switch-wrapper">
+                            <span class="toggle-label">Enable</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle_readest" name="READEST_ENABLED"
+                                    onchange="toggleSection('readest_body', this.checked)" {% if readest_enabled
+                                    %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
-                <div class="section-body">
+                <div id="readest_body" class="section-body {% if not readest_enabled %}collapsed{% endif %}">
                     <div class="form-group full-width">
                         <div class="help-text" style="background:rgba(102,126,234,.08);border:1px solid rgba(102,126,234,.25);border-radius:8px;padding:10px 12px;">
+                            Covers everything Readest does for a user — highlight &amp; note relay and both
+                            book uploads. Turning this off stops all of it, whatever each user has chosen.
                             Bidirectionally syncs KOReader highlights and bookmarks with each user's
                             <a href="https://readest.com" target="_blank" style="color:#aab4f5;">Readest</a> account.
                             Enable it and enter the Readest <strong>email &amp; password</strong> per user under
@@ -1315,6 +1363,22 @@
                         <input type="number" min="0" name="READEST_ANNOTATION_SYNC_MINUTES"
                             value="{{ get_val('READEST_ANNOTATION_SYNC_MINUTES', '15') }}">
                         <div class="help-text">0 disables the sync timer (manual trigger only).</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Upload: max books per run</label>
+                        <input type="number" min="0" name="READEST_UPLOAD_MAX_PER_RUN"
+                            value="{{ get_val('READEST_UPLOAD_MAX_PER_RUN', '5') }}">
+                        <div class="help-text">Safety rail for the &quot;upload books you are
+                            currently reading&quot; sweep, so a first run cannot flood a Readest
+                            account. Readest's free plan includes 500&nbsp;MB. 0 pauses uploading.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Upload: sweep interval (minutes)</label>
+                        <input type="number" min="0" name="READEST_UPLOAD_SWEEP_MINUTES"
+                            value="{{ get_val('READEST_UPLOAD_SWEEP_MINUTES', '60') }}">
+                        <div class="help-text">How often BookBridge looks for newly started books
+                            to upload. Shares a daemon with the annotation syncs, so the fastest of
+                            those intervals wins. 0 removes it from that schedule.</div>
                     </div>
                     <div class="form-group full-width">
                         <label>Supabase URL (advanced)</label>
@@ -1384,6 +1448,16 @@
                             {% if get_bool('CWA_SYNC_ENABLED') %}checked{% endif %}>
                         <label for="cwa_sync_toggle">Enable Sync</label>
                         <div class="help-text">Sync reading progress via CWA's Kobo sync protocol. Works with stock Kobo and KOReader.</div>
+                    </div>
+                    <div class="checkbox-wrapper full-width">
+                        <input type="checkbox" id="cwa_kobo_span_toggle" name="CWA_KOBO_SPAN_SYNC"
+                            {% if get_bool('CWA_KOBO_SPAN_SYNC') %}checked{% endif %}>
+                        <label for="cwa_kobo_span_toggle">Write Kobo span bookmarks</label>
+                        <div class="help-text">A stock Kobo jumps to a synced position only when it is given a
+                            <code>KoboSpan</code> bookmark &mdash; a bare percentage updates the library tile but the
+                            book still reopens where the device left off, overwriting the synced position. With this on,
+                            BookBridge reads the KEPUB that CWA serves your device and writes the matching span.
+                            Turn it off to leave the device's own bookmark untouched and send percentage only.</div>
                     </div>
 
                     <!-- Authoritative Identifier Mapping -->
@@ -2082,7 +2156,7 @@
                         <div class="form-group" style="align-items: center;">
                             <label>Grimmory Poll Mode</label>
                             <select name="BOOKLORE_POLL_MODE" id="booklore_poll_mode"
-                                    onchange="togglePollSeconds('booklore_poll_seconds_row', this.value)">
+                                    onchange="togglePollSeconds('booklore_poll_seconds_row', this.value); togglePollSeconds('booklore_poll_settle_row', this.value)">
                                 <option value="global" {% if get_val('BOOKLORE_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
                                 <option value="custom" {% if get_val('BOOKLORE_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
                             </select>
@@ -2094,13 +2168,53 @@
                                    value="{{ get_val('BOOKLORE_POLL_SECONDS', '300') }}">
                             <div class="help-text">Recommended: 300s for Grimmory.</div>
                         </div>
+                        <div class="form-group" id="booklore_poll_settle_row"
+                             {% if get_val('BOOKLORE_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="BOOKLORE_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('BOOKLORE_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while the position keeps changing between polls (actively reading); run it once a poll shows no further movement.</div>
+                        </div>
+                        <div class="form-group" style="align-items: center;">
+                            <label>Grimmory Audiobook Poll Mode</label>
+                            <select name="BOOKLORE_AUDIO_POLL_MODE" id="booklore_audio_poll_mode"
+                                    onchange="togglePollSeconds('booklore_audio_poll_seconds_row', this.value); togglePollSeconds('booklore_audio_poll_settle_row', this.value)">
+                                <option value="global" {% if get_val('BOOKLORE_AUDIO_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('BOOKLORE_AUDIO_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                            <div class="help-text">Listening progress is read by a separate client from ebook progress, so the Grimmory poll above does not cover it.</div>
+                        </div>
+                        <div class="form-group" id="booklore_audio_poll_seconds_row"
+                             {% if get_val('BOOKLORE_AUDIO_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Grimmory Audiobook Poll Interval (seconds)</label>
+                            <input type="number" name="BOOKLORE_AUDIO_POLL_SECONDS" min="10"
+                                   value="{{ get_val('BOOKLORE_AUDIO_POLL_SECONDS', '300') }}">
+                            <div class="help-text">Recommended: 60s while listening.</div>
+                        </div>
+                        <div class="form-group" id="booklore_audio_poll_settle_row"
+                             {% if get_val('BOOKLORE_AUDIO_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="BOOKLORE_AUDIO_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('BOOKLORE_AUDIO_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while playback keeps advancing between polls; run it once a poll shows no further movement, i.e. you paused or finished listening.</div>
+                        </div>
                         {% endif %}
 
                         {% if get_bool('BOOKORBIT_ENABLED') %}
                         <div class="form-group" style="align-items: center;">
                             <label>BookOrbit Poll Mode</label>
                             <select name="BOOKORBIT_POLL_MODE" id="bookorbit_poll_mode"
-                                    onchange="togglePollSeconds('bookorbit_poll_seconds_row', this.value)">
+                                    onchange="togglePollSeconds('bookorbit_poll_seconds_row', this.value); togglePollSeconds('bookorbit_poll_settle_row', this.value)">
                                 <option value="global" {% if get_val('BOOKORBIT_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
                                 <option value="custom" {% if get_val('BOOKORBIT_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
                             </select>
@@ -2112,13 +2226,53 @@
                                    value="{{ get_val('BOOKORBIT_POLL_SECONDS', '300') }}">
                             <div class="help-text">Recommended: 300s for BookOrbit.</div>
                         </div>
+                        <div class="form-group" id="bookorbit_poll_settle_row"
+                             {% if get_val('BOOKORBIT_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="BOOKORBIT_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('BOOKORBIT_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while the position keeps changing between polls (actively reading); run it once a poll shows no further movement.</div>
+                        </div>
+                        <div class="form-group" style="align-items: center;">
+                            <label>BookOrbit Audiobook Poll Mode</label>
+                            <select name="BOOKORBIT_AUDIO_POLL_MODE" id="bookorbit_audio_poll_mode"
+                                    onchange="togglePollSeconds('bookorbit_audio_poll_seconds_row', this.value); togglePollSeconds('bookorbit_audio_poll_settle_row', this.value)">
+                                <option value="global" {% if get_val('BOOKORBIT_AUDIO_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('BOOKORBIT_AUDIO_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                            <div class="help-text">Listening progress is read by a separate client from ebook progress, so the BookOrbit poll above does not cover it.</div>
+                        </div>
+                        <div class="form-group" id="bookorbit_audio_poll_seconds_row"
+                             {% if get_val('BOOKORBIT_AUDIO_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>BookOrbit Audiobook Poll Interval (seconds)</label>
+                            <input type="number" name="BOOKORBIT_AUDIO_POLL_SECONDS" min="10"
+                                   value="{{ get_val('BOOKORBIT_AUDIO_POLL_SECONDS', '300') }}">
+                            <div class="help-text">Recommended: 60s while listening.</div>
+                        </div>
+                        <div class="form-group" id="bookorbit_audio_poll_settle_row"
+                             {% if get_val('BOOKORBIT_AUDIO_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="BOOKORBIT_AUDIO_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('BOOKORBIT_AUDIO_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while playback keeps advancing between polls; run it once a poll shows no further movement, i.e. you paused or finished listening.</div>
+                        </div>
                         {% endif %}
 
                         {% if get_bool('KAVITA_ENABLED') %}
                         <div class="form-group" style="align-items: center;">
                             <label>Kavita Poll Mode</label>
                             <select name="KAVITA_POLL_MODE" id="kavita_poll_mode"
-                                    onchange="togglePollSeconds('kavita_poll_seconds_row', this.value)">
+                                    onchange="togglePollSeconds('kavita_poll_seconds_row', this.value); togglePollSeconds('kavita_poll_settle_row', this.value)">
                                 <option value="global" {% if get_val('KAVITA_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
                                 <option value="custom" {% if get_val('KAVITA_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
                             </select>
@@ -2129,6 +2283,48 @@
                             <input type="number" name="KAVITA_POLL_SECONDS" min="10"
                                    value="{{ get_val('KAVITA_POLL_SECONDS', '300') }}">
                             <div class="help-text">Recommended: 300s for Kavita.</div>
+                        </div>
+                        <div class="form-group" id="kavita_poll_settle_row"
+                             {% if get_val('KAVITA_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="KAVITA_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('KAVITA_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while the position keeps changing between polls (actively reading); run it once a poll shows no further movement.</div>
+                        </div>
+                        {% endif %}
+
+                        {% if get_bool('CWA_SYNC_ENABLED') %}
+                        <div class="form-group" style="align-items: center;">
+                            <label>Calibre-Web Automated Poll Mode</label>
+                            <select name="CWA_SYNC_POLL_MODE" id="cwa_sync_poll_mode"
+                                    onchange="togglePollSeconds('cwa_sync_poll_seconds_row', this.value); togglePollSeconds('cwa_sync_poll_settle_row', this.value)">
+                                <option value="global" {% if get_val('CWA_SYNC_POLL_MODE', 'global') == 'global' %}selected{% endif %}>Global</option>
+                                <option value="custom" {% if get_val('CWA_SYNC_POLL_MODE') == 'custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="cwa_sync_poll_seconds_row"
+                             {% if get_val('CWA_SYNC_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Calibre-Web Automated Poll Interval (seconds)</label>
+                            <input type="number" name="CWA_SYNC_POLL_SECONDS" min="10"
+                                   value="{{ get_val('CWA_SYNC_POLL_SECONDS', '300') }}">
+                            <div class="help-text">Recommended: 300s for CWA.</div>
+                        </div>
+                        <div class="form-group" id="cwa_sync_poll_settle_row"
+                             {% if get_val('CWA_SYNC_POLL_MODE') != 'custom' %}style="opacity: 0.45; pointer-events: none;"{% endif %}>
+                            <label>Wait for Position to Settle</label>
+                            <div class="toggle-switch-wrapper">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" name="CWA_SYNC_POLL_WAIT_FOR_SETTLE"
+                                        {% if get_bool('CWA_SYNC_POLL_WAIT_FOR_SETTLE') %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="help-text">Hold the sync while the position keeps changing between polls (actively reading); run it once a poll shows no further movement.</div>
                         </div>
                         {% endif %}
 
@@ -2266,7 +2462,7 @@
                         <input type="text" name="STORYTELLER_LIBRARY_DIR"
                             value="{{ get_val('STORYTELLER_LIBRARY_DIR') }}"
                             placeholder="Where Storyteller scans for books">
-                        <div class="help-text">Target directory where Forge writes files for Storyteller to process.
+                        <div class="help-text">Target directory where BookBridge writes files for Storyteller to process.
                         </div>
                     </div>
                     <div class="form-group">
@@ -2277,14 +2473,14 @@
                         <div class="help-text">Used to ingest Storyteller forced-alignment transcripts when available.</div>
                     </div>
                     <div class="form-group">
-                        <label>Forge Recovery Max Wait (minutes)</label>
+                        <label>Storyteller Recovery Max Wait (minutes)</label>
                         <input type="number" name="STORYTELLER_RECOVERY_MAX_WAIT_MINUTES"
                             value="{{ get_val('STORYTELLER_RECOVERY_MAX_WAIT_MINUTES') }}"
                             min="1">
                         <div class="help-text">How long to wait for Storyteller to finish alignment before giving up. Default: 360 (6 hours). Increase for very long books or slow hardware.</div>
                     </div>
                     <div class="form-group">
-                        <label>Forge Recovery Poll Interval (minutes)</label>
+                        <label>Storyteller Recovery Poll Interval (minutes)</label>
                         <input type="number" name="STORYTELLER_RECOVERY_POLL_INTERVAL_MINUTES"
                             value="{{ get_val('STORYTELLER_RECOVERY_POLL_INTERVAL_MINUTES') }}"
                             min="1">
@@ -2352,6 +2548,53 @@
                             <p class="help-text flex-1 m-0">
                                 Re-scan all Storyteller-linked books, ingest available transcript files, and regenerate
                                 storyteller-native alignment maps without SMIL or Whisper reprocessing.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Audiobook Source</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-primary" onclick="planAudioRepoint(this)">
+                                Move Audiobooks to BookOrbit
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="undoAudioRepoint(this)">
+                                Undo
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Moved your audiobooks from Audiobookshelf into BookOrbit? This repoints every
+                                matched book at its BookOrbit audiobook <strong>without re-matching anything</strong> —
+                                your reading progress, alignment, highlights and KOReader links all stay attached.
+                                <br><br>
+                                A book only moves automatically when the BookOrbit copy has the same running time.
+                                That is not just a matching check: your alignment was built against the old audio, so
+                                an identical duration is what proves it still fits. Anything ambiguous is listed for
+                                you to decide, and books not in BookOrbit stay on Audiobookshelf.
+                            </p>
+                        </div>
+                        <div id="audio_repoint_results" class="hidden"
+                             style="margin-top: 16px; padding: 16px; border: 1px solid var(--border-color, #444); border-radius: 8px;"></div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label>Series Backfill</label>
+                        <div class="cleanup-group">
+                            <button type="button" class="btn btn-primary" onclick="backfillSeriesMetadata(this)">
+                                Backfill Series Metadata
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="refreshSeriesMetadata(this)">
+                                Re-check All Series
+                            </button>
+                            <p class="help-text flex-1 m-0">
+                                Look up the series name and number for every book that is missing them, asking the
+                                service that owns each book (Audiobookshelf for audio, BookOrbit / Grimmory / Kavita
+                                for ebook-only books). Books in the same series then collapse into one card on the
+                                dashboard. Safe to re-run; books that already have a series are left alone.
+                                <br><br>
+                                <strong>Re-check All Series</strong> also revisits books that already have one, so a
+                                series you corrected or deleted in the source library is picked up here — including
+                                removing a series that no longer exists. A book is only cleared when its library
+                                actually answers, so an offline or unconfigured service never wipes what you have.
                             </p>
                         </div>
                     </div>
@@ -3234,6 +3477,247 @@
                 console.error('Error running storyteller backfill:', err);
                 alert('An error occurred while running storyteller backfill. Check console for details.');
             }
+        }
+
+        async function runSeriesBackfill(refresh, button) {
+            const label = refresh ? 'Series re-check' : 'Series backfill';
+            const question = refresh
+                ? "Re-check every book's series?\n\nThis revisits books that already have a series and will remove one the source library no longer reports. Books whose library cannot be reached are left untouched."
+                : "Run series backfill now?\n\nThis looks up the series name and number for every book that is missing them, then groups them on the dashboard. It may take a few minutes on a large library.";
+            if (!confirm(question)) {
+                return;
+            }
+
+            const originalText = button ? button.innerHTML : null;
+            if (button) {
+                button.innerHTML = refresh ? '⌛ Re-checking...' : '⌛ Backfilling...';
+                button.disabled = true;
+            }
+
+            try {
+                const response = await fetch('/api/admin/backfill-series', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ refresh: !!refresh })
+                });
+
+                const data = await response.json();
+                if (!response.ok || data.success === false) {
+                    alert(`${label} failed: ${data.error || 'Unknown error'}`);
+                    return;
+                }
+
+                let summary =
+                    `${label} complete.
+` +
+                    `Scanned: ${data.scanned}
+` +
+                    `Updated: ${data.updated}
+`;
+                if (refresh) {
+                    summary +=
+                        `Series removed: ${data.cleared}
+` +
+                        `Already correct: ${data.unchanged}
+` +
+                        `Kept (library unreachable): ${data.kept_no_answer}
+`;
+                }
+                summary +=
+                    `No series found: ${data.unresolved}
+` +
+                    `Failed: ${data.failed}
+` +
+                    `Duration: ${data.duration_seconds}s`;
+                alert(summary);
+
+                if (data.updated > 0 || data.cleared > 0) {
+                    location.reload();
+                }
+            } catch (err) {
+                console.error(`Error running ${label.toLowerCase()}:`, err);
+                alert(`An error occurred while running the ${label.toLowerCase()}. Check console for details.`);
+            } finally {
+                if (button) {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }
+            }
+        }
+
+        let audioRepointPlan = null;
+
+        function escapeRepointText(value) {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        }
+
+        function formatRunTime(seconds) {
+            if (!seconds) return 'unknown';
+            const total = Math.round(Number(seconds));
+            const h = Math.floor(total / 3600);
+            const m = Math.round((total % 3600) / 60);
+            return h + 'h ' + String(m).padStart(2, '0') + 'm';
+        }
+
+        async function planAudioRepoint(button) {
+            const box = document.getElementById('audio_repoint_results');
+            const original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Checking your library...';
+            box.classList.remove('hidden');
+            box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            box.innerHTML = '<p class="help-text">Matching every Audiobookshelf mapping against BookOrbit and confirming run times. This takes a minute or two the first time.</p>';
+            try {
+                const res = await fetch('/api/admin/audio-repoint/plan', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'plan failed');
+                audioRepointPlan = data;
+                renderAudioRepointPlan(data);
+            } catch (err) {
+                box.innerHTML = '<p class="help-text">Could not build the plan: ' + escapeRepointText(err.message) + '</p>';
+            } finally {
+                button.disabled = false;
+                button.textContent = original;
+            }
+        }
+
+        function renderAudioRepointPlan(plan) {
+            const box = document.getElementById('audio_repoint_results');
+            const c = plan.counts || {};
+            let html = '<p class="help-text"><strong>' + c.auto + ' of ' + c.total +
+                '</strong> can move automatically. <strong>' + c.review + '</strong> need a decision. <strong>' +
+                c.unmatched + '</strong> are not in BookOrbit and will stay on Audiobookshelf.</p>';
+
+            if ((plan.review || []).length) {
+                html += '<h4 style="margin: 18px 0 6px;">Needs your decision (' + plan.review.length + ')</h4>';
+                html += '<p class="help-text">Pick the right copy, or leave a book on Audiobookshelf:</p>';
+                plan.review.forEach(function (item, idx) {
+                    html += '<div class="form-group" style="align-items: flex-start;">' +
+                        '<label style="max-width: 320px;">' + escapeRepointText(item.title) +
+                        '<br><span class="help-text">' + escapeRepointText(item.reason) +
+                        ' &middot; yours runs ' + formatRunTime(item.duration) + '</span></label><div>';
+                    // No name attribute: these controls live inside the settings form,
+                    // and a named field would be POSTed to /settings and silently dropped.
+                    html += '<select class="repoint-choice" data-repoint-idx="' + idx + '">';
+                    html += '<option value="">Leave on Audiobookshelf</option>';
+                    (item.candidates || []).forEach(function (cand) {
+                        html += '<option value="' + escapeRepointText(cand.id) + '">' +
+                            escapeRepointText(cand.title) + ' &middot; ' + formatRunTime(cand.duration) +
+                            (cand.duration_agrees ? ' &middot; run time matches' : ' &middot; run time differs') +
+                            '</option>';
+                    });
+                    html += '</select></div></div>';
+                });
+            }
+
+            if ((plan.unmatched || []).length) {
+                html += '<h4 style="margin: 18px 0 6px;">Staying on Audiobookshelf (' +
+                    plan.unmatched.length + ')</h4>';
+                html += '<p class="help-text">Not found in BookOrbit, so nothing changes for these.</p>';
+                html += '<ul class="repoint-list">';
+                plan.unmatched.forEach(function (item) {
+                    html += '<li>' + escapeRepointText(item.title) + '</li>';
+                });
+                html += '</ul>';
+            }
+
+            if ((plan.auto || []).length) {
+                html += '<h4 style="margin: 18px 0 6px;">Moving automatically (' + plan.auto.length + ')</h4>';
+                html += '<p class="help-text">Title and run time both agree, so the existing alignment still fits. ' +
+                    'Untick anything you would rather leave alone.</p>';
+                html += '<div class="repoint-scroll">';
+                plan.auto.forEach(function (item, idx) {
+                    html += '<label class="repoint-row">' +
+                        '<input type="checkbox" class="repoint-auto" data-repoint-auto="' + idx + '" checked> ' +
+                        '<span>' + escapeRepointText(item.title) + ' &rarr; ' +
+                        escapeRepointText(item.target.title) + ' &middot; ' +
+                        formatRunTime(item.target.duration) + '</span></label>';
+                });
+                html += '</div>';
+            }
+
+            html += '<div class="cleanup-group" style="margin-top: 16px;">' +
+                '<button type="button" class="btn btn-primary" onclick="applyAudioRepoint(this)">Apply</button>' +
+                '<p class="help-text flex-1 m-0">Applies the ticked automatic matches plus anything you chose above. Reversible with Undo.</p></div>';
+            box.innerHTML = html;
+            box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function applyAudioRepoint(button) {
+            if (!audioRepointPlan) return;
+            const selections = [];
+            (audioRepointPlan.auto || []).forEach(function (item, idx) {
+                const box = document.querySelector('.repoint-auto[data-repoint-auto="' + idx + '"]');
+                if (box && !box.checked) return;
+                selections.push({ abs_id: item.abs_id, target_id: item.target && item.target.id });
+            });
+            (audioRepointPlan.review || []).forEach(function (item, idx) {
+                const picked = document.querySelector('.repoint-choice[data-repoint-idx="' + idx + '"]');
+                if (picked && picked.value) {
+                    selections.push({ abs_id: item.abs_id, target_id: picked.value });
+                }
+            });
+            if (!selections.length) {
+                alert('Nothing selected to move.');
+                return;
+            }
+            const original = textOf(button);
+            button.disabled = true;
+            button.textContent = 'Moving ' + selections.length + ' book(s)...';
+            try {
+                const res = await fetch('/api/admin/audio-repoint/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ selections: selections })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'apply failed');
+                alert('Moved ' + data.updated + ' book(s) to BookOrbit audio. Skipped: ' + (data.skipped || []).length);
+                location.reload();
+            } catch (err) {
+                alert('Could not apply: ' + err.message);
+                button.disabled = false;
+                button.textContent = original;
+            }
+        }
+
+        function textOf(button) {
+            return button.textContent;
+        }
+
+        async function undoAudioRepoint(button) {
+            if (!confirm('Send every repointed book back to Audiobookshelf audio?')) return;
+            const original = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Undoing...';
+            try {
+                const res = await fetch('/api/admin/audio-repoint/undo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'undo failed');
+                alert('Restored ' + data.restored + ' book(s) to Audiobookshelf audio.');
+                location.reload();
+            } catch (err) {
+                alert('Could not undo: ' + err.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = original;
+            }
+        }
+
+        async function refreshSeriesMetadata(button) {
+            return runSeriesBackfill(true, button);
+        }
+
+        async function backfillSeriesMetadata(button) {
+            return runSeriesBackfill(false, button);
         }
 
         document.addEventListener('DOMContentLoaded', function () {

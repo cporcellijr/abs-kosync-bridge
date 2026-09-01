@@ -174,7 +174,9 @@ class LibraryService:
                  # Try to find one with ebook files
                  for res in results:
                      # Check if author matches loosely
-                     res_author = res.get('author', '')
+                     # ABS sends author: null for items with no author metadata,
+                     # and dict.get() returns that None rather than the default.
+                     res_author = res.get('author') or ''
                      if author and author.lower() not in res_author.lower() and res_author.lower() not in author.lower():
                          continue
 

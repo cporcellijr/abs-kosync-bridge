@@ -87,14 +87,28 @@ class TestHardcoverClient(unittest.TestCase):
         mock_sleep.assert_not_called()
 
     def test_is_configured_uses_per_user_enabled_flag(self):
-        # A user with Hardcover enabled + token is configured regardless of global config.
-        with patch.dict(os.environ, {"HARDCOVER_ENABLED": "false"}, clear=False):
+        # A user with Hardcover enabled + token is configured on their own account,
+        # without inheriting the admin's. The global gate must be ON for the
+        # per-user flag to have anything to decide (see the next test).
+        with patch.dict(os.environ, {"HARDCOVER_ENABLED": "true"}, clear=False):
             client = HardcoverClient(credentials={
                 "HARDCOVER_TOKEN": "user-token",
                 "HARDCOVER_ENABLED": "true",
                 "__allow_global_fallback__": False,
             })
             self.assertTrue(client.is_configured())
+
+    def test_global_off_overrides_a_user_who_enabled_it(self):
+        """A service switched off install-wide stays off for everyone. This used to
+        be the other way round — a per-user 'true' beat a global 'false' — which is
+        how a Storyteller nobody had enabled globally kept getting polled."""
+        with patch.dict(os.environ, {"HARDCOVER_ENABLED": "false"}, clear=False):
+            client = HardcoverClient(credentials={
+                "HARDCOVER_TOKEN": "user-token",
+                "HARDCOVER_ENABLED": "true",
+                "__allow_global_fallback__": False,
+            })
+            self.assertFalse(client.is_configured())
 
     def test_is_configured_honors_per_user_disabled_flag(self):
         with patch.dict(os.environ, {"HARDCOVER_ENABLED": "true"}, clear=False):

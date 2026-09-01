@@ -147,6 +147,71 @@ class TestBrowserCoverUrl(unittest.TestCase):
         self.assertEqual(result, "/api/cover-proxy/abs-matter")
 
 
+class TestEbookOnlyCoverDerivation(unittest.TestCase):
+    """Ebook-only mappings have no audiobook to take a cover from.
+
+    Reported after the series-grouping fix: collapsed series of ebook-only
+    BookOrbit books rendered a blank gradient slab instead of a cover stack,
+    because every child mapping had an empty cover_url — even though BookOrbit
+    serves art for those exact books. The cover still has to be same-origin.
+    """
+
+    def setUp(self):
+        from src.web_server import _browser_cover_url
+        self.sanitize = _browser_cover_url
+
+    def test_bookorbit_ebook_source_derives_same_origin_cover(self):
+        result = self.sanitize(
+            None, audio_source=None, audio_source_id=None,
+            abs_id="ebook-2914cec36706567c",
+            ebook_source="BookOrbit", ebook_source_id="5104",
+        )
+        self.assertEqual(result, "/api/bookorbit/audiobook-cover/5104")
+        _assert_browser_safe(self, result)
+
+    def test_grimmory_ebook_source_derives_same_origin_cover(self):
+        result = self.sanitize(
+            None, abs_id="ebook-abc123",
+            ebook_source="BookLore", ebook_source_id="42",
+        )
+        self.assertEqual(result, "/api/booklore/audiobook-cover/42")
+
+    def test_audio_cover_still_wins_over_the_ebook_library(self):
+        """A matched book keeps its audiobook art; the ebook is only a fallback."""
+        result = self.sanitize(
+            None, audio_source="ABS", audio_source_id=None, abs_id="abs-matter",
+            ebook_source="BookOrbit", ebook_source_id="5104",
+        )
+        self.assertEqual(result, "/api/cover-proxy/abs-matter")
+
+    def test_sources_without_a_proxy_route_stay_empty(self):
+        """CWA, Kavita and local files expose no id this app can proxy."""
+        for source in ("CWA", "Kavita", "Local File", ""):
+            with self.subTest(source=source):
+                self.assertEqual(
+                    self.sanitize(
+                        None, abs_id="ebook-abc123",
+                        ebook_source=source, ebook_source_id="7",
+                    ),
+                    "",
+                )
+
+    def test_missing_ebook_source_id_stays_empty(self):
+        self.assertEqual(
+            self.sanitize(None, abs_id="ebook-abc123",
+                          ebook_source="BookOrbit", ebook_source_id=None),
+            "",
+        )
+
+    def test_synthetic_key_still_never_becomes_an_abs_proxy(self):
+        """The #353 guard must survive the ebook fallback."""
+        result = self.sanitize(
+            None, abs_id="ebook-2914cec36706567c",
+            ebook_source="BookOrbit", ebook_source_id="5104",
+        )
+        self.assertNotIn("/api/cover-proxy/", result)
+
+
 class TestDashboardMappingCoverUrl(unittest.TestCase):
     """The real dashboard mapping builder, with the reporter's ABS config."""
 

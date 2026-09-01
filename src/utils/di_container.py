@@ -23,6 +23,7 @@ from src.api.kavita_client import KavitaClient, KavitaKoSyncClient
 from src.api.storygraph_client import StorygraphClient
 from src.api.storyteller_api import StorytellerAPIClient
 from src.db.database_service import DatabaseService
+from src.services.audio_repoint_service import AudioRepointService
 from src.utils.ebook_utils import EbookParser
 from src.utils.transcriber import AudioTranscriber
 from src.utils.smil_extractor import SmilExtractor
@@ -370,6 +371,13 @@ class Container(containers.DeclarativeContainer):
         transcriber=transcriber,
         ollama_client=ollama_client,
         epub_cache_dir=epub_cache_dir,
+    )
+
+    # Bulk audio-provider repoint (ABS -> BookOrbit) for already-matched books.
+    audio_repoint_service = providers.Singleton(
+        AudioRepointService,
+        database_service=database_service,
+        bookorbit_client=bookorbit_client,
     )
 
     # Book mapping helper for shelf-watch auto-matches + ebook-only fallbacks.

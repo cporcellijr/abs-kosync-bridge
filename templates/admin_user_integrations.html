@@ -65,19 +65,26 @@
         <form method="POST" action="{{ url_for('admin_user_integrations', user_id=target_user.id) }}">
             {% for group, fields in groups %}
             {% set gate_keys = {
+                'Audiobookshelf': 'ABS_ENABLED',
                 'KOReader / KoSync': 'KOSYNC_ENABLED',
                 'Storyteller': 'STORYTELLER_ENABLED',
                 'Grimmory': 'BOOKLORE_ENABLED',
                 'BookFusion': 'BOOKFUSION_ENABLED',
                 'BookOrbit': 'BOOKORBIT_ENABLED',
                 'Kavita': 'KAVITA_ENABLED',
-                'Readest': 'READEST_ANNOTATION_SYNC',
+                'Readest': 'READEST_ENABLED',
                 'Calibre-Web Automated': 'CWA_ENABLED',
                 'Hardcover': 'HARDCOVER_ENABLED',
                 'StoryGraph': 'STORYGRAPH_ENABLED'
             } %}
+            {# Gates whose blank value means ON. Audiobookshelf predates per-service
+               toggles, so an untouched account must keep syncing to it rather than
+               save itself off the first time this page is submitted. #}
+            {% set gate_defaults_on = ['ABS_ENABLED', 'READEST_ENABLED'] %}
             {% set gate_key = gate_keys.get(group) %}
             {% set source_gate = group == 'KOReader Collections' %}
+            {% set gate_globally_off = gate_key in service_enable_keys
+                and master.get(gate_key, '')|lower in ['false','0','no','off'] %}
             {% if gate_key %}
                 {% if gate_key in creds %}
                     {% set gate_raw = creds.get(gate_key, '') %}
@@ -86,7 +93,14 @@
                 {% else %}
                     {% set gate_raw = '' %}
                 {% endif %}
-                {% set group_enabled = gate_raw|lower in ['true','1','yes','on'] %}
+                {% if gate_raw == '' and gate_key in gate_defaults_on %}
+                    {% set gate_user_on = true %}
+                {% else %}
+                    {% set gate_user_on = gate_raw|lower in ['true','1','yes','on'] %}
+                {% endif %}
+                {# The admin's install-wide switch only ever takes the service away;
+                   what this user chose is preserved and comes back with it. #}
+                {% set group_enabled = gate_user_on and not gate_globally_off %}
             {% elif source_gate %}
                 {% if 'DEVICE_SYNC_COLLECTION_SOURCE' in creds %}
                     {% set source_raw = creds.get('DEVICE_SYNC_COLLECTION_SOURCE', 'off') %}
@@ -107,16 +121,23 @@
                     <div class="group-head-actions">
                         {% if gate_key or source_gate %}
                         <div class="toggle-switch-wrapper">
-                            <span class="toggle-label">Enable</span>
+                            <span class="toggle-label">{% if gate_globally_off %}Off server-wide{% else %}Enable{% endif %}</span>
                             <label class="toggle-switch" for="{{ gate_id }}">
                                 <input type="checkbox" id="{{ gate_id }}"
                                     {% if gate_key %}name="{{ gate_key }}"{% endif %}
                                     {% if source_gate %}data-source-select="DEVICE_SYNC_COLLECTION_SOURCE" data-source-default="grimmory"{% endif %}
                                     data-body-id="{{ body_id }}" onchange="toggleIntegrationGroup(this)"
+                                    {% if gate_globally_off %}disabled{% endif %}
                                     {% if group_enabled %}checked{% endif %}>
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        {# A disabled checkbox posts nothing, and the save loop reads an
+                           absent bool as 'false' — this keeps the user's own choice from
+                           being erased while the service is off install-wide. #}
+                        {% if gate_globally_off and gate_user_on %}
+                        <input type="hidden" name="{{ gate_key }}" value="on">
+                        {% endif %}
                         {% endif %}
                         {% if user_test_services.get(group) %}
                         <button type="button" class="test-btn" data-service="{{ user_test_services.get(group) }}"
@@ -125,10 +146,13 @@
                     </div>
                 </div>
                 <div id="{{ body_id }}" class="group-body {% if (gate_key or source_gate) and not group_enabled %}collapsed{% endif %}">
+                    {% if gate_globally_off %}
+                    <div class="note">Turned off for everyone in Settings → Integrations. This reader’s own choice is remembered and takes effect again when the service is switched back on.</div>
+                    {% endif %}
                 {% if group == 'Storyteller' %}
-                <div class="note">For this user to <strong>Forge</strong>, their Storyteller account needs the
+                <div class="note">For this user to <strong>create Storyteller editions</strong>, their Storyteller account needs the
                     <strong>Upload book</strong> and <strong>Book syncing</strong> permissions (granted in
-                    Storyteller → user permissions). Without them, forge fails at the upload (403 Forbidden) or
+                    Storyteller → user permissions). Without them, it fails at the upload (403 Forbidden) or
                     the processing-trigger step.</div>
                 {% endif %}
                 {% if group == 'KOReader / KoSync' %}

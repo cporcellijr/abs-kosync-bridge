@@ -23,6 +23,19 @@ _DEFAULT_SUPPRESSION_WINDOW = 60  # seconds
 _MAX_RETENTION_SECONDS = 3600
 
 
+class _GlobalUserSentinel:
+    """Sentinel representing the unscoped/global namespace explicitly.
+
+    Never resolves to the ambient user; callers that need the global
+    namespace pass GLOBAL_USER to bypass the contextvar fallback.
+    """
+    def __repr__(self) -> str:
+        return "GLOBAL_USER"
+
+
+GLOBAL_USER = _GlobalUserSentinel()
+
+
 def _cleanup_stale_locked(now: float) -> None:
     stale = [k for k, v in _recent_writes.items() if now - v[0] > _MAX_RETENTION_SECONDS]
     for k in stale:
@@ -32,7 +45,12 @@ def _cleanup_stale_locked(now: float) -> None:
 def _resolve_uid(user_id):
     """Fall back to the ambient sync user (set by sync_cycle) so record and read
     key on the same user even when a caller deep in a client doesn't thread
-    user_id through. Keeps one user's push from suppressing another's change."""
+    user_id through. Keeps one user's push from suppressing another's change.
+
+    Pass GLOBAL_USER to explicitly request the unscoped/global namespace
+    (bypassing the ambient user fallback)."""
+    if user_id is GLOBAL_USER:
+        return None
     if user_id is not None:
         return user_id
     try:

@@ -278,8 +278,8 @@ class ABSSyncClient(SyncClient):
                 logger.info(f"🔄 '{book_title}' Not updating ABS progress — target timestamp {ts_for_text:.2f}s is before current ABS position {abs_ts:.2f}s")
                 return SyncResult(abs_ts, True, {
                     'ts': abs_ts,
-                    'pct': self._abs_to_percentage(abs_ts, book) or 0
-                })
+                    'pct': self._abs_to_percentage(abs_ts, book) or 0,
+                }, skipped=True)
 
             prev_ts = abs_ts if abs_ts is not None else 0.0
             time_listened = (ts_for_text - prev_ts) if request.credit_listening else 0.0

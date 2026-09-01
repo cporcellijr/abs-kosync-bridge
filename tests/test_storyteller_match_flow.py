@@ -162,7 +162,7 @@ class TestStorytellerMatchFlow(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-story-uuid-1")
     def test_match_route_preserves_storyteller_source_when_ingest_missing(self, _mock_kosync, _mock_ingest):
-        self.container._storyteller_client.download_book.return_value = True
+        self.container._storyteller_client.download_slim_book.return_value = True
 
         response = self.client.post(
             "/match",

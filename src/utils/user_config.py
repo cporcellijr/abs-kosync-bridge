@@ -22,8 +22,11 @@ _ALLOW_GLOBAL_FALLBACK_KEY = "__allow_global_fallback__"
 # Keys stored per-user (credentials/accounts + per-service enable toggles).
 # Server URLs, library IDs, and engine/catalog settings stay global.
 PER_USER_CREDENTIAL_KEYS = frozenset({
-    # Audiobookshelf (server URL stays global; API token + library + collection are per-user)
-    "ABS_KEY", "ABS_LIBRARY_ID", "ABS_COLLECTION_NAME",
+    # Audiobookshelf (server URL stays global; enable flag + API token + library
+    # + collection are per-user). ABS_ENABLED is deliberately NOT in
+    # ENGINE_MIRROR_KEYS: the primary admin switching their own ABS off must not
+    # take the global singletons down for everyone else.
+    "ABS_ENABLED", "ABS_KEY", "ABS_LIBRARY_ID", "ABS_COLLECTION_NAME",
     # KOReader / KoSync (server URL global; account is per-user)
     "KOSYNC_USER", "KOSYNC_KEY", "KOSYNC_ENABLED", "KOSYNC_AUTH_METHOD",
     "DEVICE_SYNC_COLLECTION_SOURCE", "DEVICE_SYNC_COLLECTIONS",
@@ -46,8 +49,10 @@ PER_USER_CREDENTIAL_KEYS = frozenset({
     "BOOKLORE_SHELF_NAME", "BOOKLORE_LIBRARY_ID", "BOOKLORE_ANNOTATION_SYNC",
     # Readest (Supabase cloud sync; the account is per-user and the rotating
     # access/refresh tokens are cached per-user — the user never pastes a JWT)
-    "READEST_ANNOTATION_SYNC", "READEST_EMAIL", "READEST_PASSWORD",
+    "READEST_ENABLED", "READEST_ANNOTATION_SYNC", "READEST_EMAIL", "READEST_PASSWORD",
     "READEST_ACCESS_TOKEN", "READEST_REFRESH_TOKEN", "READEST_TOKEN_EXPIRES_AT",
+    "READEST_UPLOAD_ON_MATCH", "READEST_GROUP_NAME",
+    "READEST_UPLOAD_READING",
     # BookFusion
     "BOOKFUSION_ENABLED", "BOOKFUSION_ACCESS_TOKEN", "BOOKFUSION_API_KEY",
     "BOOKFUSION_ANNOTATION_SYNC",
@@ -76,6 +81,7 @@ ENGINE_MIRROR_KEYS = (
 # type: 'text' (blank clears), 'secret' (blank keeps existing), 'bool' (checkbox).
 PER_USER_FIELD_GROUPS = [
     ("Audiobookshelf", [
+        ("ABS_ENABLED", "Enabled", "bool"),
         ("ABS_KEY", "API token", "secret"),
         ("ABS_LIBRARY_ID", "Library ID (optional, for a separate library)", "text"),
         ("ABS_COLLECTION_NAME", "Collection name (synced books moved here)", "text"),
@@ -144,9 +150,13 @@ PER_USER_FIELD_GROUPS = [
         ("KAVITA_COLLECTION_NAME", "Collection name (synced books moved here)", "text"),
     ]),
     ("Readest", [
+        ("READEST_ENABLED", "Enabled", "bool"),
         ("READEST_ANNOTATION_SYNC", "Highlight sync", "bool"),
         ("READEST_EMAIL", "Account email", "text"),
         ("READEST_PASSWORD", "Account password", "secret"),
+        ("READEST_UPLOAD_ON_MATCH", "Upload matched books to Readest", "bool"),
+        ("READEST_UPLOAD_READING", "Upload books you are currently reading", "bool"),
+        ("READEST_GROUP_NAME", "Group name for uploaded books", "text"),
     ]),
     ("Calibre-Web Automated", [
         ("CWA_ENABLED", "Enabled", "bool"),
@@ -174,13 +184,66 @@ PER_USER_FIELD_GROUPS = [
 ]
 
 
-def resolve_setting(credentials, key, default=None):
+# Service availability gates. A user may pick their own account for each
+# integration, but they may not switch on a service the admin has turned off
+# install-wide: the global value for these keys is authoritative and only ever
+# takes capability away.
+#
+# A key belongs here only if an admin can actually switch its global on. The
+# `*_ANNOTATION_SYNC` flags for Grimmory and BookFusion have no toggle anywhere in
+# Settings, so their global sits at the seeded 'false' for good — gating those would
+# not enforce a decision, it would silently end highlight sync that users have turned
+# on for themselves.
+SERVICE_ENABLE_KEYS = frozenset({
+    "ABS_ENABLED",
+    "KOSYNC_ENABLED",
+    "READEST_ENABLED",
+    # CWA's Kobo sync half has its own global toggle in Settings, so it can be
+    # gated like a service; the annotation-sync flags cannot — see below.
+    "CWA_SYNC_ENABLED",
+    "STORYTELLER_ENABLED",
+    "BOOKLORE_ENABLED",
+    "BOOKORBIT_ENABLED",
+    "KAVITA_ENABLED",
+    "BOOKFUSION_ENABLED",
+    "CWA_ENABLED",
+    "HARDCOVER_ENABLED",
+    "STORYGRAPH_ENABLED",
+})
+
+_FALSEY_SETTING_VALUES = frozenset({"false", "0", "no", "off"})
+
+
+def global_service_disabled(key: str) -> bool:
+    """Whether a service gate is switched off install-wide.
+
+    Only an explicit falsey global counts. An unset key is not a decision, and
+    must never be read as one — several gates ship with no seeded value.
+    """
+    if key not in SERVICE_ENABLE_KEYS:
+        return False
+    return str(os.environ.get(key, "")).strip().lower() in _FALSEY_SETTING_VALUES
+
+
+def resolve_setting(credentials, key, default=None, *, enforce_global_gate: bool = True):
     """Resolve a config value for a (possibly per-user) client.
 
     Returns the user's value when present and non-empty. For recognized
     per-user account keys, regular user bundles do not fall back to the global
     admin environment unless their registry explicitly allows it.
+
+    A service gate the admin has switched off install-wide resolves to 'false'
+    for everyone, whatever the user stored. Enforcing it here rather than in each
+    client means no code path can miss it — every client reads its enable flag
+    through this function. The user's own value is left untouched in the database,
+    so turning the global back on restores what each person chose.
+
+    ``enforce_global_gate=False`` skips that check for callers that are not asking
+    "should this run?" — an explicit *Test connection* answers "are these credentials
+    good?", which does not depend on whether the service is currently switched on.
     """
+    if enforce_global_gate and global_service_disabled(key):
+        return "false"
     if credentials:
         val = credentials.get(key)
         if val not in (None, ""):

@@ -62,6 +62,8 @@ class SyncResult:
     updated_state: dict = field(default_factory=dict)
     # Optional machine-readable reason for failure; None for ordinary/unknown failures, ABS_ITEM_NOT_FOUND when the target ABS library item no longer exists
     error_code: Optional[str] = None
+    # True when the client intentionally performed no remote write (a policy decision, not a failure), which is why success stays True
+    skipped: bool = False
 
 class SyncClient:
     """

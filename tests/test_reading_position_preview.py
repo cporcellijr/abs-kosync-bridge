@@ -4,8 +4,9 @@ from src.services.reading_position_preview import build_reading_position_preview
 
 
 class FakeParser:
-    def __init__(self, text="abcdefghijklmnopqrstuvwxyz " * 30):
+    def __init__(self, text="abcdefghijklmnopqrstuvwxyz " * 30, spine_map=None):
         self.text = text
+        self.spine_map = spine_map or [{"start": 0, "end": len(self.text)}]
         self.xpath_result = None
         self.cfi_result = None
         self.xpath_calls = []
@@ -17,7 +18,7 @@ class FakeParser:
         return filename
 
     def extract_text_and_map(self, _path):
-        return self.text, [{"start": 0, "end": len(self.text)}]
+        return self.text, self.spine_map
 
     def resolve_xpath_to_index(self, filename, xpath):
         self.xpath_calls.append((filename, xpath))
@@ -59,6 +60,13 @@ def _state(client="kosync", percentage=0.25, **kwargs):
     }
     values.update(kwargs)
     return SimpleNamespace(**values)
+
+
+def _heading_parser(html, text):
+    return FakeParser(
+        text=text,
+        spine_map=[{"start": 0, "end": len(text), "content": html}],
+    )
 
 
 def test_xpath_is_preferred_and_marker_context_is_bounded():
@@ -192,3 +200,161 @@ def test_without_session_leader_newest_state_is_used_as_display_fallback():
     assert result["source"] == "BookOrbit"
     assert result["percentage"] == 70.0
     assert result["status"] == "approximate"
+
+
+def test_real_epub_headings_become_compact_paragraph_boundaries():
+    text = "Before warning. 6 ZENITH / NADIR 6.1 AUFBRUCH Portia sees art."
+    html = (
+        "<html><body><p>Before warning.</p>"
+        "<h1>6 ZENITH / NADIR</h1><h2>6.1 AUFBRUCH</h2>"
+        "<p>Portia sees art.</p></body></html>"
+    )
+    parser = _heading_parser(html, text)
+    parser.xpath_result = text.index("warning") + 3
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/p[1]/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    assert "\n6 ZENITH / NADIR 6.1 AUFBRUCH\n" in result["after"]
+    assert "6 ZENITH / NADIR\n6.1 AUFBRUCH" not in result["after"]
+
+
+def test_duplicate_heading_text_is_left_in_plain_flow_when_mapping_is_ambiguous():
+    text = "Chapter One Chapter One appears again in prose."
+    html = (
+        "<html><body><h1>Chapter One</h1>"
+        "<p>Chapter One appears again in prose.</p></body></html>"
+    )
+    parser = _heading_parser(html, text)
+    parser.xpath_result = text.index("appears")
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/p[1]/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    assert "\n" not in result["before"]
+    assert "\n" not in result["after"]
+
+
+def test_all_caps_normal_paragraph_is_not_guessed_as_a_heading():
+    # A REAL <h1> is present so the boundary mechanism is actually engaged: the
+    # point of this test is that only the marked-up heading breaks, never the
+    # all-caps prose beside it.  Without a real heading in the fixture nothing
+    # here could ever produce a break and the test would pass vacuously.
+    text = "REAL HEADING Before. THIS IS EMPHASIS NOT A HEADING. After."
+    html = (
+        "<html><body><h1>REAL HEADING</h1><p>Before.</p>"
+        "<p>THIS IS EMPHASIS NOT A HEADING.</p><p>After.</p></body></html>"
+    )
+    parser = _heading_parser(html, text)
+    parser.xpath_result = text.index("After")
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/p[3]/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    assert result["before"].startswith("REAL HEADING\n")
+    assert result["before"].count("\n") == 1
+    assert "\n" not in result["after"]
+
+
+def test_heading_containing_marker_is_left_in_plain_flow():
+    text = "Before. CHAPTER TITLE After."
+    html = "<html><body><p>Before.</p><h1>CHAPTER TITLE</h1><p>After.</p></body></html>"
+    parser = _heading_parser(html, text)
+    parser.xpath_result = text.index("TITLE") + 2
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/h1/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    assert "\n" not in result["before"]
+    assert "\n" not in result["after"]
+
+
+def test_missing_spine_markup_keeps_existing_plain_excerpt_behavior():
+    text = "Before. CHAPTER TITLE After."
+    parser = FakeParser(text=text)
+    parser.xpath_result = text.index("After")
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/p[1]/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    assert result["before"] == "Before. CHAPTER TITLE "
+    assert result["after"] == "After."
+
+
+def test_only_spines_near_the_marker_are_parsed_for_headings(monkeypatch):
+    """Heading detection must not re-parse the whole book for a 300-char window.
+
+    A heading only reaches the excerpt when it falls entirely inside a rendered
+    segment, so parsing distant spines is pure cost: on real library EPUBs the
+    unbounded scan measured 53-138 ms per on-demand preview request.
+    """
+    import src.services.reading_position_preview as module
+
+    texts = []
+    spine_map = []
+    cursor = 0
+    for n in range(12):
+        body = f"Body of chapter {n}. " + "filler sentence here. " * 10
+        chapter_text = f"Chapter {n} {body.strip()}"
+        spine_map.append({
+            "start": cursor,
+            "end": cursor + len(chapter_text),
+            "content": (
+                f"<html><body><h1>Chapter {n}</h1>"
+                f"<p>{body.strip()}</p></body></html>"
+            ),
+        })
+        texts.append(chapter_text)
+        cursor += len(chapter_text) + 1
+
+    full_text = " ".join(texts)
+    parser = FakeParser(text=full_text, spine_map=spine_map)
+    parser.xpath_result = full_text.index("Body of chapter 0") + 5
+
+    real_soup = module.BeautifulSoup
+    parsed = []
+
+    def counting_soup(markup, *args, **kwargs):
+        parsed.append(str(markup))
+        return real_soup(markup, *args, **kwargs)
+
+    monkeypatch.setattr(module, "BeautifulSoup", counting_soup)
+
+    result = build_reading_position_preview(
+        book=_book(),
+        states=[_state(xpath="/body/p[1]/text().0")],
+        last_leader="kosync",
+        ebook_parser=parser,
+        context_chars=300,
+    )
+
+    # The heading still renders, so the window did not simply skip everything.
+    assert result["before"].startswith("Chapter 0\n")
+    # Only the spines overlapping the excerpt window may be parsed.
+    assert len(parsed) <= 2, f"parsed {len(parsed)} of {len(spine_map)} spines"
+    assert not any(f"<h1>Chapter {n}</h1>" in "".join(parsed) for n in range(3, 12))

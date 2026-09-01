@@ -5,6 +5,8 @@ Calibre-Web Automated's Kobo sync endpoints.
 
 import os
 import logging
+from urllib.parse import urlparse
+
 import requests
 
 from src.utils.logging_utils import get_persistent_condition_logger
@@ -26,19 +28,20 @@ class CWASyncApi:
         self._session.headers.update({"Content-Type": "application/json"})
         self._timeout = 15
 
-        # Snapshot config at init (matches CWAClient pattern). CWA_SYNC_TOKEN/
-        # ENABLED are per-user when credentials are provided; server is global.
+        # Snapshot config at init. Server and token are snapshotted; the enable
+        # flag is deliberately read per call because this class is a DI Singleton
+        # and the install-wide gate must apply without a restart.
         self._server = (cwa_client.base_url if cwa_client else
                         resolve_setting(credentials, "CWA_SERVER", "").rstrip("/"))
         self._token = (resolve_setting(credentials, "CWA_SYNC_TOKEN", "") or "").strip()
-        self._enabled = str(resolve_setting(credentials, "CWA_SYNC_ENABLED", "")).lower() == "true"
 
     @property
     def _base_url(self) -> str:
         return f"{self._server}/kobo/{self._token}/v1"
 
     def is_configured(self) -> bool:
-        return self._enabled and bool(self._server) and bool(self._token)
+        enabled = str(resolve_setting(self._creds, "CWA_SYNC_ENABLED", "")).lower() == "true"
+        return enabled and bool(self._server) and bool(self._token)
 
     def check_connection(self) -> bool:
         if not self.is_configured():
@@ -119,8 +122,15 @@ class CWASyncApi:
             logger.error(f"❌ CWA Sync: Failed to get reading state for {book_uuid}: {e}", exc_info=True)
             return None
 
-    def update_reading_state(self, book_uuid: str, progress_percent: float, status: str = STATUS_READING) -> bool:
-        """Push reading position to CWA via Kobo sync protocol."""
+    def update_reading_state(self, book_uuid: str, progress_percent: float, status: str = STATUS_READING,
+                             location: dict | None = None) -> bool:
+        """Push reading position to CWA via Kobo sync protocol.
+
+        ``location`` is a Kobo ``{Source, Type, Value}`` bookmark. A Kobo navigates by
+        that span and ignores ProgressPercent, so passing None leaves whatever locator
+        the device last wrote intact rather than replacing it with something the device
+        cannot act on.
+        """
         if not self.is_configured():
             return False
 
@@ -133,10 +143,13 @@ class CWASyncApi:
                     "CurrentBookmark": {
                         "ProgressPercent": api_pct,
                         "ContentSourceProgressPercent": api_pct,
-                        # CWA treats null as "keep the previous Kobo locator".
-                        # Clear it so a stale KoboSpan cannot reopen and roll back
-                        # the newer percentage that BookBridge just wrote.
-                        "Location": {"Source": "", "Type": "", "Value": ""},
+                        # CWA's handler guards on `if location:` and otherwise keeps
+                        # the stored locator, so None preserves the device's bookmark.
+                        # An empty-string dict is truthy there and WIPES it — which is
+                        # what shipped in 7.4.1 and left the whole library span-less
+                        # (#364). The key must still be present: CWA reads it unguarded
+                        # and 400s when it is missing.
+                        "Location": location,
                     },
                     "Statistics": None,
                     "StatusInfo": {"Status": status},
@@ -160,6 +173,61 @@ class CWASyncApi:
         except Exception as e:
             logger.error(f"❌ CWA Sync: Failed to update reading state for {book_uuid}: {e}", exc_info=True)
             return False
+
+    def get_kepub_download_path(self, book_uuid: str) -> str | None:
+        """Return the KEPUB download path CWA advertises for this book.
+
+        ``ebook_source_id`` is a Calibre filename stem, not the numeric book id the
+        download route needs, so the id is read back from the entitlement metadata —
+        the same place the device reads it from.
+        """
+        if not self.is_configured() or not book_uuid:
+            return None
+        try:
+            r = self._session.get(
+                f"{self._base_url}/library/{book_uuid}/metadata", timeout=self._timeout
+            )
+            if r.status_code != 200:
+                logger.debug(
+                    f"📖 CWA Sync: metadata for {book_uuid} returned {r.status_code}"
+                )
+                return None
+            data = r.json()
+            entry = data[0] if isinstance(data, list) and data else data
+            for candidate in (entry or {}).get("DownloadUrls") or []:
+                if str(candidate.get("Format", "")).upper() == "KEPUB" and candidate.get("Url"):
+                    return urlparse(candidate["Url"]).path
+        except Exception as e:
+            logger.debug(
+                f"📖 CWA Sync: could not resolve kepub URL for {book_uuid}: {e}",
+                exc_info=True,
+            )
+        return None
+
+    def download_kepub(self, book_uuid: str) -> bytes | None:
+        """Fetch the KEPUB CWA serves the device for this book.
+
+        Deliberately the same file the Kobo downloads: koboSpan ids only mean anything
+        against the exact bytes the device holds. The advertised URL is re-based onto
+        the configured server so an install reachable at a different host or port than
+        CWA advertises still resolves.
+        """
+        path = self.get_kepub_download_path(book_uuid)
+        if not path:
+            return None
+        try:
+            r = self._session.get(f"{self._server}{path}", timeout=180)
+            if r.status_code != 200:
+                logger.debug(
+                    f"📖 CWA Sync: kepub download for {book_uuid} returned {r.status_code}"
+                )
+                return None
+            return r.content
+        except Exception as e:
+            logger.warning(
+                f"⚠️ CWA Sync: kepub download failed for {book_uuid}: {e}", exc_info=True
+            )
+            return None
 
     def resolve_book_uuid(self, calibre_id: str) -> str | None:
         if not self._cwa_client:

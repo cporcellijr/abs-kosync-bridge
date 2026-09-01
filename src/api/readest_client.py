@@ -14,6 +14,8 @@ import hashlib
 import logging
 import os
 import time
+import unicodedata
+import urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +27,27 @@ logger = logging.getLogger(__name__)
 
 _READEST_BASE_URL = "https://web.readest.com/api"
 _REQUEST_TIMEOUT = 15
+
+# Presigned PUTs move real file bytes and need far longer than _REQUEST_TIMEOUT.
+_UPLOAD_TIMEOUT = 120
+
+# Cloud-relative directory every book object (file blob + cover) lives under.
+_CLOUD_BOOKS_SUBDIR = "Readest/Books"
+_COVER_FILE_NAME = "cover.png"
+
+# Readest's supported book formats, keyed on the uppercase format name.
+_FORMAT_EXTENSIONS: dict[str, str] = {
+    "EPUB": "epub",
+    "PDF": "pdf",
+    "MOBI": "mobi",
+    "AZW": "azw",
+    "AZW3": "azw3",
+    "CBZ": "cbz",
+    "FB2": "fb2",
+    "FBZ": "fbz",
+    "TXT": "txt",
+    "MD": "md",
+}
 
 # Readest's public Supabase anon key (not a secret — shipped in the KOReader plugin).
 # JWT payload ref is "vbsyxfusjjqdxkjqlysc"; keep it byte-exact or the signature
@@ -286,6 +309,236 @@ class ReadestClient:
         logger.warning("Readest push_notes returned %s: %s", resp.status_code, resp.text[:200])
         return False
 
+    def pull_books(self, since: int = 0, book_hash: Optional[str] = None) -> Optional[list]:
+        """Pull book sync records from Readest since a watermark.
+
+        Mirrors pull_notes's param shape. Returns a list of book dicts, or
+        None on error.
+        """
+        if not self.ensure_authenticated():
+            logger.warning("Readest pull_books: no valid auth token")
+            return None
+        params = {
+            "type": "books",
+            "book": book_hash or "",
+            "since": str(int(since)),
+            "meta_hash": "",
+        }
+        try:
+            resp = requests.get(
+                f"{_READEST_BASE_URL}/sync",
+                params=params,
+                headers=self._auth_headers(),
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest pull_books request failed: %s", e, exc_info=True)
+            return None
+
+        if resp.status_code == 401:
+            logger.warning("Readest pull_books: 401 — token may have expired")
+            return None
+        if resp.status_code != 200:
+            logger.warning("Readest pull_books returned %s: %s", resp.status_code, resp.text[:200])
+            return None
+
+        data = resp.json()
+        return data.get("books") or []
+
+    # The server nulls any book field absent from a pushed record. Unlike
+    # reading status, cover, and the title/author/tags metadata group — each
+    # of which resolves on its own clock — `progress` has no field-level
+    # merge protection of its own, so an update that omits it silently erases
+    # the user's reading position (confirmed against the live API). Callers
+    # must pull the current server row first and carry its progress,
+    # groupId/groupName, uploadedAt and cover fields into any update record.
+    def push_books(self, records: list[dict]) -> bool:
+        """Push a list of book sync records to Readest. Returns True on success."""
+        if not records:
+            return True
+        if not self.ensure_authenticated():
+            logger.warning("Readest push_books: no valid auth token")
+            return False
+        try:
+            resp = requests.post(
+                f"{_READEST_BASE_URL}/sync",
+                json={"books": records, "notes": [], "configs": []},
+                headers=self._auth_headers(),
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest push_books request failed: %s", e, exc_info=True)
+            return False
+
+        if resp.status_code in (200, 201):
+            return True
+        logger.warning("Readest push_books returned %s: %s", resp.status_code, resp.text[:200])
+        return False
+
+    # ------------------------------------------------------------------
+    # Storage API
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def book_file_name(book_hash: str, fmt: str) -> str:
+        """Return the cloud-relative storage key for a book's file blob.
+
+        Raises ValueError for a format Readest doesn't support.
+        """
+        ext = _FORMAT_EXTENSIONS.get(str(fmt).upper())
+        if not ext:
+            raise ValueError(f"Unsupported Readest book format: {fmt}")
+        return f"{_CLOUD_BOOKS_SUBDIR}/{book_hash}/{book_hash}.{ext}"
+
+    @staticmethod
+    def cover_file_name(book_hash: str) -> str:
+        """Return the cloud-relative storage key for a book's cover image."""
+        return f"{_CLOUD_BOOKS_SUBDIR}/{book_hash}/{_COVER_FILE_NAME}"
+
+    def get_upload_url(self, file_name: str, file_size: int, book_hash: str) -> Optional[dict]:
+        """Request a presigned upload URL for a cloud-relative storage key.
+
+        ``file_name`` must already be a cloud-relative path (see
+        ``book_file_name`` / ``cover_file_name``) — the server prefixes the
+        user id itself. Returns the parsed response dict (uploadUrl, fileKey,
+        usage, quota) on success, or None on quota exhaustion, other errors,
+        or a request exception.
+        """
+        if not self.ensure_authenticated():
+            logger.warning("Readest get_upload_url: no valid auth token")
+            return None
+        try:
+            resp = requests.post(
+                f"{_READEST_BASE_URL}/storage/upload",
+                json={"fileName": file_name, "fileSize": file_size, "bookHash": book_hash},
+                headers=self._auth_headers(),
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest get_upload_url request failed: %s", e, exc_info=True)
+            return None
+
+        if resp.status_code == 403:
+            usage = quota = None
+            try:
+                body = resp.json()
+                usage = body.get("usage")
+                quota = body.get("quota")
+            except ValueError:
+                pass
+            logger.warning(
+                "Readest get_upload_url: storage quota exhausted (usage=%s, quota=%s)", usage, quota
+            )
+            return None
+        if resp.status_code != 200:
+            logger.warning("Readest get_upload_url returned %s: %s", resp.status_code, resp.text[:200])
+            return None
+
+        return resp.json()
+
+    def put_file(self, upload_url: str, data: bytes) -> bool:
+        """PUT raw bytes to a presigned Readest storage URL.
+
+        Only a Content-Length header is sent — the URL is pre-signed, so
+        adding our own Authorization header would invalidate the signature.
+        """
+        try:
+            resp = requests.put(
+                upload_url,
+                data=data,
+                headers={"Content-Length": str(len(data))},
+                timeout=_UPLOAD_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest put_file request failed: %s", e, exc_info=True)
+            return False
+
+        if resp.status_code in (200, 201, 204):
+            return True
+
+        # The storage backend returns XML errors on failure; surface just the
+        # <Code> element instead of dumping the whole document.
+        text = resp.text or ""
+        code = None
+        start = text.find("<Code>")
+        if start != -1:
+            end = text.find("</Code>", start)
+            if end != -1:
+                code = text[start + len("<Code>"):end]
+        logger.warning("Readest put_file returned %s: %s", resp.status_code, code or text[:200])
+        return False
+
+    def upload_file(self, file_name: str, data: bytes, book_hash: str) -> Optional[dict]:
+        """Convenience wrapper: get a presigned URL, then PUT the bytes to it.
+
+        Returns the ``get_upload_url`` response dict (so callers can read
+        usage/quota) on success, or None on any failure.
+        """
+        upload_info = self.get_upload_url(file_name, len(data), book_hash)
+        if not upload_info:
+            return None
+        upload_url = upload_info.get("uploadUrl")
+        if not upload_url:
+            logger.warning("Readest upload_file: get_upload_url response missing uploadUrl")
+            return None
+        if not self.put_file(upload_url, data):
+            return None
+        return upload_info
+
+    def list_files(self, book_hash: str) -> Optional[list]:
+        """List the cloud storage files recorded for a book.
+
+        This is the only reliable proof a book's bytes are actually present
+        in cloud storage — a book row's ``uploaded_at`` flag can be
+        stale-true after the file was deleted through some other path.
+        Returns None on error.
+        """
+        if not self.ensure_authenticated():
+            logger.warning("Readest list_files: no valid auth token")
+            return None
+        try:
+            resp = requests.get(
+                f"{_READEST_BASE_URL}/storage/list",
+                params={"bookHash": book_hash},
+                headers=self._auth_headers(),
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest list_files request failed: %s", e, exc_info=True)
+            return None
+
+        if resp.status_code != 200:
+            logger.warning("Readest list_files returned %s: %s", resp.status_code, resp.text[:200])
+            return None
+
+        data = resp.json()
+        return data.get("files") or []
+
+    def delete_file(self, file_key: str) -> bool:
+        """Delete one file from Readest cloud storage by its storage key."""
+        if not self.ensure_authenticated():
+            logger.warning("Readest delete_file: no valid auth token")
+            return False
+        # The key contains slashes and must be percent-encoded with no safe
+        # characters, then embedded directly in the URL — the endpoint
+        # matches it literally, and routing it through requests' own params
+        # encoding would double-encode it.
+        encoded_key = urllib.parse.quote(file_key, safe="")
+        try:
+            resp = requests.delete(
+                f"{_READEST_BASE_URL}/storage/delete?fileKey={encoded_key}",
+                headers=self._auth_headers(),
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error("Readest delete_file request failed: %s", e, exc_info=True)
+            return False
+
+        if resp.status_code == 200:
+            return True
+        logger.warning("Readest delete_file returned %s: %s", resp.status_code, resp.text[:200])
+        return False
+
     # ------------------------------------------------------------------
     # Book hash
     # ------------------------------------------------------------------
@@ -340,3 +593,42 @@ class ReadestClient:
         """Mirror the Lua plugin's generateNoteId: md5('ko:{hash}:{type}:{pos0}:{pos1}')[:7]."""
         raw = f"ko:{book_hash}:{note_type}:{pos0 or ''}:{pos1 or ''}"
         return hashlib.md5(raw.encode()).hexdigest()[:7]
+
+    @staticmethod
+    def compute_meta_hash(
+        title: Optional[str],
+        authors: Optional[list[str]],
+        identifiers: Optional[list[str]],
+    ) -> str:
+        """Return Readest's Book.metaHash, aggregating file copies of the same work.
+
+        MD5 (hex) of ``"<title>|<authors joined by ,>|<normalised identifiers
+        joined by ,>"``, Unicode NFC-normalised and UTF-8 encoded. Identifier
+        selection prefers a single scheme — uuid, then calibre, then isbn, in
+        that priority order — taking the first raw identifier that mentions
+        it; when none of those schemes is present, every identifier is used.
+        Each chosen identifier is normalised to the text after its last colon
+        when it contains "urn:", otherwise the text after its first colon,
+        otherwise left unchanged.
+        """
+        title = title or ""
+        authors = authors or []
+        identifiers = identifiers or []
+
+        chosen: list[str] = []
+        for scheme in ("uuid", "calibre", "isbn"):
+            match = next((raw for raw in identifiers if scheme in raw.lower()), None)
+            if match is not None:
+                chosen = [match]
+                break
+        if not chosen:
+            chosen = list(identifiers)
+
+        normalized_identifiers = [
+            raw.rsplit(":", 1)[-1] if "urn:" in raw.lower() else (raw.split(":", 1)[1] if ":" in raw else raw)
+            for raw in chosen
+        ]
+
+        source = "|".join([title, ",".join(authors), ",".join(normalized_identifiers)])
+        source = unicodedata.normalize("NFC", source)
+        return hashlib.md5(source.encode("utf-8")).hexdigest()

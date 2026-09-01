@@ -54,5 +54,6 @@ nav:
   - Getting Started: getting-started.md
   - User Guide: user-guide.md
   - Configuration: configuration.md
+  - Backup & Restore: backup-restore.md
   - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md

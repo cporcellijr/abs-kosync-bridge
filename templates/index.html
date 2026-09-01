@@ -385,39 +385,62 @@
            onclick="toggleSeries('{{ group.dom_id }}')"
            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSeries('{{ group.dom_id }}');}">
 
-        <div class="series-cover-stack">
-          {% for url in group.stack_cover_urls[:3] %}
-          <img src="{{ url }}" alt="" class="series-stack-cover stack-{{ loop.index }}"
-               loading="lazy" decoding="async"
-               onerror="this.style.visibility='hidden';">
-          {% endfor %}
-          {% if not group.stack_cover_urls %}
-          <div class="series-stack-cover stack-1 series-stack-placeholder">&#128218;</div>
-          {% endif %}
-        </div>
-
-        <div class="series-info">
-          <div class="series-name">{{ group.series_name }}</div>
-          {% if group.series_author %}
-          <div class="series-author">{{ group.series_author }}</div>
-          {% endif %}
-
-          <div class="series-meta-row">
-            <span class="series-count">{{ group.finished_count }}/{{ group.child_count }} finished</span>
-            <span class="series-sep">·</span>
-            <span class="series-avg">{{ '%.1f'|format(group.avg_progress) }}% avg</span>
-            {% if group.next_book and group.next_book.unified_progress < 100 %}
-            <span class="series-sep">·</span>
-            <span class="series-next">Next: {{ group.next_book.display_title }}</span>
+        <div class="series-header-main">
+          <div class="series-cover-stack">
+            {% for url in group.stack_cover_urls[:3] %}
+            <img src="{{ url }}" alt="" class="series-stack-cover stack-{{ loop.index }}"
+                 loading="lazy" decoding="async"
+                 onerror="this.style.visibility='hidden';">
+            {% endfor %}
+            {% if not group.stack_cover_urls %}
+            <div class="series-stack-cover stack-1 series-stack-placeholder" aria-hidden="true"></div>
+            <div class="series-stack-cover stack-2 series-stack-placeholder" aria-hidden="true"></div>
+            <div class="series-stack-cover stack-3 series-stack-placeholder series-stack-placeholder-top">&#128218;</div>
             {% endif %}
           </div>
 
-          <div class="series-progress-bar">
-            <div class="series-progress-fill" style="width: {{ group.avg_progress }}%"></div>
+          <div class="series-info">
+            <div class="series-name">{{ group.series_name }}</div>
+            {% if group.series_author %}
+            <div class="series-author">{{ group.series_author }}</div>
+            {% endif %}
+
+            <div class="series-meta-row">
+              <span class="series-count">{{ group.finished_count }}/{{ group.child_count }} finished</span>
+              <span class="series-sep">·</span>
+              <span class="series-avg">{{ '%.1f'|format(group.avg_progress) }}% avg</span>
+            </div>
+            {% if group.next_book and group.next_book.unified_progress < 100 %}
+            <div class="series-next" title="Next: {{ group.next_book.display_title }}">
+              Next: {{ group.next_book.display_title }}
+            </div>
+            {% endif %}
+
+            <div class="series-progress-bar">
+              <div class="series-progress-fill" style="width: {{ group.avg_progress }}%"></div>
+            </div>
           </div>
+
+          <span class="series-chevron" aria-hidden="true">&#9654;</span>
         </div>
 
-        <span class="series-chevron" aria-hidden="true">&#9654;</span>
+        {% if group.preview_books %}
+        <div class="series-book-list">
+          {% for book in group.preview_books %}
+          <div class="series-book-row{% if book.is_next %} is-next{% endif %}">
+            <span class="series-book-index">{{ book.label }}</span>
+            <span class="series-book-title" title="{{ book.title }}">{{ book.title }}</span>
+            <span class="series-book-bar">
+              <span class="series-book-fill" style="width: {{ book.progress }}%"></span>
+            </span>
+            <span class="series-book-pct">{{ '%.0f'|format(book.progress) }}%</span>
+          </div>
+          {% endfor %}
+          {% if group.preview_hidden_count %}
+          <div class="series-book-more">+{{ group.preview_hidden_count }} more in series</div>
+          {% endif %}
+        </div>
+        {% endif %}
       </div>
 
       <div class="series-children" id="{{ group.dom_id }}-children">
@@ -1671,11 +1694,15 @@
         /* Series Group */
         .series-group { display: flex; flex-direction: column; }
 
+        body:not(.series-grouping-off) .book-grid:has(> .series-group.expanded:not(.hidden)) {
+            align-items: start;
+        }
+
         .series-header {
             display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 14px 16px;
+            flex-direction: column;
+            flex: 1;
+            padding: 12px;
             background: var(--panel-soft);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: var(--radius-lg);
@@ -1693,30 +1720,48 @@
             border-bottom-color: transparent;
         }
 
+        .series-header-main {
+            display: flex;
+            align-items: stretch;
+            gap: 14px;
+        }
+
         .series-cover-stack {
             position: relative;
-            width: 72px;
-            min-width: 72px;
-            height: 96px;
-            flex-shrink: 0;
+            align-self: stretch;
+            aspect-ratio: 96 / 126;
+            min-height: 126px;
+            max-height: 158px;
+            flex: 0 0 auto;
         }
         .series-stack-cover {
             position: absolute;
-            width: 56px;
-            height: 84px;
+            height: 95.24%;
+            aspect-ratio: 2 / 3;
             border-radius: var(--radius-sm);
             object-fit: cover;
             background: rgba(0, 0, 0, 0.3);
             border: 1px solid var(--border);
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
         }
-        .series-stack-cover.stack-1 { left: 0;   top: 6px; transform: rotate(-5deg); z-index: 1; }
-        .series-stack-cover.stack-2 { left: 8px; top: 0;   transform: rotate(0deg);  z-index: 2; }
-        .series-stack-cover.stack-3 { left: 16px; top: 6px; transform: rotate(5deg);  z-index: 3; }
+        .series-stack-cover.stack-1 { left: 0;      top: 4.76%; transform: rotate(-5deg); z-index: 1; }
+        .series-stack-cover.stack-2 { left: 8.33%;  top: 0;     transform: rotate(0deg);  z-index: 2; }
+        .series-stack-cover.stack-3 { left: 16.67%; top: 4.76%; transform: rotate(5deg);  z-index: 3; }
         .series-stack-placeholder {
             display: flex; align-items: center; justify-content: center;
-            font-size: 28px;
+            font-size: 36px;
             background: var(--gradient);
+        }
+        /* With no art to show, the fan still has to read as a stack of books
+           rather than one flat slab, so the cards under the top one are dimmed
+           and only the top card carries the glyph. */
+        .series-stack-placeholder:not(.series-stack-placeholder-top) {
+            filter: brightness(0.62) saturate(0.7);
+        }
+
+        @media (max-width: 768px) {
+            .series-cover-stack { min-height: 96px; }
+            .series-stack-placeholder { font-size: 28px; }
         }
 
         .series-info { flex: 1; min-width: 0; }
@@ -1736,7 +1781,22 @@
             margin-top: 6px;
         }
         .series-sep { color: rgba(255, 255, 255, 0.2); }
-        .series-next { color: rgba(102, 126, 234, 0.9); font-weight: 600; }
+        .series-next {
+            display: block;
+            min-width: 0;
+            margin-top: 4px;
+            color: rgba(102, 126, 234, 0.9);
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .series-header:focus-visible .series-next {
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
 
         .series-progress-bar {
             height: 4px; background: var(--border);
@@ -1749,7 +1809,67 @@
             transition: width 0.5s ease;
         }
 
+        .series-book-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .series-book-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .series-book-index {
+            flex: 0 0 auto;
+            min-width: 14px;
+            text-align: right;
+            color: rgba(255, 255, 255, 0.35);
+            font-variant-numeric: tabular-nums;
+        }
+        .series-book-title {
+            flex: 1;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .series-book-row.is-next .series-book-title {
+            color: rgba(102, 126, 234, 0.9);
+            font-weight: 600;
+        }
+        .series-book-bar {
+            flex: 0 0 64px;
+            height: 3px;
+            border-radius: 2px;
+            background: var(--border);
+            overflow: hidden;
+        }
+        .series-book-fill {
+            display: block;
+            height: 100%;
+            background: var(--gradient);
+        }
+        .series-book-pct {
+            flex: 0 0 auto;
+            min-width: 28px;
+            text-align: right;
+            color: rgba(255, 255, 255, 0.5);
+            font-variant-numeric: tabular-nums;
+        }
+        .series-book-more {
+            margin-top: 4px;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+        }
+
         .series-chevron {
+            align-self: center;
             font-size: 14px;
             color: rgba(255, 255, 255, 0.5);
             transition: transform 0.3s ease;
@@ -1836,7 +1956,7 @@
         <div id="forge-status-banner" class="forge-banner" style="display: none;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div class="spinner-sm"></div>
-                <span id="forge-task-list">Hammering...</span>
+                <span id="forge-task-list">Creating Storyteller edition...</span>
             </div>
             <small style="opacity: 0.8">Processing in background</small>
         </div>
@@ -1849,7 +1969,7 @@
                         const list = document.getElementById('forge-task-list');
                         if (tasks && tasks.length > 0) {
                             banner.style.display = 'flex';
-                            const text = tasks.length === 1 ? `Forging: ${tasks[0]}` : `Forging ${tasks.length} editions...`;
+                            const text = tasks.length === 1 ? `Creating Storyteller edition: ${tasks[0]}` : `Creating ${tasks.length} Storyteller editions...`;
                             list.textContent = text;
                         } else {
                             banner.style.display = 'none';
@@ -2551,6 +2671,9 @@
                 if (sortSelect) sortBooks(sortSelect.value, sortState[sortSelect.value]);
                 if (typeof filterBooks === 'function') filterBooks();
                 updateDashboardSectionVisibility();
+                if (typeof window.bookbridgeSyncPreviewLayout === 'function') {
+                    window.bookbridgeSyncPreviewLayout();
+                }
             }
 
             // --- Event Listeners ---
@@ -2651,12 +2774,15 @@
             let refreshPaused = false;
 
             function refreshDashboard() {
-                if (refreshPaused) {
+                // A hidden tab redraws nothing, so skip the round trip entirely.
+                if (refreshPaused || document.hidden) {
                     setTimeout(refreshDashboard, 30000);
                     return;
                 }
 
-                fetch('/api/status')
+                // Compact position feed, not the full dashboard payload: this
+                // handler only redraws progress numbers and the synced line.
+                fetch('/api/status/progress')
                     .then(r => r.json())
                     .then(data => {
                         if (!data || !data.mappings) return;

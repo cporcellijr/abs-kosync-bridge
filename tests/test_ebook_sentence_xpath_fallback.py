@@ -15,10 +15,14 @@ class TestEbookSentenceXPathFallback(unittest.TestCase):
         self.assertTrue(xpath.endswith(".0"))
         self.assertIn("/text()", xpath)
 
-    def test_chapter_fallback_returns_default_when_no_text(self):
+    def test_chapter_fallback_returns_none_when_no_text(self):
+        """A chapter holding only an image has no <p> to point at. Emitting
+        body/p[1] anyway was the #420 root cause: KOReader cannot resolve a
+        locator for an element that does not exist, so it opens at the start of
+        the book and writes that near-zero position back."""
         html_content = "<html><body><div><img src='x.jpg'/></div></body></html>"
         xpath = self.parser._build_sentence_level_chapter_fallback_xpath(html_content, 5)
-        self.assertEqual(xpath, "/body/DocFragment[5]/body/p[1]/text().0")
+        self.assertIsNone(xpath)
 
     def test_generate_xpath_bs4_never_returns_root_or_trailing_slash(self):
         html_content = "<html><body>Single sentence only.</body></html>"

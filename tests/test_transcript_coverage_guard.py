@@ -363,3 +363,96 @@ class TestLargeWavHeaders(TranscriptCoverageTestCase):
         bytes_per_second = 16000 * 1 * 2
         limit_hours = (2 ** 32) / bytes_per_second / 3600
         self.assertAlmostEqual(limit_hours, 37.28, places=1)
+
+
+class TestContainerMetadataIsNotAMeasurement(TranscriptCoverageTestCase):
+    """Diagnostics finding 4441 — "Howl's Moving Castle", a 36-part audiobook.
+
+    The reported failure, verbatim:
+
+        Normalization lost audio for part 1: source 30913s -> WAV 669s
+
+    Part 1 of 36 was 5,353,264 bytes. At the container's claimed 30,913s that is
+    1.4 kbps, which no MP3 encoder produces; at the decoded 669s it is exactly
+    64.0 kbps. An ffprobe container duration is a declaration (Xing/ID3 header),
+    not a measurement — here it lied, the decode was right, and the job died on
+    part 1, so parts 2-36 were never downloaded and the book could never
+    transcribe. Only the decoded audio, judged against the runtime the library
+    reports, may fail a job.
+    """
+
+    CONTAINER_SECONDS = 30913.0
+    DECODED_SECONDS = 669.0
+    PART_COUNT = 36
+    TRUE_RUNTIME = DECODED_SECONDS * PART_COUNT  # 24,084s — what actually decodes
+
+    def _arrange(self, part_count):
+        """Container metadata claims 8.6h per part; each part decodes to 11 min."""
+        self.transcriber.get_audio_duration = MagicMock(
+            side_effect=lambda p: (
+                self.DECODED_SECONDS if str(p).endswith(".wav") else self.CONTAINER_SECONDS
+            )
+        )
+        self.transcriber.normalize_audio_to_wav = MagicMock(
+            side_effect=lambda p: p.with_suffix(".wav"))
+        self.transcriber.split_audio_file = MagicMock(side_effect=lambda p, _max: [p])
+        return [
+            {"stream_url": f"http://example.com/{i}.mp3", "ext": "mp3"}
+            for i in range(part_count)
+        ]
+
+    @staticmethod
+    def _fake_get(url, **kwargs):
+        response = MagicMock()
+        response.headers = {}
+        response.iter_content.return_value = [b"audio"]
+        response.__enter__ = lambda s: s
+        response.__exit__ = lambda *a: False
+        return response
+
+    def _run(self, audio_urls, expected_duration):
+        with patch("src.utils.transcriber.requests.get", side_effect=self._fake_get),              patch("src.utils.transcriber.get_transcription_provider") as provider_factory:
+            provider = MagicMock()
+            provider.supports_raw_audio = False
+            provider.get_name.return_value = "test"
+            provider.transcribe.return_value = [
+                {"start": 0.0, "end": self.DECODED_SECONDS, "text": "hello there"}
+            ]
+            provider_factory.return_value = provider
+            return self.transcriber.process_audio(
+                "howls-moving-castle", audio_urls, expected_duration=expected_duration,
+            )
+
+    def test_lying_container_metadata_does_not_fail_the_book(self):
+        """The reported case: the decoded audio matches the runtime, so it must run."""
+        audio_urls = self._arrange(self.PART_COUNT)
+
+        transcript = self._run(audio_urls, self.TRUE_RUNTIME)
+
+        self.assertTrue(transcript, "the book must transcribe")
+        self.assertEqual(
+            self.transcriber.normalize_audio_to_wav.call_count, self.PART_COUNT,
+            "every part must be downloaded and normalized, not just part 1",
+        )
+
+    def test_genuinely_short_audio_is_still_rejected(self):
+        """The guard survives: decoded audio short of the runtime still fails."""
+        audio_urls = self._arrange(self.PART_COUNT)
+
+        with self.assertRaises(ValueError) as ctx:
+            self._run(audio_urls, REPORTED_AUDIO_DURATION)
+
+        message = str(ctx.exception)
+        self.assertIn("Coverage too low", message)
+        self.assertIn("[source audio as downloaded]", message)
+        self.assertNotIn("Normalization lost audio", message)
+
+    def test_shortfall_stays_fatal_without_a_library_runtime(self):
+        """forge_service passes no expected_duration: the container is all we have."""
+        audio_urls = self._arrange(1)
+
+        with self.assertRaises(ValueError) as ctx:
+            self._run(audio_urls, None)
+
+        self.assertIn("Normalization lost audio for part 1", str(ctx.exception))
+        self.assertIn("source 30913s -> WAV 669s", str(ctx.exception))

@@ -767,14 +767,15 @@ class StorytellerAPIClient:
         try:
             # 1. Get Book Details for Filepath
             r_details = self._make_request("GET", f"/api/v2/books/{book_uuid}")
-            if not r_details or r_details.status_code != 200:
+            if r_details is None or r_details.status_code != 200:
+                details_status = getattr(r_details, "status_code", "No Response")
                 if polling:
                     logger.debug(
                         f"Storyteller poll: details unavailable for '{book_uuid[:8]}...' "
-                        f"({r_details.status_code if r_details else 'No Response'})"
+                        f"({details_status})"
                     )
                     return False
-                logger.error(f"❌ Failed to fetch book details for fallback: {r_details.status_code if r_details else 'No Response'}")
+                logger.error(f"❌ Failed to fetch book details for fallback: {details_status}")
                 raise Exception("API download failed and could not fetch details for fallback.")
 
             book_data = r_details.json()
@@ -851,6 +852,92 @@ class StorytellerAPIClient:
                 else:
                     zout.writestr(item, zin.read(item.filename))
 
+    @classmethod
+    def _epub_has_embedded_audio(cls, path) -> bool:
+        """True when the archive still carries non-empty narration audio.
+
+        Reads only the zip central directory so a multi-GB artifact costs nothing
+        to inspect.
+        """
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                for item in zf.infolist():
+                    ext = os.path.splitext(item.filename)[1].lower()
+                    if ext in cls._AUDIO_EXTENSIONS and item.file_size > 0:
+                        return True
+            return False
+        except Exception as e:
+            logger.debug(f"Could not inspect EPUB for audio: {e}")
+            return False
+
+    def download_slim_book(self, book_uuid: str, dest_path, *, polling: bool = False) -> bool:
+        """Download the ReadAloud EPUB and cache an audio-stripped copy at dest_path.
+
+        The full artifact only ever exists as a transient .full.tmp. Returns True
+        when the slim copy is in place.
+        """
+        dest_path = Path(dest_path)
+        tmp_full = dest_path.with_name(dest_path.name + ".full.tmp")
+        try:
+            if not self.download_book(book_uuid, tmp_full, polling=polling):
+                return False
+            self._strip_audio_from_epub(tmp_full, dest_path)
+            if dest_path.exists():
+                logger.info(
+                    f"📦 Cached slim ReadAloud EPUB for '{book_uuid[:8]}...' "
+                    f"({dest_path.stat().st_size / 1e6:.2f} MB, audio stripped)"
+                )
+                return True
+            return False
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Failed to materialize slim ReadAloud EPUB for '{book_uuid[:8]}...': {e}",
+                exc_info=True,
+            )
+            try:
+                if dest_path.exists():
+                    dest_path.unlink()
+            except Exception:
+                pass
+            return False
+        finally:
+            try:
+                if tmp_full.exists():
+                    tmp_full.unlink()
+            except Exception:
+                pass
+
+    def strip_cached_audio_in_place(self, cache_path) -> bool:
+        """Rewrite an already-cached artifact that still carries narration audio,
+        in place and atomically; returns True when it actually shrank one.
+        """
+        cache_path = Path(cache_path)
+        if not cache_path.exists():
+            return False
+        if not self._epub_has_embedded_audio(cache_path):
+            return False
+        original_size = cache_path.stat().st_size
+        tmp_slim = cache_path.with_name(cache_path.name + ".slim.tmp")
+        try:
+            self._strip_audio_from_epub(cache_path, tmp_slim)
+            os.replace(tmp_slim, cache_path)
+            logger.info(
+                f"🛠️ Re-stripped audio from cached ReadAloud EPUB '{cache_path.name}' "
+                f"({original_size / 1e6:.2f} MB → {cache_path.stat().st_size / 1e6:.2f} MB)"
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Could not re-strip cached ReadAloud EPUB '{cache_path.name}': {e}",
+                exc_info=True,
+            )
+            try:
+                if tmp_slim.exists():
+                    tmp_slim.unlink()
+            except Exception:
+                pass
+            return False
+
     def ensure_readaloud_epub_cached(self, book_uuid: str, epub_cache_dir) -> bool:
         """Ensure a slim (audio-stripped) ReadAloud EPUB is cached for locator work.
 
@@ -863,6 +950,11 @@ class StorytellerAPIClient:
         small audio-stripped copy at ``epub_cache_dir/storyteller_<uuid>.epub`` when
         one is not already present.
 
+        An artifact already sitting in the cache is re-stripped when it still carries
+        narration audio: older builds (and, before #414, the match/Batch Match/Forge
+        paths) wrote the full multi-GB EPUB here, which OOM-kills the container on the
+        next parse. Self-healing here spares those installs the manual cache delete.
+
         Returns True when the slim EPUB is present afterwards.
         """
         if not book_uuid:
@@ -870,6 +962,7 @@ class StorytellerAPIClient:
         cache_dir = Path(epub_cache_dir)
         cache_path = cache_dir / f"storyteller_{book_uuid}.epub"
         if cache_path.exists():
+            self.strip_cached_audio_in_place(cache_path)
             return True
         try:
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -877,36 +970,13 @@ class StorytellerAPIClient:
             logger.warning(f"⚠️ Could not create epub cache dir '{cache_dir}': {e}", exc_info=True)
             return False
 
-        tmp_full = cache_path.with_name(cache_path.name + ".full.tmp")
-        try:
-            if not self.download_book(book_uuid, tmp_full):
-                logger.warning(
-                    f"⚠️ ReadAloud EPUB download failed for '{book_uuid[:8]}...'; "
-                    "cannot cache slim copy for sync locators"
-                )
-                return False
-            self._strip_audio_from_epub(tmp_full, cache_path)
-            if cache_path.exists():
-                logger.info(
-                    f"📦 Cached slim ReadAloud EPUB for '{book_uuid[:8]}...' "
-                    f"({cache_path.stat().st_size / 1e6:.2f} MB, audio stripped)"
-                )
-                return True
+        if not self.download_slim_book(book_uuid, cache_path):
+            logger.warning(
+                f"⚠️ ReadAloud EPUB download failed for '{book_uuid[:8]}...'; "
+                "cannot cache slim copy for sync locators"
+            )
             return False
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to materialize slim ReadAloud EPUB for '{book_uuid[:8]}...': {e}", exc_info=True)
-            try:
-                if cache_path.exists():
-                    cache_path.unlink()
-            except Exception:
-                pass
-            return False
-        finally:
-            try:
-                if tmp_full.exists():
-                    tmp_full.unlink()
-            except Exception:
-                pass
+        return True
 
     def trigger_processing(self, book_uuid: str) -> bool:
         """Trigger the Storyteller processing for a book."""

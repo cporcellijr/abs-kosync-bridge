@@ -6,6 +6,7 @@ import time
 import traceback
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 import re
 
 
@@ -89,6 +90,19 @@ _COMPLETION_PROPAGATION_EXCLUDED_CLIENTS: frozenset[str] = frozenset({
     "StoryGraph",
     "Hardcover",
     "ABSEbook",
+})
+
+# Clients that navigate by locator rather than by percentage. ABSEbook rejects a
+# locator whose cfi is None outright; BookOrbit, Grimmory and CWA all back a Kobo
+# reading state, and a Kobo moves only when it is handed a KoboSpan — which those
+# services derive from the CFI we send them. Handed a bare percentage they store a
+# number the device ignores, so it reopens at its own bookmark and pushes it back
+# (#364). These clients get the CFI-hydrated locator when one can be resolved.
+_CFI_DEPENDENT_CLIENTS: frozenset[str] = frozenset({
+    "ABSEbook",
+    "BookOrbit",
+    "BookLore",
+    "CWA",
 })
 
 # Multi-user: per-cycle override of the active sync-client bundle. Set by
@@ -241,6 +255,32 @@ class SyncManager:
             return current
         return original or current
 
+    def _repair_storyteller_epub(self, filename: str) -> None:
+        """Re-strip a cached ReadAloud artifact that still carries narration audio.
+
+        Installs that matched a book before #414 have a full multi-GB EPUB sitting at
+        the cache path, and ``extract_text_and_map`` loads the whole archive -- which
+        is what OOM-killed the container. The download-time guard cannot reach those:
+        every resolver short-circuits on the file already existing, so the repair has
+        to happen where a fat artifact is *found*, not where one is missing.
+
+        At most one attempt per artifact per cycle; on an already-slim file the check
+        is a zip central-directory read and nothing is rewritten.
+        """
+        client = getattr(self, "storyteller_client", None)
+        if not filename or not client:
+            return
+        if filename in self._storyteller_epub_ensure_attempted:
+            return
+        self._storyteller_epub_ensure_attempted.add(filename)
+        path = self._get_local_epub(filename)
+        if not path:
+            return
+        try:
+            client.strip_cached_audio_in_place(path)
+        except Exception as e:
+            logger.debug(f"Storyteller cached EPUB repair skipped for '{filename}': {e}")
+
     def _get_storyteller_ebook_filename(self, book: Book | None) -> str | None:
         """Preferred EPUB for Storyteller href/fragment operations."""
         if not book:
@@ -248,12 +288,14 @@ class SyncManager:
 
         current = getattr(book, "ebook_filename", None)
         if current and str(current).startswith("storyteller_") and self._get_local_epub(current):
+            self._repair_storyteller_epub(current)
             return current
 
         storyteller_uuid = getattr(book, "storyteller_uuid", None)
         if storyteller_uuid:
             candidate = f"storyteller_{storyteller_uuid}.epub"
             if self._get_local_epub(candidate):
+                self._repair_storyteller_epub(candidate)
                 return candidate
 
             # Materialize a slim (audio-stripped) ReadAloud EPUB so Storyteller
@@ -320,10 +362,19 @@ class SyncManager:
                         logger.warning(f"⚠️ Completion propagation failed for '{client_name}': mark_finished returned False")
                 else:
                     result = client.update_progress(book, request)
-                    if getattr(result, 'success', False):
+                    self._record_bridge_write(client_name, abs_id, result)
+                    if self._sync_result_was_applied(result):
+                        # Genuinely applied write: persist the snapshot and log
                         self._persist_state_snapshot(book, client_name, {'pct': 1.0}, current_time)
                         logger.info(f"🏁 '{abs_id}' '{title_snip}' completion propagated to '{client_name}'")
+                    elif getattr(result, 'success', False) and getattr(result, 'skipped', False):
+                        # Deliberate policy skip: successful but not applied.
+                        # Persist NOTHING — the {'pct': 1.0} value is a fabricated constant,
+                        # not an observation. Persisting it would assert a completion that
+                        # never happened. Log at INFO so the skip appears in diagnostics.
+                        logger.info(f"🏁 '{abs_id}' '{title_snip}' completion propagation skipped for '{client_name}' by client policy; no write performed")
                     else:
+                        # Real failure: keep the existing warning line
                         logger.warning(f"⚠️ Completion propagation failed for '{client_name}': client reported unsuccessful write")
             except Exception as e:
                 logger.warning(f"⚠️ Completion propagation failed for '{client_name}': {e}", exc_info=True)
@@ -392,6 +443,60 @@ class SyncManager:
             return float(os.environ.get("SYNC_ROLLBACK_VETO_SECONDS", "600") or 600)
         except (TypeError, ValueError):
             return 600.0
+
+    @staticmethod
+    def _own_writeback_window_seconds() -> int:
+        """How long a recorded own-write stays usable as evidence that a peer's
+        position is BookBridge's own echo.
+
+        A follower write is only observed on the NEXT cycle, so the tracker's 60s
+        default is far too short at any realistic cadence. Sized from the sync
+        period with slack, and capped at the tracker's own 3600s retention horizon
+        beyond which no marker survives anyway. The percentage match, not this
+        window, is what keeps the exclusion honest: a peer the user actually moved
+        no longer matches the value we wrote."""
+        try:
+            period_mins = float(os.environ.get("SYNC_PERIOD_MINS", "5") or 5)
+        except (TypeError, ValueError):
+            period_mins = 5.0
+        window = period_mins * 120.0 + 60.0
+        return int(max(600.0, min(window, 3600.0)))
+
+    def _peer_position_is_own_writeback(
+        self, abs_id: str, client_name: str, observed_pct: float, margin: float
+    ) -> bool:
+        """Whether a peer's current position is the echo of BookBridge's own write.
+
+        The rollback veto reads a peer's fresh service timestamp as evidence the
+        user is active there. That inference fails for a client BookBridge itself
+        writes to every cycle: the service restamps on write, so the peer we just
+        pushed to always looks newest and vetoes a genuine rewind forever (#413).
+        A peer stops counting as evidence only when a recorded own-write — scoped
+        to this user, or to the unscoped namespace a globally-triggered sync
+        records under — still matches the value the service now reports. A missing,
+        expired, percentage-less, mismatched or wrong-user marker leaves the veto
+        exactly as it was."""
+        try:
+            from src.services.write_tracker import GLOBAL_USER, get_recent_write
+        except ImportError:
+            return False
+
+        window = self._own_writeback_window_seconds()
+        recent = get_recent_write(client_name, abs_id, suppression_window=window)
+        if recent is None:
+            recent = get_recent_write(
+                client_name, abs_id, suppression_window=window, user_id=GLOBAL_USER
+            )
+        if not recent:
+            return False
+
+        written_pct = recent.get('pct')
+        if written_pct is None or observed_pct is None:
+            return False
+        try:
+            return abs(float(written_pct) - float(observed_pct)) <= margin
+        except (TypeError, ValueError):
+            return False
 
     def _build_text_anchors(self, full_text: str, char_offset: int):
         if not full_text:
@@ -2742,6 +2847,9 @@ class SyncManager:
         # "Most recent change wins" - if only one client changed, it becomes the leader
         # Use hybrid time/percentage logic to filter out phantom API noise
         normalized_positions = self._normalize_for_cross_format_comparison(book, config)
+        # Clients whose current position is still the echo of BookBridge's own write.
+        # Populated by Guard 3 below; empty when the freshness guards are disabled.
+        echo_clients: set[str] = set()
         primary_audio_client = self._get_primary_audio_client_name(book)
         clients_with_delta = {k: v for k, v in vals.items() if self._has_significant_delta(k, config, book)}
 
@@ -2806,6 +2914,16 @@ class SyncManager:
                         continue
                     if (other_pct > candidate_pct + regression_margin
                             and (other_ts - candidate_ts) > veto_tolerance):
+                        if self._peer_position_is_own_writeback(
+                            abs_id, other_name, other_pct, regression_margin
+                        ):
+                            logger.info(
+                                f"🪞 '{abs_id}' '{title_snip}' Rollback veto skipped: "
+                                f"'{other_name}' ({other_pct:.2%}) holds BookBridge's own "
+                                f"write-back, not user movement — it cannot veto "
+                                f"'{client_name}' ({candidate_pct:.2%})"
+                            )
+                            continue
                         logger.info(
                             f"🛑 '{abs_id}' '{title_snip}' Rollback veto: '{client_name}' "
                             f"({candidate_pct:.2%}) is behind '{other_name}' ({other_pct:.2%}) "
@@ -2814,6 +2932,54 @@ class SyncManager:
                         )
                         clients_with_delta.pop(client_name, None)
                         break
+
+            # Guard 3 - own write-back provenance: BookBridge writes the leader's
+            # position to every follower each cycle, so a follower we just wrote to
+            # reports our own echo back. That echo is not evidence the user moved, so
+            # it may neither be the reason a sync runs nor the source it runs from
+            # (#416). The rollback veto already consults this provenance; leader
+            # selection did not, and in the same cycle would let the very value it had
+            # just dismissed as our write-back go on to lead. Same-value match only:
+            # a peer the user actually moved no longer matches what we wrote.
+            echo_margin = getattr(self, "sync_delta_between_clients", 0.005)
+            for client_name, observed_pct in vals.items():
+                if self._peer_position_is_own_writeback(
+                    abs_id, client_name, observed_pct, echo_margin
+                ):
+                    echo_clients.add(client_name)
+            for client_name in sorted(echo_clients):
+                if client_name in clients_with_delta:
+                    logger.info(
+                        f"🪞 '{abs_id}' '{title_snip}' Ignoring '{client_name}' delta "
+                        f"({vals[client_name]:.2%}): it holds BookBridge's own write-back, "
+                        f"not user movement"
+                    )
+                    clients_with_delta.pop(client_name, None)
+
+            # Guard 4 - cross-format scale artifact: an audio timeline and a book-level
+            # text percentage express the SAME physical position in different
+            # denominators, so their raw percentage spread is permanently non-zero.
+            # That standing spread reads as a discrepancy and keeps re-triggering
+            # resolution on a book nobody is reading, which is what round-tripped a
+            # text position through the audio timeline and rewound the reader (#416).
+            # When nothing has genuinely moved and every candidate lands on the same
+            # point of the normalized timeline, there is no disagreement to resolve.
+            if not clients_with_delta and normalized_positions and len(normalized_positions) > 1:
+                candidate_ts = [
+                    ts for name, ts in normalized_positions.items()
+                    if name in vals and ts is not None
+                ]
+                if len(candidate_ts) > 1:
+                    spread = max(candidate_ts) - min(candidate_ts)
+                    deadband = getattr(self, "cross_format_deadband_seconds", 2.0)
+                    if spread <= deadband:
+                        logger.info(
+                            f"🪞 '{abs_id}' '{title_snip}' No leader: no client moved and all "
+                            f"positions agree within {spread:.1f}s on the normalized timeline "
+                            f"(deadband {deadband:.1f}s) - the raw percentage spread is a "
+                            f"cross-format scale artifact, not a discrepancy"
+                        )
+                        return None, None
 
         leader = None
         leader_pct = None
@@ -2910,6 +3076,30 @@ class SyncManager:
             # Multiple clients changed or this is a discrepancy resolution
             # Use "furthest wins" logic among changed clients (or all if none changed)
             candidates = vals if single_delta_low_conf else (clients_with_delta if clients_with_delta else vals)
+
+            # Furthest-wins reaches for every client when nothing moved, which is
+            # exactly when our own write-back is the furthest value in the system.
+            # Drop echoes from the running; if that leaves nobody, nothing in the
+            # system has moved since our last write and there is nothing to sync -
+            # writing anyway is the rewind (#416).
+            if echo_clients:
+                genuine_candidates = {
+                    name: pct for name, pct in candidates.items() if name not in echo_clients
+                }
+                if genuine_candidates:
+                    if len(genuine_candidates) != len(candidates):
+                        excluded = sorted(set(candidates) - set(genuine_candidates))
+                        logger.info(
+                            f"🪞 '{abs_id}' '{title_snip}' Excluding own write-back "
+                            f"candidate(s) {excluded} from leader selection"
+                        )
+                    candidates = genuine_candidates
+                else:
+                    logger.info(
+                        f"🪞 '{abs_id}' '{title_snip}' No leader: every candidate holds "
+                        f"BookBridge's own write-back, not user movement - nothing to sync"
+                    )
+                    return None, None
             
             # For cross-format sync (audiobook vs ebook), use normalized timestamps
             if normalized_positions and len(normalized_positions) > 1:
@@ -3055,6 +3245,111 @@ class SyncManager:
         if pct is None:
             return False
         return pct >= 1.0 - epsilon and leader_pct < pct - min_gap
+
+    def _hydrate_cfi_locator(self, locator: LocatorResult, epub, abs_id, title_snip,
+                             leader: str, leader_pct, leader_formatter) -> Optional[LocatorResult]:
+        """Re-express a percentage-only locator as a real position in the target EPUB.
+
+        Text matching is the primary path; when it misses, the cross-client locator
+        falls back to a bare percentage that carries no cfi/href/chapter_progress.
+        Locator-driven clients cannot act on that: ABSEbook rejects it outright, and
+        BookOrbit/Grimmory/CWA all back a Kobo reading state, where a position only
+        moves the device if it arrives as a KoboSpan — which those services derive
+        from the CFI we send them. Handed a percentage alone they store a number the
+        device ignores, so it reopens at its own bookmark and pushes it back (#364).
+
+        This does not make the position more accurate; it is the same percentage
+        expressed in a form the receiver can act on instead of discarded structure.
+
+        Returns the hydrated locator, or None when the offset cannot be round-tripped
+        to within 1% of its target or the resolution collapsed to start-of-book.
+        """
+        if not epub or str(epub).startswith("storyteller_") or locator.percentage is None:
+            return None
+        try:
+            _full_text, total_len = self._get_cached_ebook_text(epub)
+            if not total_len:
+                return None
+
+            target_offset = locator.match_index
+            if target_offset is None:
+                target_offset = int(locator.percentage * total_len)
+            target_offset = max(0, min(int(target_offset), total_len - 1))
+
+            hydrated = self.ebook_parser.get_locator_from_char_offset(epub, target_offset)
+            if not hydrated or not hydrated.cfi:
+                return None
+            hydrated.percentage = locator.percentage
+
+            # Round-trip the derived CFI back to an offset: a locator that does not
+            # resolve to where it was built from is worse than no locator at all.
+            cfi_offset = self.ebook_parser.resolve_cfi_to_index(epub, hydrated.cfi)
+            if cfi_offset is None or abs(int(cfi_offset) - target_offset) / total_len > 0.01:
+                return None
+
+            if self._locator_collapsed_to_start(
+                LocatorResult(percentage=cfi_offset / total_len), locator.percentage
+            ):
+                logger.info(
+                    f"🕳️ '{abs_id}' '{title_snip}' Collapse guard: blocked hydrated "
+                    f"CFI for leader '{leader}' at {leader_formatter(leader_pct)} — roundtrip "
+                    f"resolution collapsed to start-of-book (~0%); keeping percentage-based locator"
+                )
+                return None
+
+            logger.debug(
+                f"'{abs_id}' '{title_snip}' Hydrated missing CFI for leader '{leader}' "
+                f"at offset {target_offset} (roundtrip={cfi_offset})"
+            )
+            return hydrated
+        except Exception as exc:
+            logger.debug(
+                f"'{abs_id}' '{title_snip}' CFI hydration failed: {exc}", exc_info=True
+            )
+            return None
+
+    @staticmethod
+    def _sync_result_was_applied(result) -> bool:
+        """Return True only when a successful result represents a real remote write.
+
+        This answers the question: "Did a real remote write happen?" — it governs
+        whether we may stamp own-write provenance and whether we may claim a
+        completion was propagated. A skip answers NO.
+
+        This is NOT the right question to ask before persisting an observed state.
+        """
+        if not result or not getattr(result, 'success', False):
+            return False
+        # Identity comparison against True is deliberate:
+        # - Real SyncResult objects always have a real bool 'skipped' field.
+        # - unittest.mock.Mock auto-creates a truthy child Mock for any attribute
+        #   access; 'skipped' would be a Mock, not the boolean True. An identity
+        #   check (is True) correctly rejects that, preserving the pre-existing
+        #   behavior where a bare Mock is treated as applied (not skipped).
+        return getattr(result, 'skipped', False) is not True
+
+    def _record_bridge_write(self, client_name: str, abs_id: str, result) -> None:
+        """Record that BookBridge itself produced this client's current position.
+
+        A later cycle reads this client back and sees a freshly stamped position;
+        the marker (client, book, written percentage) is how it tells the echo of
+        our own write from genuine user movement. The percentage comes from the
+        client's own axis via SyncResult.updated_state['pct'], so audio and ebook
+        clients each record a value comparable with what they will report next."""
+        try:
+            if not self._sync_result_was_applied(result):
+                return
+            updated_state = getattr(result, 'updated_state', None)
+            pct = updated_state.get('pct') if isinstance(updated_state, dict) else None
+            if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+                pct = None
+            from src.services.write_tracker import record_write
+            record_write(client_name, abs_id, pct)
+        except Exception as e:
+            logger.debug(
+                f"Could not record own-write marker for '{client_name}'/'{abs_id}': {e}",
+                exc_info=True,
+            )
 
     def _persist_state_snapshot(self, book, client_name: str, state_current: dict, current_time: float) -> None:
         """Save a single client's current position to the DB without running a
@@ -3671,67 +3966,22 @@ class SyncManager:
                 if txt is None:
                     txt = ""
 
+                # Locator-driven clients need a real position, not a bare percentage
+                # (see _hydrate_cfi_locator and #364). Resolve one once per cycle and
+                # hand it to whichever of them are in play.
+                hydrated_locator = None
+                if not locator.cfi and any(name in config for name in _CFI_DEPENDENT_CLIENTS):
+                    hydrated_locator = self._hydrate_cfi_locator(
+                        locator, epub, abs_id, title_snip, leader, leader_pct, leader_formatter
+                    )
+                    if hydrated_locator is not None and locator_source == "percent_fallback":
+                        locator_source = "percent_derived"
+
                 logger.debug(
                     f"'{abs_id}' '{title_snip}' Locator resolved via source={locator_source or 'unknown'} "
                     f"epub='{sanitize_log_data(epub)}' "
                     f"original_epub='{sanitize_log_data(getattr(book, 'original_ebook_filename', None))}'"
                 )
-
-                abs_ebook_locator = None
-                if (
-                    "ABSEbook" in config
-                    and not locator.cfi
-                    and epub
-                    and not str(epub).startswith("storyteller_")
-                    and locator.percentage is not None
-                ):
-                    try:
-                        _full_text, total_len = self._get_cached_ebook_text(epub)
-                        if total_len:
-                            target_offset = locator.match_index
-                            if target_offset is None:
-                                target_offset = int(locator.percentage * total_len)
-                            target_offset = max(0, min(int(target_offset), total_len - 1))
-                            hydrated = self.ebook_parser.get_locator_from_char_offset(
-                                epub, target_offset
-                            )
-                            if hydrated and hydrated.cfi:
-                                hydrated.percentage = locator.percentage
-                                cfi_offset = self.ebook_parser.resolve_cfi_to_index(
-                                    epub, hydrated.cfi
-                                )
-                            else:
-                                cfi_offset = None
-                            if (
-                                cfi_offset is not None
-                                and abs(int(cfi_offset) - target_offset) / total_len <= 0.01
-                                and not self._locator_collapsed_to_start(
-                                    LocatorResult(percentage=cfi_offset / total_len),
-                                    locator.percentage,
-                                )
-                            ):
-                                abs_ebook_locator = hydrated
-                                logger.debug(
-                                    f"'{abs_id}' '{title_snip}' Hydrated missing ABS ebook CFI "
-                                    f"at offset {target_offset} (roundtrip={cfi_offset})"
-                                )
-                            elif (
-                                cfi_offset is not None
-                                and abs(int(cfi_offset) - target_offset) / total_len <= 0.01
-                                and self._locator_collapsed_to_start(
-                                    LocatorResult(percentage=cfi_offset / total_len),
-                                    locator.percentage,
-                                )
-                            ):
-                                logger.info(
-                                    f"🕳️ '{abs_id}' '{title_snip}' Collapse guard: blocked hydrated ABS ebook "
-                                    f"CFI for leader '{leader}' at {leader_formatter(leader_pct)} — roundtrip "
-                                    f"resolution collapsed to start-of-book (~0%); keeping percentage-based locator"
-                                )
-                    except Exception as exc:
-                        logger.debug(
-                            f"'{abs_id}' '{title_snip}' ABS ebook CFI hydration failed: {exc}"
-                        )
 
                 # Guard: never write a start-of-book (0%) reset that came from a
                 # FAILED locator resolution. When the leader is materially ahead but
@@ -3794,8 +4044,8 @@ class SyncManager:
                             continue
 
                         target_locator = (
-                            abs_ebook_locator
-                            if client_name == "ABSEbook" and abs_ebook_locator
+                            hydrated_locator
+                            if hydrated_locator and client_name in _CFI_DEPENDENT_CLIENTS
                             else locator
                         )
                         request = UpdateProgressRequest(
@@ -3809,6 +4059,7 @@ class SyncManager:
                         )
                         result = client.update_progress(book, request)
                         results[client_name] = result
+                        self._record_bridge_write(client_name, abs_id, result)
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to update '{client_name}': {e}", exc_info=True)
                         results[client_name] = SyncResult(None, False)
@@ -3891,6 +4142,13 @@ class SyncManager:
                 # Save sync results from other clients
                 for client_name, result in results.items():
                     if result.success:
+                        # The position in a skipped result is a genuine fresh read of the
+                        # service (from a live get_progress() call inside update_progress()).
+                        # This loop is the only place follower state is persisted, so dropping
+                        # it would leave the ABS State row stale. But it is still not a write,
+                        # so no provenance marker is stamped (that gate is in
+                        # _record_bridge_write a few lines earlier, which still uses
+                        # _sync_result_was_applied).
                         # Use updated_state if provided, otherwise fall back to basic state
                         state_data = result.updated_state if result.updated_state else {'pct': result.location}
                         logger.info(f"'{abs_id}' '{title_snip}' Updated state data for '{client_name}': {state_data}")
@@ -4079,7 +4337,12 @@ class SyncManager:
         prev_states_by_client: dict,
         current_time: float,
     ) -> None:
-        """Record a reading session to Grimmory when progress changes on a tracked book."""
+        """Record a reading session to Grimmory when progress changes on a tracked book.
+
+        Grimmory has no endpoint for reading back its existing sessions, so the
+        BookOrbit double-count guard (#424) has no equivalent here; whether Grimmory
+        self-records is untested.
+        """
         booklore_client = self.active_booklore_client
         if not booklore_client:
             return
@@ -4158,7 +4421,12 @@ class SyncManager:
         """Record a reading session to BookOrbit when progress changes on a
         BookOrbit-hosted ebook or audiobook. Audio-leader sessions are logged
         against the BookOrbit audiobook when the audio is BookOrbit-hosted,
-        falling back to the ebook's BookOrbit id otherwise."""
+        falling back to the ebook's BookOrbit id otherwise.
+
+        Skipped when BookOrbit has already logged a session covering the same
+        reading — its web reader records its own as the user reads, so posting ours
+        on top double-counts it (#424).
+        """
         bookorbit_client = self.active_bookorbit_client
         if not bookorbit_client:
             return
@@ -4199,6 +4467,38 @@ class SyncManager:
             else:
                 book_type = "EBOOK"
             end_location = leader_state.current.get('cfi')
+
+        # Check every BookOrbit id for this work, not just the one we would post to:
+        # audio and ebook are separate BookOrbit books with separate session lists,
+        # and a stretch consumed in either format is the same reading (#424).
+        candidate_ids = [book_id]
+        if getattr(book, "audio_source", None) == "BookOrbit":
+            candidate_ids.append(getattr(book, "audio_provider_book_id", None)
+                                 or getattr(book, "audio_source_id", None))
+        if getattr(book, "ebook_source", None) == "BookOrbit":
+            candidate_ids.append(getattr(book, "ebook_source_id", None))
+
+        existing = None
+        try:
+            existing = bookorbit_client.find_overlapping_session(
+                book_ids=[i for i in candidate_ids if i],
+                start_progress=prev_pct,
+                end_progress=leader_pct,
+                end_time=current_time,
+            )
+        except Exception as e:
+            logger.warning(
+                "BookOrbit session dedupe check failed for '%s': %s",
+                getattr(book, 'abs_id', None), e, exc_info=True,
+            )
+        if existing:
+            logger.info(
+                "⏸️ Skipping BookOrbit reading session for '%s': BookOrbit already logged "
+                "session %s covering %.2f%%->%.2f%% (leader '%s')",
+                getattr(book, 'abs_id', None), existing.get('id'),
+                prev_pct * 100, leader_pct * 100, leader,
+            )
+            return
 
         try:
             bookorbit_client.create_reading_session(
@@ -4306,6 +4606,7 @@ class SyncManager:
                         continue
                     try:
                         result = client.update_progress(book, request)
+                        self._record_bridge_write(client_name, book.abs_id, result)
                         reset_results[client_name] = {
                             'success': result.success,
                             'message': 'Reset to 0%' if result.success else 'Failed to reset'

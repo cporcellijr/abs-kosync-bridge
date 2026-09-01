@@ -218,8 +218,18 @@ class TestABSCollectionCleanup(unittest.TestCase):
             no_collection.json.return_value = {"collections": []}
             libraries = MagicMock(status_code=200)
             libraries.json.return_value = {"libraries": [{"id": "library-1"}]}
+            item = MagicMock(status_code=200)
+            item.json.return_value = {"id": "item-1", "libraryId": "library-1"}
             client.session = MagicMock()
-            client.session.get.side_effect = [no_collection, libraries]
+
+            def get_response(url, **_kwargs):
+                if url.endswith("/api/collections"):
+                    return no_collection
+                if "/api/items/" in url:
+                    return item
+                return libraries
+
+            client.session.get.side_effect = get_response
 
             def create_collection(_url, json):
                 return MagicMock(

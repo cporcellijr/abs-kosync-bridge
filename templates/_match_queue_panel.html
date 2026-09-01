@@ -1,4 +1,5 @@
 {% if queue %}
+<div class="queue-items">
 {% for item in queue %}
 <div class="queue-item" data-bridge-key="{{ item.bridge_key or item.abs_id }}">
     <img src="{{ item.cover_url }}" alt="Cover" class="queue-item-cover" onerror="this.style.opacity='0.25';">
@@ -19,6 +20,7 @@
     </form>
 </div>
 {% endfor %}
+</div>
 <div class="queue-actions">
     <form method="POST" action="/suggestions">
         <input type="hidden" name="action" value="process_queue">

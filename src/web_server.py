@@ -35,9 +35,11 @@ from src.utils.user_context import (
 )
 from src.utils.user_config import user_setting
 from src.utils.user_config import global_fallback_allowed as _global_fallback_allowed
+from src.utils.user_config import SERVICE_ENABLE_KEYS
 
 from src.utils.config_loader import ConfigLoader, KNOWN_SETTING_KEYS, env_truthy
 from src.utils.cache_paths import safe_cache_path, safe_library_path, is_plain_basename
+from src.utils.ebook_utils import LRUCache
 from src.utils.logging_utils import memory_log_handler, LOG_PATH
 from src.utils.logging_utils import sanitize_log_data
 from src.utils.logging_utils import get_persistent_condition_logger
@@ -53,6 +55,13 @@ from src.sync_clients.sync_client_interface import LocatorResult, UpdateProgress
 from src.services.audio_source_adapters import AudioResult, ABSAudioSourceAdapter, BookLoreAudioSourceAdapter, BookOrbitAudioSourceAdapter
 from src.utils.storyteller_transcript import StorytellerTranscript
 from src.utils.kosync_headers import kosync_request_kwargs
+from src.utils.series_metadata import (
+    extract_series_from_abs_metadata as _series_from_abs_metadata,
+    extract_series_from_library_detail as _series_from_library_detail,
+    extract_series_from_title as _series_from_title,
+    resolve_series_details,
+    resolve_series_for_book,
+)
 
 def _reconfigure_logging():
     """Force update of root logger and all handler levels based on env var."""
@@ -275,6 +284,13 @@ def setup_dependencies(app, test_container=None):
             logger.error(f"❌ Could not encrypt stored credentials: {e}", exc_info=True)
         ConfigLoader.load_settings(database_service)
         logger.info("✅ Settings loaded into environment variables")
+
+        # One-time upgrade safety net: a service switched on only per-user, with
+        # the global left at its seeded 'false', would go dark the moment the
+        # install-wide gate became authoritative. Runs once, then never again —
+        # so an admin switching a service off later stays off for everyone.
+        from src.db.user_bootstrap import reconcile_service_gates
+        reconcile_service_gates(database_service)
 
         # Force reconfigure logging level based on new settings
         _reconfigure_logging()
@@ -1188,6 +1204,7 @@ def account_integrations():
         groups=PER_USER_FIELD_GROUPS,
         creds=creds,
         master=master,
+        service_enable_keys=SERVICE_ENABLE_KEYS,
         allow_master_fallback=_global_fallback_allowed(database_service, user),
         message=message,
         account_user=user,
@@ -1282,6 +1299,7 @@ def admin_user_integrations(user_id):
         groups=PER_USER_FIELD_GROUPS,
         creds=creds,
         master=master,
+        service_enable_keys=SERVICE_ENABLE_KEYS,
         allow_master_fallback=_global_fallback_allowed(database_service, target),
         message=message,
         target_user=target,
@@ -1355,7 +1373,10 @@ def _posted_user_test_credentials(target, submitted):
     for service_fields in _TEST_CONNECTION_FIELDS.values():
         for key in service_fields:
             if key in PER_USER_CREDENTIAL_KEYS:
-                payload[key] = resolve_setting(creds, key, "")
+                # A connection test validates credentials, so it is not subject to
+                # the install-wide service gate: an admin must be able to check a
+                # user's account before switching the service on for everyone.
+                payload[key] = resolve_setting(creds, key, "", enforce_global_gate=False)
             else:
                 payload[key] = os.environ.get(key, "")
     return payload
@@ -2031,6 +2052,17 @@ def _is_storyteller_artifact_filename(filename):
     return bool(filename and re.match(r"^storyteller_[0-9a-fA-F-]+\.epub$", filename))
 
 
+def _is_abs_hosted_ebook_filename(filename) -> bool:
+    """True for the synthesized name of an ABS-hosted ebook (`<abs_id>_abs.epub`).
+
+    The `_abs.` marker is the same one `get_kosync_id_for_ebook` reads the ABS item
+    id back out of, so an ebook wearing it lives in ABS, not in a library with
+    shelves.
+    """
+    if not isinstance(filename, str):
+        return False
+    return "_abs." in filename
+
 def _shelve_matched_ebook(shelf_filename, ebook_source=None, ebook_source_id=None):
     """Add a newly matched ebook to the Kobo shelf and clear it from the
     shelf-watch "Up Next" shelf, on whichever library hosts the ebook.
@@ -2047,8 +2079,9 @@ def _shelve_matched_ebook(shelf_filename, ebook_source=None, ebook_source_id=Non
 
     from src.utils.user_config import user_setting
     clients = uc()
-    is_bookorbit = (ebook_source or "").strip().lower() == "bookorbit"
-    is_kavita = (ebook_source or "").strip().lower() == "kavita"
+    source = (ebook_source or "").strip().lower()
+    is_bookorbit = source == "bookorbit"
+    is_kavita = source == "kavita"
     if is_bookorbit:
         client = clients.bookorbit_client
         kobo_shelf = (user_setting("BOOKORBIT_SHELF_NAME") or "Kobo").strip()
@@ -2064,6 +2097,18 @@ def _shelve_matched_ebook(shelf_filename, ebook_source=None, ebook_source_id=Non
         )
         watch_shelf = (os.environ.get("KAVITA_SHELF_WATCH_NAME") or "Up Next").strip()
     else:
+        # Grimmory owns this branch; it is not a catch-all. An ABS- or
+        # BookFusion-hosted ebook has no Grimmory catalog entry, so the shelf call
+        # can only ever warn "Book not found for shelf assignment/removal" — and it
+        # does so every cycle, forever (#4184, #4187). ABS-hosted books are already
+        # shelved by their own add_to_collection call. An unrecorded source stays on
+        # this path: legacy rows and /books-mount installs never set one.
+        if source not in ("", "booklore", "grimmory") or _is_abs_hosted_ebook_filename(shelf_filename):
+            logger.debug(
+                f"Skipping Grimmory shelf ops for '{sanitize_log_data(shelf_filename)}': "
+                f"hosted by {ebook_source or 'ABS'}, not Grimmory"
+            )
+            return
         client = clients.booklore_client
         kobo_shelf = user_setting("BOOKLORE_SHELF_NAME", "Kobo")
         watch_enabled = str(os.environ.get("BOOKLORE_SHELF_WATCH_ENABLED", "false")).strip().lower() in (
@@ -2126,6 +2171,52 @@ def _shelve_saved_ebook(book) -> None:
         getattr(book, 'ebook_source', None),
         getattr(book, 'ebook_source_id', None),
     )
+    _spawn_user_background(_publish_saved_ebook_to_readest, book, label="Readest upload")
+
+
+def _publish_saved_ebook_to_readest(book) -> None:
+    """Upload a saved mapping's original ebook into the user's Readest cloud library.
+
+    Best-effort convenience layered on top of the match-save flow: gated on the
+    per-user `READEST_UPLOAD_ON_MATCH` setting (off by default) and must never
+    affect the caller, so every failure is swallowed here and only logged. Runs
+    off the request thread via `_spawn_user_background`, which re-binds the
+    ambient user id/credentials onto the worker thread — there is no Flask
+    request context here to resolve them from.
+    """
+    if not book:
+        return
+    filename = (
+        getattr(book, 'original_ebook_filename', None)
+        or getattr(book, 'ebook_filename', None)
+    )
+    if not filename or _is_storyteller_artifact_filename(filename):
+        return
+
+    def _on(key, default):
+        return (user_setting(key, default) or "").strip().lower() in ("true", "1", "yes", "on")
+
+    # The service gate covers every Readest feature, so an install-wide off here
+    # stops the upload even for a user who left it switched on.
+    if not _on("READEST_ENABLED", "true") or not _on("READEST_UPLOAD_ON_MATCH", "false"):
+        return
+
+    user_id = get_current_user_id()
+    creds = get_current_user_credentials()
+
+    try:
+        from src.api.readest_client import ReadestClient
+        from src.services.readest_upload_service import ReadestUploadService
+
+        client = ReadestClient(credentials=creds, database_service=database_service, user_id=user_id)
+        service = ReadestUploadService(client, container.ebook_parser(), database_service)
+        result = service.publish_book(filename)
+        logger.info(
+            "📚 Readest publish for %s: status=%s message=%s",
+            filename, result.status, result.message,
+        )
+    except Exception as e:
+        logger.error("Readest publish failed for %s: %s", filename, e, exc_info=True)
 
 
 def _download_storyteller_artifact(storyteller_uuid, abs_title=None, *, original_ebook_filename=None):
@@ -2134,8 +2225,9 @@ def _download_storyteller_artifact(storyteller_uuid, abs_title=None, *, original
     When ``STORYTELLER_NO_EPUB_CACHE`` is enabled and an original EPUB can be
     located via ``EbookParser.resolve_book_path``, skip the API download and
     return ``(original_name, original_path)``. Otherwise, download the
-    Storyteller ReadAloud EPUB into the epub cache as before, falling back to
-    a local ``STORYTELLER_LIBRARY_DIR`` copy on failure.
+    Storyteller ReadAloud EPUB into the epub cache as a slim, audio-stripped copy,
+    falling back to a local ``STORYTELLER_LIBRARY_DIR`` copy (also stripped) on
+    failure.
 
     Returns ``(filename, Path)`` on success, ``(None, None)`` on failure.
     """
@@ -2177,7 +2269,7 @@ def _download_storyteller_artifact(storyteller_uuid, abs_title=None, *, original
 
     downloaded = False
     try:
-        downloaded = uc().storyteller_client.download_book(storyteller_uuid, target_path)
+        downloaded = uc().storyteller_client.download_slim_book(storyteller_uuid, target_path)
     except Exception as dl_err:
         logger.warning(f"Storyteller API download failed for '{storyteller_uuid}': {dl_err}", exc_info=True)
 
@@ -2191,7 +2283,15 @@ def _download_storyteller_artifact(storyteller_uuid, abs_title=None, *, original
                 continue
             readaloud = list(child.glob("*readaloud*.epub")) + list(child.glob("*synced*/*.epub"))
             if readaloud and child.name.lower().strip() == abs_title.lower().strip():
-                shutil.copy2(readaloud[0], target_path)
+                try:
+                    uc().storyteller_client._strip_audio_from_epub(readaloud[0], target_path)
+                except Exception as strip_err:
+                    logger.warning(
+                        f"Storyteller local fallback strip failed for '{readaloud[0]}'; "
+                        f"copying verbatim: {strip_err}",
+                        exc_info=True,
+                    )
+                    shutil.copy2(readaloud[0], target_path)
                 logger.warning(f"Storyteller local fallback used: '{readaloud[0]}'")
                 return artifact_filename, target_path
 
@@ -3806,6 +3906,8 @@ def settings():
             'SYNC_COMPLETION_PROPAGATION',
             'SYNC_ABS_EBOOK',
             'XPATH_FALLBACK_TO_PREVIOUS_SEGMENT',
+            'ABS_ENABLED',
+            'READEST_ENABLED',
             'KOSYNC_ENABLED',
             'STORYTELLER_ENABLED',
             'BOOKLORE_ENABLED',
@@ -3813,6 +3915,7 @@ def settings():
             'GRIMMORY_READING_SESSIONS',
             'CWA_ENABLED',
             'CWA_SYNC_ENABLED',
+            'CWA_KOBO_SPAN_SYNC',
             'HARDCOVER_ENABLED',
             'HARDCOVER_ANNOTATION_SYNC',
             'STORYGRAPH_ENABLED',
@@ -3824,6 +3927,12 @@ def settings():
             'INSTANT_SYNC_ENABLED',
             'STORYTELLER_POLL_WAIT_FOR_SETTLE',
             'BOOKFUSION_POLL_WAIT_FOR_SETTLE',
+            'BOOKORBIT_AUDIO_POLL_WAIT_FOR_SETTLE',
+            'BOOKLORE_AUDIO_POLL_WAIT_FOR_SETTLE',
+            'BOOKORBIT_POLL_WAIT_FOR_SETTLE',
+            'BOOKLORE_POLL_WAIT_FOR_SETTLE',
+            'KAVITA_POLL_WAIT_FOR_SETTLE',
+            'CWA_SYNC_POLL_WAIT_FOR_SETTLE',
             'STORYTELLER_LISTENING_SESSIONS',
             'STORYTELLER_NO_EPUB_CACHE',
             'BOOKLORE_SHELF_WATCH_ENABLED',
@@ -4009,47 +4118,62 @@ def _coerce_author_display(value):
 
 def _extract_series_from_abs_metadata(metadata: dict) -> tuple:
     """Return (series_name, series_sequence) from an ABS media.metadata block."""
-    if not isinstance(metadata, dict):
-        return None, None
-    series_list = metadata.get("series") or []
-    if not isinstance(series_list, list) or not series_list:
-        name = (metadata.get("seriesName") or "").strip()
-        return (name or None, None)
-    first = series_list[0]
-    if isinstance(first, dict):
-        name = (first.get("name") or "").strip() or None
-        raw_seq = first.get("sequence")
-    else:
-        name = str(first).strip() or None
-        raw_seq = None
-    sequence = None
-    if raw_seq is not None:
-        try:
-            sequence = float(raw_seq)
-        except (TypeError, ValueError):
-            sequence = None
-    return name, sequence
+    return _series_from_abs_metadata(metadata)
 
 
 def _extract_series_from_booklore_metadata(raw: dict) -> tuple:
     """Return (series_name, series_sequence) from cached BookLore raw_metadata."""
-    if not isinstance(raw, dict):
-        return None, None
-    metadata = raw.get("metadata") or raw
-    name = (metadata.get("seriesName") or "").strip() or None
-    raw_seq = metadata.get("seriesNumber") or metadata.get("seriesSequence")
-    sequence = None
-    if raw_seq is not None:
-        try:
-            sequence = float(raw_seq)
-        except (TypeError, ValueError):
-            sequence = None
-    return name, sequence
+    return _series_from_library_detail(raw)
 
 
 def _normalize_series_key(name: str) -> str:
     """Case- and whitespace-insensitive key for grouping series."""
     return re.sub(r"\s+", " ", (name or "").strip()).casefold()
+
+
+SERIES_PREVIEW_LIMIT = 5
+
+
+def _format_series_sequence(sequence: "float | int | str | None") -> str:
+    """Render a series sequence as a short label ('1', '2.5'); blank when unset."""
+    if sequence is None:
+        return ""
+    try:
+        value = float(sequence)
+    except (TypeError, ValueError):
+        return str(sequence)
+    if value.is_integer():
+        return str(int(value))
+    return ("%.2f" % value).rstrip("0").rstrip(".")
+
+
+def _series_preview_books(children: list, next_index: "int | None",
+                          limit: int = SERIES_PREVIEW_LIMIT) -> "tuple[list, int]":
+    """Pick the child books a collapsed series card previews.
+
+    A series longer than the limit scrolls the window to the next unfinished book,
+    so the preview shows where the reader actually is rather than volumes they
+    finished long ago.
+    """
+    total = len(children)
+    if total > limit and next_index is not None:
+        start = max(0, min(next_index - 1, total - limit))
+    else:
+        start = 0
+    window = children[start:start + limit]
+
+    preview = []
+    for offset, child in enumerate(window):
+        position = start + offset
+        progress = child.get("unified_progress") or 0
+        preview.append({
+            "abs_id": child.get("abs_id"),
+            "label": _format_series_sequence(child.get("series_sequence")) or str(position + 1),
+            "title": child.get("display_title") or "",
+            "progress": progress,
+            "is_next": next_index is not None and position == next_index,
+        })
+    return preview, total - len(window)
 
 
 def _finalize_series_group(group: dict) -> None:
@@ -4065,7 +4189,12 @@ def _finalize_series_group(group: dict) -> None:
     finished = sum(1 for c in children if (c.get("unified_progress") or 0) >= 100)
     in_progress = sum(1 for c in children if 0 < (c.get("unified_progress") or 0) < 100)
     avg = round(sum((c.get("unified_progress") or 0) for c in children) / total, 1) if total else 0.0
-    next_book = next((c for c in children if (c.get("unified_progress") or 0) < 100), None)
+    next_index = next(
+        (i for i, c in enumerate(children) if (c.get("unified_progress") or 0) < 100),
+        None,
+    )
+    next_book = children[next_index] if next_index is not None else None
+    preview_books, preview_hidden_count = _series_preview_books(children, next_index)
 
     last_sync_unix = 0.0
     for c in children:
@@ -4093,6 +4222,8 @@ def _finalize_series_group(group: dict) -> None:
         "in_progress_count": in_progress,
         "avg_progress": avg,
         "next_book": next_book,
+        "preview_books": preview_books,
+        "preview_hidden_count": preview_hidden_count,
         "last_sync_unix": last_sync_unix,
         "added_at_unix": added_at_unix,
         "stack_cover_urls": [c.get("cover_url") for c in children[:3] if c.get("cover_url")],
@@ -4404,7 +4535,15 @@ def _storyteller_transcript_source(storyteller_uuid, storyteller_manifest):
 def _get_dashboard_sync_warning_clients(mapping, integrations):
     client_names = []
 
-    if integrations.get('abs') and mapping.get('sync_mode') != 'ebook_only':
+    # A book repointed away from ABS keeps its old ABS progress row so the
+    # repoint stays undoable, but the sync engine never refreshes that row and
+    # the dashboard hides its tile — counting it would flag permanent drift
+    # nothing can clear.
+    if (
+        integrations.get('abs')
+        and mapping.get('sync_mode') != 'ebook_only'
+        and (mapping.get('audio_source') or 'ABS') == 'ABS'
+    ):
         client_names.append('abs')
 
     if integrations.get('bookloreaudio') and mapping.get('audio_source') == 'BookLore':
@@ -4487,8 +4626,19 @@ def _dashboard_text_axis_pct(client_name, state, mapping):
     return text_fraction * 100.0
 
 
-def _compute_dashboard_sync_warning_pct(mapping, integrations):
-    progress_values = []
+# Drift is computed for every visible book on every dashboard render, and an
+# audio client's conversion loads that book's alignment map — a 10-15MB JSON blob
+# against a 3-entry cache. The result only moves when a position moves, so it is
+# memoized on the exact inputs that produced it (issue #412).
+_DASHBOARD_SYNC_WARNING_CACHE = LRUCache(capacity=512)
+
+
+def _dashboard_sync_warning_candidates(mapping, integrations):
+    """The (client, state) pairs eligible for the drift comparison.
+
+    Split out from the computation so callers can count the candidates — and bail
+    — before paying for any audio-to-text axis conversion."""
+    candidates = []
     states = mapping.get('states', {})
 
     for client_name in _get_dashboard_sync_warning_clients(mapping, integrations):
@@ -4498,6 +4648,42 @@ def _compute_dashboard_sync_warning_pct(mapping, integrations):
         raw = state.get('percentage')
         if raw is None or raw <= 0:
             continue
+        candidates.append((client_name, state))
+
+    return candidates
+
+
+def _dashboard_sync_warning_cache_key(mapping, candidates):
+    """Fingerprint the inputs the drift number is derived from.
+
+    Anything that can change the answer belongs here: the book, the set of
+    candidate clients, each one's reported position, and the duration used as the
+    timestamp fallback. Identical fingerprint, identical result."""
+    return (
+        mapping.get('abs_id'),
+        mapping.get('duration') or 0,
+        tuple(
+            (name, state.get('percentage'), state.get('timestamp'))
+            for name, state in candidates
+        ),
+    )
+
+
+def _compute_dashboard_sync_warning_pct(mapping, integrations):
+    candidates = _dashboard_sync_warning_candidates(mapping, integrations)
+
+    # One reporting client cannot drift from anything. Returning here keeps a
+    # single-integration install off the alignment path entirely.
+    if len(candidates) < 2:
+        return 0.0
+
+    cache_key = _dashboard_sync_warning_cache_key(mapping, candidates)
+    cached = _DASHBOARD_SYNC_WARNING_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    progress_values = []
+    for client_name, state in candidates:
         value = _dashboard_text_axis_pct(client_name, state, mapping)
         if value is None:
             continue
@@ -4506,7 +4692,9 @@ def _compute_dashboard_sync_warning_pct(mapping, integrations):
     if len(progress_values) < 2:
         return 0.0
 
-    return round(max(progress_values) - min(progress_values), 1)
+    warning_pct = round(max(progress_values) - min(progress_values), 1)
+    _DASHBOARD_SYNC_WARNING_CACHE.put(cache_key, warning_pct)
+    return warning_pct
 
 
 def _shelf_watch_clients_for(meta: dict):
@@ -4661,6 +4849,8 @@ def _browser_cover_url(
     audio_source: str | None = None,
     audio_source_id: str | None = None,
     abs_id: str | None = None,
+    ebook_source: str | None = None,
+    ebook_source_id: str | None = None,
 ) -> str:
     """Convert any cover URL into a safe, same-origin BookBridge URL.
 
@@ -4680,7 +4870,12 @@ def _browser_cover_url(
        - BookOrbit with ``audio_source_id`` -> ``/api/bookorbit/audiobook-cover/<id>``
        - ABS or unset source with ``abs_id`` (preferred) or ``audio_source_id`` ->
          ``/api/cover-proxy/<id>`` (only for non-library audio sources)
-    3. If nothing can be derived, return an empty string.
+    3. Failing that, derive from the ebook library that hosts the book, so
+       ebook-only mappings still get art: BookOrbit/BookLore with
+       ``ebook_source_id`` reuse that provider's cover proxy (one endpoint
+       serves a book's cover whether the book is audio or text). CWA, Kavita
+       and local files expose no id we can proxy, so they stay coverless.
+    4. If nothing can be derived, return an empty string.
 
     An ebook-only mapping has no Audiobookshelf item, so its synthetic
     ``ebook-<hash>`` key must not be turned into a cover-proxy URL that can only
@@ -4703,6 +4898,14 @@ def _browser_cover_url(
         proxy_id = aid or src_id
         if proxy_id and not _is_synthetic_bridge_key(proxy_id):
             return f"/api/cover-proxy/{proxy_id}"
+
+    ebook_src = (ebook_source or "").strip()
+    ebook_id = (ebook_source_id or "").strip()
+    if ebook_id:
+        if ebook_src == "BookLore":
+            return f"/api/booklore/audiobook-cover/{ebook_id}"
+        if ebook_src == "BookOrbit":
+            return f"/api/bookorbit/audiobook-cover/{ebook_id}"
     return ""
 
 
@@ -5014,8 +5217,15 @@ def _build_dashboard_mapping(
         audio_source_id=mapping.get("audio_source_id"),
         abs_id=book.abs_id,
     )
-    if safe_cover:
-        mapping["cover_url"] = safe_cover
+    # An ebook-only mapping has no audiobook to take a cover from, so fall back
+    # to the library hosting the ebook. `audio_cover_url` stays audio-only.
+    display_cover = safe_cover or _browser_cover_url(
+        None,
+        ebook_source=mapping.get("ebook_source"),
+        ebook_source_id=mapping.get("ebook_source_id"),
+    )
+    if display_cover:
+        mapping["cover_url"] = display_cover
     mapping["audio_cover_url"] = safe_cover
 
     reading_stats = reading_stats_by_book.get(book.abs_id)
@@ -8294,6 +8504,15 @@ def cleanup_mapping_resources(book, defer_audio_cache: bool = False):
     except Exception as e:
         logger.warning(f"⚠️ Failed to delete KOSync data for '{book.abs_id}': {e}", exc_info=True)
 
+    # A deleted mapping is the user's explicit "re-match this" signal, so the
+    # shelf-watch re-scan throttle must not outlive it either: the throttle row
+    # is keyed by the library's book id, which survives both the delete and a
+    # rename in the source library, so re-adding the book to the watch shelf
+    # would otherwise be skipped as `skipped_throttled` for the whole rescan
+    # window.
+    from src.services.shelf_watch_service import clear_shelf_watch_throttle
+    clear_shelf_watch_throttle(database_service, book)
+
     is_abs_backed = (
         getattr(book, 'sync_mode', 'audiobook') != 'ebook_only'
         and not str(book.abs_id).startswith('booklore:')
@@ -9717,6 +9936,63 @@ def api_status():
     return jsonify({"mappings": mappings})
 
 
+def _build_dashboard_progress_rows(books, all_states):
+    """The per-book fields the dashboard's periodic refresh actually redraws.
+
+    Deliberately derived from Book and State rows alone: no display-metadata
+    resolution, no per-book service lookups, and above all no alignment map —
+    which the full dashboard build loads per book to compute the drift badge
+    (issue #412)."""
+    states_by_book = _group_dashboard_states_by_book(all_states)
+    rows = []
+
+    for book in books or []:
+        abs_id = getattr(book, "abs_id", None)
+        if not abs_id:
+            continue
+
+        states = {}
+        latest_update_time = 0
+        max_progress = 0.0
+        for state in states_by_book.get(abs_id, []):
+            if state.last_updated and state.last_updated > latest_update_time:
+                latest_update_time = state.last_updated
+            pct_val = round(state.percentage * 100, 1) if state.percentage is not None else 0
+            states[state.client_name] = {
+                "timestamp": state.timestamp or 0,
+                "percentage": pct_val,
+            }
+            if state.percentage is not None:
+                max_progress = max(max_progress, pct_val)
+
+        rows.append({
+            "abs_id": abs_id,
+            "unified_progress": min(max_progress, 100.0),
+            "last_sync": _format_dashboard_last_sync(latest_update_time),
+            "last_sync_unix": latest_update_time,
+            "states": states,
+        })
+
+    return rows
+
+
+def api_status_progress():
+    """Compact position feed for the dashboard's periodic refresh.
+
+    The refresh only redraws progress numbers and the 'last synced' line, but
+    /api/status rebuilds the whole dashboard payload for every visible book —
+    including the per-book alignment lookups behind the drift badge, which the
+    refresh never reads. Serving those few fields from the database alone stops a
+    dashboard left open from pegging a core every 30 seconds (issue #412)."""
+    user = current_user()
+    user_id = user.id if user else None
+    books = database_service.get_all_books(user_id=user_id)
+    all_states = database_service.get_all_states(user_id=user_id)
+    books = _dashboard_visible_books_for_user(books, user)
+
+    return jsonify({"mappings": _build_dashboard_progress_rows(books, all_states)})
+
+
 def logs_view():
     """Display logs frontend with filtering capabilities.
 
@@ -10097,107 +10373,231 @@ def api_storyteller_backfill():
 
 
 def _extract_series_from_title(title: str) -> tuple:
+    """Return (series_name, series_sequence) parsed out of a numbered title."""
+    return _series_from_title(title)
+
+
+def _series_seq_equal(stored: "float | int | str | None", resolved: "float | None") -> bool:
+    """True when a stored series sequence already matches a freshly resolved one."""
+    if stored is None and resolved is None:
+        return True
+    if stored is None or resolved is None:
+        return False
+    try:
+        return abs(float(stored) - float(resolved)) < 1e-9
+    except (TypeError, ValueError):
+        return False
+
+
+def _series_refresh_action(stored_name: "str | None", stored_seq: "float | int | str | None",
+                           resolution) -> str:
+    """Decide what a resolved series means for a stored row.
+
+    Returns ``update``, ``unchanged``, ``clear``, ``keep`` or ``none``.
+    ``clear`` is only ever returned when a service that owns the book actually
+    answered — silence from an offline or unconfigured library must leave the
+    stored series alone rather than read as "the series was deleted".
     """
-    Heuristic: extract series name + sequence from a title like
-    "Solar Dragons Need Love, Too! 2" or "Returner's Defiance 3".
+    had_series = bool((stored_name or "").strip())
+    if resolution.name:
+        if had_series and resolution.name == stored_name:
+            if _series_seq_equal(stored_seq, resolution.sequence):
+                return "unchanged"
+            # Never trade a known volume number for an unknown one. Some
+            # libraries carry the series name but no index, and dropping the
+            # stored number would sort that book to the end of its own series.
+            if resolution.sequence is None and stored_seq is not None:
+                return "unchanged"
+        return "update"
+    if had_series:
+        return "clear" if resolution.service_answered else "keep"
+    return "none"
 
-    Handles patterns:
-      "Series Name N"          → (Series Name, N)
-      "Series Name, Book N"    → (Series Name, N)
-      "Series Name (Book N)"   → (Series Name, N)
-    Returns (None, None) when no clear numeric suffix is found.
+
+def _series_backfill_clients() -> dict:
+    """Return the clients the series backfill resolves against, keyed by kwarg name."""
+    return {
+        "abs_client": container.abs_client(),
+        "bookorbit_client": container.bookorbit_client(),
+        "booklore_client": container.booklore_client(),
+        "kavita_client": container.kavita_client(),
+    }
+
+
+@admin_required
+def api_audio_repoint_plan():
+    """Work out which ABS-audio mappings could move to BookOrbit. Changes nothing.
+
+    Slow by nature: confirming a candidate costs a BookOrbit detail call, and that
+    duration check is what proves the book's existing alignment still describes the
+    audio. Detail responses are cached for an hour, so a re-run is cheap.
     """
-    if not title:
-        return None, None
-    # Strip trailing unabridged/abridged qualifiers
-    clean = re.sub(r'\s*\((?:unabridged|abridged|audio(?:\s+book)?)\)\s*$', '', title.strip(), flags=re.IGNORECASE)
+    try:
+        plan = container.audio_repoint_service().build_plan()
+    except Exception as e:
+        logger.error(f"❌ Audio repoint plan failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **plan})
 
-    # "Title, Book N" / "Title - Book N" / "Title (Book N)"
-    m = re.search(
-        r'^(.+?)[\s,\-:]+\(?(?:book|volume|vol\.?|part)\s+(\d+(?:\.\d+)?)\)?\s*$',
-        clean, re.IGNORECASE,
-    )
-    if m:
-        series = m.group(1).rstrip(' ,.!:-').strip()
-        if series:
-            return series, float(m.group(2))
 
-    # "Title N" — trailing integer (not float, to avoid matching "Author 2.0")
-    m = re.match(r'^(.+?)\s+(\d{1,3})\s*$', clean)
-    if m:
-        series = m.group(1).rstrip(' ,.!:-').strip()
-        seq = int(m.group(2))
-        # Guard: series candidate must be non-trivially long and seq plausible
-        if len(series) >= 4 and 1 <= seq <= 50:
-            return series, float(seq)
+@admin_required
+def api_audio_repoint_apply():
+    """Apply a set of repoint selections: [{'abs_id': ..., 'target_id': ...}]."""
+    payload = request.get_json(silent=True) or {}
+    selections = payload.get("selections") or []
+    if not isinstance(selections, list):
+        return jsonify({"success": False, "error": "selections must be a list"}), 400
+    try:
+        result = container.audio_repoint_service().apply(selections)
+    except Exception as e:
+        logger.error(f"❌ Audio repoint apply failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **result})
 
-    return None, None
+
+@admin_required
+def api_audio_repoint_undo():
+    """Send repointed books back to Audiobookshelf.
+
+    With no body, reverts every book that was repointed (rows whose audio is
+    BookOrbit but whose key is still an ABS item id).
+    """
+    payload = request.get_json(silent=True) or {}
+    abs_ids = payload.get("abs_ids")
+    if abs_ids is not None and not isinstance(abs_ids, list):
+        return jsonify({"success": False, "error": "abs_ids must be a list"}), 400
+    try:
+        result = container.audio_repoint_service().undo(abs_ids)
+    except Exception as e:
+        logger.error(f"❌ Audio repoint undo failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **result})
 
 
 @admin_required
 def api_series_backfill():
-    """Backfill series_name/series_sequence for all books that lack it.
+    """Backfill series_name/series_sequence, optionally re-resolving known rows.
 
-    Tries ABS metadata first; falls back to parsing the number out of the title.
-    Writes via direct SQL UPDATE to avoid ORM session lifecycle issues.
+    Default (fill) mode only touches books with no series. Refresh mode
+    (``{"refresh": true}``) re-resolves every book and clears a series the
+    owning service no longer reports — but only when that service actually
+    answered, so an outage or an unconfigured client never wipes good data.
+
+    Resolves each row against the service that owns its metadata — ABS for ABS
+    audio, the ebook library (BookOrbit/Grimmory/Kavita) for ebook-only rows —
+    and falls back to parsing the number out of the title. Writes via direct SQL
+    UPDATE to avoid ORM session lifecycle issues.
     """
     import time as _time
+    from types import SimpleNamespace
     import sqlalchemy as _sa
     start = _time.time()
     db = container.database_service()
-    abs_client = container.abs_client()
-    if not abs_client or not abs_client.is_configured():
-        return jsonify({"error": "ABS not configured"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    refresh = bool(payload.get("refresh")) or (
+        str(request.args.get("refresh", "")).strip().lower() in ("1", "true", "on", "yes")
+    )
+
+    clients = _series_backfill_clients()
+
+    def _usable(client) -> bool:
+        try:
+            return client is not None and client.is_configured()
+        except Exception:
+            return False
+
+    if not any(_usable(c) for c in clients.values()):
+        return jsonify({"error": "No library service is configured"}), 400
+
+    columns = (
+        "SELECT abs_id, abs_title, audio_source, audio_source_id, "
+        "ebook_source, ebook_source_id, series_name, series_sequence FROM books"
+    )
+    query = columns if refresh else (
+        columns + " WHERE series_name IS NULL OR series_name = ''"
+    )
 
     # Collect all rows that need updating — read-only pass
     with db.get_session() as session:
-        rows = session.execute(
-            _sa.text("SELECT abs_id, abs_title, audio_source FROM books WHERE series_name IS NULL OR series_name = ''")
-        ).fetchall()
+        rows = session.execute(_sa.text(query)).fetchall()
 
     updates = []   # list of (abs_id, series_name, series_sequence)
-    skipped = 0
+    clears = []    # abs_ids whose owning service says the series is gone
+    unresolved = 0
+    unchanged = 0
+    kept_no_answer = 0
     failed = 0
 
-    for abs_id, abs_title, audio_source in rows:
-        sname, sseq = None, None
+    for (abs_id, abs_title, audio_source, audio_source_id,
+         ebook_source, ebook_source_id, stored_name, stored_seq) in rows:
+        book_row = SimpleNamespace(
+            abs_id=abs_id,
+            abs_title=abs_title,
+            audio_source=audio_source,
+            audio_source_id=audio_source_id,
+            ebook_source=ebook_source,
+            ebook_source_id=ebook_source_id,
+        )
+        try:
+            resolution = resolve_series_details(book_row, force_refresh=refresh, **clients)
+        except Exception as e:
+            logger.warning(
+                f"Series backfill lookup failed for '{sanitize_log_data(abs_title)}': {e}",
+                exc_info=True,
+            )
+            failed += 1
+            continue
 
-        if audio_source == "ABS" and abs_id:
-            try:
-                item_details = abs_client.get_item_details(abs_id)
-                if item_details:
-                    meta = item_details.get("media", {}).get("metadata", {})
-                    sname, sseq = _extract_series_from_abs_metadata(meta)
-            except Exception as e:
-                logger.warning(f"Series backfill ABS lookup failed for '{abs_title}': {e}", exc_info=True)
-                failed += 1
-                continue
-
-        if not sname:
-            sname, sseq = _extract_series_from_title(abs_title or "")
-
-        if sname:
-            updates.append((abs_id, sname, sseq))
-            logger.debug(f"Series backfill queued: '{sname}' #{sseq} → '{abs_title}'")
+        action = _series_refresh_action(stored_name, stored_seq, resolution)
+        if action == "update":
+            updates.append((abs_id, resolution.name, resolution.sequence))
+            logger.debug(
+                f"Series backfill queued: '{resolution.name}' #{resolution.sequence} "
+                f"→ '{sanitize_log_data(abs_title)}' (via {resolution.source})"
+            )
+        elif action == "unchanged":
+            unchanged += 1
+        elif action == "clear":
+            clears.append(abs_id)
+            logger.info(
+                f"📚 Series cleared for '{sanitize_log_data(abs_title)}': source no longer "
+                f"reports a series (was '{sanitize_log_data(stored_name)}')"
+            )
+        elif action == "keep":
+            kept_no_answer += 1
+        else:
+            unresolved += 1
 
     # Write pass — single transaction, plain SQL
-    if updates:
+    if updates or clears:
         with db.get_session() as session:
             for abs_id, sname, sseq in updates:
                 session.execute(
                     _sa.text("UPDATE books SET series_name = :sname, series_sequence = :sseq WHERE abs_id = :abs_id"),
                     {"sname": sname, "sseq": sseq, "abs_id": abs_id},
                 )
+            for abs_id in clears:
+                session.execute(
+                    _sa.text("UPDATE books SET series_name = NULL, series_sequence = NULL WHERE abs_id = :abs_id"),
+                    {"abs_id": abs_id},
+                )
 
     duration = round(_time.time() - start, 1)
     logger.info(
-        f"Series backfill complete: updated={len(updates)} skipped={skipped} "
-        f"failed={failed} duration={duration}s"
+        f"Series backfill complete (mode={'refresh' if refresh else 'fill'}): "
+        f"updated={len(updates)} cleared={len(clears)} unchanged={unchanged} "
+        f"unresolved={unresolved} kept_no_answer={kept_no_answer} failed={failed} "
+        f"duration={duration}s"
     )
     return jsonify({
+        "mode": "refresh" if refresh else "fill",
         "scanned": len(rows),
         "updated": len(updates),
-        "skipped_already_set": skipped,
+        "cleared": len(clears),
+        "unchanged": unchanged,
+        "unresolved": unresolved,
+        "kept_no_answer": kept_no_answer,
         "failed": failed,
         "duration_seconds": duration,
         "sample_updates": [{"abs_id": a, "series": s, "seq": q} for a, s, q in updates[:10]],
@@ -10340,10 +10740,14 @@ def get_abs_libraries():
 def proxy_booklore_audiobook_cover(book_id):
     """Stream a Grimmory audiobook cover through the backend."""
     user = current_user()
-    # The route id identifies the audiobook, which can be paired with an ebook
-    # from a different provider (or a different book id on the same provider).
+    # The route id identifies a Grimmory book, which can be paired with an ebook
+    # from a different provider (or a different book id on the same provider),
+    # or be the text source of an ebook-only mapping.
     book = (
-        database_service.get_book_by_audio_source('BookLore', str(book_id))
+        (
+            database_service.get_book_by_audio_source('BookLore', str(book_id))
+            or database_service.get_book_by_ebook_source('BookLore', str(book_id))
+        )
         if database_service else None
     )
     if book and book.abs_id:
@@ -10372,9 +10776,13 @@ def proxy_booklore_audiobook_cover(book_id):
 def proxy_bookorbit_audiobook_cover(book_id):
     """Stream a BookOrbit book cover through the backend."""
     user = current_user()
-    # The route id identifies the audiobook, not the linked ebook source.
+    # The route id identifies a BookOrbit book, which may be reached as an
+    # audiobook or as an ebook-only mapping's text source.
     book = (
-        database_service.get_book_by_audio_source('BookOrbit', str(book_id))
+        (
+            database_service.get_book_by_audio_source('BookOrbit', str(book_id))
+            or database_service.get_book_by_ebook_source('BookOrbit', str(book_id))
+        )
         if database_service else None
     )
     if book and book.abs_id:
@@ -11667,6 +12075,9 @@ def create_app(test_container=None):
     if test_container is not None:
         global _BACKGROUND_TASKS_SYNCHRONOUS
         _BACKGROUND_TASKS_SYNCHRONOUS = True
+    # The drift memo is process-scoped and keyed on stored positions; a new app
+    # instance is a new process's worth of state, so it starts empty.
+    _DASHBOARD_SYNC_WARNING_CACHE.clear()
     STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
     TEMPLATE_DIR = os.environ.get('TEMPLATE_DIR', '/app/templates')
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static', template_folder=TEMPLATE_DIR)
@@ -11777,6 +12188,7 @@ def create_app(test_container=None):
     app.add_url_rule('/api/health', 'api_health', api_health)
     app.add_url_rule('/api/restart', 'api_restart', api_restart, methods=['POST'])
     app.add_url_rule('/api/status', 'api_status', api_status)
+    app.add_url_rule('/api/status/progress', 'api_status_progress', api_status_progress)
     app.add_url_rule('/stats', 'stats_view', stats_view)
     app.add_url_rule('/api/stats', 'api_stats', api_stats)
     app.add_url_rule('/api/stats/reading-day', 'api_stats_reading_day', api_stats_reading_day)
@@ -11821,6 +12233,9 @@ def create_app(test_container=None):
     app.add_url_rule('/api/storyteller/link/<abs_id>', 'api_storyteller_link', api_storyteller_link, methods=['POST'])
     app.add_url_rule('/api/storyteller/backfill', 'api_storyteller_backfill', api_storyteller_backfill, methods=['POST'])
     app.add_url_rule('/api/admin/backfill-series', 'api_series_backfill', api_series_backfill, methods=['POST'])
+    app.add_url_rule('/api/admin/audio-repoint/plan', 'api_audio_repoint_plan', api_audio_repoint_plan, methods=['GET', 'POST'])
+    app.add_url_rule('/api/admin/audio-repoint/apply', 'api_audio_repoint_apply', api_audio_repoint_apply, methods=['POST'])
+    app.add_url_rule('/api/admin/audio-repoint/undo', 'api_audio_repoint_undo', api_audio_repoint_undo, methods=['POST'])
     app.add_url_rule('/api/admin/debug-abs-series', 'api_debug_abs_series', api_debug_abs_series, methods=['GET'])
 
     # Forge routes
@@ -11950,6 +12365,18 @@ if __name__ == '__main__':
                 hardcover_interval = int(os.environ.get("HARDCOVER_ANNOTATION_SYNC_MINUTES", "30") or 0)
                 if hardcover_interval > 0:
                     intervals.append(hardcover_interval)
+            except (TypeError, ValueError):
+                pass
+            # The Readest "currently reading" upload sweep rides this same daemon
+            # rather than starting its own thread. Without a contribution here, a
+            # user who enables uploads but no annotation sync would get 0 back
+            # from this function and the daemon would never run a cycle at all.
+            # Since the result is a min(), adding this never slows an existing
+            # schedule down.
+            try:
+                readest_upload_interval = int(os.environ.get("READEST_UPLOAD_SWEEP_MINUTES", "60") or 0)
+                if readest_upload_interval > 0:
+                    intervals.append(readest_upload_interval)
             except (TypeError, ValueError):
                 pass
             return min(intervals) if intervals else 0

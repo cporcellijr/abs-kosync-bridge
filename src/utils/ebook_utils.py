@@ -24,6 +24,7 @@ from pathlib import Path
 from collections import OrderedDict
 from src.sync_clients.sync_client_interface import LocatorResult
 from src.utils.cache_paths import safe_cache_path, is_plain_basename
+from src.utils.logging_utils import get_persistent_condition_logger
 
 logger = logging.getLogger(__name__)
 
@@ -1353,17 +1354,47 @@ class EbookParser:
         xpath_base = self._build_xpath(anchor)
         return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
 
-    def _build_sentence_level_chapter_fallback_xpath(self, html_content, spine_index) -> str:
+    def _structural_anchor_xpath(self, tree, spine_index) -> Optional[str]:
+        """Anchor to the nearest structural ancestor of the first real text node.
+
+        Text living inside inline markup (``<p><span>text</span></p>``) has no
+        *direct* text parent, so the direct-text passes miss every element in the
+        chapter. Walking up from the text keeps the document's real parent chain
+        rather than inventing one.
+        """
+        for element in tree.iter():
+            if not str(element.text or "").strip():
+                continue
+            ancestor = element
+            while ancestor is not None:
+                if self._local_tag_name(ancestor) in self.CRENGINE_STRUCTURAL_TAGS:
+                    xpath_base = self._build_xpath(ancestor)
+                    if xpath_base:
+                        return f"/body/DocFragment[{spine_index}]/{xpath_base}.0"
+                    break
+                ancestor = ancestor.getparent()
+        return None
+
+    def _build_sentence_level_chapter_fallback_xpath(self, html_content, spine_index) -> Optional[str]:
         """
         Build a safe sentence-level XPath anchored to the first readable text node
         in the chapter. This intentionally targets node starts (.0) instead of
         character-level offsets.
+
+        Returns None when the chapter offers no real anchor. It must never invent
+        one: a structurally impossible XPointer (``body/p[1]`` for a chapter whose
+        DOM is ``body/div/p``) cannot be resolved by KOReader, which then opens at
+        the start of the book and writes that near-zero position back (#420).
+        Every caller already treats None as "no locator" and skips the write.
         """
-        default_xpath = f"/body/DocFragment[{spine_index}]/body/p[1]/text().0"
         try:
             tree = html.fromstring(html_content)
         except Exception:
-            return default_xpath
+            logger.debug(
+                "Chapter fallback: spine %s content could not be parsed; no anchor emitted",
+                spine_index,
+            )
+            return None
 
         sentence_tags = (
             "p", "li", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -1386,7 +1417,15 @@ class EbookParser:
                 xpath_base = self._build_xpath(element)
                 return f"/body/DocFragment[{spine_index}]/{xpath_base}{suffix}.0"
 
-        return default_xpath
+        anchored = self._structural_anchor_xpath(tree, spine_index)
+        if anchored:
+            return anchored
+
+        logger.debug(
+            "Chapter fallback: spine %s has no anchorable text; no anchor emitted",
+            spine_index,
+        )
+        return None
 
     def get_sentence_level_ko_xpath(self, filename, percentage) -> Optional[str]:
         """
@@ -1772,7 +1811,11 @@ class EbookParser:
                     _log_fallback(candidate_item)
                     return candidate_item, tree, elements[0]
 
-        logger.warning(f"Could not resolve XPath in {filename}: {clean_xpath}")
+        get_persistent_condition_logger().warn(
+            logger,
+            "xpath_unresolved",
+            f"Could not resolve XPath in {filename}: {clean_xpath}",
+        )
         return None, None, None
 
     def resolve_xpath(self, filename, xpath_str):

@@ -38,7 +38,7 @@
 - **Self-Hosted**: Runs entirely in Docker on your own server.
 
 > [!TIP]
-> **Upgrading?** Review `docs/getting-started.md` to potentially simplify your `docker-compose.yml` volumes. The new Forge tool and CWA integration reduce the need for multiple volume mappings.
+> **Upgrading?** Review `docs/getting-started.md` to potentially simplify your `docker-compose.yml` volumes. Storyteller edition uploads and the CWA integration reduce the need for multiple volume mappings.
 
 ## Quick Start
 
@@ -63,7 +63,7 @@ services:
       # - /path/to/storyteller/assets:/storyteller/assets    # Optional: Storyteller transcript ingest
 ```
 
-Forge now uploads directly to Storyteller over the API, so a Storyteller library mount is no longer required for normal Forge ingestion.
+Storyteller editions are uploaded directly to Storyteller over the API, so a Storyteller library mount is no longer required for normal ingestion.
 
 If you want KOReader to download and manage bridge-provided books for you, an optional **Bridge Sync** KOReader plugin is available from the project's GitHub Releases page.
 

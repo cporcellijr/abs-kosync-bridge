@@ -222,7 +222,7 @@ class TestMatchPathsRegression(unittest.TestCase):
 
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="1234567890abcdef1234567890abcdef")
     def test_match_route_creates_ebook_only_mapping_from_storyteller_without_audiobook(self, _mock_kosync):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_container.mock_storyteller_client.is_configured.return_value = True
         self.mock_container.mock_storyteller_client.get_book_details.return_value = {
             "title": "Story Only Title",
@@ -249,7 +249,7 @@ class TestMatchPathsRegression(unittest.TestCase):
 
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="abcdef1234567890abcdef1234567890")
     def test_match_route_ebook_only_storyteller_preserves_original_filename_for_hash(self, _mock_kosync):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
 
         response = self.client.post(
@@ -296,7 +296,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     def test_match_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
         self._prepare_storyteller_assets("Regression Book", chapter_count=2)
         self._set_abs_chapters(chapter_count=2)
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         response = self.client.post(
             "/match",
@@ -318,7 +318,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-match-story-fallback"])
     def test_match_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
 
         response = self.client.post(
@@ -846,7 +846,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-forge-story")
     def test_batch_match_forge_queue_storyteller_items_use_direct_match(self, _mock_kosync, _mock_ingest):
         self.mock_container.mock_storyteller_client.is_configured.return_value = True
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         add_response = self.client.post(
             "/batch-match",
@@ -916,7 +916,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-batch-story-1")
     def test_batch_match_storyteller_uuid_preserves_storyteller_source(self, _mock_kosync, _mock_ingest):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         add_response = self.client.post(
             "/batch-match",
@@ -948,7 +948,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     def test_batch_match_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
         self._prepare_storyteller_assets("Regression Book", chapter_count=2)
         self._set_abs_chapters(chapter_count=2)
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         add_response = self.client.post(
             "/batch-match",
@@ -975,7 +975,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-batch-story-fallback"])
     def test_batch_match_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
 
         add_response = self.client.post(
@@ -1939,7 +1939,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", return_value="hash-suggestions-story-1")
     def test_suggestions_queue_storyteller_uuid_preserves_storyteller_source(self, _mock_kosync, _mock_ingest):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         add_response = self.client.post(
             "/suggestions",
@@ -1972,7 +1972,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     def test_suggestions_queue_storyteller_uuid_real_ingest_persists_manifest(self, _mock_kosync):
         self._prepare_storyteller_assets("Regression Book", chapter_count=2)
         self._set_abs_chapters(chapter_count=2)
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
 
         add_response = self.client.post(
             "/suggestions",
@@ -1999,7 +1999,7 @@ class TestMatchPathsRegression(unittest.TestCase):
     @patch("src.web_server.ingest_storyteller_transcripts", return_value=None)
     @patch("src.web_server.get_kosync_id_for_ebook", side_effect=[None, "hash-suggestions-story-fallback"])
     def test_suggestions_queue_storyteller_uuid_falls_back_to_artifact_hash_when_original_missing(self, _mock_kosync, _mock_ingest):
-        self.mock_container.mock_storyteller_client.download_book.return_value = True
+        self.mock_container.mock_storyteller_client.download_slim_book.return_value = True
         self.mock_container.mock_booklore_client.find_book_by_filename.return_value = None
 
         add_response = self.client.post(
@@ -2058,7 +2058,7 @@ class TestMatchPathsRegression(unittest.TestCase):
         )
         self.assertEqual(process_response.status_code, 302)
 
-        self.mock_container.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_container.mock_storyteller_client.download_slim_book.assert_not_called()
         self.mock_container.mock_database_service.save_book.assert_called_once()
         saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
         self.assertEqual(saved_book.ebook_filename, "batch-forge-original.epub")
@@ -2088,7 +2088,7 @@ class TestMatchPathsRegression(unittest.TestCase):
         )
         self.assertEqual(process_response.status_code, 302)
 
-        self.mock_container.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_container.mock_storyteller_client.download_slim_book.assert_not_called()
         self.mock_container.mock_database_service.save_book.assert_called_once()
         saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
         self.assertEqual(saved_book.ebook_filename, "batch-match-original.epub")
@@ -2118,7 +2118,7 @@ class TestMatchPathsRegression(unittest.TestCase):
         )
         self.assertEqual(process_response.status_code, 302)
 
-        self.mock_container.mock_storyteller_client.download_book.assert_not_called()
+        self.mock_container.mock_storyteller_client.download_slim_book.assert_not_called()
         self.mock_container.mock_database_service.save_book.assert_called_once()
         saved_book = self.mock_container.mock_database_service.save_book.call_args[0][0]
         self.assertEqual(saved_book.ebook_filename, "suggestions-original.epub")

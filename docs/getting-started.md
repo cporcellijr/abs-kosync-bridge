@@ -17,18 +17,15 @@ All you actually need:
 Common starting points:
 
 - **Audiobookshelf + KOReader** — the classic audiobook ↔ ebook pairing
-- **Ebook-only** — KOReader, BookFusion, Grimmory, BookOrbit, or CWA in any combination, with Audiobookshelf intentionally disabled
+- **Ebook-only** — KOReader, BookFusion, Grimmory, BookOrbit, or CWA in any combination, with Audiobookshelf switched off
 
-Everything else — Storyteller, Hardcover, StoryGraph, Readest, Telegram, AI assist — is optional and can be added later from the Settings UI.
-
-!!! note "Storyteller is optional"
-    You do **not** need Storyteller for audio ↔ ebook sync. The bridge aligns audio and text itself using built-in Whisper transcription (or the EPUB's SMIL data). Add Storyteller only if you actually use the Storyteller read-along app.
+Everything else — Storyteller, Hardcover, StoryGraph, Readest, Telegram, AI assist — is optional and can be added later from the Settings UI. BookBridge aligns audio and text on its own, using built-in Whisper transcription and the EPUB's own timing data, so an audiobook and an ebook stay in step without any of them.
 
 ---
 
 ## Step 1: Gather your ABS details
 
-Setting up ebook-only? Skip this step — you will enter `disabled` for Audiobookshelf later.
+Setting up ebook-only? Skip this step — you will switch Audiobookshelf off later.
 
 ### Audiobookshelf API token
 
@@ -106,7 +103,7 @@ If you want to expose only the KOSync endpoint to the internet:
 
     If you enable Grimmory or BookOrbit, the bridge can use them for ebook matching and audiobook sources. If you enable CWA, the bridge can use it as an ebook source and, when Kobo sync is enabled, as a reading-progress participant.
 
-    Forge uploads directly to Storyteller over the API, so a Storyteller library mount is not required for normal Forge imports.
+    Storyteller editions upload directly to Storyteller over the API, so a Storyteller library mount is not required for normal imports.
 
     If you mount Storyteller assets at `/storyteller/assets`, set **Storyteller Assets Path** in Settings to `/storyteller`.
     The assets path can be configured entirely in the UI; `STORYTELLER_ASSETS_DIR` is optional.
@@ -136,7 +133,7 @@ same names, in the same order.
 
 1. Open `http://localhost:8080`. The first time you open it, you will be asked to create your account — choose a username and password. This becomes your main (admin) account.
 2. Open **Settings → Integrations**.
-3. On the **Audiobookshelf** card, enter your **Server URL** — or `disabled` for an ebook-only install.
+3. On the **Audiobookshelf** card, enter your **Server URL** — or switch the card's **Enable** toggle off for an ebook-only install.
 4. Enable any optional services you use and enter their server URLs: Grimmory, BookOrbit, CWA, BookFusion, Storyteller, Readest, Hardcover, StoryGraph.
 5. Click **Save Settings** and wait for the app to come back.
 6. Open **Account → My Integrations** and enter your personal logins: your ABS API token and Library ID, KoSync username/password, and any other service accounts. Use the **Test** button on a card to check a login before saving.
@@ -157,7 +154,7 @@ You can start in either of these ways:
 2. Click **Scan Library**.
 3. Review the likely pairs.
 4. Add the good ones to the queue.
-5. Click **Process All**.
+5. Click **Match All**.
 
 If your audiobook and ebook services point at the same mounted `/books` tree,
 sibling audio and ebook files in the same title folder appear as high-confidence

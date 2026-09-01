@@ -10,9 +10,11 @@ side-effect-free.
 import logging
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from src.db.models import Book
+from src.utils.series_metadata import resolve_series_for_book
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,38 @@ class BookMappingService:
             logger.warning(f"Shelf-watch: ebook parser failed to compute kosync hash: {e}", exc_info=True)
             return None
 
+    def _resolve_series_metadata(self, book_like, user_id: Optional[int] = None) -> tuple:
+        """Resolve (series_name, series_sequence) for a new mapping from its source library.
+
+        The dashboard groups books into series cards purely on the persisted
+        columns, so a mapping created without them never collapses into its
+        series until an admin runs the backfill.
+        """
+        try:
+            abs_client = self.abs_client
+            bookorbit = self.bookorbit_client
+            booklore = self.booklore_client
+            kavita = self.kavita_client
+            if user_id is not None and self._user_client_registry is not None:
+                bundle = self._user_client_registry.get_clients(user_id)
+                abs_client = getattr(bundle, 'abs_client', None) or abs_client
+                bookorbit = getattr(bundle, 'bookorbit_client', None) or bookorbit
+                booklore = getattr(bundle, 'booklore_client', None) or booklore
+                kavita = getattr(bundle, 'kavita_client', None) or kavita
+            return resolve_series_for_book(
+                book_like,
+                abs_client=abs_client,
+                bookorbit_client=bookorbit,
+                booklore_client=booklore,
+                kavita_client=kavita,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Shelf-watch: series lookup failed for '{getattr(book_like, 'abs_title', '')}': {e}",
+                exc_info=True,
+            )
+            return None, None
+
     def _automatch_progress_trackers(self, book: Book, user_id: Optional[int] = None) -> None:
         """Run Hardcover/StoryGraph auto-match if configured. Mirrors process_queue lines 4142-4148."""
         try:
@@ -147,13 +181,14 @@ class BookMappingService:
 
         # Callers that already know the KOSync hash (e.g. the filesystem read path) pass it
         # directly; library-anchored callers compute it from the source download.
+        source_ebook_id = booklore_ebook_id or ebook_source_id
         kosync_doc_id = kosync_doc_id or self._compute_kosync_id(
-            ebook_filename, booklore_ebook_id, ebook_source, user_id=user_id,
+            ebook_filename, source_ebook_id, ebook_source, user_id=user_id,
         )
         if not kosync_doc_id:
             logger.warning(
                 f"Shelf-watch: could not compute kosync id for '{ebook_filename}' "
-                f"(source_id={booklore_ebook_id}); skipping mapping"
+                f"(source_id={source_ebook_id}); skipping mapping"
             )
             return None
 
@@ -214,6 +249,12 @@ class BookMappingService:
         target_book.status = "pending"
         target_book.sync_mode = "audiobook"
         target_book.duration = audio_duration if audio_duration is not None else target_book.duration
+
+        if not target_book.series_name:
+            _sname, _sseq = self._resolve_series_metadata(target_book, user_id=user_id)
+            if _sname:
+                target_book.series_name = _sname
+                target_book.series_sequence = _sseq
 
         saved_book = self.database_service.save_book(target_book)
         self._automatch_progress_trackers(saved_book, user_id=user_id)
@@ -333,6 +374,17 @@ class BookMappingService:
             return existing_by_id
 
         inferred_title = ebook_title or Path(ebook_filename).stem or target_abs_id
+        series_name, series_sequence = self._resolve_series_metadata(
+            SimpleNamespace(
+                abs_id=target_abs_id,
+                abs_title=inferred_title,
+                audio_source=None,
+                audio_source_id=None,
+                ebook_source=ebook_source,
+                ebook_source_id=ebook_source_id or booklore_ebook_id,
+            ),
+            user_id=user_id,
+        )
         target_book = Book(
             abs_id=target_abs_id,
             abs_title=inferred_title,
@@ -343,6 +395,8 @@ class BookMappingService:
             ebook_source_id=ebook_source_id,
             kosync_doc_id=kosync_doc_id,
             status="pending",
+            series_name=series_name,
+            series_sequence=series_sequence,
         )
 
         saved_book = self.database_service.save_book(target_book)

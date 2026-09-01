@@ -516,6 +516,29 @@ class DatabaseService:
             )
             return bool(updated)
 
+    def update_book_fields(self, abs_id: str, **fields) -> bool:
+        """Update named columns on one book row, leaving `abs_id` alone.
+
+        Used by the audio repoint, which changes a book's audio provider in place:
+        keeping the primary key keeps every State row, alignment map, KOSync link
+        and annotation attached to the book. Unknown column names are ignored so a
+        caller cannot inject arbitrary attributes.
+        """
+        if not abs_id or not fields:
+            return False
+        allowed = {
+            key: value for key, value in fields.items()
+            if key != 'abs_id' and hasattr(Book, key)
+        }
+        if not allowed:
+            return False
+        with self.get_session() as session:
+            updated = session.query(Book).filter(Book.abs_id == abs_id).update(
+                {getattr(Book, key): value for key, value in allowed.items()},
+                synchronize_session=False,
+            )
+            return bool(updated)
+
     def has_alignment(self, abs_id: str) -> bool:
         """Whether a stored alignment map exists for a book.
 
@@ -2327,6 +2350,21 @@ class DatabaseService:
             session.refresh(row)
             session.expunge(row)
             return row
+
+    def delete_shelf_watch_scan(self, grimmory_book_id: str) -> bool:
+        """Delete the shelf-watch throttle row for a Grimmory book.
+
+        Returns True if at least one row was deleted, False otherwise (including
+        when the id is falsy/empty).
+        """
+        if not grimmory_book_id:
+            return False
+        gid = str(grimmory_book_id)
+        with self.get_session() as session:
+            rows = session.query(ShelfWatchScan).filter(
+                ShelfWatchScan.grimmory_book_id == gid
+            ).delete(synchronize_session=False)
+            return rows > 0
 
     def clear_stale_suggestions(self) -> int:
         """
