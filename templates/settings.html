@@ -963,7 +963,7 @@
                                 {% if get_bool('STORYTELLER_NO_EPUB_CACHE') %}checked{% endif %}>
                             <span class="slider"></span>
                         </label>
-                        <div class="help-text">When enabled, BookBridge uses the original EPUB for text extraction across all Storyteller flows (Auto-Forge, manual Create Mapping, Match, and the Batch Forge/Match flows) instead of downloading and caching Storyteller's ReadAloud EPUB. Requires the original EPUB to be accessible via a mapped library path (<code>/books</code>).</div>
+                        <div class="help-text">When enabled, BookBridge uses the original EPUB for text extraction across all Storyteller flows (automatic and manual Storyteller edition creation, Create Mapping, and Match) instead of downloading and caching Storyteller's ReadAloud EPUB. Requires the original EPUB to be accessible via a mapped library path (<code>/books</code>).</div>
                     </div>
                     <div class="form-group" style="align-items: center;">
                         <label>Count as Listening Time</label>
@@ -2462,7 +2462,7 @@
                         <input type="text" name="STORYTELLER_LIBRARY_DIR"
                             value="{{ get_val('STORYTELLER_LIBRARY_DIR') }}"
                             placeholder="Where Storyteller scans for books">
-                        <div class="help-text">Target directory where Forge writes files for Storyteller to process.
+                        <div class="help-text">Target directory where BookBridge writes files for Storyteller to process.
                         </div>
                     </div>
                     <div class="form-group">
@@ -2473,14 +2473,14 @@
                         <div class="help-text">Used to ingest Storyteller forced-alignment transcripts when available.</div>
                     </div>
                     <div class="form-group">
-                        <label>Forge Recovery Max Wait (minutes)</label>
+                        <label>Storyteller Recovery Max Wait (minutes)</label>
                         <input type="number" name="STORYTELLER_RECOVERY_MAX_WAIT_MINUTES"
                             value="{{ get_val('STORYTELLER_RECOVERY_MAX_WAIT_MINUTES') }}"
                             min="1">
                         <div class="help-text">How long to wait for Storyteller to finish alignment before giving up. Default: 360 (6 hours). Increase for very long books or slow hardware.</div>
                     </div>
                     <div class="form-group">
-                        <label>Forge Recovery Poll Interval (minutes)</label>
+                        <label>Storyteller Recovery Poll Interval (minutes)</label>
                         <input type="number" name="STORYTELLER_RECOVERY_POLL_INTERVAL_MINUTES"
                             value="{{ get_val('STORYTELLER_RECOVERY_POLL_INTERVAL_MINUTES') }}"
                             min="1">

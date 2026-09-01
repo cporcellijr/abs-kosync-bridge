@@ -1956,7 +1956,7 @@
         <div id="forge-status-banner" class="forge-banner" style="display: none;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div class="spinner-sm"></div>
-                <span id="forge-task-list">Hammering...</span>
+                <span id="forge-task-list">Creating Storyteller edition...</span>
             </div>
             <small style="opacity: 0.8">Processing in background</small>
         </div>
@@ -1969,7 +1969,7 @@
                         const list = document.getElementById('forge-task-list');
                         if (tasks && tasks.length > 0) {
                             banner.style.display = 'flex';
-                            const text = tasks.length === 1 ? `Forging: ${tasks[0]}` : `Forging ${tasks.length} editions...`;
+                            const text = tasks.length === 1 ? `Creating Storyteller edition: ${tasks[0]}` : `Creating ${tasks.length} Storyteller editions...`;
                             list.textContent = text;
                         } else {
                             banner.style.display = 'none';
