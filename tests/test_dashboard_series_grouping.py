@@ -226,9 +226,9 @@ class TestSeriesGrouping(unittest.TestCase):
     def test_two_books_same_series_groups(self):
         flat = [
             _make_mapping(abs_id="a", series_name="Imperial Radch", series_sequence=1.0,
-                          display_title="Ancillary Justice", unified_progress=100),
+                          display_title="Auxiliary Verdict", unified_progress=100),
             _make_mapping(abs_id="b", series_name="Imperial Radch", series_sequence=2.0,
-                          display_title="Ancillary Sword", unified_progress=64),
+                          display_title="Auxiliary Blade", unified_progress=64),
         ]
         result = self.group(flat)
         self.assertEqual(len(result), 1)
@@ -237,7 +237,7 @@ class TestSeriesGrouping(unittest.TestCase):
         self.assertEqual(g["child_count"], 2)
         self.assertEqual(g["finished_count"], 1)
         self.assertEqual(g["section_bucket"], "not_started")
-        self.assertEqual(g["next_book"]["display_title"], "Ancillary Sword")
+        self.assertEqual(g["next_book"]["display_title"], "Auxiliary Blade")
 
     def test_all_finished_group_lands_in_finished(self):
         flat = [

@@ -606,4 +606,40 @@ assert(dead_ok == false and dead_reason == "subprocess produced no result",
     "a subprocess that exits without a result must be reported as a failure")
 bridge._in_subprocess = nil
 
+-- Session rejection reasons. A session the bridge will never accept used to sit
+-- in the queue re-uploading on every wake: after a match was deleted the device
+-- logged "Session upload partially accepted: 0 accepted, 3 retained for retry"
+-- on every single wake, and the bridge logged "Session upload: book not found"
+-- to match, forever.
+bridge.session_upload_attempts = {}
+bridge.pending_sessions = {}
+
+assert(bridge:_shouldAbandonSession({ session_id = "bad" }, { reason = "invalid_session" }),
+    "a malformed session can never become valid and must be abandoned at once")
+assert(not bridge:_shouldAbandonSession({ session_id = "t" }, { reason = "record_failed" }),
+    "a transient bridge-side failure must stay queued for retry")
+assert(not bridge:_shouldAbandonSession({ session_id = "t2" }, nil),
+    "a rejection carrying no reason must stay queued for retry")
+
+-- book_not_found recovers if the same file is matched again, so it gets a
+-- bounded number of attempts rather than an instant drop or an endless retry.
+local gone = { session_id = "gone", abs_id = "ebook-89a7f7b8d25f2391" }
+local gone_attempts = 0
+while not bridge:_shouldAbandonSession(gone, { reason = "book_not_found" }) do
+    gone_attempts = gone_attempts + 1
+    assert(gone_attempts < 20, "book_not_found never stopped retrying")
+end
+gone_attempts = gone_attempts + 1
+assert(gone_attempts == 5,
+    "book_not_found must be abandoned on the 5th attempt, got " .. tostring(gone_attempts))
+
+-- Attempt counters for sessions that have left the queue must not accumulate.
+bridge.pending_sessions = { { session_id = "still-queued" } }
+bridge.session_upload_attempts["still-queued"] = 2
+bridge:_pruneSessionUploadAttempts()
+assert(bridge.session_upload_attempts["still-queued"] == 2,
+    "pruning dropped the counter for a session that is still queued")
+assert(bridge.session_upload_attempts["gone"] == nil,
+    "pruning kept the counter for a session that is no longer queued")
+
 print("BridgeSync Lua init regression test passed")

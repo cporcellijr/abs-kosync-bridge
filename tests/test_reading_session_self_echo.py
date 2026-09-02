@@ -2,7 +2,7 @@
 
 BookOrbit's own web reader logs a reading session as the user reads. BookBridge
 also posts an estimated session when it notices the progress move, so the same
-reading was counted twice. Captured live on 2026-08-31 against Goblin Gigs:
+reading was counted twice. Captured live on 2026-08-31 against Marsh Errands:
 
     id=2768  epub  dur=149  pct 11.43->14.34319   <- BookOrbit's own
     id=2769  epub  dur=737  pct 11.89->14.34      <- BookBridge's estimate
@@ -132,7 +132,7 @@ def _client(items, per_book=None):
     return client
 
 
-# The live payload that exposed the bug (Goblin Gigs, 2026-08-31).
+# The live payload that exposed the bug (Marsh Errands, 2026-08-31).
 _REAL_SESSION = {
     "id": 2768, "bookFileId": 15511, "durationSeconds": 149,
     "startedAt": "2026-08-31T17:37:46.000Z", "endedAt": "2026-08-31T17:40:16.000Z",

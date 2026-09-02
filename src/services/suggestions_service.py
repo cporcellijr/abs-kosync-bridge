@@ -1001,8 +1001,8 @@ class SuggestionsService:
                 best = cand
 
         if best and best_score >= 80 and best.get("name"):
-            # Volume guard: a base title ("Heretic Spellblade") fuzzy-matches its sequel
-            # ("Heretic Spellblade 2") well above threshold. Refuse to attach the wrong
+            # Volume guard: a base title ("Apostate Runeblade") fuzzy-matches its sequel
+            # ("Apostate Runeblade 2") well above threshold. Refuse to attach the wrong
             # volume's file — the audiobook title carries the authoritative volume number.
             audio_vol = self._trailing_volume(audio_title)
             cand_vol = self._trailing_volume(best.get("title"))

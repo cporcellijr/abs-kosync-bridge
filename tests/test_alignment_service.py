@@ -278,8 +278,8 @@ def test_probe_storyteller_transcripts_returns_ready_when_validated():
 def test_resolve_storyteller_title_dir_prefers_suffixed_dir_with_transcriptions_over_bare_dir_without_transcriptions():
     with tempfile.TemporaryDirectory() as tmp:
         assets_root = Path(tmp)
-        bare_dir = assets_root / "assets" / "Trad Wife"
-        suffixed_dir = assets_root / "assets" / "Trad Wife [5j7RKcRZ]"
+        bare_dir = assets_root / "assets" / "Home Maker"
+        suffixed_dir = assets_root / "assets" / "Home Maker [5j7RKcRZ]"
         bare_dir.mkdir(parents=True, exist_ok=True)
         transcriptions_dir = suffixed_dir / "transcriptions"
         transcriptions_dir.mkdir(parents=True, exist_ok=True)
@@ -288,7 +288,7 @@ def test_resolve_storyteller_title_dir_prefers_suffixed_dir_with_transcriptions_
             encoding="utf-8",
         )
 
-        result = _resolve_storyteller_title_dir(assets_root, "Trad Wife")
+        result = _resolve_storyteller_title_dir(assets_root, "Home Maker")
 
     assert result == suffixed_dir
 
@@ -296,8 +296,8 @@ def test_resolve_storyteller_title_dir_prefers_suffixed_dir_with_transcriptions_
 def test_probe_storyteller_transcripts_uses_suffixed_storyteller_assets_dir():
     with tempfile.TemporaryDirectory() as tmp:
         assets_root = Path(tmp)
-        (assets_root / "assets" / "Trad Wife").mkdir(parents=True, exist_ok=True)
-        transcriptions_dir = assets_root / "assets" / "Trad Wife [5j7RKcRZ]" / "transcriptions"
+        (assets_root / "assets" / "Home Maker").mkdir(parents=True, exist_ok=True)
+        transcriptions_dir = assets_root / "assets" / "Home Maker [5j7RKcRZ]" / "transcriptions"
         transcriptions_dir.mkdir(parents=True, exist_ok=True)
         for idx in range(2):
             (transcriptions_dir / f"00001-{idx + 1:05d}.json").write_text(
@@ -308,7 +308,7 @@ def test_probe_storyteller_transcripts_uses_suffixed_storyteller_assets_dir():
         with pytest.MonkeyPatch.context() as mp:
             mp.setenv("STORYTELLER_ASSETS_DIR", str(assets_root))
             result = probe_storyteller_transcripts(
-                "Trad Wife",
+                "Home Maker",
                 [{"start": 0.0, "end": 1.0}, {"start": 1.0, "end": 2.0}],
             )
 
@@ -319,10 +319,10 @@ def test_probe_storyteller_transcripts_uses_suffixed_storyteller_assets_dir():
 def test_resolve_storyteller_title_dir_matches_title_with_bracket_suffix_when_only_suffixed_dir_exists():
     with tempfile.TemporaryDirectory() as tmp:
         assets_root = Path(tmp)
-        suffixed_dir = assets_root / "assets" / "Trad Wife [5j7RKcRZ]"
+        suffixed_dir = assets_root / "assets" / "Home Maker [5j7RKcRZ]"
         suffixed_dir.mkdir(parents=True, exist_ok=True)
 
-        result = _resolve_storyteller_title_dir(assets_root, "Trad Wife")
+        result = _resolve_storyteller_title_dir(assets_root, "Home Maker")
 
     assert result == suffixed_dir
 
@@ -330,8 +330,8 @@ def test_resolve_storyteller_title_dir_matches_title_with_bracket_suffix_when_on
 def test_resolve_storyteller_title_dir_returns_none_when_multiple_transcript_ready_suffix_variants_exist():
     with tempfile.TemporaryDirectory() as tmp:
         assets_root = Path(tmp)
-        first_dir = assets_root / "assets" / "Trad Wife [5j7RKcRZ]"
-        second_dir = assets_root / "assets" / "Trad Wife [ABCD1234]"
+        first_dir = assets_root / "assets" / "Home Maker [5j7RKcRZ]"
+        second_dir = assets_root / "assets" / "Home Maker [ABCD1234]"
         for folder in (first_dir, second_dir):
             transcriptions_dir = folder / "transcriptions"
             transcriptions_dir.mkdir(parents=True, exist_ok=True)
@@ -340,7 +340,7 @@ def test_resolve_storyteller_title_dir_returns_none_when_multiple_transcript_rea
                 encoding="utf-8",
             )
 
-        result = _resolve_storyteller_title_dir(assets_root, "Trad Wife")
+        result = _resolve_storyteller_title_dir(assets_root, "Home Maker")
 
     assert result is None
 

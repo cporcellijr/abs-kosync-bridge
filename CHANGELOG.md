@@ -43,6 +43,51 @@ All notable changes to BookBridge will be documented in this file.
 
 ### Fixed
 
+- **Adding an audiobook to a book you already had as an ebook no longer creates a
+  second copy of it.** BookBridge merges the two into one entry — but only when you
+  matched through the book's own page. Matching the same way from Suggestions skipped
+  that step, so you ended up with two entries for one book: two copies downloaded to
+  your reader, and only one of them able to receive your reading progress, because a
+  book is identified to KOReader by the ebook's content and only one entry can own
+  that. Both routes now merge. Existing duplicates are not cleaned up automatically —
+  delete the leftover ebook-only entry and the audiobook one keeps the progress.
+
+- **Adding or removing a book now starts rebuilding your reader's book list
+  immediately.** That list was refreshed only on a timer, so a match you had just
+  added or deleted waited for the next tick before BookBridge even began to notice
+  it. Adding, removing, or changing the status of a book now kicks off the refresh at
+  once. Be aware the refresh itself still takes a few minutes on a large library — on
+  a 413-book shelf it measures about ten — so a book you add will not appear on a sync
+  you run seconds later; it will be there shortly after. BookBridge also no longer
+  restarts that refresh a minute after each one finishes, which had it rebuilding an
+  unchanged list almost continuously.
+
+- **A deleted match no longer leaves your reader retrying the same upload forever.**
+  When you remove a book from BookBridge, any reading sessions the device had already
+  queued for it can never be accepted. BridgeSync kept re-sending them on every wake
+  anyway, which showed up as `Session upload partially accepted: 0 accepted, N
+  retained for retry` on the device and a matching `book not found` warning in the
+  server log, every time, indefinitely. BridgeSync now reads why the server turned a
+  session down: malformed ones are dropped at once, ones for a book that is no longer
+  matched are retried a few times — in case you re-match the same file — and then let
+  go, and genuine temporary failures keep retrying exactly as before. Requires the
+  updated **BridgeSync 0.6.8** plugin on the device.
+
+- **KOReader froze and ran out of memory on Kindle while BridgeSync was syncing.**
+  The plugin was starting a full copy of KOReader in the background for every single
+  request it made to the bridge — hundreds of them — each one briefly claiming as much
+  memory as the reader itself. On a Kindle that eventually failed outright
+  (`fork failed: Cannot allocate memory`), and while it was happening those background
+  copies also fought the plugin for its own settings database
+  (`database is locked`) and could hold a network port open behind other plugins such
+  as HTTP Inspector. Requests now run directly, so the memory spike is gone; the
+  database waits briefly for a competing writer instead of failing instantly; and the
+  plugin keeps one sync queue for the whole app rather than one per open book, so a
+  wake no longer replays the same uploads several times over. Going to sleep now also
+  cancels queued work and stops anything still running, instead of leaving it holding
+  memory until the next wake. Requires the updated **BridgeSync 0.6.7** plugin on the
+  device.
+
 - **Most ebook-only books showed no author.** BookBridge works an author out from
   Grimmory, from Storyteller, or by reading it off a `Title - Author.epub` filename —
   so a book from a library that names its files any other way ended up with no author

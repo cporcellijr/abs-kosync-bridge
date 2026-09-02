@@ -24,7 +24,7 @@ from src.sync_manager import SyncManager
 _DETAIL_MULTI = {
     "id": 4345,
     "title": "A Children's Bible",
-    "authors": [{"name": "Lydia Millet"}],
+    "authors": [{"name": "Nora Whitfield"}],
     "audioMetadata": {
         "durationSeconds": 20049,
         "chapters": [
@@ -72,8 +72,8 @@ def test_get_audiobook_info_duration_falls_back_to_track_sum():
 def test_search_audiobooks_filters_audio_hits_and_enriches():
     client = BookOrbitClient()
     client._search_raw = MagicMock(return_value=[
-        {"id": 4345, "title": "A Children's Bible", "authors": ["Lydia Millet"], "formats": ["mp3"]},
-        {"id": 2065, "title": "A Children's Bible", "authors": ["Lydia Millet"], "formats": ["epub"]},
+        {"id": 4345, "title": "A Children's Bible", "authors": ["Nora Whitfield"], "formats": ["mp3"]},
+        {"id": 2065, "title": "A Children's Bible", "authors": ["Nora Whitfield"], "formats": ["epub"]},
     ])
     client.get_audiobook_info = MagicMock(return_value={
         "duration_seconds": 20049,
@@ -107,7 +107,7 @@ def test_search_audiobooks_empty_query_uses_cache_without_detail_calls():
 def test_adapter_search_maps_audio_results(tmp_path):
     bo = MagicMock()
     bo.search_audiobooks.return_value = [
-        {"id": 4345, "title": "A Children's Bible", "authors": "Lydia Millet",
+        {"id": 4345, "title": "A Children's Bible", "authors": "Nora Whitfield",
          "language": "en", "duration_seconds": 20049, "num_files": 5},
     ]
     adapter = BookOrbitAudioSourceAdapter(bo, tmp_path)

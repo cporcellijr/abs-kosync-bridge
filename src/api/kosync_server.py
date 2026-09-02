@@ -587,9 +587,17 @@ def _scope_manifest_to_user(manifest, user_id):
 
 
 def _manifest_prebuilder_loop() -> None:
-    """Daemon thread: rebuild manifest cache when signaled or every 60 seconds."""
+    """Daemon thread: rebuild the manifest cache when signaled, or as a backstop.
+
+    Catalog changes signal this loop directly (DatabaseService fires a
+    catalog-change callback on every book create/save/delete/status change, and
+    the sync manager fires one after each cycle), so the timeout is only a safety
+    net for changes nothing announces -- chiefly a book's bytes changing on disk
+    while its catalog row stays put. It is deliberately long: a short interval
+    rebuilt an unchanged manifest hundreds of times a day.
+    """
     global _manifest_cache
-    _REBUILD_INTERVAL = 60
+    _REBUILD_INTERVAL = 1800
     logger.info("Manifest prebuilder thread started")
     while True:
         _manifest_rebuild_event.wait(timeout=_REBUILD_INTERVAL)
@@ -1896,7 +1904,13 @@ def koreader_device_sync_download(abs_id):
         max_age=0,
     )
     response.set_etag(content_hash)
-    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    # Content-Disposition is left to send_file, which RFC 5987-encodes a non-ASCII
+    # download_name. Overwriting it with a raw f-string put the literal filename in
+    # the header, and a WSGI server encodes headers as latin-1: a curly apostrophe
+    # (any curly apostrophe) raised UnicodeEncodeError while writing the
+    # response, killing the connection mid-download. The device saw only a read
+    # timeout and retried forever. BridgeSync never reads this header anyway -- it
+    # takes the filename from the manifest.
     return response
 
 

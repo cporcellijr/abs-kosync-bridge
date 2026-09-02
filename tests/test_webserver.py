@@ -248,6 +248,40 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
     def _read_template_source(self, template_name: str) -> str:
         return (Path(__file__).parent.parent / 'templates' / template_name).read_text(encoding='utf-8')
 
+    def test_manifest_rebuild_is_wired_to_catalog_changes_not_sync_cycles(self):
+        """The device-sync manifest must be invalidated by catalog changes only.
+
+        Hooking it to the end of a sync cycle was the original signal, from before
+        a catalog-change hook existed. A cycle only moves reading progress, which
+        the manifest does not carry, and instant sync runs a cycle whenever a
+        device or poller sees movement -- so with a rebuild taking minutes on a
+        few hundred books, the prebuilder rebuilt an identical manifest back to
+        back all day (observed: 415 books / revision 7b7c9fe5 twice in a row).
+        """
+        # Compare by qualified name, not object identity: the suite runs in random
+        # order and a differently-ordered import can leave two module objects, so
+        # an identity check here fails for a reason that has nothing to do with
+        # the wiring under test.
+        def names(mock_method):
+            return [
+                "%s.%s" % (getattr(c.args[0], "__module__", ""),
+                           getattr(c.args[0], "__qualname__", ""))
+                for c in mock_method.call_args_list if c.args
+            ]
+
+        target = "src.api.kosync_server.signal_manifest_rebuild"
+
+        self.assertIn(
+            target,
+            names(self.mock_container.mock_database_service.register_catalog_change_callback),
+            "a catalog change must invalidate the manifest",
+        )
+        self.assertNotIn(
+            target,
+            names(self.mock_container.mock_sync_manager.register_post_cycle_callback),
+            "a sync cycle must not trigger a manifest rebuild",
+        )
+
     def test_forging_book_exposes_job_progress_on_dashboard(self):
         from src.db.models import Book, Job
 
@@ -1153,8 +1187,8 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         test_book = Book(
             abs_id='ebook-filename-year-1',
-            abs_title='Hearts Strange and Dreadful - Tim McGregor (2021)',
-            ebook_filename='Hearts Strange and Dreadful - Tim McGregor (2021).epub',
+            abs_title='Hearts Strange and Dreadful - Sam Corrigan (2021)',
+            ebook_filename='Hearts Strange and Dreadful - Sam Corrigan (2021).epub',
             sync_mode='ebook_only',
             status='active'
         )
@@ -1169,8 +1203,8 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         mapping = self._capture_index_mapping()
         self.assertEqual(mapping['display_title'], 'Hearts Strange and Dreadful')
         self.assertEqual(mapping['display_subtitle'], '')
-        self.assertEqual(mapping['display_author'], 'Tim McGregor')
-        self.assertEqual(mapping['display_filename'], 'Hearts Strange and Dreadful - Tim McGregor (2021).epub')
+        self.assertEqual(mapping['display_author'], 'Sam Corrigan')
+        self.assertEqual(mapping['display_filename'], 'Hearts Strange and Dreadful - Sam Corrigan (2021).epub')
 
     def test_index_endpoint_parses_filename_fallback_without_year(self):
         from src.db.models import Book
@@ -1260,7 +1294,7 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         test_book = Book(
             abs_id='sync-warning-1',
-            abs_title='Trad Wife',
+            abs_title='Home Maker',
             ebook_filename='storyteller_uuid-book.epub',
             storyteller_uuid='uuid-story-1',
             sync_mode='audiobook',
@@ -1754,11 +1788,11 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         )
 
     def test_add_book_cards_disambiguate_same_titled_series_books(self):
-        """Three same-titled 'Warlock' books rendered as indistinguishable cards.
+        """Three same-titled 'Sorcerer' books rendered as indistinguishable cards.
 
-        BookOrbit holds three books all titled exactly "Warlock" (subtitles
+        BookOrbit holds three books all titled exactly "Sorcerer" (subtitles
         "Book 1/2/3"), and ABS holds the matching audiobooks — one of which is
-        also a bare "Warlock" whose only disambiguator is its subtitle. Both
+        also a bare "Sorcerer" whose only disambiguator is its subtitle. Both
         picker columns must surface an edition label.
         """
         import re
@@ -1767,26 +1801,26 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
 
         ebooks = [
             ws.EbookResult(
-                name="Warlock_ Book 1 - Daniel Kensington.epub",
-                title="Warlock",
+                name="Sorcerer_ Book 1 - Morgan Ashby.epub",
+                title="Sorcerer",
                 subtitle="Book 1",
-                authors="Daniel Kensington",
+                authors="Morgan Ashby",
                 source="BookOrbit",
                 source_id=2641,
             ),
             ws.EbookResult(
-                name="Warlock 2_ Warlock - Daniel Kensington.epub",
-                title="Warlock",
+                name="Sorcerer 2_ Sorcerer - Morgan Ashby.epub",
+                title="Sorcerer",
                 subtitle="Book 2",
-                authors="Daniel Kensington",
+                authors="Morgan Ashby",
                 source="BookOrbit",
                 source_id=2005,
             ),
             ws.EbookResult(
-                name="Warlock 3 - Daniel Kensington.epub",
-                title="Warlock",
+                name="Sorcerer 3 - Morgan Ashby.epub",
+                title="Sorcerer",
                 subtitle="Book 3",
-                authors="Daniel Kensington",
+                authors="Morgan Ashby",
                 source="BookOrbit",
                 source_id=2639,
             ),
@@ -1797,29 +1831,29 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
             AudioResult(
                 source="ABS",
                 source_id="7f951bd0-1b4f-4fd0-a7c4-e0a7ab6536ce",
-                title="Warlock",
-                subtitle="Warlock, Book 1",
-                series_label="Warlock #1",
-                authors="Daniel Kensington",
-                display_name="Warlock",
+                title="Sorcerer",
+                subtitle="Sorcerer, Book 1",
+                series_label="Sorcerer #1",
+                authors="Morgan Ashby",
+                display_name="Sorcerer",
             ),
             AudioResult(
                 source="ABS",
                 source_id="c4a761e9-a0d3-45da-ab25-32e49a8a29f4",
-                title="Warlock, Book Two",
+                title="Sorcerer, Book Two",
                 subtitle="",
-                series_label="Warlock #2",
-                authors="Daniel Kensington",
-                display_name="Warlock, Book Two",
+                series_label="Sorcerer #2",
+                authors="Morgan Ashby",
+                display_name="Sorcerer, Book Two",
             ),
             AudioResult(
                 source="ABS",
                 source_id="5686c668-e8c8-4846-bac3-4bab69cd7a02",
-                title="Warlock: Book Three",
+                title="Sorcerer: Book Three",
                 subtitle="",
-                series_label="Warlock #3",
-                authors="Daniel Kensington",
-                display_name="Warlock: Book Three",
+                series_label="Sorcerer #3",
+                authors="Morgan Ashby",
+                display_name="Sorcerer: Book Three",
             ),
         ]
 
@@ -1830,23 +1864,23 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
                  '_promote_authoritative_ebook_matches',
                  side_effect=lambda _audio, candidates: candidates,
              ):
-            response = self.client.get('/add-book?search=warlock')
+            response = self.client.get('/add-book?search=sorcerer')
 
         html = response.get_data(as_text=True)
         squashed = " ".join(html.split())
         self.assertEqual(response.status_code, 200)
 
-        # Ebook column: three distinct labels, not three bare "Warlock" cards.
+        # Ebook column: three distinct labels, not three bare "Sorcerer" cards.
         for expected in (
-            "Warlock: Book 1 - Daniel Kensington",
-            "Warlock: Book 2 - Daniel Kensington",
-            "Warlock: Book 3 - Daniel Kensington",
+            "Sorcerer: Book 1 - Morgan Ashby",
+            "Sorcerer: Book 2 - Morgan Ashby",
+            "Sorcerer: Book 3 - Morgan Ashby",
         ):
             self.assertIn(f'data-display-name="{expected}"', html)
 
         # Audiobook column: subtitle when present, series label otherwise.
         self.assertIn('class="resource-subtitle"', squashed)
-        for label in ("Warlock, Book 1", "Warlock #2", "Warlock #3"):
+        for label in ("Sorcerer, Book 1", "Sorcerer #2", "Sorcerer #3"):
             self.assertIn(
                 f'<div class="resource-subtitle" title="{label}">{label}</div>',
                 squashed,
@@ -1859,15 +1893,15 @@ class CleanFlaskIntegrationTest(unittest.TestCase):
         self.assertIn('padding: 0 12px 12px;', html)
 
         # Display-only guarantee: the label never folds into the stored title.
-        self.assertIn('data-audio-title="Warlock"', html)
+        self.assertIn('data-audio-title="Sorcerer"', html)
         stored_titles = re.findall(r'data-audio-title="([^"]*)"', html)
         self.assertEqual(
             [t for t in stored_titles if t],
-            ["Warlock", "Warlock, Book Two", "Warlock: Book Three"],
+            ["Sorcerer", "Sorcerer, Book Two", "Sorcerer: Book Three"],
         )
         for stored in stored_titles:
             self.assertNotIn("#", stored)
-            self.assertNotEqual(stored, "Warlock: Warlock, Book 1")
+            self.assertNotEqual(stored, "Sorcerer: Sorcerer, Book 1")
 
     def test_suggestions_template_has_submit_feedback_hooks(self):
         html = self._read_template_source('suggestions.html')
@@ -2968,7 +3002,7 @@ class TestAudiobookSearchVariants(unittest.TestCase):
 
     def test_extension_and_year_stripped(self):
         from src.web_server import _audiobook_search_variants
-        self.assertEqual(_audiobook_search_variants("Blister (2016).epub"), ["Blister (2016).epub", "Blister"])
+        self.assertEqual(_audiobook_search_variants("Ember (2016).epub"), ["Ember (2016).epub", "Ember"])
 
     def test_unabridged_suffix_stripped(self):
         from src.web_server import _audiobook_search_variants
@@ -2984,7 +3018,7 @@ class TestAudiobookSearchVariants(unittest.TestCase):
 
     def test_clean_query_is_unchanged(self):
         from src.web_server import _audiobook_search_variants
-        self.assertEqual(_audiobook_search_variants("Sublimation"), ["Sublimation"])
+        self.assertEqual(_audiobook_search_variants("Transmutation"), ["Transmutation"])
 
     def test_title_with_author_suffix(self):
         from src.web_server import _audiobook_search_variants
@@ -3014,7 +3048,7 @@ class TestEbookSearchProviderPreference(unittest.TestCase):
     def test_provider_upgrades_local_file(self):
         import src.web_server as ws
         from types import SimpleNamespace
-        fname = "Sublimation - Isabel J. Kim (2026).epub"
+        fname = "Transmutation - Robin T. Hale (2026).epub"
 
         def fake_search(term):
             # Only the bare title matches BookOrbit; the filename-stem term hits only the local file.

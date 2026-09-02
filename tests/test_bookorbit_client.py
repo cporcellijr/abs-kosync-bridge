@@ -388,8 +388,8 @@ def test_search_ebooks_empty_term_returns_empty(client):
 
 def test_search_ebooks_carries_edition_metadata_subtitle_series_index(client):
     hits = [
-        {"id": 1, "title": "Warlock", "authors": ["D. Kensington"],
-         "libraryName": "Ebooks", "formats": ["epub"], "seriesName": "Warlock"},
+        {"id": 1, "title": "Sorcerer", "authors": ["D. Kensington"],
+         "libraryName": "Ebooks", "formats": ["epub"], "seriesName": "Sorcerer"},
     ]
 
     def fake_request(method, endpoint, payload=None):
@@ -397,22 +397,22 @@ def test_search_ebooks_carries_edition_metadata_subtitle_series_index(client):
         return _Resp(hits)
 
     details = {
-        1: {"id": 1, "title": "Warlock", "subtitle": "Book 2",
-            "authors": [{"name": "D. Kensington"}], "seriesName": "Warlock",
+        1: {"id": 1, "title": "Sorcerer", "subtitle": "Book 2",
+            "authors": [{"name": "D. Kensington"}], "seriesName": "Sorcerer",
             "seriesIndex": 2,
             "files": [{"id": 11, "format": "epub", "role": "primary",
-                       "filename": "Warlock_Book2.epub"}]},
+                       "filename": "Sorcerer_Book2.epub"}]},
     }
     with patch.object(client, '_make_request', side_effect=fake_request), \
          patch.object(client, 'get_book_detail', side_effect=lambda bid, force=False: details.get(bid)):
-        out = client.search_ebooks("warlock")
+        out = client.search_ebooks("sorcerer")
 
     assert len(out) == 1
     row = out[0]
     assert row["id"] == 1
-    assert row["fileName"] == "Warlock_Book2.epub"
+    assert row["fileName"] == "Sorcerer_Book2.epub"
     assert row["subtitle"] == "Book 2"
-    assert row["seriesName"] == "Warlock"
+    assert row["seriesName"] == "Sorcerer"
     assert row["seriesIndex"] == 2
 
 
@@ -446,8 +446,8 @@ def test_search_ebooks_standalone_book_no_subtitle_no_series(client):
 
 def test_search_ebooks_prefers_hit_seriesname_over_detail(client):
     hits = [
-        {"id": 3, "title": "Warlock", "authors": ["D. Kensington"],
-         "libraryName": "Ebooks", "formats": ["epub"], "seriesName": "Warlock"},
+        {"id": 3, "title": "Sorcerer", "authors": ["D. Kensington"],
+         "libraryName": "Ebooks", "formats": ["epub"], "seriesName": "Sorcerer"},
     ]
 
     def fake_request(method, endpoint, payload=None):
@@ -455,25 +455,25 @@ def test_search_ebooks_prefers_hit_seriesname_over_detail(client):
         return _Resp(hits)
 
     details = {
-        3: {"id": 3, "title": "Warlock", "authors": [{"name": "D. Kensington"}],
+        3: {"id": 3, "title": "Sorcerer", "authors": [{"name": "D. Kensington"}],
             "files": [{"id": 33, "format": "epub", "role": "primary",
-                       "filename": "Warlock.epub"}]},
+                       "filename": "Sorcerer.epub"}]},
     }
     with patch.object(client, '_make_request', side_effect=fake_request), \
          patch.object(client, 'get_book_detail', side_effect=lambda bid, force=False: details.get(bid)):
-        out = client.search_ebooks("warlock")
+        out = client.search_ebooks("sorcerer")
 
     assert len(out) == 1
     row = out[0]
-    assert row["seriesName"] == "Warlock"
+    assert row["seriesName"] == "Sorcerer"
     assert row["subtitle"] == ""
     assert row["seriesIndex"] is None
 
 
 def test_search_audiobooks_carries_edition_metadata(client):
     hits = [
-        {"id": 10, "title": "Warlock", "authors": ["D. Kensington"],
-         "libraryName": "Audiobooks", "formats": ["m4b"], "seriesName": "Warlock"},
+        {"id": 10, "title": "Sorcerer", "authors": ["D. Kensington"],
+         "libraryName": "Audiobooks", "formats": ["m4b"], "seriesName": "Sorcerer"},
     ]
 
     def fake_request(method, endpoint, payload=None):
@@ -481,11 +481,11 @@ def test_search_audiobooks_carries_edition_metadata(client):
         return _Resp(hits)
 
     detail = {
-        10: {"id": 10, "title": "Warlock", "subtitle": "Book 1",
-             "authors": [{"name": "D. Kensington"}], "language": "en", "seriesName": "Warlock",
+        10: {"id": 10, "title": "Sorcerer", "subtitle": "Book 1",
+             "authors": [{"name": "D. Kensington"}], "language": "en", "seriesName": "Sorcerer",
              "seriesIndex": 1,
              "files": [{"id": 101, "format": "m4b", "role": "primary",
-                        "filename": "Warlock_Book1.m4b", "durationSeconds": 3600.0,
+                        "filename": "Sorcerer_Book1.m4b", "durationSeconds": 3600.0,
                         "sizeBytes": 1000000}]},
     }
     audio_info = {
@@ -495,14 +495,14 @@ def test_search_audiobooks_carries_edition_metadata(client):
     with patch.object(client, '_make_request', side_effect=fake_request), \
          patch.object(client, 'get_book_detail', side_effect=lambda bid, force=False: detail.get(bid)), \
          patch.object(client, 'get_audiobook_info', return_value=audio_info):
-        out = client.search_audiobooks("warlock")
+        out = client.search_audiobooks("sorcerer")
 
     assert len(out) == 1
     row = out[0]
     assert row["id"] == 10
-    assert row["title"] == "Warlock"
+    assert row["title"] == "Sorcerer"
     assert row["subtitle"] == "Book 1"
-    assert row["seriesName"] == "Warlock"
+    assert row["seriesName"] == "Sorcerer"
     assert row["seriesIndex"] == 1
     assert row["language"] == "en"
     assert row["duration_seconds"] == 3600.0

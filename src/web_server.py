@@ -373,7 +373,16 @@ def setup_dependencies(app, test_container=None):
 
     # Register KoSync Blueprint and initialize with dependencies
     init_kosync_server(database_service, container, manager, EBOOK_DIR)
-    manager.register_post_cycle_callback(signal_manifest_rebuild)
+    # A catalog change (match added, deleted, or status flipped) invalidates the
+    # device-sync manifest, so rebuild it then rather than waiting on the loop.
+    #
+    # Deliberately NOT hooked to the end of a sync cycle. That was the original
+    # invalidation signal, from before this precise one existed, and a cycle only
+    # moves reading progress -- which the manifest does not carry. Since instant
+    # sync runs a cycle whenever a device or a poller sees movement, and a full
+    # rebuild of a few hundred books takes minutes, that proxy signal kept the
+    # prebuilder rebuilding an identical manifest back to back all day.
+    database_service.register_catalog_change_callback(signal_manifest_rebuild)
     app.register_blueprint(kosync_sync_bp)
     app.register_blueprint(kosync_admin_bp)
 
@@ -3514,6 +3523,12 @@ def _create_or_update_library_audio_mapping(
 
     saved_book = database_service.save_book(target_book)
 
+    # An ebook-only mapping for this same ebook may already exist -- adding an
+    # audiobook to a book you already had as an ebook is exactly this path. Without
+    # this, both rows survive and only one can own the KOSync document hash, so the
+    # loser is served to devices but can never receive progress.
+    database_service.absorb_duplicate_mapping(saved_book)
+
     if uc().storyteller_client.is_configured() and saved_book.storyteller_uuid:
         try:
             uc().storyteller_client.add_to_collection_by_uuid(saved_book.storyteller_uuid)
@@ -3814,6 +3829,10 @@ def _create_or_update_bookfusion_progress_mapping(
         saved_book = target_book
 
     if getattr(saved_book, "kosync_doc_id", None):
+        # Fold in any older mapping for this same ebook before claiming the hash
+        # below -- two rows can each carry the hash, but only one can be the book
+        # a device's progress resolves to.
+        database_service.absorb_duplicate_mapping(saved_book)
         try:
             database_service.ensure_linked_kosync_document(saved_book.kosync_doc_id, saved_book.abs_id)
         except Exception as e:

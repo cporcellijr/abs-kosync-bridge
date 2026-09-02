@@ -11,7 +11,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 from contextlib import contextmanager
 from zoneinfo import ZoneInfo
 
@@ -48,6 +48,28 @@ from src.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
+# The columns the KOReader device-sync manifest is actually built from: the book
+# is listed only while active, and each entry carries its title, the resolved
+# ebook file, and that file's content hash. A save that touches none of these
+# cannot change the manifest. This matters because the sync cycle and the
+# transcription jobs call save_book constantly to write back routine fields --
+# announcing every one of those rebuilt the whole manifest back to back.
+MANIFEST_RELEVANT_BOOK_FIELDS = (
+    "status",
+    "abs_title",
+    "original_ebook_filename",
+    "ebook_filename",
+    "kosync_doc_id",
+    "sync_mode",
+    "ebook_source",
+    "ebook_source_id",
+)
+
+
+def _manifest_signature(book) -> tuple:
+    """Snapshot the manifest-relevant columns of a book row for change detection."""
+    return tuple(getattr(book, field, None) for field in MANIFEST_RELEVANT_BOOK_FIELDS)
+
 # SQLite limits bound parameters per statement (SQLITE_MAX_VARIABLE_NUMBER, historically 999).
 # Use 500 to stay well under the cap with room for other query parameters.
 _SQL_IN_CHUNK = 500
@@ -67,12 +89,38 @@ class DatabaseService:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_manager = DatabaseManager(str(self.db_path))
         self._default_uid = None  # cached default (admin) user id for state scoping
+        self._catalog_change_callbacks: list[Callable[[], None]] = []
 
         # Run Alembic migrations to ensure schema is up to date
         self._run_alembic_migrations()
 
         # Ensure all tables exist (covers new models not yet in migrations)
         Base.metadata.create_all(self.db_manager.engine)
+
+    def register_catalog_change_callback(self, callback: Callable[[], None]) -> None:
+        """Register a zero-argument callable to run after the catalog changes.
+
+        The catalog is the set of books a device or client can see, so anything
+        derived from it (the KOReader device-sync manifest, for one) needs to know
+        when a book is created, deleted, or has its status flipped. Registering a
+        callback here keeps that dependency pointing inward: this module never
+        imports the API layer.
+        """
+        self._catalog_change_callbacks.append(callback)
+
+    def _notify_catalog_change(self) -> None:
+        """Run every catalog-change callback, swallowing individual failures.
+
+        A subscriber must never be able to fail the database write that triggered
+        it -- the mutation is already committed by the time this runs.
+        """
+        for callback in self._catalog_change_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                logger.warning(
+                    "⚠️ Catalog-change callback failed: %s", e, exc_info=True
+                )
 
     def _run_alembic_migrations(self):
         """Run Alembic migrations to ensure database schema is up to date."""
@@ -514,7 +562,10 @@ class DatabaseService:
             updated = session.query(Book).filter(Book.abs_id == abs_id).update(
                 {Book.status: status}, synchronize_session=False
             )
-            return bool(updated)
+
+        if updated:
+            self._notify_catalog_change()
+        return bool(updated)
 
     def update_book_fields(self, abs_id: str, **fields) -> bool:
         """Update named columns on one book row, leaving `abs_id` alone.
@@ -764,7 +815,9 @@ class DatabaseService:
             session.flush()
             session.refresh(book)
             session.expunge(book)
-            return book
+
+        self._notify_catalog_change()
+        return book
 
     def save_book(self, book: Book) -> Book:
         """Save or update a book model."""
@@ -773,6 +826,7 @@ class DatabaseService:
 
             if existing:
                 # Update existing book
+                before_signature = _manifest_signature(existing)
                 for attr in ['abs_title', 'audio_source', 'audio_source_id', 'audio_title',
                            'audio_cover_url', 'audio_duration', 'audio_provider_book_id',
                            'audio_provider_file_id', 'ebook_filename', 'ebook_source',
@@ -784,8 +838,9 @@ class DatabaseService:
                         setattr(existing, attr, getattr(book, attr))
                 session.flush()
                 session.refresh(existing)
+                catalog_changed = _manifest_signature(existing) != before_signature
                 session.expunge(existing)
-                return existing
+                saved = existing
             else:
                 # Create new book — stamp the creator from the ambient user context
                 # (the matching request, the kosync device user, or the running
@@ -804,7 +859,12 @@ class DatabaseService:
                         session.add(UserBook(user_id=creator_uid, abs_id=book.abs_id))
                 session.refresh(book)
                 session.expunge(book)
-                return book
+                catalog_changed = True
+                saved = book
+
+        if catalog_changed:
+            self._notify_catalog_change()
+        return saved
 
     def update_book_if_exists(self, book: Book) -> Optional[Book]:
         """Update a book without ever inserting a missing/deleted mapping."""
@@ -868,6 +928,80 @@ class DatabaseService:
                 logger.error(f"❌ Failed to migrate book data: {e}", exc_info=True)
                 raise
 
+    def _find_ebook_only_duplicate(self, keep_book) -> Optional[str]:
+        """Find an ebook-only mapping pointing at the same source ebook.
+
+        The content hash is not enough on its own: the same file can yield two
+        different hashes (a library that re-stamps metadata on download gives a
+        stored hash and a served hash, which the bridge already records as
+        siblings), so an exact-hash check misses the pair. The source ebook id is
+        the stable identity.
+
+        Restricted to ``ebook_only`` rows on purpose. Two *audiobook* mappings
+        sharing one source ebook is a mis-match, not a duplicate -- two distinct
+        audiobooks were linked to the same ebook -- and folding those together
+        would destroy one of them.
+        """
+        from sqlalchemy import func
+
+        source = (getattr(keep_book, "ebook_source", None) or "").strip()
+        source_id = str(getattr(keep_book, "ebook_source_id", None) or "").strip()
+        keep_abs_id = getattr(keep_book, "abs_id", None)
+        if not source or not source_id or not keep_abs_id:
+            return None
+
+        with self.get_session() as session:
+            row = session.query(Book.abs_id).filter(
+                func.lower(Book.ebook_source) == source.lower(),
+                Book.ebook_source_id == source_id,
+                Book.abs_id != keep_abs_id,
+                Book.sync_mode == "ebook_only",
+            ).first()
+            return row[0] if row else None
+
+    def absorb_duplicate_mapping(self, keep_book) -> Optional[str]:
+        """Fold a stale mapping for the same ebook into ``keep_book``.
+
+        Two mappings for one ebook is never right: KOSync names a document by its
+        content hash and ``KosyncDocument.linked_abs_id`` holds exactly one book,
+        so the loser of the pair is listed and served but can never receive
+        progress, and the device downloads a second copy of bytes it already has.
+
+        Detection, migration and deletion live in this one call precisely because
+        splitting them is how the bug arose -- the merge was reimplemented per
+        match path, and the paths that forgot it duplicated silently.
+
+        Returns the absorbed abs_id, or None when there was nothing to fold in.
+        """
+        keep_abs_id = getattr(keep_book, "abs_id", None)
+        if not keep_abs_id:
+            return None
+
+        stale_abs_id = None
+        doc_id = str(getattr(keep_book, "kosync_doc_id", None) or "").strip()
+        if doc_id:
+            candidate = self.get_book_by_kosync_id(doc_id)
+            candidate_id = getattr(candidate, "abs_id", None)
+            if candidate_id and candidate_id != keep_abs_id:
+                stale_abs_id = candidate_id
+
+        if stale_abs_id is None:
+            stale_abs_id = self._find_ebook_only_duplicate(keep_book)
+
+        if not stale_abs_id:
+            # Logged so that "ran and found nothing" is distinguishable from
+            # "never ran" -- the silent no-op made it impossible to tell whether a
+            # match path was reaching this at all.
+            logger.debug("No duplicate mapping to absorb for '%s'", keep_abs_id)
+            return None
+
+        self.migrate_book_data(stale_abs_id, keep_abs_id)
+        self.delete_book(stale_abs_id)
+        logger.info(
+            "🔗 Absorbed duplicate mapping '%s' into '%s'", stale_abs_id, keep_abs_id
+        )
+        return stale_abs_id
+
     def delete_book(self, abs_id: str) -> bool:
         """Delete a book and all its related data."""
         with self.get_session() as session:
@@ -889,8 +1023,13 @@ class DatabaseService:
             book = session.query(Book).filter(Book.abs_id == abs_id).first()
             if book:
                 session.delete(book)  # Cascade will handle states and jobs
-                return True
-            return False
+                deleted = True
+            else:
+                deleted = False
+
+        if deleted:
+            self._notify_catalog_change()
+        return deleted
 
     def cleanup_orphaned_book_references(self) -> dict[str, int]:
         """Remove legacy membership or hash links whose book no longer exists."""
