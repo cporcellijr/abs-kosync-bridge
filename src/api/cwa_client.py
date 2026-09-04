@@ -430,11 +430,26 @@ class CWAClient:
             return False
 
     def get_book_uuid(self, calibre_id: str) -> str | None:
-        """Resolve a Calibre book ID to its UUID via OPDS search."""
+        """Resolve a stored CWA book identifier to its Calibre UUID via OPDS search.
+
+        ``calibre_id`` is whatever ``_parse_opds`` stored as the entry ``id`` when
+        the book was matched: a numeric Calibre book id when one could be
+        extracted, otherwise a title-derived slug. A CWA search on a title or
+        series term legitimately returns many books (e.g. every entry in a
+        series), so the correct entry must be *selected* rather than assumed to be
+        first. Returning the first result blindly wrote progress to the wrong book
+        (see issue #427). If a unique match cannot be identified we return
+        ``None`` — skipping the sync is safer than corrupting another book's
+        progress.
+        """
         if calibre_id in self._uuid_cache:
             return self._uuid_cache[calibre_id]
 
         if not self.is_configured():
+            return None
+
+        key = str(calibre_id or "").strip()
+        if not key:
             return None
 
         try:
@@ -442,7 +457,7 @@ class CWAClient:
             if not template:
                 return None
 
-            search_url = template.replace("{searchTerms}", quote(calibre_id))
+            search_url = template.replace("{searchTerms}", quote(key))
             r = self._make_request(search_url, timeout=10)
             if r.status_code != 200:
                 return None
@@ -450,21 +465,76 @@ class CWAClient:
             root = ET.fromstring(r.text)
             ns = {'atom': 'http://www.w3.org/2005/Atom'}
 
+            uuid_re = re.compile(
+                r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+                re.IGNORECASE,
+            )
+            want_numeric = key.isdigit()
+
+            # Collect every candidate entry with the identifiers we can match on:
+            # its UUID, the numeric book id embedded in its links, and the same
+            # title slug that ``_parse_opds`` would have stored as the entry id.
+            candidates = []  # list of (uuid, numeric_id, title_slug)
             for entry in root.findall('atom:entry', ns):
                 id_elem = entry.find('atom:id', ns)
+                uuid = None
                 if id_elem is not None and id_elem.text:
-                    uuid_match = re.search(
-                        r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
-                        id_elem.text, re.IGNORECASE,
-                    )
-                    if uuid_match:
-                        uuid = uuid_match.group(1)
-                        self._uuid_cache[calibre_id] = uuid
-                        logger.debug(f"📖 CWA: Resolved '{calibre_id}' -> UUID {uuid}")
-                        return uuid
+                    m = uuid_re.search(id_elem.text)
+                    if m:
+                        uuid = m.group(1)
+                if not uuid:
+                    continue
 
-            self._uuid_cache[calibre_id] = None
-            return None
+                numeric_id = None
+                for link in entry.findall('atom:link', ns):
+                    href = link.get('href', '')
+                    # CWA download links look like /opds/download/505/epub/ while
+                    # classic Calibre-Web uses /book/123 or /books/123.
+                    m = re.search(r'/(?:book|books|download)/(\d+)', href)
+                    if m:
+                        numeric_id = m.group(1)
+                        break
+
+                title_elem = entry.find('atom:title', ns)
+                title = title_elem.text if (title_elem is not None and title_elem.text) else ""
+                title_slug = re.sub(r'[^a-zA-Z0-9]', '_', title)[:30]
+
+                candidates.append((uuid, numeric_id, title_slug))
+
+            chosen = None
+
+            # 1. Exact numeric id match — most reliable when the stored id is the
+            #    Calibre book number.
+            if want_numeric:
+                for uuid, numeric_id, _slug in candidates:
+                    if numeric_id == key:
+                        chosen = uuid
+                        break
+
+            # 2. Title-slug match — covers the common CWA case where the stored id
+            #    is the title-derived slug. Only accept it when it is unambiguous.
+            if chosen is None:
+                slug_matches = [c[0] for c in candidates if c[2] and c[2] == key]
+                if len(slug_matches) == 1:
+                    chosen = slug_matches[0]
+
+            # 3. A single result is unambiguous by definition.
+            if chosen is None and len(candidates) == 1:
+                chosen = candidates[0][0]
+
+            if chosen is None:
+                if candidates:
+                    logger.error(
+                        f"❌ CWA: Could not unambiguously resolve '{calibre_id}' to a "
+                        f"single book ({len(candidates)} candidate(s) returned); skipping "
+                        "CWA sync to avoid writing progress to the wrong book."
+                    )
+                self._uuid_cache[calibre_id] = None
+                return None
+
+            self._uuid_cache[calibre_id] = chosen
+            logger.debug(f"📖 CWA: Resolved '{calibre_id}' -> UUID {chosen}")
+            return chosen
 
         except Exception as e:
             logger.error(f"❌ CWA UUID resolution error for '{calibre_id}': {e}", exc_info=True)
