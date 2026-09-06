@@ -12,12 +12,19 @@ period the effective gap is ten minutes; an instant-sync install with a ten-hour
 sync period gets 30 minutes rather than twenty hours. Settings
 shows this value and updates the preview when either input changes. Session checks
 run on the scheduler every minute and during sync cycles; busy cycles can delay
-the check. The unrelated **KOReader Session Gap** groups page events for statistics.
+the check. The scheduler waits twice the gap before closing an idle session,
+because only a later observation can prove that an apparent idle was really
+uninterrupted reading a service had not flushed yet: when that observation
+arrives, idle its own progress accounts for does not count towards splitting.
+That allowance is capped at 90 minutes, since a large forward seek is
+indistinguishable from listening at the same rate. The unrelated **KOReader Session Gap** groups page events for statistics.
 
-Durations are estimates. Positive position changes are capped by elapsed time
-between observations and the effective gap. The first observation uses the last
-saved state time when available; otherwise its position delta is capped by the
-gap. No one-minute minimum is added. Pauses, seeks, playback-speed changes, and
+Durations are estimates. A positive position change is credited as the smaller
+of the distance moved and the time elapsed since the previous observation. It is
+NOT capped by the merge gap: services flush progress on their own schedule, so a
+single observation can legitimately cover an hour of listening. The first
+observation, having no baseline to measure against, is the one case the gap
+bounds; it uses the last saved state time when available. No one-minute minimum is added. Pauses, seeks, playback-speed changes, and
 slow playback cannot be recovered exactly from position alone. Each emitted start
 is backdated from its final observation by the estimated duration, so it is not
 necessarily the moment listening began. Existing local history bounds subsequent

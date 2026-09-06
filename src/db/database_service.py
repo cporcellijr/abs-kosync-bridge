@@ -4559,7 +4559,9 @@ class DatabaseService:
                                end_location: str | None = None,
                                complete: bool = False, user_id: int | None = None) -> None:
         """Accumulate one observation; callers serialize writes with the sync lock."""
-        from src.services.reading_session_aggregator import MAX_SESSION_SECONDS, movement_seconds
+        from src.services.reading_session_aggregator import (
+            MAX_SESSION_SECONDS, movement_seconds, unexplained_idle_seconds,
+        )
 
         uid = self._resolve_uid(user_id) or 0
         with self.get_session() as session:
@@ -4580,8 +4582,9 @@ class DatabaseService:
                         (row.bookorbit_book_id, bookorbit_book_id),
                     )
                 )
+                idle = unexplained_idle_seconds(now - row.last_event_at, position_delta)
                 if (
-                    now - row.last_event_at > gap_seconds
+                    idle > gap_seconds
                     or now - row.started_at >= MAX_SESSION_SECONDS
                     or row.leader_client != leader_client
                     or destination_changed
@@ -4636,16 +4639,24 @@ class DatabaseService:
 
     def close_reading_sessions(self, now: float, gap_seconds: float,
                                user_id: int | None = None, all_users: bool = False) -> None:
-        """Close idle or over-age buffers, including users no longer eligible for sync."""
-        from src.services.reading_session_aggregator import MAX_SESSION_SECONDS
+        """Close idle or over-age buffers, including users no longer eligible for sync.
 
+        The idle timer is deliberately more patient than the gap the next
+        observation is judged against, so a service that flushes progress
+        infrequently gets the chance to prove the sitting never ended.
+        """
+        from src.services.reading_session_aggregator import (
+            IDLE_CLOSE_PATIENCE, MAX_SESSION_SECONDS,
+        )
+
+        idle_limit = gap_seconds * IDLE_CLOSE_PATIENCE
         uid = None if all_users else (self._resolve_uid(user_id) or 0)
         with self.get_session() as session:
             query = session.query(ReadingSessionBuffer).filter(ReadingSessionBuffer.closed_at.is_(None))
             if not all_users:
                 query = query.filter(ReadingSessionBuffer.user_id == uid)
             for row in query.all():
-                if now - row.last_event_at > gap_seconds or now - row.started_at >= MAX_SESSION_SECONDS:
+                if now - row.last_event_at > idle_limit or now - row.started_at >= MAX_SESSION_SECONDS:
                     self._close_reading_session(session, row, now)
 
     def get_pending_reading_sessions(self, user_id: int | None = None) -> list[ReadingSessionBuffer]:

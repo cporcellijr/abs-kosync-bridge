@@ -24,6 +24,18 @@ def _positive_number(value: object, default: float) -> float:
 # session. Past this ceiling the configured value stands on its own.
 MAX_DERIVED_GAP_MINUTES = 30
 
+# The scheduler closes an idle session on a timer, but only a later observation
+# can prove that the apparent idle was really uninterrupted reading a service had
+# not flushed yet. Closing at exactly the gap denies that observation its vote —
+# it arrives moments too late and starts a second session. So the timer waits
+# this much longer than the gap, and the observation-time test decides.
+IDLE_CLOSE_PATIENCE = 2
+
+# The most idle time one observation's own progress may account for. BookOrbit
+# was measured flushing every 37-50 minutes, so this must comfortably exceed
+# that, while staying far below a break a reader would call a break.
+MAX_EXPLAINED_IDLE_SECONDS = 5400
+
 
 def effective_session_gap_seconds() -> float:
     """Read the idle gap, allowing two scheduled observations before splitting."""
@@ -66,8 +78,36 @@ def movement_seconds(position_delta: float, now: float, previous_at: float | Non
     Position alone cannot distinguish seeks, playback speeds, or pauses within an
     observation interval. Slow playback is undercounted; a first observation with
     no baseline may overcount fast playback. Never manufacture a minimum duration.
+
+    The idle gap bounds only the first interval, where there is no baseline to
+    measure against. It must NOT bound a measured interval: upstream services
+    flush progress on their own schedule, so one observation can legitimately
+    cover an hour of listening, and capping it at the gap silently discards the
+    rest (observed live: 3973s of audio credited as exactly 1800s).
     """
     if not math.isfinite(position_delta) or position_delta <= 0:
         return 0.0
-    elapsed = gap_seconds if previous_at is None else max(0.0, now - previous_at)
-    return min(position_delta, elapsed, gap_seconds, MAX_SESSION_SECONDS)
+    if previous_at is None:
+        return min(position_delta, gap_seconds, MAX_SESSION_SECONDS)
+    return min(position_delta, max(0.0, now - previous_at), MAX_SESSION_SECONDS)
+
+
+def unexplained_idle_seconds(elapsed: float, position_delta: float) -> float:
+    """Idle time an observation's own progress does not account for.
+
+    Whether a sitting ended is a question about *idle* time, not about how long
+    we waited to hear about it. When a service flushes progress infrequently, a
+    long wait followed by a large position jump is continuous reading, not a
+    break — the jump is the evidence. Only the part of the wait that the reading
+    cannot explain counts towards splitting the session.
+
+    Bounded, because a large forward seek is indistinguishable from listening at
+    the same rate: without a ceiling, someone who broke for three hours and then
+    skipped four hours ahead would look like one continuous sitting. The ceiling
+    sits well above any realistic flush cadence and well below a real break.
+    """
+    if not math.isfinite(position_delta) or position_delta <= 0:
+        explained = 0.0
+    else:
+        explained = min(position_delta, MAX_EXPLAINED_IDLE_SECONDS)
+    return max(0.0, elapsed - explained)

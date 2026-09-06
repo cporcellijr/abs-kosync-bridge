@@ -56,7 +56,11 @@ All notable changes to BookBridge will be documented in this file.
   sessions survive restarts, and a destination that is temporarily unreachable is
   retried without duplicating your local history or holding up the other one.
   Where BookOrbit already logged part of a stretch itself, only the remainder is
-  credited rather than the whole session being dropped. Durations remain estimates
+  credited rather than the whole session being dropped. Services that report
+  progress infrequently are handled properly: a long wait followed by a large
+  jump is recognised as continuous reading rather than being split in two, and
+  the time credited is the time that actually elapsed instead of being clipped to
+  the merge gap. Durations remain estimates
   from progress and elapsed observation time, not exact player telemetry. KOReader
   sessions are unchanged — the plugin already grouped those. Existing fragmented
   history is not merged. Requires migration + restart.
