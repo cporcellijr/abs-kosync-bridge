@@ -1,6 +1,7 @@
 """Tests for BookOrbit-hosted audiobook support: client audio surface,
 BookOrbitAudioSourceAdapter, forge staging, and sync_manager wiring."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -309,11 +310,23 @@ def test_bundle_adapters_include_bookorbit():
     assert isinstance(adapters["BookOrbit"], BookOrbitAudioSourceAdapter)
 
 
+
+def _buffer_row(book_id, candidates, session_type="EPUB", end_location=None):
+    """A closed buffer row as the delivery pass sees it."""
+    return SimpleNamespace(
+        id=1, abs_id="bookorbit:4345", session_type=session_type,
+        leader_client="BookOrbitAudio", start_progress=0.4, end_progress=0.5,
+        last_event_at=1_000_000.0, end_location=end_location,
+        bookorbit_book_id=book_id, bookorbit_candidate_ids=json.dumps(candidates),
+    )
+
 def test_bookorbit_session_logs_audio_leader_against_audio_book_id():
     bo = MagicMock()
     bo.is_configured.return_value = True
-    bo.find_overlapping_session.return_value = None  # BookOrbit has not logged it (#424)
+    bo.find_covering_sessions.return_value = []  # BookOrbit has not logged it (#424)
+    bo.create_reading_session.return_value = True
     sm = _sync_manager(bookorbit_client=bo)
+    sm.database_service = MagicMock()
     book = SimpleNamespace(
         audio_source="BookOrbit",
         audio_provider_book_id="4345",
@@ -323,9 +336,11 @@ def test_bookorbit_session_logs_audio_leader_against_audio_book_id():
         ebook_filename="x.epub",
         sync_mode="audiobook",
     )
-    leader_state = SimpleNamespace(current={"pct": 0.5}, previous_pct=0.4)
-    with patch.object(sm, "_compute_session_duration", return_value=120):
-        sm._record_bookorbit_reading_session(book, "BookOrbitAudio", leader_state, {}, 1_000_000.0)
+    book_id, candidates = sm._resolve_bookorbit_session_ids(book, audio=True)
+    assert book_id == 4345
+    assert sm._deliver_reading_session(
+        _buffer_row(book_id, candidates, session_type="AUDIOBOOK"), "bookorbit", 120,
+    )
     _, kwargs = bo.create_reading_session.call_args
     assert kwargs["book_id"] == 4345
     assert kwargs["book_type"] == "AUDIOBOOK"
@@ -344,7 +359,7 @@ def test_bookorbit_session_skips_ebook_leader_without_bookorbit_ebook():
         ebook_filename="x.epub",
         sync_mode="audiobook",
     )
-    leader_state = SimpleNamespace(current={"pct": 0.5}, previous_pct=0.4)
-    with patch.object(sm, "_compute_session_duration", return_value=120):
-        sm._record_bookorbit_reading_session(book, "KoSync", leader_state, {}, 1_000_000.0)
+    # An ebook-leader session is never logged against the audiobook.
+    book_id, _ = sm._resolve_bookorbit_session_ids(book, audio=False)
+    assert book_id is None
     bo.create_reading_session.assert_not_called()

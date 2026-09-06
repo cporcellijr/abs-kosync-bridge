@@ -29,6 +29,7 @@ from .models import (
     PendingSuggestion,
     BookloreBook,
     ReadingSession,
+    ReadingSessionBuffer,
     KOReaderBookStat,
     KOReaderPageStat,
     KoreaderAnnotation,
@@ -47,6 +48,14 @@ from src.utils import secret_store
 from src.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
+
+# Reading-session buffer delivery destinations, mapped to the status column each
+# one owns. A buffered session is delivered to these independently, so one being
+# unreachable never holds up or duplicates the other.
+_READING_SESSION_DESTINATIONS = {
+    "grimmory": "grimmory_status",
+    "bookorbit": "bookorbit_status",
+}
 
 # The columns the KOReader device-sync manifest is actually built from: the book
 # is listed only while active, and each entry carries its title, the resolved
@@ -1018,6 +1027,9 @@ class DatabaseService:
             ).delete(synchronize_session=False)
             session.query(UserBook).filter(
                 UserBook.abs_id == abs_id
+            ).delete(synchronize_session=False)
+            session.query(ReadingSessionBuffer).filter(
+                ReadingSessionBuffer.abs_id == abs_id
             ).delete(synchronize_session=False)
             
             book = session.query(Book).filter(Book.abs_id == abs_id).first()
@@ -4515,6 +4527,201 @@ class DatabaseService:
                 ReadingSession.leader_client == leader_client,
                 ReadingSession.user_id == uid,
             ).first() is not None
+
+    @staticmethod
+    def _close_reading_session(session, row: ReadingSessionBuffer, now: float) -> None:
+        """Close the buffer and insert local history in the same transaction."""
+        from src.services.reading_session_aggregator import MAX_SESSION_SECONDS
+
+        duration = int(min(row.accumulated_seconds,
+                           max(0, row.last_event_at - row.started_at), MAX_SESSION_SECONDS))
+        row.closed_at = now
+        if duration <= 0:
+            row.grimmory_status = "disabled"
+            row.bookorbit_status = "disabled"
+            return
+        session.add(ReadingSession(
+            abs_id=row.abs_id, session_type=row.session_type,
+            start_time=row.last_event_at - duration, end_time=row.last_event_at,
+            duration_seconds=duration, start_progress=row.start_progress,
+            end_progress=row.end_progress, leader_client=row.leader_client,
+            user_id=row.user_id or None,
+        ))
+        logger.info("Reading session closed: user=%s book='%s' type=%s estimated_seconds=%s",
+                    row.user_id, row.abs_id, row.session_type, duration)
+
+    def extend_reading_session(self, abs_id: str, session_type: str, leader_client: str,
+                               now: float, previous_at: float | None, position_delta: float,
+                               start_progress: float, end_progress: float, gap_seconds: float,
+                               grimmory_book_id: int | None = None,
+                               bookorbit_book_id: int | None = None,
+                               bookorbit_candidate_ids: list | None = None,
+                               end_location: str | None = None,
+                               complete: bool = False, user_id: int | None = None) -> None:
+        """Accumulate one observation; callers serialize writes with the sync lock."""
+        from src.services.reading_session_aggregator import MAX_SESSION_SECONDS, movement_seconds
+
+        uid = self._resolve_uid(user_id) or 0
+        with self.get_session() as session:
+            row = session.query(ReadingSessionBuffer).filter_by(
+                user_id=uid, abs_id=abs_id, session_type=session_type, closed_at=None,
+            ).first()
+            if row is not None and now <= row.last_event_at:
+                return
+            if row is not None:
+                # A destination id only means "a different book" when both sides are
+                # known. It is re-resolved on every observation and legitimately comes
+                # back None while that client's book cache is cold, and reading None as
+                # a change would split the session and strand its remainder undelivered.
+                destination_changed = any(
+                    stored is not None and incoming is not None and stored != incoming
+                    for stored, incoming in (
+                        (row.grimmory_book_id, grimmory_book_id),
+                        (row.bookorbit_book_id, bookorbit_book_id),
+                    )
+                )
+                if (
+                    now - row.last_event_at > gap_seconds
+                    or now - row.started_at >= MAX_SESSION_SECONDS
+                    or row.leader_client != leader_client
+                    or destination_changed
+                ):
+                    previous_at = max(previous_at or row.last_event_at, row.last_event_at)
+                    self._close_reading_session(session, row, now)
+                    session.flush()  # release the partial unique index before inserting its successor
+                    row = None
+            if row is None:
+                # Local history survives buffer cleanup and bounds the first interval
+                # after completion, force-close, a restart, or an idle gap.
+                previous = session.query(ReadingSession.end_time).filter_by(
+                    abs_id=abs_id, session_type=session_type, user_id=uid or None,
+                ).order_by(ReadingSession.end_time.desc()).first()
+                if previous:
+                    previous_at = max(previous_at or previous[0], previous[0])
+                contribution = movement_seconds(position_delta, now, previous_at, gap_seconds)
+                if contribution <= 0:
+                    return
+                row = ReadingSessionBuffer(
+                    user_id=uid, abs_id=abs_id, session_type=session_type,
+                    leader_client=leader_client, started_at=now - contribution,
+                    last_event_at=now, accumulated_seconds=contribution,
+                    start_progress=start_progress, end_progress=end_progress,
+                    end_location=end_location,
+                    grimmory_book_id=grimmory_book_id,
+                    grimmory_status="pending" if grimmory_book_id is not None else "disabled",
+                    bookorbit_book_id=bookorbit_book_id,
+                    bookorbit_status="pending" if bookorbit_book_id is not None else "disabled",
+                )
+                if bookorbit_candidate_ids:
+                    row.bookorbit_candidate_ids = json.dumps(bookorbit_candidate_ids)
+                session.add(row)
+            else:
+                baseline = max(previous_at or row.last_event_at, row.last_event_at)
+                row.accumulated_seconds += movement_seconds(position_delta, now, baseline, gap_seconds)
+                row.last_event_at = now
+                row.end_progress = end_progress
+                row.end_location = end_location
+                if grimmory_book_id is not None and row.grimmory_book_id is None:
+                    row.grimmory_book_id = grimmory_book_id
+                    if row.grimmory_status == "disabled":
+                        row.grimmory_status = "pending"
+                if bookorbit_book_id is not None and row.bookorbit_book_id is None:
+                    row.bookorbit_book_id = bookorbit_book_id
+                    if row.bookorbit_status == "disabled":
+                        row.bookorbit_status = "pending"
+                if bookorbit_candidate_ids:
+                    row.bookorbit_candidate_ids = json.dumps(bookorbit_candidate_ids)
+            if complete:
+                self._close_reading_session(session, row, now)
+
+    def close_reading_sessions(self, now: float, gap_seconds: float,
+                               user_id: int | None = None, all_users: bool = False) -> None:
+        """Close idle or over-age buffers, including users no longer eligible for sync."""
+        from src.services.reading_session_aggregator import MAX_SESSION_SECONDS
+
+        uid = None if all_users else (self._resolve_uid(user_id) or 0)
+        with self.get_session() as session:
+            query = session.query(ReadingSessionBuffer).filter(ReadingSessionBuffer.closed_at.is_(None))
+            if not all_users:
+                query = query.filter(ReadingSessionBuffer.user_id == uid)
+            for row in query.all():
+                if now - row.last_event_at > gap_seconds or now - row.started_at >= MAX_SESSION_SECONDS:
+                    self._close_reading_session(session, row, now)
+
+    def get_pending_reading_sessions(self, user_id: int | None = None) -> list[ReadingSessionBuffer]:
+        """Return at most 200 closed buffers with at least one destination still pending."""
+        from sqlalchemy import or_
+
+        uid = self._resolve_uid(user_id) or 0
+        with self.get_session() as session:
+            rows = session.query(ReadingSessionBuffer).filter(
+                ReadingSessionBuffer.user_id == uid,
+                ReadingSessionBuffer.closed_at.isnot(None),
+                or_(
+                    ReadingSessionBuffer.grimmory_status == "pending",
+                    ReadingSessionBuffer.bookorbit_status == "pending",
+                ),
+            ).order_by(ReadingSessionBuffer.id).limit(200).all()
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    def mark_reading_session_delivered(self, session_id: int, destination: str, status: str,
+                                       user_id: int | None = None) -> None:
+        """Acknowledge success or an explicitly disabled destination within its owner scope."""
+        if destination not in _READING_SESSION_DESTINATIONS:
+            raise ValueError("Invalid reading session delivery destination")
+        if status not in {"delivered", "disabled", "failed"}:
+            raise ValueError("Invalid reading session delivery status")
+        column = _READING_SESSION_DESTINATIONS[destination]
+        uid = self._resolve_uid(user_id) or 0
+        with self.get_session() as session:
+            session.query(ReadingSessionBuffer).filter_by(
+                id=session_id, user_id=uid, **{column: "pending"},
+            ).update({column: status}, synchronize_session=False)
+
+    def record_reading_session_delivery_failure(self, session_id: int, now: float,
+                                                user_id: int | None = None) -> bool:
+        """Count one failed delivery pass; abandon the row once retries run out.
+
+        Returns whether the remaining destinations were given up on, so a
+        decommissioned service cannot pin the queue or grow the buffer forever.
+        """
+        from src.services.reading_session_aggregator import DELIVERY_RETRY_WINDOW_SECONDS
+
+        uid = self._resolve_uid(user_id) or 0
+        with self.get_session() as session:
+            row = session.query(ReadingSessionBuffer).filter_by(
+                id=session_id, user_id=uid,
+            ).first()
+            if row is None:
+                return False
+            row.delivery_attempts = (row.delivery_attempts or 0) + 1
+            if (row.closed_at or now) > now - DELIVERY_RETRY_WINDOW_SECONDS:
+                return False
+            abandoned = [
+                name for name, column in _READING_SESSION_DESTINATIONS.items()
+                if getattr(row, column) == "pending"
+            ]
+            if not abandoned:
+                return False
+            for column in (_READING_SESSION_DESTINATIONS[name] for name in abandoned):
+                setattr(row, column, "failed")
+            logger.warning(
+                "⚠️ Giving up on reading session delivery for '%s' after %s attempts: %s",
+                row.abs_id, row.delivery_attempts, ", ".join(sorted(abandoned)),
+            )
+            return True
+
+    def purge_delivered_reading_sessions(self, now: float) -> None:
+        """Remove buffers after 30 days once every destination is terminal."""
+        terminal = ("delivered", "disabled", "failed")
+        with self.get_session() as session:
+            session.query(ReadingSessionBuffer).filter(
+                ReadingSessionBuffer.closed_at < now - 30 * 86400,
+                ReadingSessionBuffer.grimmory_status.in_(terminal),
+                ReadingSessionBuffer.bookorbit_status.in_(terminal),
+            ).delete(synchronize_session=False)
 
     def record_reading_session(self, abs_id: str, session_type: str, start_time: float,
                                end_time: float, duration_seconds: int,

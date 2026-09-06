@@ -43,6 +43,24 @@ All notable changes to BookBridge will be documented in this file.
 
 ### Fixed
 
+- **A continuous listen is now one reading session instead of dozens (#429).**
+  A 45-minute audiobook stretch used to land in Grimmory and BookOrbit as ~40
+  separate 60-second sessions, with gaps and overlaps between them, because a
+  session was written every time progress synced and its length was measured in
+  book position rather than time spent. Sessions now accumulate until you stop
+  reading, finish the book, or hit a four-hour boundary, and are then written
+  once to your local history, Grimmory, and BookOrbit. Progress itself still
+  syncs immediately — this only changes session history.
+  Settings shows the effective merge gap (at least twice the global sync period),
+  and the old statistics field is now labelled **KOReader Session Gap**. Buffered
+  sessions survive restarts, and a destination that is temporarily unreachable is
+  retried without duplicating your local history or holding up the other one.
+  Where BookOrbit already logged part of a stretch itself, only the remainder is
+  credited rather than the whole session being dropped. Durations remain estimates
+  from progress and elapsed observation time, not exact player telemetry. KOReader
+  sessions are unchanged — the plugin already grouped those. Existing fragmented
+  history is not merged. Requires migration + restart.
+
 - **Adding an audiobook to a book you already had as an ebook no longer creates a
   second copy of it.** BookBridge merges the two into one entry — but only when you
   matched through the book's own page. Matching the same way from Suggestions skipped

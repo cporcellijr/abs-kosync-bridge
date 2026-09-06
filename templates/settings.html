@@ -2021,10 +2021,20 @@
                             value="{{ get_val('SYNC_DELTA_BETWEEN_CLIENTS_PERCENT') }}">
                     </div>
                     <div class="form-group">
-                        <label>Reading Session Gap (Minutes)</label>
+                        <label>KOReader Session Gap (Minutes)</label>
                         <input type="number" min="1" name="KOREADER_SESSION_GAP_MINUTES"
                             value="{{ get_val('KOREADER_SESSION_GAP_MINUTES') or '30' }}">
                         <small>Idle gap that splits KOReader page events into separate reading sessions on the stats page.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Reading Session Merge Gap (Minutes)</label>
+                        <input type="number" min="1" name="READING_SESSION_MERGE_MINUTES"
+                            value="{{ get_val('READING_SESSION_MERGE_MINUTES') or '5' }}">
+                        <small>Groups progress updates into local and Grimmory sessions. Effective idle gap:
+                            <strong><span id="effective_session_gap">{{ [1, get_val('READING_SESSION_MERGE_MINUTES')|float(5), [2 * (get_val('SYNC_PERIOD_MINS')|float(5)), 30]|min]|max }}</span> minutes</strong>
+                            (at least twice the sync period, capped at 30), plus time until the next session check.
+                            Sessions also close on completion or at four hours. Estimated reading time appears after closure.
+                            BookOrbit and KOReader uploads keep their existing timing.</small>
                     </div>
                     <div class="checkbox-wrapper full-width">
                         <input type="checkbox" id="sync_completion_propagation" name="SYNC_COMPLETION_PROPAGATION" {% if
@@ -3921,6 +3931,24 @@
         document.addEventListener('DOMContentLoaded', function () {
             const fromHash = (location.hash || '').replace('#', '');
             showSettingsTab(fromHash || 'integrations');
+
+            const sessionGap = document.querySelector('[name="READING_SESSION_MERGE_MINUTES"]');
+            const syncPeriod = document.querySelector('[name="SYNC_PERIOD_MINS"]');
+            const effectiveGap = document.getElementById('effective_session_gap');
+            if (sessionGap && syncPeriod && effectiveGap) {
+                const positiveMinutes = input => {
+                    const value = Number(input.value);
+                    return Number.isFinite(value) && value > 0 ? value : 5;
+                };
+                const updateSessionGap = () => {
+                    effectiveGap.textContent = Math.max(
+                        1, positiveMinutes(sessionGap),
+                        Math.min(2 * positiveMinutes(syncPeriod), 30));
+                };
+                sessionGap.addEventListener('input', updateSessionGap);
+                syncPeriod.addEventListener('input', updateSessionGap);
+                updateSessionGap();
+            }
 
             // Integration card headers expand/collapse their body on click.
             // Clicks inside the header tail (status pill, enable switch) are ignored.

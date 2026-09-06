@@ -552,10 +552,39 @@ class BookAlignment(Base):
         self.total_chars = total_chars
 
 
+class ReadingSessionBuffer(Base):
+    """Open estimates and durable delivery to Grimmory and BookOrbit; user 0 is the default scope."""
+    __tablename__ = 'reading_session_buffers'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, default=0, server_default='0', index=True)
+    abs_id = Column(String(255), ForeignKey('books.abs_id', ondelete='CASCADE'), nullable=False)
+    session_type = Column(String(20), nullable=False)
+    leader_client = Column(String(50), nullable=False)
+    started_at = Column(Float, nullable=False)
+    last_event_at = Column(Float, nullable=False)
+    accumulated_seconds = Column(Float, nullable=False)
+    start_progress = Column(Float, nullable=False)
+    end_progress = Column(Float, nullable=False)
+    end_location = Column(Text, nullable=True)
+    grimmory_book_id = Column(Integer, nullable=True)
+    grimmory_status = Column(String(20), nullable=False, default='disabled', server_default='disabled')
+    bookorbit_book_id = Column(Integer, nullable=True)
+    bookorbit_candidate_ids = Column(Text, nullable=True)
+    bookorbit_status = Column(String(20), nullable=False, default='disabled', server_default='disabled')
+    delivery_attempts = Column(Integer, nullable=False, default=0, server_default='0')
+    closed_at = Column(Float, nullable=True)
+
+    __table_args__ = (
+        Index('uq_reading_session_buffer_open', user_id, abs_id, session_type,
+              unique=True, sqlite_where=closed_at.is_(None)),
+    )
+
+
 class ReadingSession(Base):
     """
     Local reading session tracking for dashboard stats.
-    Recorded on every sync cycle where a leader is elected and progress changes.
+    Recorded when a progress-derived session closes or device telemetry is uploaded.
     """
     __tablename__ = 'reading_sessions'
 

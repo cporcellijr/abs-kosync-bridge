@@ -53,7 +53,7 @@ from src.utils.transcription_cancel import (
     unregister_worker,
 )
 from src.utils.transcriber import TranscriptionCancelled
-from src.utils.logging_utils import sanitize_log_data
+from src.utils.logging_utils import sanitize_log_data, get_persistent_condition_logger
 from src.utils.progress_metadata import state_metadata_kwargs
 
 # Service imports
@@ -61,6 +61,11 @@ from src.services.alignment_service import AlignmentService, ingest_storyteller_
 from src.services.audio_source_adapters import ABSAudioSourceAdapter, BookLoreAudioSourceAdapter, BookOrbitAudioSourceAdapter
 from src.services.library_service import LibraryService
 from src.services.migration_service import MigrationService
+from src.services.reading_session_aggregator import (
+    MAX_SESSION_SECONDS,
+    effective_session_gap_seconds,
+    uncovered_fraction,
+)
 
 # Silence noisy third-party loggers
 for noisy in ('urllib3', 'requests', 'schedule', 'chardet', 'multipart', 'faster_whisper'):
@@ -3370,7 +3375,7 @@ class SyncManager:
         except Exception as e:
             logger.debug(f"Could not persist state snapshot for '{client_name}': {e}")
 
-    def sync_cycle(self, target_abs_id=None, user_id=None):
+    def sync_cycle(self, target_abs_id=None, user_id=None, sessions_only: bool = False):
         """
         Run a sync cycle.
 
@@ -3380,6 +3385,7 @@ class SyncManager:
             user_id: Multi-user — run the cycle for this user, using their own
                      client bundle and scoping state/progress to them. When None,
                      runs as the default (single-user/admin) exactly as before.
+            sessions_only: Deliver buffered sessions using the same user context and lock.
         """
         # Per-user context: only when an explicit user + a registry are present,
         # so the default cycle is byte-for-byte unchanged.
@@ -3427,7 +3433,10 @@ class SyncManager:
                      return
 
             try:
-                self._sync_cycle_internal(target_abs_id)
+                if sessions_only:
+                    self._flush_reading_sessions()
+                else:
+                    self._sync_cycle_internal(target_abs_id)
             except Exception as e:
                 logger.error(f"❌ Sync cycle internal error: {e}", exc_info=True)
             finally:
@@ -3449,6 +3458,36 @@ class SyncManager:
                 reset_current_user_id(user_token)
             if creds_token is not None:
                 reset_current_user_credentials(creds_token)
+
+    def flush_reading_sessions_for_all_users(self) -> None:
+        """Scheduler maintenance; close locally for all owners, deliver as active users."""
+        if not self._sync_lock.acquire(blocking=False):
+            return
+        try:
+            now = time.time()
+            self.database_service.close_reading_sessions(
+                now, effective_session_gap_seconds(), all_users=True,
+            )
+            self.database_service.purge_delivered_reading_sessions(now)
+            users = self.database_service.list_users()
+            get_persistent_condition_logger().resolve(
+                logger, "reading-session-maintenance", "Reading session maintenance resumed",
+            )
+        except Exception as exc:
+            get_persistent_condition_logger().warn(
+                logger, "reading-session-maintenance", "Reading session maintenance failed: %s", exc, exc_info=True,
+            )
+            return
+        finally:
+            self._sync_lock.release()
+        # Never turn the storage-only sentinel 0 into a registry lookup. Once
+        # accounts exist, orphan/default-scope remote rows remain pending.
+        if not users:
+            self.sync_cycle(sessions_only=True)
+        elif self.user_client_registry is not None:
+            for user in users:
+                if user.active:
+                    self.sync_cycle(user_id=user.id, sessions_only=True)
 
     def _active_sync_users(self):
         """Active users that have at least one configured client. Returns [] when
@@ -3573,6 +3612,7 @@ class SyncManager:
         return visible
 
     def _sync_cycle_internal(self, target_abs_id=None):
+        self._flush_reading_sessions()
         # Clear caches at start of cycle
         self._sync_cycle_ebook_cache.clear()
         self._sync_cycle_local_epub_cache.clear()
@@ -4166,50 +4206,17 @@ class SyncManager:
 
                 logger.info(f"💾 '{abs_id}' '{title_snip}' States saved to database")
 
-                # ── Local Reading Session Recording (always fires) ──
+                # One movement feeds local/Grimmory history independently of progress writes.
                 if leader_pct != leader_state.previous_pct:
                     try:
-                        self._record_local_reading_session(
+                        self._record_reading_movement(
                             book, leader, leader_state, prev_states_by_client, current_time
                         )
-                    except Exception:
-                        pass  # Non-blocking
-
-                # ── Grimmory Reading Session Recording ──
-                booklore_client = self.active_booklore_client
-                if (
-                    os.environ.get("GRIMMORY_READING_SESSIONS", "true").lower() == "true"
-                    and booklore_client
-                    and booklore_client.is_configured()
-                    and leader_pct != leader_state.previous_pct
-                    and leader.lower() != 'kosync'  # Plugin handles KOSync→Grimmory
-                ):
-                    try:
-                        self._record_grimmory_reading_session(
-                            book, leader, leader_state, prev_states_by_client, current_time
+                    except Exception as exc:
+                        get_persistent_condition_logger().warn(
+                            logger, f"reading-session-ingest:{get_current_user_id()}:{book.abs_id}",
+                            "Reading session accumulation failed for '%s': %s", book.abs_id, exc, exc_info=True,
                         )
-                    except Exception:
-                        pass  # Non-blocking: never prevent sync
-
-                # ── BookOrbit Reading Session Recording ──
-                bookorbit_client = self.active_bookorbit_client
-                if (
-                    os.environ.get("BOOKORBIT_READING_SESSIONS", "true").strip().lower() in ("true", "1", "yes", "on")
-                    and bookorbit_client
-                    and bookorbit_client.is_configured()
-                    and (
-                        getattr(book, "ebook_source", None) == "BookOrbit"
-                        or getattr(book, "audio_source", None) == "BookOrbit"
-                    )
-                    and leader_pct != leader_state.previous_pct
-                    and leader.lower() != 'kosync'  # kosync_server handles KOSync->BookOrbit
-                ):
-                    try:
-                        self._record_bookorbit_reading_session(
-                            book, leader, leader_state, prev_states_by_client, current_time
-                        )
-                    except Exception:
-                        pass  # Non-blocking: never prevent sync
 
                 # Debugging crash: Flush logs to ensure we see this before any potential hard crash
                 for handler in logger.handlers:
@@ -4238,280 +4245,234 @@ class SyncManager:
                 logger.info(summary)
         logger.debug("End of sync cycle for active books")
 
-    def _compute_session_duration(
-        self,
-        book,
-        leader: str,
-        leader_state,
-        prev_states_by_client: dict,
-        current_time: float,
-    ) -> int | None:
-        """Compute an accurate session duration in seconds. Returns None if indeterminate."""
-        leader_pct = leader_state.current.get('pct', 0)
-        prev_pct = leader_state.previous_pct or 0.0
-        prev_state = prev_states_by_client.get(leader.lower())
-
-        primary_audio_client = self._get_primary_audio_client_name(book)
-        is_audio_leader = (leader == primary_audio_client)
-
-        # Audio Tier: ABS/audio playback timestamp delta
-        if is_audio_leader:
-            current_ts = leader_state.current.get('ts')
-            previous_ts = prev_state.timestamp if prev_state else None
-            if current_ts is not None and previous_ts is not None and current_ts > previous_ts:
-                delta = int(current_ts - previous_ts)
-                if 0 < delta <= 14400:
-                    return delta
-
-        # Progress-delta heuristic (universal fallback)
-        progress_delta = abs(leader_pct - prev_pct)
-        if progress_delta > 0:
-            total_time = getattr(book, 'duration', None) or getattr(book, 'audio_duration', None) or 36000
-            estimated = int(progress_delta * total_time)
-            return max(60, min(estimated, 3600))  # clamp [1min, 1hr]
-
-        return None
-
-    def _record_local_reading_session(
-        self,
-        book,
-        leader: str,
-        leader_state,
-        prev_states_by_client: dict,
-        current_time: float,
+    def _record_reading_movement(
+        self, book, leader: str, leader_state, prev_states_by_client: dict, current_time: float,
     ) -> None:
-        """Record a local reading session for dashboard stats. Always fires on progress change."""
-        try:
-            # Plugin handles all KOSync ebook sessions directly
-            if leader.lower() == 'kosync':
-                return
-
-            leader_pct = leader_state.current.get('pct', 0)
-            prev_pct = leader_state.previous_pct or 0.0
-
-            prev_state = prev_states_by_client.get(leader.lower())
-            start_time = (
-                prev_state.last_updated
-                if prev_state and prev_state.last_updated
-                else current_time - 60
-            )
-
-            primary_audio_client = self._get_primary_audio_client_name(book)
-            is_audio_leader = (leader == primary_audio_client)
-
-            if is_audio_leader:
-                session_type = "AUDIOBOOK"
-            else:
-                ebook_filename = getattr(book, 'ebook_filename', '') or ''
-                if ebook_filename.lower().endswith('.epub'):
-                    session_type = "EPUB"
-                elif ebook_filename.lower().endswith('.pdf'):
-                    session_type = "PDF"
-                else:
-                    session_type = "EBOOK"
-
-            duration_seconds = self._compute_session_duration(
-                book, leader, leader_state, prev_states_by_client, current_time
-            )
-            if duration_seconds is None or duration_seconds <= 0:
-                return
-
-            self.database_service.record_reading_session(
-                abs_id=book.abs_id,
-                session_type=session_type,
-                start_time=start_time,
-                end_time=current_time,
-                duration_seconds=duration_seconds,
-                start_progress=prev_pct,
-                end_progress=leader_pct,
-                leader_client=leader,
-            )
-        except Exception:
-            pass  # Never block sync
-
-    def _record_grimmory_reading_session(
-        self,
-        book,
-        leader: str,
-        leader_state,
-        prev_states_by_client: dict,
-        current_time: float,
-    ) -> None:
-        """Record a reading session to Grimmory when progress changes on a tracked book.
-
-        Grimmory has no endpoint for reading back its existing sessions, so the
-        BookOrbit double-count guard (#424) has no equivalent here; whether Grimmory
-        self-records is untested.
-        """
-        booklore_client = self.active_booklore_client
-        if not booklore_client:
+        """Accumulate one progress observation for local history and Grimmory."""
+        if leader.lower() == "kosync":
             return
+        current = leader_state.current
+        previous_pct = leader_state.previous_pct or 0.0
+        current_pct = current.get("pct") or 0.0
+        previous = prev_states_by_client.get(leader.lower())
+        audio = leader == self._get_primary_audio_client_name(book)
+        if audio:
+            session_type = "AUDIOBOOK"
+        else:
+            extension = Path(getattr(book, "ebook_filename", "") or "").suffix.lower()
+            session_type = {".epub": "EPUB", ".pdf": "PDF"}.get(extension, "EBOOK")
 
-        leader_pct = leader_state.current.get('pct', 0)
-        prev_pct = leader_state.previous_pct or 0.0
+        previous_ts = getattr(previous, "timestamp", None)
+        if audio and current.get("ts") is not None and previous_ts is not None:
+            delta = current["ts"] - previous_ts
+        else:
+            duration = getattr(book, "duration", None) or getattr(book, "audio_duration", None) or 36000
+            delta = (current_pct - previous_pct) * duration
 
-        # Compute accurate duration, then backdate start_time so Grimmory's
-        # internal (end_time - start_time) math produces the correct value.
-        duration_seconds = self._compute_session_duration(
-            book, leader, leader_state, prev_states_by_client, current_time
-        )
-        if duration_seconds is None or duration_seconds <= 0:
-            duration_seconds = 60  # Conservative 1-minute fallback for Grimmory
-        start_time = current_time - duration_seconds
-
-        primary_audio_client = self._get_primary_audio_client_name(book)
-        is_audio_leader = (leader == primary_audio_client)
-
-        if is_audio_leader:
-            # Path 1: Audio Session (Strict Isolation - No Ebook Double Dip)
-            audio_grimmory_id = None
-            if getattr(book, 'audio_source', None) == "BookLore":
-                audio_grimmory_id = getattr(book, 'audio_provider_book_id', None) or getattr(book, 'audio_source_id', None)
-
-            # If using ABS audio, fallback to logging the audiobook session against the linked Grimmory ebook ID
-            grimmory_id = audio_grimmory_id
+        grimmory_id = None
+        client = self.active_booklore_client
+        if env_truthy("GRIMMORY_READING_SESSIONS", "true") and client and client.is_configured():
+            if audio and getattr(book, "audio_source", None) == "BookLore":
+                grimmory_id = (getattr(book, "audio_provider_book_id", None)
+                               or getattr(book, "audio_source_id", None))
             if not grimmory_id:
                 grimmory_id = self._resolve_grimmory_ebook_id(book)
+            try:
+                grimmory_id = int(grimmory_id) if grimmory_id is not None else None
+            except (TypeError, ValueError):
+                grimmory_id = None
 
-            if grimmory_id:
-                try:
-                    booklore_client.create_reading_session(
-                        book_id=int(grimmory_id),
-                        start_time=start_time,
-                        end_time=current_time,
-                        start_progress=prev_pct,
-                        end_progress=leader_pct,
-                        book_type="AUDIOBOOK",
-                    )
-                except (TypeError, ValueError):
-                    pass
-        else:
-            # Path 2: Ebook Session (Strict Isolation - Only if reading)
-            ebook_grimmory_id = self._resolve_grimmory_ebook_id(book)
-            if ebook_grimmory_id:
-                book_type = None
-                ebook_filename = getattr(book, 'ebook_filename', '') or ''
-                if ebook_filename.lower().endswith('.epub'):
-                    book_type = "EPUB"
-                elif ebook_filename.lower().endswith('.pdf'):
-                    book_type = "PDF"
+        bookorbit_id, bookorbit_candidates = self._resolve_bookorbit_session_ids(book, audio)
 
-                cfi = leader_state.current.get('cfi')
-                try:
-                    booklore_client.create_reading_session(
-                        book_id=int(ebook_grimmory_id),
-                        start_time=start_time,
-                        end_time=current_time,
-                        start_progress=prev_pct,
-                        end_progress=leader_pct,
-                        book_type=book_type,
-                        end_location=cfi,
-                    )
-                except (TypeError, ValueError):
-                    pass
-
-    def _record_bookorbit_reading_session(
-        self,
-        book,
-        leader: str,
-        leader_state,
-        prev_states_by_client: dict,
-        current_time: float,
-    ) -> None:
-        """Record a reading session to BookOrbit when progress changes on a
-        BookOrbit-hosted ebook or audiobook. Audio-leader sessions are logged
-        against the BookOrbit audiobook when the audio is BookOrbit-hosted,
-        falling back to the ebook's BookOrbit id otherwise.
-
-        Skipped when BookOrbit has already logged a session covering the same
-        reading — its web reader records its own as the user reads, so posting ours
-        on top double-counts it (#424).
-        """
-        bookorbit_client = self.active_bookorbit_client
-        if not bookorbit_client:
-            return
-
-        leader_pct = leader_state.current.get('pct', 0)
-        prev_pct = leader_state.previous_pct or 0.0
-
-        duration_seconds = self._compute_session_duration(
-            book, leader, leader_state, prev_states_by_client, current_time
+        self.database_service.extend_reading_session(
+            abs_id=book.abs_id, session_type=session_type, leader_client=leader,
+            now=current_time, previous_at=getattr(previous, "last_updated", None),
+            position_delta=delta, start_progress=previous_pct, end_progress=current_pct,
+            gap_seconds=effective_session_gap_seconds(), grimmory_book_id=grimmory_id,
+            bookorbit_book_id=bookorbit_id, bookorbit_candidate_ids=bookorbit_candidates,
+            end_location=current.get("cfi") if not audio else None,
+            complete=current_pct >= self._completion_threshold(),
         )
-        if duration_seconds is None or duration_seconds <= 0:
-            duration_seconds = 60
-        start_time = current_time - duration_seconds
+        get_persistent_condition_logger().resolve(
+            logger, f"reading-session-ingest:{get_current_user_id()}:{book.abs_id}",
+            "Reading session accumulation resumed for '%s'", book.abs_id,
+        )
 
-        primary_audio_client = self._get_primary_audio_client_name(book)
-        is_audio_leader = (leader == primary_audio_client)
+    # Buffered sessions fan out to these at close, each with its own book id,
+    # setting and delivery status, so one destination being unreachable never
+    # holds up or duplicates the other.
+    _SESSION_DESTINATIONS = (
+        ("grimmory", "Grimmory", "GRIMMORY_READING_SESSIONS"),
+        ("bookorbit", "BookOrbit", "BOOKORBIT_READING_SESSIONS"),
+    )
 
-        book_id = None
-        if is_audio_leader and getattr(book, "audio_source", None) == "BookOrbit":
-            book_id = (
-                getattr(book, "audio_provider_book_id", None)
-                or getattr(book, "audio_source_id", None)
-            )
-        if not book_id and getattr(book, "ebook_source", None) == "BookOrbit":
-            book_id = getattr(book, "ebook_source_id", None)
-        if not book_id:
-            return
+    def _reading_session_client(self, destination: str):
+        """Return this user's client for one reading-session destination."""
+        if destination == "grimmory":
+            return self.active_booklore_client
+        return self.active_bookorbit_client
 
-        end_location = None
-        if is_audio_leader:
-            book_type = "AUDIOBOOK"
-        else:
-            ebook_filename = getattr(book, 'ebook_filename', '') or ''
-            if ebook_filename.lower().endswith('.epub'):
-                book_type = "EPUB"
-            elif ebook_filename.lower().endswith('.pdf'):
-                book_type = "PDF"
-            else:
-                book_type = "EBOOK"
-            end_location = leader_state.current.get('cfi')
+    def _resolve_bookorbit_session_ids(self, book, audio: bool) -> tuple[int | None, list[int]]:
+        """Return the BookOrbit book id to post a session against, plus every id
+        for the same work.
 
-        # Check every BookOrbit id for this work, not just the one we would post to:
-        # audio and ebook are separate BookOrbit books with separate session lists,
-        # and a stretch consumed in either format is the same reading (#424).
-        candidate_ids = [book_id]
+        Audio-leader sessions go against the BookOrbit audiobook when the audio is
+        BookOrbit-hosted, falling back to the ebook. The candidate list spans both
+        formats because a stretch consumed in either is the same reading (#424).
+        """
+        client = self.active_bookorbit_client
+        if not env_truthy("BOOKORBIT_READING_SESSIONS", "true") or not client or not client.is_configured():
+            return None, []
+
+        audio_id = None
         if getattr(book, "audio_source", None) == "BookOrbit":
-            candidate_ids.append(getattr(book, "audio_provider_book_id", None)
-                                 or getattr(book, "audio_source_id", None))
+            audio_id = (getattr(book, "audio_provider_book_id", None)
+                        or getattr(book, "audio_source_id", None))
+        ebook_id = None
         if getattr(book, "ebook_source", None) == "BookOrbit":
-            candidate_ids.append(getattr(book, "ebook_source_id", None))
+            ebook_id = getattr(book, "ebook_source_id", None)
 
-        existing = None
+        def _as_int(value):
+            try:
+                return int(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        # An audio session falls back to the ebook, but an ebook session is never
+        # logged against the audiobook — that would invent listening that did not
+        # happen. Unchanged from the per-sync path this replaced.
+        book_id = _as_int(audio_id) if audio else None
+        if book_id is None:
+            book_id = _as_int(ebook_id)
+        candidates = [i for i in (book_id, _as_int(audio_id), _as_int(ebook_id)) if i is not None]
+        return book_id, list(dict.fromkeys(candidates))
+
+    def _bookorbit_session_scale(self, row, duration: int) -> float:
+        """Fraction of a buffered session BookOrbit has not already logged itself.
+
+        BookOrbit's own reader records sessions as the user reads, so posting ours
+        on top double-counts it (#424). An aggregated session spans much more of a
+        book than the per-observation sessions this replaced, so a sliver of
+        overlap must not suppress the whole thing — credit only the uncovered part.
+        """
+        client = self.active_bookorbit_client
+        candidates = []
+        if row.bookorbit_candidate_ids:
+            try:
+                candidates = [int(i) for i in json.loads(row.bookorbit_candidate_ids)]
+            except (TypeError, ValueError):
+                candidates = []
+        if not candidates:
+            candidates = [row.bookorbit_book_id]
+
         try:
-            existing = bookorbit_client.find_overlapping_session(
-                book_ids=[i for i in candidate_ids if i],
-                start_progress=prev_pct,
-                end_progress=leader_pct,
-                end_time=current_time,
+            existing = client.find_covering_sessions(
+                book_ids=[i for i in candidates if i],
+                start_progress=row.start_progress,
+                end_progress=row.end_progress,
+                end_time=row.last_event_at,
             )
         except Exception as e:
             logger.warning(
                 "BookOrbit session dedupe check failed for '%s': %s",
-                getattr(book, 'abs_id', None), e, exc_info=True,
+                row.abs_id, e, exc_info=True,
             )
-        if existing:
+            return 1.0
+
+        spans = []
+        for session in existing or ():
+            try:
+                end_pct = float(session.get("endProgress") or 0)
+                spans.append((end_pct - float(session.get("progressDelta") or 0), end_pct))
+            except (TypeError, ValueError):
+                continue
+        if not spans:
+            return 1.0
+
+        fraction = uncovered_fraction(row.start_progress * 100, row.end_progress * 100, spans)
+        if fraction <= 0.1:
             logger.info(
                 "⏸️ Skipping BookOrbit reading session for '%s': BookOrbit already logged "
-                "session %s covering %.2f%%->%.2f%% (leader '%s')",
-                getattr(book, 'abs_id', None), existing.get('id'),
-                prev_pct * 100, leader_pct * 100, leader,
+                "%.0f%% of %.2f%%->%.2f%% (leader '%s')",
+                row.abs_id, (1 - fraction) * 100,
+                row.start_progress * 100, row.end_progress * 100, row.leader_client,
             )
-            return
+            return 0.0
+        if fraction < 1.0:
+            logger.info(
+                "✂️ Trimming BookOrbit reading session for '%s' to %.0f%% of %ds: "
+                "BookOrbit already logged the rest of %.2f%%->%.2f%%",
+                row.abs_id, fraction * 100, duration,
+                row.start_progress * 100, row.end_progress * 100,
+            )
+        return fraction
 
+    def _deliver_reading_session(self, row, destination: str, duration: int) -> bool:
+        """Post one buffered session to one destination. False means retry later."""
+        client = self._reading_session_client(destination)
+        if destination == "bookorbit":
+            scale = self._bookorbit_session_scale(row, duration)
+            if scale <= 0:
+                self.database_service.mark_reading_session_delivered(row.id, destination, "disabled")
+                return True
+            duration = max(1, int(duration * scale))
+        # At-least-once delivery: a lost POST response may cause a duplicate.
+        # Retain the row on any failure; local history was committed at close.
+        return bool(client.create_reading_session(
+            book_id=getattr(row, f"{destination}_book_id"),
+            start_time=row.last_event_at - duration,
+            end_time=row.last_event_at, start_progress=row.start_progress,
+            end_progress=row.end_progress, book_type=row.session_type,
+            end_location=row.end_location,
+        ))
+
+    def _flush_reading_sessions(self) -> None:
+        """Close and deliver this user's sessions, only while the sync lock is held."""
         try:
-            bookorbit_client.create_reading_session(
-                book_id=int(book_id),
-                start_time=start_time,
-                end_time=current_time,
-                start_progress=prev_pct,
-                end_progress=leader_pct,
-                book_type=book_type,
-                end_location=end_location,
+            now = time.time()
+            self.database_service.close_reading_sessions(now, effective_session_gap_seconds())
+            rows = self.database_service.get_pending_reading_sessions()
+            for row in rows:
+                duration = int(min(row.accumulated_seconds,
+                                   max(0, row.last_event_at - row.started_at), MAX_SESSION_SECONDS))
+                book_present = self.database_service.get_book(row.abs_id) is not None
+                retry_later = False
+                for destination, display, setting in self._SESSION_DESTINATIONS:
+                    if getattr(row, f"{destination}_status") != "pending":
+                        continue
+                    delivery_key = f"reading-session-post:{destination}:{row.id}"
+                    if (not env_truthy(setting, "true") or duration <= 0 or not book_present
+                            or getattr(row, f"{destination}_book_id") is None):
+                        self.database_service.mark_reading_session_delivered(
+                            row.id, destination, "disabled")
+                        continue
+                    client = self._reading_session_client(destination)
+                    if not client or not client.is_configured():
+                        retry_later = True
+                        continue
+                    if self._deliver_reading_session(row, destination, duration):
+                        self.database_service.mark_reading_session_delivered(
+                            row.id, destination, "delivered")
+                        get_persistent_condition_logger().resolve(
+                            logger, delivery_key, "%s session delivery resumed for '%s'",
+                            display, row.abs_id,
+                        )
+                    else:
+                        retry_later = True
+                        get_persistent_condition_logger().warn(
+                            logger, delivery_key, "%s session delivery pending for '%s'; will retry",
+                            display, row.abs_id,
+                        )
+                if retry_later:
+                    self.database_service.record_reading_session_delivery_failure(row.id, now)
+            get_persistent_condition_logger().resolve(
+                logger, f"reading-session-flush:{get_current_user_id()}", "Reading session delivery resumed",
             )
-        except (TypeError, ValueError):
-            pass
+        except Exception as exc:
+            get_persistent_condition_logger().warn(
+                logger, f"reading-session-flush:{get_current_user_id()}",
+                "Reading session delivery failed: %s", exc, exc_info=True,
+            )
 
     def _resolve_grimmory_ebook_id(self, book):
         """Resolve the Grimmory book ID for a book's ebook. Returns int or None."""

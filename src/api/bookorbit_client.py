@@ -1194,7 +1194,30 @@ class BookOrbitClient:
         end_time: float,
         window_seconds: int = _SESSION_DEDUPE_WINDOW_SECONDS,
     ) -> Optional[dict]:
-        """Return an existing session covering the same reading, if there is one.
+        """Return the first existing session overlapping this reading, if any.
+
+        Thin wrapper over :meth:`find_covering_sessions` for callers that only need
+        to know whether anything overlaps at all.
+        """
+        matches = self.find_covering_sessions(
+            book_ids, start_progress, end_progress, end_time, window_seconds,
+        )
+        return matches[0] if matches else None
+
+    def find_covering_sessions(
+        self,
+        book_ids,
+        start_progress: float,
+        end_progress: float,
+        end_time: float,
+        window_seconds: int = _SESSION_DEDUPE_WINDOW_SECONDS,
+    ) -> list[dict]:
+        """Return every existing session overlapping the same reading.
+
+        All of them, not just the first: an aggregated session covers a long span,
+        and a caller has to weigh how much of that span BookOrbit already logged
+        before deciding to skip it. Suppressing a whole session on one sliver of
+        overlap would lose most of the reading it represents.
 
         Matching is by progress range rather than timestamp: BookOrbit stamps its
         session when the reader flushes it, while ours is backdated from the poll
@@ -1211,7 +1234,8 @@ class BookOrbitClient:
         ebook are separate books in BookOrbit and keep separate session lists.
 
         Progress args are 0-1 fractions; BookOrbit's session fields are 0-100.
-        Returns the matching session dict, or None.
+        Returns the matching session dicts, each carrying BookOrbit's own 0-100
+        ``endProgress``/``progressDelta``, newest-first per book.
         """
         if isinstance(book_ids, (str, int)):
             book_ids = [book_ids]
@@ -1224,8 +1248,9 @@ class BookOrbitClient:
             if value not in wanted:
                 wanted.append(value)
         if not wanted:
-            return None
+            return []
 
+        matches = []
         lo = min(float(start_progress), float(end_progress)) * 100
         hi = max(float(start_progress), float(end_progress)) * 100
         for book_id in wanted:
@@ -1247,8 +1272,8 @@ class BookOrbitClient:
                     continue
                 s_lo, s_hi = min(s_start, s_end), max(s_start, s_end)
                 if min(hi, s_hi) - max(lo, s_lo) > _SESSION_OVERLAP_EPSILON_PCT:
-                    return session
-        return None
+                    matches.append(session)
+        return matches
     # ------------------------------------------------------------------
 
     def create_reading_session(
